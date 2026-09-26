@@ -41,42 +41,6 @@
       "model_sha256": "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309",
       "runtime_version": "1.0.0",
       "supported_workloads": []
-    },
-    {
-      "endpoint_id": "test-remote-vm",
-      "name": "Test Cloud Worker",
-      "endpoint_type": "CLOUD_VM",
-      "base_url": "http://10.0.0.5:8080",
-      "capabilities": [
-        "INFERENCE"
-      ],
-      "priority": 75,
-      "auth_token": null,
-      "public_key_hex": null,
-      "resource_limits": {
-        "cpu_cores": 1,
-        "ram_mb": 1024,
-        "gpu_available": false,
-        "gpu_device_name": null,
-        "gpu_model": null,
-        "gpu_vram_mb": 0,
-        "cpu_capacity": 1.0,
-        "disk_free_mb": 5000,
-        "battery_percent": null
-      },
-      "tags": {},
-      "is_enabled": true,
-      "health_status": "UNKNOWN",
-      "last_seen_timestamp": 0.0,
-      "consecutive_failures": 0,
-      "average_rtt_ms": 0.0,
-      "last_error_message": null,
-      "current_load": 0.0,
-      "queue_depth": 0,
-      "model_available": true,
-      "model_sha256": "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309",
-      "runtime_version": "1.0.0",
-      "supported_workloads": []
     }
   ]
 }

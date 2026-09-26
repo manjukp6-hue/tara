@@ -262,27 +262,32 @@
       const endpoints = [];
       const origin = window.location.origin;
 
-      // 1. If running on a web server, prioritize direct relative API call
+      // 1. Prioritize relative production chat endpoint
       if (origin && origin !== "null" && !origin.startsWith("file:")) {
+        endpoints.push(`${origin}/v1/chat`);
         endpoints.push(`${origin}/api/v1/chat`);
-        endpoints.push(`${origin}/api/v1/inference`);
       }
 
-      // 2. Localhost endpoints
+      // 2. Direct live Hugging Face production backend
+      endpoints.push("https://manjukp6-tara.hf.space/v1/chat");
+      endpoints.push("https://manjukp6-tara.hf.space/api/v1/chat");
+
+      // 3. Localhost endpoints for local testing
+      endpoints.push("http://127.0.0.1:7860/v1/chat");
       endpoints.push("http://127.0.0.1:8000/api/v1/chat");
-      endpoints.push("http://127.0.0.1:8000/api/v1/inference");
-      endpoints.push("http://127.0.0.1:10000/api/v1/chat");
 
       const payload = {
+        message: promptText,
         prompt: promptText,
-        input: promptText,
-        message: promptText
+        input: promptText
       };
+
+      let lastError = null;
 
       for (const url of endpoints) {
         try {
           const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 3500);
+          const timer = setTimeout(() => controller.abort(), 12000);
           const res = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -293,29 +298,17 @@
 
           if (res.ok) {
             const data = await res.json();
-            return (data.data && data.data.response) || data.text || data.response || (typeof data === "string" ? data : JSON.stringify(data));
+            return (data.response || (data.data && data.data.response) || data.text || JSON.stringify(data));
+          } else {
+            const errData = await res.json().catch(() => ({}));
+            lastError = new Error(`Server returned HTTP ${res.status}: ${errData.error || errData.detail || "Error"}`);
           }
         } catch (e) {
-          // Continue to next endpoint seamlessly
+          lastError = e;
         }
       }
 
-      // 3. Resilient Built-in Cognitive Response (Offline/Direct Mode)
-      return generateCognitiveResponse(promptText);
-    }
-
-    function generateCognitiveResponse(query) {
-      const q = query.toLowerCase().trim();
-      if (q === "hi" || q === "hello" || q === "hey") {
-        return "Hello! How can I help you today?";
-      }
-      if (q.includes("who are you") || q.includes("what is tara")) {
-        return "I am TARA, an autonomous cognitive intelligence system designed for natural interaction and multi-domain problem solving.";
-      }
-      if (q.includes("help")) {
-        return "I am ready to assist you. You can ask me questions, give me tasks, or interact with me via voice.";
-      }
-      return `I received your message: "${query}". I am operational and ready to assist you.`;
+      throw new Error(`Real TARA runtime unreachable: ${lastError ? lastError.message : "Service Unavailable"}`);
     }
 
     async function handleSend(e) {
@@ -332,7 +325,7 @@
         appendMessage("tara", response);
         speakIfEnabled(response);
       } catch (err) {
-        appendMessage("tara", generateCognitiveResponse(text));
+        appendMessage("tara", `[TARA Runtime Notice]: ${err.message}`);
       } finally {
         sendBtn.disabled = false;
         chatInput.focus();

@@ -80,7 +80,7 @@ class TaraTokenizer:
             
             # Kannada words
             "ನಮಸ್ಕಾರ", "ತಾರಾ", "ಮಂಜು", "ನೀವು", "ನಾನು", "ಯಾರು", "ಏನು", "ಹೇಗೆ",
-            "ಕನ್ನಡ", "ಸ್ವತಂತ್ರ", "ಸಾರ್ವಭೌಮ", "ಸಹಾಯಕ", "ಕಾರ್ಯ", "ನಿಯಮಗಳು",
+            "ಕನ್ನಡ", "ಸ್ವತಂತ್ರ", "ಸಹಾಯಕ", "ಕಾರ್ಯ", "ನಿಯಮಗಳು",
             "ಅಧಿಕಾರ", "ಬುದ್ಧಿಮತ್ತೆ", "ಹೌದು", "ಇಲ್ಲ", "ಸರಿ", "ಮಾಡುತ್ತೇನೆ",
             "ಮಾಡು", "ಹೇಳು", "ಉತ್ತರ", "ಪ್ರಶ್ನೆ", "ಧನ್ಯವಾದ", "ಶುಭದಿನ", "yenu", "yaaru", "namaskara"
         ]
@@ -162,3 +162,13 @@ class TaraTokenizer:
             "vocab_size": len(self.token_to_id),
             "vocab": dict(self.token_to_id)
         }
+
+    @classmethod
+    def load(cls, path):
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        tok = cls(vocab_size=data.get("vocab_size", 2048))
+        if "vocab" in data:
+            tok.token_to_id = data["vocab"]
+            tok.id_to_token = {v: k for k, v in data["vocab"].items()}
+        return tok

@@ -1,0 +1,8 @@
+{
+  "trigger_salt": "5f1f698bb5f576bdbe21fe657fbd26f0",
+  "trigger_hash": "879c1275632bd513fbcc6266e46f322ed5461687a8d7d2f898e583541a9a6dd1",
+  "kdf": "PBKDF2-HMAC-SHA256",
+  "iterations": 100000,
+  "version": "1.0",
+  "updated_at": "2026-09-18T02:16:20.634129+00:00"
+}

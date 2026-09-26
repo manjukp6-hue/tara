@@ -1,0 +1,10 @@
+{
+  "framework": "gradio",
+  "hardware": {
+    "cpu": {
+      "min_cores": 2,
+      "min_ram_mb": 16384
+    }
+  },
+  "entry_file": "app.py"
+}

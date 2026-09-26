@@ -1,0 +1,4 @@
+cryptography==50.0.1
+huggingface_hub==1.31.0
+torch>=2.0.0
+safetensors==0.8.0

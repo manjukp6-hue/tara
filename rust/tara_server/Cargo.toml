@@ -1,0 +1,45 @@
+[package]
+name = "tara_server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "TARA AI — Full HTTP server, TaraBrain orchestration, all subsystems, web UI"
+license.workspace = true
+
+[[bin]]
+name = "tara_server"
+path = "src/main.rs"
+
+[dependencies]
+# HTTP server
+tiny_http = "0.12"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Crypto
+sha2 = { version = "0.10", features = ["oid"] }
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+rand = "0.8"
+hex = "0.4"
+hmac = "0.12"
+constant_time_eq = "0.3"
+zeroize = { version = "1.7", features = ["derive"] }
+base64 = "0.22"
+scrypt = "0.11"
+aes-gcm = "0.10"
+rsa = "0.9"
+
+# Utilities
+uuid = { version = "=1.10.0", features = ["v4"] }
+regex = "1.11"
+thiserror = "1.0"
+url = "2.5"
+memmap2 = "0.9"
+half = { version = "2.3", features = ["std"] }
+byteorder = "1.5"
+
+# Internal crates
+tara_core = { path = "../tara_core" }
+tara_engine = { path = "../tara_engine" }

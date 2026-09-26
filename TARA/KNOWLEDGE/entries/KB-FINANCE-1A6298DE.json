@@ -1,0 +1,28 @@
+{
+  "knowledge_id": "KB-FINANCE-1A6298DE",
+  "topic": "finance",
+  "subject": "GST Rates",
+  "content": "GST Rate for services is 18%",
+  "version": 1,
+  "sources": [
+    {
+      "url": "https://cbic.gov.in"
+    },
+    {
+      "url": "https://gst.gov.in"
+    }
+  ],
+  "confidence": 0.9,
+  "verification_status": "VERIFIED",
+  "first_learned_at": "2026-09-13T05:04:48Z",
+  "last_updated_at": "2026-09-13T05:04:48Z",
+  "last_verified_at": "2026-09-13T05:04:48Z",
+  "provenance": {
+    "learned_by_role": "USER",
+    "trigger": "USER_SEARCH",
+    "session_id": "default"
+  },
+  "update_history": [],
+  "conflicting_views": [],
+  "verification_count": 2
+}

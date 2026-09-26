@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "requirements_file": "requirements.txt",
+  "requirements_sha256": "87f73cedecb254ecce749fab58a15e80feb787b558e3a50bb220960ef5900563",
+  "declared_requirements": {
+    "cryptography": "==50.0.1",
+    "huggingface_hub": "==1.31.0",
+    "torch": ">=2.0.0",
+    "safetensors": "==0.8.0"
+  },
+  "runtime_installed": {
+    "cryptography": "50.0.1",
+    "huggingface_hub": "1.31.0",
+    "torch": "2.14.0",
+    "safetensors": "0.8.0"
+  }
+}

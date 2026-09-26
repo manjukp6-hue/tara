@@ -1,0 +1,16 @@
+# Auto detect text files and perform LF normalization
+* text=auto eol=lf
+*.py text eol=lf
+*.json text eol=lf
+*.jsonl text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+storage/datasets/tara/*.jsonl text eol=crlf
+TARA/MODEL/current_model.json -text
+*.safetensors binary
+*.pt binary
+*.bin binary
+*.key binary
+*.exe binary

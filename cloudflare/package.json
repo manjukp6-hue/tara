@@ -1,0 +1,21 @@
+{
+  "name": "tara-edge-worker",
+  "version": "1.0.0",
+  "description": "TARA Public Edge & HTTPS Gateway on Cloudflare Workers",
+  "main": "src/index.js",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "keywords": [
+    "tara",
+    "edge",
+    "serverless",
+    "cloudflare-workers"
+  ],
+  "author": "ROOT_OPERATOR",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

@@ -1,0 +1,17 @@
+[package]
+name = "tara_core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "TARA AI — Hardened memory-safe security, authority, permissions, and rule engine"
+license.workspace = true
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+rand = "0.8"
+thiserror = "1.0"
+hex = "0.4"
+zeroize = { version = "1.7", features = ["derive"] }

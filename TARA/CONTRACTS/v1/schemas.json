@@ -1,0 +1,351 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TARA Canonical Cross-Language Contract Layer",
+  "version": "1.0.0",
+  "definitions": {
+    "AuthContext": {
+      "type": "object",
+      "properties": {
+        "actor_id": { "type": "string" },
+        "session_id": { "type": "string" },
+        "creator_verified": { "type": "boolean" },
+        "client_ip": { "type": "string" }
+      },
+      "required": ["actor_id", "session_id"]
+    },
+    "InferenceRequest": {
+      "type": "object",
+      "properties": {
+        "request_id": { "type": "string" },
+        "job_id": { "type": "string" },
+        "prompt": { "type": "string" },
+        "max_tokens": { "type": "integer", "minimum": 1, "maximum": 4096 },
+        "temperature": { "type": "number", "minimum": 0.0, "maximum": 2.0 },
+        "top_k": { "type": "integer", "minimum": 0 },
+        "top_p": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+        "repetition_penalty": { "type": "number", "minimum": 1.0, "maximum": 3.0 },
+        "stop_tokens": { "type": "array", "items": { "type": "string" } },
+        "expected_model_identity": { "type": "string" },
+        "expected_model_checksum": { "type": "string" },
+        "auth_context": { "$ref": "#/definitions/AuthContext" }
+      },
+      "required": ["request_id", "prompt", "expected_model_checksum"]
+    },
+    "InferenceResponse": {
+      "type": "object",
+      "properties": {
+        "request_id": { "type": "string" },
+        "status": { "type": "string", "enum": ["SUCCESS", "ERROR"] },
+        "text": { "type": "string" },
+        "token_count": { "type": "integer" },
+        "token_ids": { "type": "array", "items": { "type": "integer" } },
+        "model_identity": { "type": "string" },
+        "model_checksum": { "type": "string" },
+        "runtime_engine": { "type": "string", "enum": ["rust_cpu", "python_gpu", "python_cpu"] },
+        "first_latency_ms": { "type": "number" },
+        "total_latency_ms": { "type": "number" },
+        "tokens_per_second": { "type": "number" }
+      },
+      "required": ["request_id", "status", "text", "model_checksum", "runtime_engine"]
+    },
+    "WorkerHealthResponse": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["HEALTHY", "DEGRADED", "UNHEALTHY"] },
+        "ready": { "type": "boolean" },
+        "worker_identity": { "type": "string" },
+        "protocol_version": { "type": "string" },
+        "model_identity": { "type": "string" },
+        "model_checksum": { "type": "string" },
+        "parameters": { "type": "integer" },
+        "has_gpu": { "type": "boolean" },
+        "gpu_device": { "type": ["string", "null"] },
+        "device_type": { "type": "string" },
+        "shared_storage_verified": { "type": "boolean" },
+        "queue_depth": { "type": "integer" },
+        "uptime_seconds": { "type": "number" }
+      },
+      "required": ["status", "ready", "protocol_version", "model_checksum", "has_gpu"]
+    },
+    "CanonicalErrorResponse": {
+      "type": "object",
+      "properties": {
+        "request_id": { "type": "string" },
+        "status": { "type": "string", "const": "ERROR" },
+        "error_code": { "type": "string" },
+        "message": { "type": "string" },
+        "retryable": { "type": "boolean" },
+        "failover_advised": { "type": "boolean" }
+      },
+      "required": ["status", "error_code", "message", "retryable", "failover_advised"]
+    },
+    "VoiceTranscribeRequest": {
+      "type": "object",
+      "properties": {
+        "audio_data": { "type": "string" },
+        "language": { "type": "string" }
+      },
+      "required": ["audio_data"]
+    },
+    "VoiceTranscribeResponse": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["SUCCESS", "ERROR"] },
+        "transcript": { "type": "string" },
+        "language": { "type": "string" },
+        "confidence": { "type": "number" },
+        "has_speech": { "type": "boolean" },
+        "duration_seconds": { "type": "number" }
+      },
+      "required": ["status", "transcript", "language", "has_speech"]
+    },
+    "VoiceSynthesizeRequest": {
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "language": { "type": "string" },
+        "rate": { "type": "integer" },
+        "volume": { "type": "integer" }
+      },
+      "required": ["text"]
+    },
+    "VoiceConverseRequest": {
+      "type": "object",
+      "properties": {
+        "input_text": { "type": "string" },
+        "audio_data": { "type": "string" },
+        "language": { "type": "string" },
+        "context": { "type": "object" },
+        "require_wake_word": { "type": "boolean" }
+      }
+    },
+    "VoiceConverseResponse": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["SUCCESS", "ERROR", "WAKE_WORD_NOT_DETECTED"] },
+        "transcript": { "type": "string" },
+        "response_text": { "type": "string" },
+        "audio_base64": { "type": "string" },
+        "language": { "type": "string" },
+        "turn_id": { "type": "string" }
+      },
+      "required": ["status", "transcript", "response_text", "audio_base64", "language", "turn_id"]
+    },
+    "VoiceBargeInResponse": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "const": "SUCCESS" },
+        "barge_in": {
+          "type": "object",
+          "properties": {
+            "interrupted": { "type": "boolean" },
+            "total_interruptions": { "type": "integer" }
+          },
+          "required": ["interrupted", "total_interruptions"]
+        }
+      },
+      "required": ["status", "barge_in"]
+    },
+    "VoiceCapabilitiesResponse": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "const": "SUCCESS" },
+        "stt_available": { "type": "boolean" },
+        "tts_available": { "type": "boolean" },
+        "languages": { "type": "array", "items": { "type": "string" } },
+        "barge_in_supported": { "type": "boolean" },
+        "wake_words": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["status", "stt_available", "tts_available", "languages", "barge_in_supported", "wake_words"]
+    },
+    "CreatorSetupRequest": {
+      "type": "object",
+      "properties": {
+        "google_id_token": { "type": "string" },
+        "confirm_identity": { "type": "boolean" },
+        "device_name": { "type": "string" },
+        "device_public_key": { "type": "string" }
+      },
+      "required": ["google_id_token", "confirm_identity"]
+    },
+    "CreatorSetupResponse": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["SUCCESS", "ERROR"] },
+        "authority_state": { "type": "string" },
+        "creator_id": { "type": "string" },
+        "display_name": { "type": "string" },
+        "recovery_code": { "type": "string" }
+      },
+      "required": ["status", "authority_state", "creator_id", "display_name"]
+    },
+    "DeviceRegisterRequest": {
+      "type": "object",
+      "properties": {
+        "session_token": { "type": "string" },
+        "google_id_token": { "type": "string" },
+        "device_public_key": { "type": "string" },
+        "device_name": { "type": "string" }
+      },
+      "required": ["device_public_key"]
+    },
+    "DeviceRevokeRequest": {
+      "type": "object",
+      "properties": {
+        "session_token": { "type": "string" },
+        "device_id": { "type": "string" },
+        "all": { "type": "boolean" },
+        "reason": { "type": "string" }
+      }
+    },
+    "DeviceListResponse": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["SUCCESS", "ERROR"] },
+        "devices": { "type": "array", "items": { "type": "object" } }
+      },
+      "required": ["status", "devices"]
+    },
+    "RuntimeState": {
+      "type": "string",
+      "enum": [
+        "DISCOVERED",
+        "VERIFYING",
+        "VERIFIED",
+        "FAILED",
+        "INCOMPATIBLE",
+        "UNAVAILABLE",
+        "DEGRADED",
+        "QUARANTINED",
+        "REVOKED",
+        "RETIRED"
+      ]
+    },
+    "RuntimeRecord": {
+      "type": "object",
+      "properties": {
+        "runtime_id": { "type": "string" },
+        "language": { "type": "string" },
+        "implementation_version": { "type": "string" },
+        "model_identity": { "type": "string", "const": "TARA" },
+        "model_version": { "type": "string" },
+        "model_sha": { "type": "string" },
+        "contract_version": { "type": "string" },
+        "security_version": { "type": "string" },
+        "supported_capabilities": { "type": "array", "items": { "type": "string" } },
+        "status": { "$ref": "#/definitions/RuntimeState" },
+        "required_for_promotion": { "type": "boolean" },
+        "last_verification": { "type": "object" },
+        "compatibility_state": { "type": "object" }
+      },
+      "required": [
+        "runtime_id",
+        "language",
+        "implementation_version",
+        "model_identity",
+        "model_sha",
+        "contract_version",
+        "security_version",
+        "status",
+        "required_for_promotion"
+      ]
+    },
+    "CanonicalSkillDefinition": {
+      "type": "object",
+      "properties": {
+        "skill_id": { "type": "string" },
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "inputs_schema": { "type": "object" },
+        "outputs_schema": { "type": "object" },
+        "permissions": { "type": "array", "items": { "type": "string" } },
+        "behavior": { "type": "string" },
+        "security_rules": { "type": "array", "items": { "type": "string" } },
+        "capability_requirements": { "type": "array", "items": { "type": "string" } },
+        "error_semantics": { "type": "object" },
+        "implementations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "status": { "type": "string" },
+              "code_path": { "type": "string" },
+              "last_tested": { "type": "string" }
+            },
+            "required": ["status"]
+          }
+        },
+        "status": {
+          "type": "string",
+          "enum": ["DRAFT", "VERIFYING", "PARTIAL_RUNTIME_SUPPORT", "UNIVERSAL_RUNTIME_READY", "REVOKED", "RETIRED"]
+        }
+      },
+      "required": ["skill_id", "name", "version", "inputs_schema", "outputs_schema", "permissions", "status"]
+    },
+    "CanonicalToolDefinition": {
+      "type": "object",
+      "properties": {
+        "tool_id": { "type": "string" },
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "parameters_schema": { "type": "object" },
+        "returns_schema": { "type": "object" },
+        "permissions": { "type": "array", "items": { "type": "string" } },
+        "implementations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "status": { "type": "string" },
+              "adapter_path": { "type": "string" }
+            },
+            "required": ["status"]
+          }
+        },
+        "status": {
+          "type": "string",
+          "enum": ["DRAFT", "VERIFYING", "PARTIAL_RUNTIME_SUPPORT", "UNIVERSAL_RUNTIME_READY", "REVOKED", "RETIRED"]
+        }
+      },
+      "required": ["tool_id", "name", "version", "parameters_schema", "returns_schema", "permissions", "status"]
+    },
+    "UniversalGateEvaluationRequest": {
+      "type": "object",
+      "properties": {
+        "target_type": { "type": "string", "enum": ["MODEL", "SKILL", "TOOL", "CODE_EDIT", "SECURITY_POLICY", "API"] },
+        "target_id": { "type": "string" },
+        "candidate_version": { "type": "string" },
+        "change_manifest": { "type": "object" }
+      },
+      "required": ["target_type", "target_id", "candidate_version"]
+    },
+    "UniversalGateEvaluationResponse": {
+      "type": "object",
+      "properties": {
+        "target_type": { "type": "string" },
+        "target_id": { "type": "string" },
+        "candidate_version": { "type": "string" },
+        "required_runtimes": { "type": "array", "items": { "type": "string" } },
+        "runtime_results": { "type": "object" },
+        "eligible_for_promotion": { "type": "boolean" },
+        "gate_verdict": {
+          "type": "string",
+          "enum": ["APPROVED", "REJECTED_RUNTIME_FAILURE", "REJECTED_PARTIAL_SUPPORT", "QUARANTINED"]
+        },
+        "reason": { "type": "string" }
+      },
+      "required": ["target_type", "target_id", "candidate_version", "required_runtimes", "runtime_results", "eligible_for_promotion", "gate_verdict"]
+    },
+    "RuntimeParityMatrix": {
+      "type": "object",
+      "properties": {
+        "dimensions": { "type": "array", "items": { "type": "string" } },
+        "runtimes": { "type": "array", "items": { "type": "string" } },
+        "matrix": { "type": "object" },
+        "all_parity_passed": { "type": "boolean" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["dimensions", "runtimes", "matrix", "all_parity_passed", "timestamp"]
+    }
+  }
+}

@@ -1,0 +1,36 @@
+# Render Blueprint: TARA Optional Backend Worker & Control-Plane Target
+# NOTE: Render is strictly an optional backend execution node.
+# The primary public TARA entry point is: https://gateway.tara.local
+services:
+  - type: web
+    name: tara-backend-worker
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python python/tara_core/server.py
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: HOST
+        value: 0.0.0.0
+      - key: PUBLIC_TARA_URL
+        value: https://gateway.tara.local
+      - key: TARA_CONTROL_PLANE_URL
+        value: http://127.0.0.1:8765
+      - key: USER_COMPUTE_COST
+        value: "0.0"
+      - key: ENFORCE_ZERO_USER_COST
+        value: "true"
+      - key: TARA_SLEEP_AWARE
+        value: "true"
+      - key: HF_REPO_ID
+        value: tara-project/tara
+      - key: HF_TOKEN
+        sync: false
+      - key: TARA_API_KEY
+        sync: false
+      - key: TARA_CREATOR_PASSPHRASE
+        sync: false
+      - key: TARA_PRIMARY_DEVICE_ID
+        value: TARA-DEVICE-002

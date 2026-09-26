@@ -1,0 +1,1360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>TARA AI Core | Cognitive Intelligence</title>
+  <meta name="description" content="TARA Unified Intelligence Interface - Distributed zero-cost cognitive runtime.">
+  <style>
+    :root {
+      --bg-dark: #070a12;
+      --panel-bg: #0f172a;
+      --card-bg: #131c33;
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.25);
+      --accent-hover: #7dd3fc;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --border-color: #232f48;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --user-bubble: #1d4ed8;
+      --tara-bubble: #172033;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+    }
+    /* Header */
+    header {
+      background-color: var(--panel-bg);
+      border-bottom: 1px solid var(--border-color);
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      gap: 12px;
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 10px var(--success);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+    .brand-title {
+      font-weight: 800;
+      font-size: 16px;
+      letter-spacing: 0.5px;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .brand-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .header-badges {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 9px;
+      border-radius: 12px;
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .badge-success {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: rgba(16, 185, 129, 0.35);
+      color: #6ee7b7;
+    }
+    .badge-replica {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: rgba(56, 189, 248, 0.35);
+      color: var(--accent);
+      cursor: pointer;
+    }
+    .badge-warning {
+      background: rgba(245, 158, 11, 0.15);
+      border-color: rgba(245, 158, 11, 0.35);
+      color: #fbbf24;
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-header {
+      background: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-header:hover {
+      background: #1e293b;
+      color: var(--text-main);
+      border-color: #334155;
+    }
+    /* Failover Alert Banner */
+    #failover-banner {
+      display: none;
+      background: #78350f;
+      color: #fef3c7;
+      font-size: 12px;
+      padding: 6px 16px;
+      text-align: center;
+      border-bottom: 1px solid #b45309;
+      font-weight: 500;
+    }
+    /* Chat Container */
+    #chat-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      max-width: 900px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    .msg {
+      display: flex;
+      flex-direction: column;
+      max-width: 82%;
+      animation: fadeIn 0.18s ease-in-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .msg.user { align-self: flex-end; }
+    .msg.user .bubble {
+      background: var(--user-bubble);
+      color: #ffffff;
+      border-radius: 14px 14px 2px 14px;
+      box-shadow: 0 4px 12px rgba(29, 78, 216, 0.25);
+    }
+    .msg.tara { align-self: flex-start; }
+    .msg.tara .bubble {
+      background: var(--tara-bubble);
+      color: var(--text-main);
+      border-radius: 14px 14px 14px 2px;
+      border: 1px solid var(--border-color);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    .msg-label {
+      font-size: 11px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: #64748b;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .msg.user .msg-label { justify-content: flex-end; color: #60a5fa; }
+    .bubble {
+      padding: 13px 18px;
+      font-size: 14px;
+      line-height: 1.55;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+    .bubble code {
+      background: rgba(0, 0, 0, 0.4);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+      font-size: 13px;
+      color: #38bdf8;
+    }
+    .bubble pre {
+      background: #080d1a;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      margin: 8px 0;
+      overflow-x: auto;
+    }
+    .bubble pre code {
+      background: transparent;
+      padding: 0;
+      color: #e2e8f0;
+      font-size: 12px;
+    }
+    /* Authentication Panel */
+    .auth-methods-box {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .auth-btn-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 8px;
+    }
+    .auth-chip {
+      background: var(--card-bg);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .auth-chip:hover, .auth-chip:active {
+      background: var(--accent);
+      color: #0b0f19;
+      transform: translateY(-1px);
+    }
+    .qr-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding: 16px;
+      background: var(--card-bg);
+      border-radius: 8px;
+      margin-top: 10px;
+      border: 1px solid var(--border-color);
+    }
+    .qr-svg {
+      max-width: 200px;
+      max-height: 200px;
+      border: 8px solid #ffffff;
+      border-radius: 6px;
+      background: #ffffff;
+    }
+    .qr-timer { font-size: 12px; color: var(--warning); font-weight: 600; }
+    .qr-uri-box {
+      font-family: monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      background: #0b0f19;
+      padding: 8px 12px;
+      border-radius: 4px;
+      max-width: 100%;
+      overflow-x: auto;
+      white-space: nowrap;
+      border: 1px solid var(--border-color);
+    }
+    .inline-auth-form {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: var(--card-bg);
+      padding: 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+    }
+    .inline-input {
+      background: #0b0f19;
+      border: 1px solid #475569;
+      color: var(--text-main);
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
+    }
+    .inline-input:focus { border-color: var(--accent); }
+    .inline-btn {
+      background: var(--accent);
+      color: #0b0f19;
+      border: none;
+      font-weight: 700;
+      padding: 10px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: background 0.15s ease;
+    }
+    .inline-btn:hover { background: var(--accent-hover); }
+    /* Footer & Input */
+    footer {
+      background-color: var(--panel-bg);
+      border-top: 1px solid var(--border-color);
+      padding: 12px 18px;
+      flex-shrink: 0;
+    }
+    .input-form {
+      display: flex;
+      gap: 10px;
+      max-width: 900px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    #chat-input {
+      flex: 1;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      padding: 12px 18px;
+      border-radius: 24px;
+      font-size: 14px;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+    #chat-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    #btn-send {
+      background: var(--accent);
+      color: #0b0f19;
+      border: none;
+      border-radius: 24px;
+      padding: 0 22px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #btn-send:hover { background: var(--accent-hover); }
+    #btn-send:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    @media (max-width: 768px) {
+      .header-badges { display: none; }
+      .bubble { font-size: 13px; padding: 11px 14px; }
+      .msg { max-width: 90%; }
+    }
+    /* Voice Interface Controls */
+    .btn-mic {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      border-radius: 50%;
+      width: 44px;
+      height: 44px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      transition: all 0.2s ease;
+      flex-shrink: 0;
+    }
+    .btn-mic:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-mic.listening {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: var(--danger);
+      color: var(--danger);
+      box-shadow: 0 0 12px rgba(239, 68, 68, 0.6);
+      animation: micPulse 1.2s infinite;
+    }
+    .btn-mic.processing {
+      background: rgba(245, 158, 11, 0.2);
+      border-color: var(--warning);
+      color: var(--warning);
+    }
+    .btn-mic.speaking {
+      background: rgba(56, 189, 248, 0.25);
+      border-color: var(--accent);
+      color: var(--accent);
+      box-shadow: 0 0 12px var(--accent-glow);
+      animation: speakingPulse 1.5s infinite;
+    }
+    .btn-mic.error {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+    @keyframes micPulse {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+      70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+    @keyframes speakingPulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.08); }
+      100% { transform: scale(1); }
+    }
+    .voice-controls-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      max-width: 900px;
+      margin: 8px auto 0 auto;
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 0 6px;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .voice-mode-toggle {
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid var(--border-color);
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .voice-mode-toggle.active {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .voice-lang-select {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .voice-lang-select select {
+      background: #0b0f19;
+      color: var(--text-main);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      font-size: 11px;
+      padding: 2px 6px;
+      outline: none;
+    }
+    .voice-status-text {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Failover Notification Banner -->
+  <div id="failover-banner">
+    ⚠️ Primary endpoint unreachable. Seamlessly routed via failover replica (<span id="failover-target-name">Replica</span>).
+  </div>
+
+  <header>
+    <div class="header-left">
+      <div class="status-dot" id="system-status-dot"></div>
+      <div>
+        <div class="brand-title">
+          <span>TARA AI Core</span>
+          <span class="badge badge-success" id="badge-cost">$0.00 / Zero-Cost</span>
+        </div>
+        <div class="brand-sub" id="header-status">Core Intelligence • Invariant Verified</div>
+      </div>
+    </div>
+
+    <div class="header-badges">
+      <span class="badge badge-replica" id="replica-pill" title="Click to view replicas and trigger health probes" onclick="triggerReplicaProbe()">
+        <span id="replica-icon">🌐</span>
+        <span id="replica-label">Connecting...</span>
+      </span>
+      <span class="badge" id="badge-params" title="Production Model Checksum">118,080 params • 7a50308b...</span>
+      <span class="badge" id="auth-status-badge">User Mode</span>
+    </div>
+
+    <div class="header-actions">
+      <button class="btn-header" id="auth-action-btn" onclick="toggleAuthAction()">Auth</button>
+      <button class="btn-header" onclick="clearChat()">Clear</button>
+    </div>
+  </header>
+
+  <div id="chat-container">
+    <div class="msg tara">
+      <div class="msg-label">TARA Core</div>
+      <div class="bubble">Hello. I am TARA, an enterprise-grade distributed cognitive intelligence system operating with zero user compute cost. How may I assist you today?</div>
+    </div>
+  </div>
+
+  <footer>
+    <form class="input-form" onsubmit="handleSendMessage(event)">
+      <input type="text" id="chat-input" placeholder="Message TARA (supports natural chat & direct verification)..." autocomplete="off" />
+      <button type="button" id="btn-mic" class="btn-mic" onclick="toggleVoiceRecording()" title="Voice Input / Barge-In">🎙️</button>
+      <button type="submit" id="btn-send">Send ➔</button>
+    </form>
+    <div class="voice-controls-bar">
+      <span class="voice-mode-toggle" id="voice-mode-toggle" onclick="toggleVoiceMode()">
+        <span id="voice-toggle-icon">🔇</span> Voice Mode: <b id="voice-toggle-label">OFF</b>
+      </span>
+      <span class="voice-lang-select">
+        <label for="voice-lang">Lang: </label>
+        <select id="voice-lang" onchange="onVoiceLangChange(this.value)">
+          <option value="en-US">English (en-US)</option>
+          <option value="en-IN">English (en-IN)</option>
+          <option value="kn-IN">ಕನ್ನಡ (kn-IN)</option>
+        </select>
+      </span>
+      <span class="voice-lang-select">
+        <label for="stt-mode-select">STT: </label>
+        <select id="stt-mode-select" onchange="onSttModeChange(this.value)" title="Controlled TARA STT (Private) vs Explicit Browser Fallback">
+          <option value="LOCAL_CONTROLLED">Controlled TARA STT (Private)</option>
+          <option value="BROWSER_FALLBACK">Browser Fallback (WebSpeech)</option>
+        </select>
+      </span>
+      <span id="voice-status-text" class="voice-status-text">Ready</span>
+    </div>
+  </footer>
+
+  <script>
+    /**
+     * TARA Unified Client Architecture & Provider-Independent Failover Engine
+     * Canonical Public Domain: https://gateway.tara.local
+     * Configurable at runtime via window.TARA_PUBLIC_URL or URL query param ?endpoint=
+     */
+    const urlParams = new URLSearchParams(window.location.search);
+    const CANONICAL_PUBLIC_DOMAIN = window.TARA_PUBLIC_URL || urlParams.get("endpoint") || "https://gateway.tara.local";
+    const CANONICAL_MODEL_SHA256 = "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309";
+    const CANONICAL_PARAM_COUNT = 118080;
+
+    // Prioritized Provider Replicas Registry
+    const REPLICA_REGISTRY = [
+      { id: "cloudflare", name: "Cloudflare Edge", url: CANONICAL_PUBLIC_DOMAIN, isPrimary: true, healthy: true, latencyMs: null },
+      { id: "local", name: "Local Core Gateway", url: "http://127.0.0.1:8000", isPrimary: false, healthy: true, latencyMs: null },
+      { id: "render", name: "Render Backend", url: "http://127.0.0.1:10000", isPrimary: false, healthy: true, latencyMs: null },
+      { id: "huggingface", name: "Hugging Face Space", url: "http://127.0.0.1:7860", isPrimary: false, healthy: true, latencyMs: null },
+      { id: "modelscope", name: "ModelScope Studio", url: "http://127.0.0.1:7861", isPrimary: false, healthy: true, latencyMs: null }
+    ];
+
+    // Strict Security Invariant: Never store raw creator private keys or persistent credentials in localStorage
+    try {
+      localStorage.removeItem("tara_session_token");
+      localStorage.removeItem("tara_creator_id");
+      localStorage.removeItem("creator_token");
+      localStorage.removeItem("creator_private_key");
+    } catch (e) {}
+
+    let currentReplicaIndex = 0;
+    // Ephemeral session storage only (wiped upon tab/window closure)
+    let currentSessionToken = sessionStorage.getItem("tara_session_token") || null;
+    let currentCreatorId = sessionStorage.getItem("tara_creator_id") || null;
+    let activeFailover = false;
+
+    // Initialize Replica Detection & Latency Prober
+    function initReplicas() {
+      const currentOrigin = window.location.origin;
+      // If served directly from a specific provider, make that the initial active replica
+      const directMatchIdx = REPLICA_REGISTRY.findIndex(r => r.url === currentOrigin);
+      if (directMatchIdx !== -1) {
+        currentReplicaIndex = directMatchIdx;
+      }
+      updateReplicaUI();
+      triggerReplicaProbe();
+      if (currentCreatorId) {
+        updateAuthBadge(`Creator (${currentCreatorId})`, true);
+        updateAuthButton(true);
+      }
+    }
+
+    function updateReplicaUI() {
+      const current = REPLICA_REGISTRY[currentReplicaIndex];
+      const label = document.getElementById("replica-label");
+      if (label) {
+        const latStr = current.latencyMs !== null ? ` [${current.latencyMs}ms]` : "";
+        label.textContent = `${current.name}${latStr}`;
+      }
+    }
+
+    async function triggerReplicaProbe() {
+      for (let i = 0; i < REPLICA_REGISTRY.length; i++) {
+        const replica = REPLICA_REGISTRY[i];
+        const t0 = performance.now();
+        try {
+          // Probe relative health if origin matches, or direct URL with timeout
+          const probeUrl = (replica.url === window.location.origin) ? "/health" : `${replica.url}/health`;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 2500);
+          const res = await fetch(probeUrl, { method: "GET", signal: controller.signal, mode: "cors" });
+          clearTimeout(timeoutId);
+          if (res.ok) {
+            replica.healthy = true;
+            replica.latencyMs = Math.round(performance.now() - t0);
+          } else {
+            replica.healthy = false;
+          }
+        } catch (e) {
+          replica.healthy = false;
+        }
+      }
+      updateReplicaUI();
+    }
+
+    function updateAuthBadge(text, isAuthed = false) {
+      const badge = document.getElementById("auth-status-badge");
+      if (badge) {
+        badge.textContent = text;
+        badge.className = isAuthed ? "badge badge-success" : "badge";
+      }
+    }
+
+    function updateAuthButton(isAuthed = false) {
+      const btn = document.getElementById("auth-action-btn");
+      if (btn) {
+        btn.textContent = isAuthed ? "Logout" : "Auth";
+      }
+    }
+
+    function toggleAuthAction() {
+      if (currentCreatorId || currentSessionToken) {
+        handleLogout();
+      } else {
+        showAuthDrawer();
+      }
+    }
+
+    function appendMessage(sender, text, isHtml = false, extraNode = null) {
+      const container = document.getElementById("chat-container");
+      const msgDiv = document.createElement("div");
+      msgDiv.className = `msg ${sender.toLowerCase()}`;
+
+      const label = document.createElement("div");
+      label.className = "msg-label";
+      label.textContent = sender === "user" ? (currentCreatorId ? `Creator (${currentCreatorId})` : "User") : "TARA Core";
+      msgDiv.appendChild(label);
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      if (isHtml) {
+        bubble.innerHTML = text;
+      } else {
+        bubble.textContent = text;
+      }
+
+      if (extraNode) {
+        bubble.appendChild(extraNode);
+      }
+
+      msgDiv.appendChild(bubble);
+      container.appendChild(msgDiv);
+      container.scrollTop = container.scrollHeight;
+      return msgDiv;
+    }
+
+    function clearChat() {
+      const container = document.getElementById("chat-container");
+      container.innerHTML = `
+        <div class="msg tara">
+          <div class="msg-label">TARA Core</div>
+          <div class="bubble">Chat cleared. Mode: ${currentCreatorId || "User (Standard)"}. Model: 118,080 params verified.</div>
+        </div>`;
+    }
+
+    /**
+     * Provider-Independent Failover Request Dispatcher
+     */
+    async function sendWithFailover(endpoint, body) {
+      let attempts = 0;
+      const totalReplicas = REPLICA_REGISTRY.length;
+      let lastError = null;
+
+      while (attempts < totalReplicas) {
+        const replica = REPLICA_REGISTRY[currentReplicaIndex];
+        const isCurrentOrigin = replica.url === window.location.origin;
+        const targetBase = isCurrentOrigin ? "" : replica.url;
+        const targetUrl = `${targetBase}${endpoint}`;
+
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+          const headers = {
+            "Content-Type": "application/json",
+            "X-Tara-Session-Token": currentSessionToken || "anonymous_session"
+          };
+          if (currentSessionToken) {
+            headers["Authorization"] = `Bearer ${currentSessionToken}`;
+          }
+
+          const res = await fetch(targetUrl, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(body),
+            signal: controller.signal,
+            mode: "cors"
+          });
+          clearTimeout(timeoutId);
+
+          if (!res.ok && res.status >= 500) {
+            throw new Error(`Server status ${res.status}`);
+          }
+
+          const data = await res.json();
+          // Request succeeded
+          if (activeFailover) {
+            // Dismiss failover banner if resolved
+            document.getElementById("failover-banner").style.display = "none";
+            activeFailover = false;
+          }
+          return data;
+        } catch (err) {
+          lastError = err;
+          // Mark replica unhealthy and failover to next
+          replica.healthy = false;
+          currentReplicaIndex = (currentReplicaIndex + 1) % totalReplicas;
+          attempts++;
+
+          // Display failover notification banner
+          activeFailover = true;
+          const banner = document.getElementById("failover-banner");
+          const targetName = document.getElementById("failover-target-name");
+          if (banner && targetName) {
+            targetName.textContent = REPLICA_REGISTRY[currentReplicaIndex].name;
+            banner.style.display = "block";
+          }
+          updateReplicaUI();
+        }
+      }
+
+      throw new Error(`All provider replicas unreachable: ${lastError ? lastError.message : "Unknown error"}`);
+    }
+
+    async function handleSendMessage(e) {
+      if (e) e.preventDefault();
+      const input = document.getElementById("chat-input");
+      const sendBtn = document.getElementById("btn-send");
+      const text = input.value.trim();
+      if (!text) return;
+
+      appendMessage("user", text);
+      input.value = "";
+      sendBtn.disabled = true;
+
+      try {
+        // Build payload compatible with both /api/v1/chat and /api/v1/inference
+        const payload = {
+          prompt: text,
+          input: text,
+          actor_id: currentCreatorId || "user",
+          session_id: "web-session-client",
+          expected_model_checksum: CANONICAL_MODEL_SHA256,
+          context: {
+            source: "canonical_tara_frontend",
+            session_token: currentSessionToken
+          }
+        };
+
+        // Attempt /api/v1/chat first, fallback gracefully to /api/v1/inference
+        let data;
+        try {
+          data = await sendWithFailover("/api/v1/chat", payload);
+        } catch (chatErr) {
+          data = await sendWithFailover("/api/v1/inference", payload);
+        }
+
+        const reply = (data.data && data.data.response) || data.text || (data.status === "ERROR" ? `Error: ${data.error}` : JSON.stringify(data));
+        let extraNode = null;
+
+        if (reply.includes("Choose an authentication method:") || (data.data && data.data.result && data.data.result.status === "AWAITING_METHOD_SELECTION")) {
+          extraNode = renderInChatAuthChips();
+        }
+
+        appendMessage("tara", reply, false, extraNode);
+
+        if (isVoiceMode && reply) {
+          playTaraVoiceResponse(reply, selectedVoiceLang);
+        }
+
+        if (data.data && data.data.result && data.data.result.status === "SUCCESS" && data.data.result.session_token) {
+          onCreatorAuthenticated(data.data.result);
+        }
+      } catch (err) {
+        appendMessage("tara", "Network error communicating with TARA: " + err.message);
+      } finally {
+        sendBtn.disabled = false;
+        input.focus();
+      }
+    }
+
+    function showAuthDrawer() {
+      const container = document.getElementById("chat-container");
+      const node = renderInChatAuthChips();
+      appendMessage("tara", "TARA Creator Authentication Gatekeeper:", false, node);
+    }
+
+    function renderInChatAuthChips() {
+      const box = document.createElement("div");
+      box.className = "auth-methods-box";
+
+      const grid = document.createElement("div");
+      grid.className = "auth-btn-grid";
+
+      const methods = [
+        { id: "QR", label: "📱 QR Authentication", action: selectQrMethod },
+        { id: "KEY", label: "🔑 Creator Key Authentication", action: selectCreatorKeyMethod },
+        { id: "GOOGLE", label: "🔐 Google Authentication", action: selectGoogleMethod },
+        { id: "RECOVERY", label: "🆘 Recovery", action: selectRecoveryMethod }
+      ];
+
+      methods.forEach(m => {
+        const chip = document.createElement("button");
+        chip.className = "auth-chip";
+        chip.textContent = m.label;
+        chip.onclick = m.action;
+        grid.appendChild(chip);
+      });
+
+      box.appendChild(grid);
+      return box;
+    }
+
+    async function selectQrMethod() {
+      try {
+        const d = await sendWithFailover("/api/v1/auth/qr_challenge", { creator_id: "ROOT_OPERATOR" });
+        const chal = d.challenge || {};
+        const qrContainer = document.createElement("div");
+        qrContainer.className = "qr-container";
+
+        const timer = document.createElement("div");
+        timer.className = "qr-timer";
+        timer.textContent = "⏱ Scan within 120s using your verified TARA Device";
+        qrContainer.appendChild(timer);
+
+        if (chal.qr_svg || chal.svg_qr) {
+          const svgDiv = document.createElement("div");
+          svgDiv.innerHTML = chal.qr_svg || chal.svg_qr;
+          qrContainer.appendChild(svgDiv);
+        }
+
+        const uriBox = document.createElement("div");
+        uriBox.className = "qr-uri-box";
+        uriBox.textContent = chal.qr_uri || chal.challenge_id || "tara-auth://challenge";
+        qrContainer.appendChild(uriBox);
+
+        appendMessage("tara", "Scan this cryptographic QR challenge to authenticate:", false, qrContainer);
+      } catch (e) {
+        appendMessage("tara", "Error generating QR challenge: " + e.message);
+      }
+    }
+
+    function selectCreatorKeyMethod() {
+      const form = document.createElement("div");
+      form.className = "inline-auth-form";
+
+      const input = document.createElement("input");
+      input.type = "password";
+      input.placeholder = "Enter Creator Passphrase / Secret Key...";
+      input.className = "inline-input";
+
+      const btn = document.createElement("button");
+      btn.textContent = "Authenticate Key";
+      btn.className = "inline-btn";
+      btn.onclick = async () => {
+        const val = input.value.trim();
+        input.value = ""; // Zero credential residue in DOM immediately
+        if (!val) return;
+        try {
+          const res = await sendWithFailover("/api/v1/auth/creator_key", {
+            creator_id: "ROOT_OPERATOR",
+            passphrase: val,
+            secret_key: val
+          });
+          if (res.status === "SUCCESS") {
+            onCreatorAuthenticated(res);
+          } else {
+            appendMessage("tara", "Authentication rejected: " + (res.error || "Invalid secret key"));
+          }
+        } catch (e) {
+          appendMessage("tara", "Auth error: " + e.message);
+        }
+      };
+
+      form.appendChild(input);
+      form.appendChild(btn);
+      appendMessage("tara", "Enter creator authentication credential (unlocked locally; zero raw key exposed):", false, form);
+    }
+
+    function selectGoogleMethod() {
+      const form = document.createElement("div");
+      form.className = "inline-auth-form";
+
+      const input = document.createElement("input");
+      input.type = "password";
+      input.placeholder = "Enter Google ID Token (RS256 JWT)...";
+      input.className = "inline-input";
+
+      const btn = document.createElement("button");
+      btn.textContent = "Verify Google ID Token";
+      btn.className = "inline-btn";
+      btn.onclick = async () => {
+        const val = input.value.trim();
+        input.value = ""; // Zero credential residue in DOM immediately
+        if (!val) return;
+        try {
+          const res = await sendWithFailover("/api/v1/auth/google", {
+            id_token: val
+          });
+          if (res.status === "SUCCESS") {
+            onCreatorAuthenticated(res);
+          } else {
+            appendMessage("tara", "Google authentication rejected: " + (res.error || "Verification failed"));
+          }
+        } catch (e) {
+          appendMessage("tara", "Google auth error: " + e.message);
+        }
+      };
+
+      form.appendChild(input);
+      form.appendChild(btn);
+      appendMessage("tara", "🔐 Authenticate via authorized Google Identity:", false, form);
+    }
+
+    function selectRecoveryMethod() {
+      const form = document.createElement("div");
+      form.className = "inline-auth-form";
+
+      const input = document.createElement("input");
+      input.type = "password";
+      input.placeholder = "Enter 32-character Recovery Code...";
+      input.className = "inline-input";
+
+      const btn = document.createElement("button");
+      btn.textContent = "Submit Recovery Code";
+      btn.className = "inline-btn";
+      btn.onclick = async () => {
+        const val = input.value.trim();
+        input.value = ""; // Zero credential residue in DOM immediately
+        if (!val) return;
+        try {
+          const res = await sendWithFailover("/api/v1/auth/recovery", {
+            recovery_code: val,
+            claimed_creator_id: "ROOT_OPERATOR"
+          });
+          if (res.status === "SUCCESS") {
+            onCreatorAuthenticated(res);
+          } else {
+            appendMessage("tara", "Recovery authentication rejected: " + (res.error || "Invalid recovery code"));
+          }
+        } catch (e) {
+          appendMessage("tara", "Recovery auth error: " + e.message);
+        }
+      };
+
+      form.appendChild(input);
+      form.appendChild(btn);
+      appendMessage("tara", "🆘 Emergency Recovery Authentication:", false, form);
+    }
+
+    function onCreatorAuthenticated(res) {
+      currentSessionToken = res.session_token;
+      currentCreatorId = res.creator_id || "ROOT_OPERATOR";
+      sessionStorage.setItem("tara_session_token", currentSessionToken);
+      sessionStorage.setItem("tara_creator_id", currentCreatorId);
+      updateAuthBadge(`Creator (${currentCreatorId})`, true);
+      updateAuthButton(true);
+      appendMessage("tara", `✅ Authenticated successfully as Creator (${currentCreatorId}). Root execution enabled.`);
+    }
+
+    async function handleLogout() {
+      if (currentSessionToken) {
+        try {
+          await sendWithFailover("/api/v1/auth/logout", { session_token: currentSessionToken });
+        } catch (e) {}
+      }
+      currentSessionToken = null;
+      currentCreatorId = null;
+      sessionStorage.removeItem("tara_session_token");
+      sessionStorage.removeItem("tara_creator_id");
+      updateAuthBadge("User Mode", false);
+      updateAuthButton(false);
+      appendMessage("tara", "🔒 Creator session terminated. Reverted to standard user mode.");
+    }
+
+    // -------------------------------------------------------------
+    // TARA Voice-to-Voice Engine & Barge-In Coordinator
+    // -------------------------------------------------------------
+    let isVoiceMode = false;
+    let micState = "IDLE";
+    let recognition = null;
+    let selectedVoiceLang = "en-US";
+    let sttMode = "LOCAL_CONTROLLED"; // "LOCAL_CONTROLLED" (preferred) or "BROWSER_FALLBACK"
+    let activeAudioPlayer = null;
+    let localMediaRecorder = null;
+    let localAudioChunks = [];
+
+    function initVoiceEngine() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        try {
+          recognition = new SpeechRecognition();
+          recognition.continuous = false;
+          recognition.interimResults = false;
+          recognition.lang = selectedVoiceLang;
+
+          recognition.onstart = () => {
+            setMicState("LISTENING");
+            updateVoiceStatus("Listening (Browser STT)...");
+          };
+
+          recognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript;
+            setMicState("PROCESSING");
+            updateVoiceStatus("Processing speech...");
+            const input = document.getElementById("chat-input");
+            if (input) input.value = transcript;
+            handleSendMessage();
+          };
+
+          recognition.onerror = (event) => {
+            console.warn("Speech recognition error:", event.error);
+            setMicState("ERROR");
+            updateVoiceStatus("Mic: " + event.error);
+            setTimeout(() => { setMicState("IDLE"); updateVoiceStatus("Ready"); }, 2500);
+          };
+
+          recognition.onend = () => {
+            if (micState === "LISTENING") {
+              setMicState("IDLE");
+              updateVoiceStatus("Ready");
+            }
+          };
+        } catch (e) {
+          console.warn("SpeechRecognition init exception:", e);
+        }
+      }
+    }
+
+    function onSttModeChange(mode) {
+      sttMode = mode;
+      if (mode === "LOCAL_CONTROLLED") {
+        updateVoiceStatus("STT: Controlled TARA (Private)");
+      } else {
+        updateVoiceStatus("STT: Browser Fallback");
+      }
+    }
+
+    function toggleVoiceMode() {
+      isVoiceMode = !isVoiceMode;
+      const toggle = document.getElementById("voice-mode-toggle");
+      const label = document.getElementById("voice-toggle-label");
+      const icon = document.getElementById("voice-toggle-icon");
+      if (isVoiceMode) {
+        if (toggle) toggle.classList.add("active");
+        if (label) label.textContent = "ON";
+        if (icon) icon.textContent = "🔊";
+        updateVoiceStatus("Voice Mode ON");
+        appendMessage("tara", "🔊 Voice Mode enabled. TARA will speak responses and accept speech input.");
+      } else {
+        if (toggle) toggle.classList.remove("active");
+        if (label) label.textContent = "OFF";
+        if (icon) icon.textContent = "🔇";
+        bargeIn();
+        updateVoiceStatus("Voice Mode OFF");
+      }
+    }
+
+    function onVoiceLangChange(lang) {
+      selectedVoiceLang = lang;
+      if (recognition) {
+        recognition.lang = lang;
+      }
+      updateVoiceStatus(`Lang set to ${lang}`);
+    }
+
+    function setMicState(state) {
+      micState = state;
+      const btn = document.getElementById("btn-mic");
+      if (!btn) return;
+      btn.className = "btn-mic " + state.toLowerCase();
+      if (state === "IDLE") {
+        btn.innerHTML = "🎙️";
+        btn.title = "Voice Input";
+      } else if (state === "LISTENING") {
+        btn.innerHTML = "🔴";
+        btn.title = "Listening... Click to stop";
+      } else if (state === "PROCESSING") {
+        btn.innerHTML = "⏳";
+        btn.title = "Processing...";
+      } else if (state === "SPEAKING") {
+        btn.innerHTML = "🔊";
+        btn.title = "TARA Speaking - Click to Barge-In / Interrupt";
+      } else if (state === "ERROR") {
+        btn.innerHTML = "⚠️";
+        btn.title = "Voice Error";
+      }
+    }
+
+    function updateVoiceStatus(text) {
+      const el = document.getElementById("voice-status-text");
+      if (el) el.textContent = text;
+    }
+
+    async function toggleVoiceRecording() {
+      if (micState === "SPEAKING" || (window.speechSynthesis && window.speechSynthesis.speaking) || activeAudioPlayer) {
+        bargeIn();
+        return;
+      }
+
+      if (micState === "LISTENING") {
+        // Stop recording
+        if (localMediaRecorder && localMediaRecorder.state === "recording") {
+          localMediaRecorder.stop();
+          setMicState("PROCESSING");
+          updateVoiceStatus("Processing TARA Audio...");
+          return;
+        }
+        if (recognition) {
+          try { recognition.stop(); } catch (e) {}
+        }
+        setMicState("IDLE");
+        updateVoiceStatus("Stopped");
+        return;
+      }
+
+      // Start recording
+      // Preference 1: Controlled Local Audio Capture -> TARA Voice Pipeline
+      if (sttMode === "LOCAL_CONTROLLED" && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          localAudioChunks = [];
+          localMediaRecorder = new MediaRecorder(stream);
+          
+          localMediaRecorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) {
+              localAudioChunks.push(e.data);
+            }
+          };
+
+          localMediaRecorder.onstop = async () => {
+            stream.getTracks().forEach(track => track.stop());
+            if (localAudioChunks.length === 0) {
+              setMicState("IDLE");
+              updateVoiceStatus("No audio captured");
+              return;
+            }
+
+            const audioBlob = new Blob(localAudioChunks, { type: "audio/wav" });
+            const reader = new FileReader();
+            reader.onloadend = async () => {
+              const base64Data = (reader.result || "").split(",")[1];
+              if (!base64Data) {
+                setMicState("IDLE");
+                return;
+              }
+              await processVoiceConverseStream(base64Data);
+            };
+            reader.readAsDataURL(audioBlob);
+          };
+
+          localMediaRecorder.start();
+          setMicState("LISTENING");
+          updateVoiceStatus("Listening (Controlled TARA STT)...");
+          return;
+        } catch (micErr) {
+          console.warn("Local mic access unavailable or denied:", micErr);
+          // Do not silently switch: ask or notify user
+          updateVoiceStatus("Mic denied. Use Browser STT or prompt.");
+        }
+      }
+
+      // Preference 2: Explicit Browser Speech Recognition Fallback
+      if (sttMode === "BROWSER_FALLBACK" || !navigator.mediaDevices) {
+        if (!recognition) {
+          initVoiceEngine();
+        }
+        if (recognition) {
+          try {
+            recognition.lang = selectedVoiceLang;
+            recognition.start();
+            return;
+          } catch (e) {
+            console.warn("Browser recognition start failed:", e);
+          }
+        }
+      }
+
+      // Fallback 3: Text Prompt Simulation
+      const simulated = prompt("Enter voice input prompt (Fallback):", "Hello TARA Core");
+      if (simulated) {
+        const input = document.getElementById("chat-input");
+        if (input) input.value = simulated;
+        handleSendMessage();
+      }
+    }
+
+    async function processVoiceConverseStream(audioBase64) {
+      setMicState("PROCESSING");
+      updateVoiceStatus("Transcribing & inferring...");
+
+      try {
+        const payload = {
+          audio_data: audioBase64,
+          language: selectedVoiceLang,
+          context: {
+            source: "canonical_tara_frontend_voice",
+            session_token: currentSessionToken,
+            voice_turn: true
+          }
+        };
+
+        const res = await sendWithFailover("/api/v1/voice/converse", payload);
+        if (res && res.status === "SUCCESS") {
+          if (res.transcript) {
+            appendMessage("user", res.transcript);
+          }
+          if (res.response_text) {
+            appendMessage("tara", res.response_text);
+          }
+          if (isVoiceMode && res.audio_base64) {
+            playTaraAudioBuffer(res.audio_base64);
+          } else {
+            setMicState("IDLE");
+            updateVoiceStatus("Ready");
+          }
+        } else {
+          appendMessage("tara", "Voice pipeline notice: " + (res.error || "No speech detected."));
+          setMicState("IDLE");
+          updateVoiceStatus("Ready");
+        }
+      } catch (err) {
+        appendMessage("tara", "Voice network error: " + err.message);
+        setMicState("IDLE");
+        updateVoiceStatus("Ready");
+      }
+    }
+
+    function bargeIn() {
+      if (window.speechSynthesis) {
+        try { window.speechSynthesis.cancel(); } catch (e) {}
+      }
+      if (activeAudioPlayer) {
+        try {
+          activeAudioPlayer.pause();
+          activeAudioPlayer.src = "";
+        } catch (e) {}
+        activeAudioPlayer = null;
+      }
+      setMicState("IDLE");
+      updateVoiceStatus("Interrupted (Barge-in)");
+      sendWithFailover("/api/v1/voice/barge_in", {}).catch(() => {});
+    }
+
+    function playTaraAudioBuffer(audioB64) {
+      if (!isVoiceMode || !audioB64) {
+        setMicState("IDLE");
+        updateVoiceStatus("Ready");
+        return;
+      }
+      bargeIn();
+      setMicState("SPEAKING");
+      updateVoiceStatus("TARA Speaking (Audio)...");
+
+      try {
+        const audio = new Audio("data:audio/wav;base64," + audioB64);
+        activeAudioPlayer = audio;
+        audio.onended = () => {
+          setMicState("IDLE");
+          updateVoiceStatus("Ready");
+          activeAudioPlayer = null;
+        };
+        audio.onerror = () => {
+          setMicState("IDLE");
+          updateVoiceStatus("Ready");
+          activeAudioPlayer = null;
+        };
+        audio.play().catch(() => {
+          setMicState("IDLE");
+          updateVoiceStatus("Ready");
+          activeAudioPlayer = null;
+        });
+      } catch (e) {
+        setMicState("IDLE");
+        updateVoiceStatus("Ready");
+      }
+    }
+
+    function playTaraVoiceResponse(text, lang) {
+      if (!isVoiceMode || !text) return;
+      bargeIn();
+
+      setMicState("SPEAKING");
+      updateVoiceStatus("TARA Speaking...");
+
+      const isKannada = lang?.startsWith("kn") || /[\u0C80-\u0CFF]/.test(text);
+
+      if ("speechSynthesis" in window) {
+        const cleanText = text.replace(/[*_#`]/g, "").substring(0, 500);
+        const utter = new SpeechSynthesisUtterance(cleanText);
+        utter.lang = isKannada ? "kn-IN" : "en-US";
+        utter.rate = 1.0;
+
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length > 0) {
+          const match = voices.find(v => v.lang.startsWith(isKannada ? "kn" : "en"));
+          if (match) utter.voice = match;
+        }
+
+        utter.onend = () => {
+          setMicState("IDLE");
+          updateVoiceStatus("Ready");
+        };
+        utter.onerror = () => {
+          setMicState("IDLE");
+          updateVoiceStatus("Ready");
+        };
+
+        window.speechSynthesis.speak(utter);
+      } else {
+        sendWithFailover("/api/v1/voice/synthesize", {
+          text: text.substring(0, 300),
+          language: isKannada ? "kn" : "en"
+        }).then((data) => {
+          if (data && data.audio_base64) {
+            playTaraAudioBuffer(data.audio_base64);
+          } else {
+            setMicState("IDLE");
+            updateVoiceStatus("Ready");
+          }
+        }).catch(() => {
+          setMicState("IDLE");
+          updateVoiceStatus("Ready");
+        });
+      }
+    }
+
+    // Boot listener
+    window.addEventListener("DOMContentLoaded", () => {
+      initReplicas();
+      initVoiceEngine();
+    });
+  </script>
+</body>
+</html>

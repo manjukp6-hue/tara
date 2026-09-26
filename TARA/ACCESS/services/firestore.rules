@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // 1. Users collection: Normal users cannot escalate role to 'creator' or claim 'ROOT_OPERATOR'
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      
+      // On creation: role must default to 'USER', cannot claim creator_id
+      allow create: if isOwner(userId)
+                    && request.resource.data.role == 'USER'
+                    && (!('creator_id' in request.resource.data) || request.resource.data.creator_id == null);
+
+      // On update: cannot modify role to 'creator' or 'root_creator', cannot bind creator_id
+      allow update: if isOwner(userId)
+                    && request.resource.data.role == resource.data.role
+                    && request.resource.data.role != 'creator'
+                    && request.resource.data.role != 'root_creator'
+                    && (!('creator_id' in request.resource.data) || request.resource.data.creator_id == resource.data.creator_id);
+
+      allow delete: if false;
+    }
+
+    // 2. Creators collection: Public read for root key verification, client writes are strictly BLOCKED
+    // All creator updates require creator cryptographic signature verification processed server-side
+    match /creators/{creatorId} {
+      allow read: if true;
+      allow write: if false; // Block client-side privilege escalation
+    }
+
+    // 3. Devices subcollection: Client writes strictly BLOCKED
+    match /creators/{creatorId}/devices/{deviceId} {
+      allow read: if true;
+      allow write: if false; // Devices can only be registered/authorized via verified creator signature
+    }
+
+    // 4. Recovery collection: Protected
+    match /recovery/{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

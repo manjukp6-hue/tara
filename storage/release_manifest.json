@@ -1,0 +1,27 @@
+{
+  "manifest_version": "2.0",
+  "build_id": "TARA-BUILD-2026",
+  "version": "2.0.0",
+  "created_at": "2026-09-18T02:48:32.939107+00:00",
+  "production_model_sha256": "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309",
+  "file_tree": {
+    "storage/models/tara/model.safetensors": "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309",
+    "TARA/ACCESS/operator/operator_record.json": "e239baa6aad2409571659288ac7a4c9a25efc34421f9396fd9083ab155b9b318",
+    "TARA/ACCESS/operator/operators_registry.json": "227ab4faa5a2beb9e39fcb2cfb5f14e77fa76b19d6c8338bac21710f02800cb4",
+    "TARA/ACCESS/operator/activation_config.json": "633ab042a685cca0ff7d82b2ca8134e2219a7564c1f147e94ad9dc3b495b25a4",
+    "TARA/ACCESS/creator/state_v1_verifier.json": "fec48f11df1b696c45951177be3f5e2b10bed963513d2401c8e3a0f7e2e07394",
+    "TARA/SECURITY/dependency_verifier.py": "aa09401e01d85af6357b588cb8e273a8cbb62fa636d0f6656128c7975e674369",
+    "storage/dependency_manifest.json": "ea11e8831cabf3cde5767738c2e8eef30f2a85a0d80061f39cc9e2da46e3da01",
+    "TARA/ACCESS/restore/restore_config.json": "66722da2ef7059bd33f8cdc122cda87a08bf844d0c285701f68e13552ff7af52",
+    "TARA/ACCESS/creator/creator_authority.py": "48c2fc844d0ffd9a35240930a13408198168ed3512525f2790e390da9312e477",
+    "TARA/ACCESS/creator/creator_identity.py": "1f77d2a49a141fbd3f7635f87e13c9727eeb0b7b6584cb85ca4f5788494769de",
+    "TARA/ACCESS/creator/multi_creator_registry.py": "4450772689c09fe2fa978f7f5a116a9ab484e5e76b1810f03ee4a002143e9452",
+    "TARA/ACCESS/services/creator_auth_service.py": "0dced808d3044ed2e7206af3c8be372662d5941779c866a79fd6377a8f660fab",
+    "TARA/ACCESS/wizard/setup_wizard.py": "578890ce72ebf94f6fc090e6e88f50f0c72052542fe46b0c9818482b0af7531c",
+    "python/tara_core/server.py": "1e4327d0ff4f0e1dcf3ef2faa43e2d40b92590c951a0647c7a9936eb87b9cf1e",
+    "rust/tara_core/src/authority.rs": "91eb5d533c2d224522b8af5411b796bd69226072b2e63f2801df85cd281e94d0"
+  },
+  "manifest_hash": "fd2c56dae5f3a9583a66420f71fc83387a04bdaee5216bd6ade50ca352d5102e",
+  "signature_type": "UNSIGNED_RELEASE",
+  "signature": null
+}

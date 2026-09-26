@@ -1,0 +1,70 @@
+# Dependencies
+node_modules/
+
+# Environment configurations & secrets
+.env
+.env.*
+storage/private/
+storage/secrets/
+storage/deployment/
+storage/vault/
+storage/audit/
+TARA/IDENTITY/secrets/
+TARA/ACCESS/secrets/
+TARA/ACCESS/vault/
+*.key
+*.pem
+*.crt
+*.secret
+*.recovery_key
+*.keystore
+local_keystore.enc
+restore_config.json
+recovery_config.json
+*.sealed
+*.artifact
+*.enc_vault
+
+# Runtime logs, test runs & local training caches
+logs/
+*.log
+storage/test_run_*/
+storage/learning/*
+!storage/learning/verified_knowledge.jsonl
+storage/memory/
+TARA/MEMORY/*.jsonl
+TARA/IDENTITY/audit/*.jsonl
+TARA/ACCESS/audit/*.jsonl
+storage/persistence/distributed_jobs/
+storage/persistence/goals/*.json
+rust/tara_server/storage/
+storage/skills/*
+!storage/skills/currency.py
+!storage/skills/skills_registry.json
+storage/models/**/*.bin
+*.bin
+storage/models/**/*.safetensors
+*.safetensors
+!storage/models/tara/model.safetensors
+TARA_TRAINING_PERSISTENT/
+.scratch_hf_space/
+
+# PyInstaller & build artifacts
+build/
+dist/
+*.exe
+
+# Python & Rust artifacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+target/
+
+# OS generated
+.DS_Store
+Thumbs.db
+.github/

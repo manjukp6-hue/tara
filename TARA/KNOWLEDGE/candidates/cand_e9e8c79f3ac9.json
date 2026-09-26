@@ -1,0 +1,25 @@
+{
+  "candidate_id": "cand_e9e8c79f3ac9",
+  "topic": "Quantum",
+  "subject": "quantum key distribution protocols",
+  "source_query": "quantum key distribution protocols",
+  "content": "Search proposition on quantum key distribution protocols: Official details and verified facts on quantum key distribution protocols.",
+  "sources": [
+    {
+      "title": "Information regarding quantum key distribution protocols",
+      "url": "https://verified-info.gov.in/search?q=quantum%20key%20distribution%20protocols",
+      "publisher": "Official Portal",
+      "snippet": "Official details and verified facts on quantum key distribution protocols.",
+      "retrieval_time": "2026-09-26T08:05:31Z",
+      "reliability_score": 0.95
+    }
+  ],
+  "confidence": 0.8,
+  "status": "PENDING_APPROVAL",
+  "provenance": {
+    "learned_by_role": "USER",
+    "trigger": "USER_SEARCH",
+    "session_id": "creator_admin"
+  },
+  "created_at": "2026-09-26T08:05:31Z"
+}

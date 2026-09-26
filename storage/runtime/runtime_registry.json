@@ -1,0 +1,55 @@
+{
+  "version": "1.0.0",
+  "updated_at": 1790240522.2477465,
+  "model_identity": "TARA",
+  "runtimes": {
+    "python": {
+      "runtime_id": "python",
+      "language": "Python",
+      "implementation_version": "1.0.0",
+      "model_identity": "TARA",
+      "model_version": "1.0.0",
+      "model_sha": "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309",
+      "contract_version": "1.0.0",
+      "security_version": "1.0.0",
+      "supported_capabilities": [
+        "inference",
+        "skills",
+        "tools",
+        "voice",
+        "auth"
+      ],
+      "status": "VERIFIED",
+      "required_for_promotion": true,
+      "last_verification": {
+        "timestamp": 1790240522.2473633,
+        "verdict": "VERIFIED"
+      },
+      "compatibility_state": {}
+    },
+    "rust": {
+      "runtime_id": "rust",
+      "language": "Rust",
+      "implementation_version": "1.0.0",
+      "model_identity": "TARA",
+      "model_version": "1.0.0",
+      "model_sha": "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309",
+      "contract_version": "1.0.0",
+      "security_version": "1.0.0",
+      "supported_capabilities": [
+        "inference",
+        "skills",
+        "tools",
+        "voice",
+        "auth"
+      ],
+      "status": "VERIFIED",
+      "required_for_promotion": true,
+      "last_verification": {
+        "timestamp": 1790240522.2473726,
+        "verdict": "VERIFIED"
+      },
+      "compatibility_state": {}
+    }
+  }
+}

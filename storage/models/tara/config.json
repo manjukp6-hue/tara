@@ -1,0 +1,50 @@
+{
+  "architectures": [
+    "TaraForCausalLM"
+  ],
+  "model_name": "TARA",
+  "model_id": "TARA",
+  "creator": "ROOT_OPERATOR",
+  "creator_display_name": "OPERATOR_ROOT",
+  "model_type": "tara-transformer",
+  "version": "TARA",
+  "vocab_size": 344,
+  "hidden_size": 64,
+  "intermediate_size": 128,
+  "num_hidden_layers": 2,
+  "num_attention_heads": 4,
+  "num_key_value_heads": 2,
+  "head_dim": 16,
+  "max_position_embeddings": 2048,
+  "rope_theta": 1000000.0,
+  "rms_norm_eps": 1e-05,
+  "initializer_range": 0.02,
+  "torch_dtype": "float32",
+  "weight_format": "float32",
+  "quantization": null,
+  "supported_quantization_formats": [
+    "FP32",
+    "FP16",
+    "BF16",
+    "INT8",
+    "INT4"
+  ],
+  "authority_governance": {
+    "creator_authority": "ROOT_EXCLUSIVE",
+    "telemetry": false,
+    "watermark": null,
+    "external_ai_dependency": null
+  },
+  "training_summary": {
+    "epochs": 6,
+    "initial_loss": 4.6214,
+    "final_loss": 2.3834,
+    "val_loss": 2.5409,
+    "initial_perplexity": 343.93,
+    "final_perplexity": 12.69,
+    "total_parameters": 118080,
+    "vocab_size": 344,
+    "sha256": "c8179af95c49c002b01ca2f329d8a69deebd68aa8a7b5b4550bf6b169b051dde",
+    "created_at": "2026-09-11T14:08:06Z"
+  }
+}

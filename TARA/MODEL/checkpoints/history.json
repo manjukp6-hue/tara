@@ -1,0 +1,13 @@
+[
+  {
+    "training_run_id": "TARA_CANONICAL_INIT",
+    "timestamp": 1789387200,
+    "iso_time": "2026-09-13T12:00:00Z",
+    "dataset_revision": "TARA",
+    "checkpoint_step": 0,
+    "baseline_metric": 2.5409,
+    "candidate_metric": 2.5409,
+    "promoted": true,
+    "rollback_reference": "storage/models/tara/rollback"
+  }
+]

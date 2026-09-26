@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Non-root user for security and cloud container compliance
+# Non-root user for cloud container compliance and security
 RUN useradd -m -u 1000 user
 
 COPY requirements.txt .

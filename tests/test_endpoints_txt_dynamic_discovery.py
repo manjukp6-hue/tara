@@ -57,11 +57,13 @@ def test_no_hardcoded_urls_in_source():
 
     source_files = [
         os.path.join(REPO_ROOT, "frontend", "index.html"),
-        os.path.join(REPO_ROOT, "providers", "huggingface", "index.html"),
-        os.path.join(REPO_ROOT, "providers", "modelscope", "index.html"),
-        os.path.join(REPO_ROOT, "providers", "render", "index.html"),
-        os.path.join(REPO_ROOT, "cloudflare", "src", "index.js")
+        os.path.join(REPO_ROOT, "index.html"),
+        os.path.join(REPO_ROOT, "cloudflare", "src", "index.js"),
+        os.path.join(REPO_ROOT, "app.py")
     ]
+
+    # Verify no duplicate provider directories exist
+    assert not os.path.exists(os.path.join(REPO_ROOT, "providers")), "Duplicate providers/ directory must not exist (One Universal Package rule)"
 
     for path in source_files:
         assert os.path.exists(path), f"File {path} must exist"

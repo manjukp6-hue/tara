@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# TARA AI Core - Linux / macOS Local 1-Click Launcher
+# TARA AI Core - Linux / macOS 1-Click Launcher
 set -e
 
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/../.." && pwd )"
-cd "$DIR"
-
 echo "=============================================================================="
-echo "  TARA AI Core - Starting Local Production Engine"
+echo "  Starting TARA AI Core Production Engine"
 echo "=============================================================================="
 
 python3 -m pip install -r requirements.txt

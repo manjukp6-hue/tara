@@ -5,5 +5,3 @@ tests
 scratch
 .cargo
 Cargo.*
-*.md
-!README.md

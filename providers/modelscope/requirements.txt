@@ -1,2 +1,0 @@
-gradio>=3.50.0
-requests>=2.28.0

@@ -2,13 +2,13 @@
 """
 scripts/sync_to_hf_space.py
 
-Automated Synchronization and Verification Engine for Hugging Face Static Space (tara-project/tara).
+Automated Synchronization and Verification Engine for Hugging Face Static Space (manjukp6/tara).
 Enforces:
 1. Canonical TARA Frontend as single source of truth (GitHub -> HF Space).
 2. Zero backend code, zero model weights (.safetensors, .pt, .bin), zero secrets/private keys.
 3. Configurable public TARA endpoint (defaults to https://gateway.tara.local).
 4. Full preservation of TARA branding, dark theme, failover engine, and auth drawer.
-5. End-to-end deployment verification of https://operator_root-tara.hf.space.
+5. End-to-end deployment verification of https://manjukp6-tara.static.hf.space.
 """
 
 import os
@@ -40,9 +40,9 @@ from tara_core.contracts import (
 )
 from tara_core.frontend_sync import get_canonical_frontend
 
-HF_SPACE_ID = "tara-project/tara"
+HF_SPACE_ID = "manjukp6/tara"
 HF_SPACE_URL = f"https://huggingface.co/spaces/{HF_SPACE_ID}"
-HF_DIRECT_URL = f"https://operator_root-tara.hf.space"
+HF_DIRECT_URL = f"https://manjukp6-tara.static.hf.space"
 CANONICAL_FRONTEND_PATH = os.path.join(REPO_ROOT, "frontend", "index.html")
 HF_PROVIDER_DIR = os.path.join(REPO_ROOT, "providers", "huggingface")
 
@@ -94,7 +94,7 @@ Static Web Replica of the canonical TARA Frontend interface.
 - **Model SHA-256**: `{CANONICAL_MODEL_SHA256}`
 - **User Compute Cost**: ${USER_COMPUTE_COST:.2f} (Zero-cost policy enforced)
 - **Public Gateway**: {PUBLIC_TARA_URL}
-- **Source of Truth**: [GitHub Repository](https://github.com/tara-project/tara)
+- **Source of Truth**: [GitHub Repository](https://github.com/manjukp6/tara)
 - **Frontend SHA-256**: `{sha256_hash}`
 """
     dest_readme = os.path.join(dest_dir, "README.md")

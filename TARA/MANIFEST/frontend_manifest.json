@@ -3,8 +3,8 @@
   "version": "2.1.0",
   "protocol_version": "1.0.0",
   "canonical_public_domain": "https://gateway.tara.local",
-  "canonical_sha256": "ffbe4257450bfd2b6d779d9d24ae0ccd8763e63d7b3c03ebce6dc724844920d7",
-  "size_bytes": 44923,
+  "canonical_sha256": "c0cf351bd2a8533477b67efb0a04cb96c8ca165073e68515ca037cfeeb0c458d",
+  "size_bytes": 11732,
   "canonical_source": "frontend/index.html",
   "zero_user_cost": 0.0,
   "canonical_model_sha256": "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309",
@@ -23,5 +23,5 @@
     "health_check_interval_ms": 30000,
     "timeout_ms": 4000
   },
-  "synced_at": "2026-09-26T08:06:53Z"
+  "synced_at": "2026-09-26T12:26:29Z"
 }

@@ -27,7 +27,12 @@ js_template = """/**
 const CANONICAL_MODEL_IDENTITY = "TARA";
 const CANONICAL_MODEL_SHA256 = "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309";
 const CANONICAL_PARAM_COUNT = 118080;
-const DEFAULT_BACKEND_URL = "https://manjukp6-tara.hf.space";
+function getActiveEndpointsFromTxt() {
+  return ENDPOINTS_TXT.split(/\\r?\\n/)
+    .map(l => l.trim())
+    .filter(l => l && !l.startsWith("#") && l.startsWith("https://"))
+    .map(l => l.replace(/\\/+$/, ""));
+}
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -43,12 +48,19 @@ export default {
 
     const url = new URL(request.url);
     const path = url.pathname;
-    const backendUrl = env.TARA_CONTROL_PLANE_URL || DEFAULT_BACKEND_URL;
+    const endpoints = getActiveEndpointsFromTxt();
+    const backendUrl = env.TARA_CONTROL_PLANE_URL || (endpoints.length > 0 ? endpoints[0] : "");
 
     try {
       // 1. Root & Chat UI
       if (path === "/" || path === "/chat") {
         return handleChatUI(env);
+      }
+
+      if (path === "/endpoints.txt") {
+        return new Response(ENDPOINTS_TXT, {
+          headers: { "Content-Type": "text/plain;charset=UTF-8", ...CORS_HEADERS }
+        });
       }
 
       // 2. Health & Status Endpoints
@@ -157,6 +169,11 @@ function errorResponse(message, status = 400) {
 }
 """
 
+endpoints_path = os.path.join(repo_root, "endpoints.txt")
+with open(endpoints_path, "r", encoding="utf-8") as f:
+    endpoints_raw = f.read().replace("`", "")
+
+js_template = js_template.replace("const CANONICAL_PARAM_COUNT = 118080;", f'const CANONICAL_PARAM_COUNT = 118080;\nconst ENDPOINTS_TXT = `{endpoints_raw}`;')
 js_code = js_template.replace("__B64_FRONTEND__", b64)
 
 with open(worker_dest, "w", encoding="utf-8") as f:
@@ -167,8 +184,6 @@ main = "src/index.js"
 compatibility_date = "2024-09-23"
 
 [vars]
-PUBLIC_TARA_URL = "https://tara.nawaz.workers.dev"
-TARA_CONTROL_PLANE_URL = "https://manjukp6-tara.hf.space"
 CANONICAL_MODEL_IDENTITY = "TARA"
 CANONICAL_MODEL_SHA256 = "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309"
 CANONICAL_PARAM_COUNT = 118080

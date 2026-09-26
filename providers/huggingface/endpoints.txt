@@ -1,0 +1,11 @@
+# ==============================================================================
+# TARA Distributed Endpoints Configuration
+# ==============================================================================
+# Add, edit, or delete endpoints here.
+# - Each active endpoint must be on its own line.
+# - Lines starting with '#' and blank lines are ignored.
+# - Changes here take effect dynamically across all clients without modifying code.
+# ==============================================================================
+
+https://manjukp6-tara.static.hf.space
+https://tara.nawaz.workers.dev

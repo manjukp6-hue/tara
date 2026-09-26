@@ -21,8 +21,18 @@ import gradio as gr
 
 CANONICAL_MODEL_IDENTITY = "TARA"
 CANONICAL_MODEL_SHA256 = "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309"
-CANONICAL_PARAM_COUNT = 118080
-PUBLIC_TARA_URL = os.environ.get("PUBLIC_TARA_URL", "https://gateway.tara.local")
+def get_active_endpoints() -> list:
+    """Dynamically loads active provider endpoints from endpoints.txt."""
+    candidates = [
+        os.path.join(os.path.dirname(__file__), "endpoints.txt"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "endpoints.txt")
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8") as f:
+                return [l.strip().rstrip("/") for l in f if l.strip() and not l.strip().startswith("#")]
+    custom_url = os.environ.get("PUBLIC_TARA_URL")
+    return [custom_url.rstrip("/")] if custom_url else []
 
 
 def get_canonical_html() -> str:
@@ -35,33 +45,43 @@ def get_canonical_html() -> str:
 
 
 def query_tara_bridge(user_message: str, history):
-    """Bridges chat interaction to the canonical public TARA gateway using standard library urllib."""
+    """Bridges chat interaction using dynamic failover across endpoints in endpoints.txt."""
     user_message = (user_message or "").strip()
     if not user_message:
         return "", history
 
     payload = json.dumps({
         "prompt": user_message,
+        "message": user_message,
         "input": user_message,
         "actor_id": "modelscope_guest",
-        "session_id": "session_ms_studio",
         "expected_model_checksum": CANONICAL_MODEL_SHA256
     }).encode("utf-8")
 
-    try:
-        req = urllib.request.Request(
-            f"{PUBLIC_TARA_URL}/api/v1/inference",
-            data=payload,
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=6.0) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            tara_reply = data.get("text") or (data.get("data", {}).get("response")) or "Response received from TARA."
-    except Exception as e:
-        if "TARA_LIVE_INFERENCE_OK" in user_message:
-            tara_reply = "TARA_LIVE_INFERENCE_OK"
-        else:
-            tara_reply = f"[TARA Bridge]: Gateway query fallback ({str(e)})."
+    endpoints = get_active_endpoints()
+    tara_reply = None
+    last_err = None
+
+    for base in endpoints:
+        for route in ["/v1/chat", "/api/v1/chat", "/api/v1/inference"]:
+            try:
+                req = urllib.request.Request(
+                    f"{base}{route}",
+                    data=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(req, timeout=6.0) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    tara_reply = data.get("response") or data.get("text") or (data.get("data", {}).get("response"))
+                    if tara_reply:
+                        break
+            except Exception as e:
+                last_err = e
+        if tara_reply:
+            break
+
+    if not tara_reply:
+        tara_reply = f"[TARA Runtime Notice]: Could not reach active providers from endpoints.txt ({str(last_err)})."
 
     history = history or []
     # Support both list-of-dicts and list-of-tuples for Gradio cross-version compatibility

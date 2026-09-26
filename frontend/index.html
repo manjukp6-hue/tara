@@ -258,23 +258,178 @@
       return bubble;
     }
 
-    async function sendChatRequest(promptText) {
-      const endpoints = [];
-      const origin = window.location.origin;
+    // =========================================================================
+    // DYNAMIC ENDPOINTS & CONCURRENT PROBING ENGINE
+    // ZERO provider URLs hardcoded in source code.
+    // endpoints.txt is the dynamic source of truth.
+    // =========================================================================
+    let activeProviders = [];
+    let isProbing = false;
+    let lastProbeTimestamp = 0;
+    const PROBE_CACHE_TTL_MS = 30000;
 
-      // 1. Prioritize relative production chat endpoint
-      if (origin && origin !== "null" && !origin.startsWith("file:")) {
-        endpoints.push(`${origin}/v1/chat`);
-        endpoints.push(`${origin}/api/v1/chat`);
+    function validateEndpointUrl(rawLine) {
+      if (!rawLine) return null;
+      const str = rawLine.trim();
+      if (!str || str.startsWith("#")) return null;
+
+      try {
+        const parsed = new URL(str);
+        const isCurrentLocal = window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost";
+        if (parsed.protocol === "https:" || (isCurrentLocal && parsed.protocol === "http:")) {
+          return `${parsed.protocol}//${parsed.host}`;
+        }
+        return null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    async function fetchEndpointsConfig() {
+      const sources = [
+        "endpoints.txt?t=" + Date.now(),
+        "/endpoints.txt?t=" + Date.now(),
+        "https://raw.githubusercontent.com/manjukp6-hue/tara/main/endpoints.txt?t=" + Date.now()
+      ];
+
+      const validUrls = new Set();
+
+      const currentOrigin = window.location.origin;
+      if (currentOrigin && currentOrigin !== "null" && !currentOrigin.startsWith("file:")) {
+        const validatedOrigin = validateEndpointUrl(currentOrigin);
+        if (validatedOrigin) validUrls.add(validatedOrigin);
       }
 
-      // 2. Direct live Hugging Face production backend
-      endpoints.push("https://manjukp6-tara.hf.space/v1/chat");
-      endpoints.push("https://manjukp6-tara.hf.space/api/v1/chat");
+      for (const src of sources) {
+        try {
+          const res = await fetch(src, { cache: "no-cache" });
+          if (res.ok) {
+            const text = await res.text();
+            const lines = text.split("\n");
+            for (const line of lines) {
+              const validated = validateEndpointUrl(line);
+              if (validated) {
+                validUrls.add(validated);
+              }
+            }
+            if (validUrls.size > 0) break;
+          }
+        } catch (e) {}
+      }
 
-      // 3. Localhost endpoints for local testing
-      endpoints.push("http://127.0.0.1:7860/v1/chat");
-      endpoints.push("http://127.0.0.1:8000/api/v1/chat");
+      return Array.from(validUrls);
+    }
+
+    async function probeProvider(baseUrl) {
+      const t0 = performance.now();
+      const probeTarget = `${baseUrl}/health`;
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 4000);
+        const res = await fetch(probeTarget, {
+          method: "GET",
+          headers: { "Accept": "application/json" },
+          signal: controller.signal
+        });
+        clearTimeout(timer);
+
+        const latencyMs = Math.round(performance.now() - t0);
+        const contentType = res.headers.get("content-type") || "";
+
+        if (res.ok && contentType.includes("application/json")) {
+          const healthData = await res.json();
+          const isHealthy = healthData.status === "HEALTHY" && (
+            healthData.live_inference_ready === true ||
+            healthData.model_identity === "TARA" ||
+            (healthData.service && healthData.service.includes("TARA"))
+          );
+
+          if (isHealthy) {
+            return {
+              url: baseUrl,
+              available: true,
+              latencyMs,
+              httpStatus: res.status,
+              health: healthData
+            };
+          }
+        }
+
+        return {
+          url: baseUrl,
+          available: false,
+          latencyMs: 999999,
+          httpStatus: res.status,
+          error: "Health verification failed"
+        };
+      } catch (err) {
+        return {
+          url: baseUrl,
+          available: false,
+          latencyMs: 999999,
+          httpStatus: 0,
+          error: err.message
+        };
+      }
+    }
+
+    async function probeAllProvidersConcurrently(forceRefresh = false) {
+      const now = Date.now();
+      if (!forceRefresh && activeProviders.length > 0 && (now - lastProbeTimestamp < PROBE_CACHE_TTL_MS)) {
+        return activeProviders;
+      }
+
+      if (isProbing) return activeProviders;
+      isProbing = true;
+
+      try {
+        const configuredUrls = await fetchEndpointsConfig();
+        if (configuredUrls.length === 0) {
+          activeProviders = [];
+          return [];
+        }
+
+        const probePromises = configuredUrls.map(url => probeProvider(url));
+        const results = await Promise.allSettled(probePromises);
+
+        const healthyProviders = [];
+        for (const res of results) {
+          if (res.status === "fulfilled" && res.value.available) {
+            healthyProviders.push(res.value);
+          }
+        }
+
+        healthyProviders.sort((a, b) => a.latencyMs - b.latencyMs);
+
+        activeProviders = healthyProviders;
+        lastProbeTimestamp = Date.now();
+
+        if (activeProviders.length > 0) {
+          console.log(`[TARA] Discovered ${activeProviders.length} active provider(s). Lowest latency: ${activeProviders[0].url} (${activeProviders[0].latencyMs}ms)`);
+        } else {
+          console.warn("[TARA] No healthy providers currently reachable.");
+        }
+
+        return activeProviders;
+      } finally {
+        isProbing = false;
+      }
+    }
+
+    async function sendChatRequest(promptText) {
+      return sendWithFailover(promptText);
+    }
+
+    async function sendWithFailover(promptText) {
+      let providers = await probeAllProvidersConcurrently();
+
+      if (providers.length === 0) {
+        providers = await probeAllProvidersConcurrently(true);
+      }
+
+      if (providers.length === 0) {
+        throw new Error("No active TARA providers currently available from endpoints.txt. Please verify your configured endpoints.");
+      }
 
       const payload = {
         message: promptText,
@@ -284,31 +439,41 @@
 
       let lastError = null;
 
-      for (const url of endpoints) {
-        try {
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 12000);
-          const res = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-            signal: controller.signal
-          });
-          clearTimeout(timer);
+      for (const provider of providers) {
+        const candidatePaths = ["/v1/chat", "/api/v1/chat"];
+        for (const path of candidatePaths) {
+          const targetUrl = `${provider.url}${path}`;
+          try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 12000);
+            const res = await fetch(targetUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+              signal: controller.signal
+            });
+            clearTimeout(timer);
 
-          if (res.ok) {
-            const data = await res.json();
-            return (data.response || (data.data && data.data.response) || data.text || JSON.stringify(data));
-          } else {
-            const errData = await res.json().catch(() => ({}));
-            lastError = new Error(`Server returned HTTP ${res.status}: ${errData.error || errData.detail || "Error"}`);
+            if (res.ok) {
+              const data = await res.json();
+              const responseText = data.response || (data.data && data.data.response) || data.text;
+              if (responseText) {
+                return responseText;
+              }
+              if (typeof data === "string") return data;
+              return JSON.stringify(data);
+            } else {
+              const errJson = await res.json().catch(() => ({}));
+              lastError = new Error(`Provider ${provider.url} HTTP ${res.status}: ${errJson.error || errJson.detail || "Request failed"}`);
+            }
+          } catch (err) {
+            lastError = err;
           }
-        } catch (e) {
-          lastError = e;
         }
       }
 
-      throw new Error(`Real TARA runtime unreachable: ${lastError ? lastError.message : "Service Unavailable"}`);
+      lastProbeTimestamp = 0;
+      throw new Error(`All reachable TARA providers failed to process request: ${lastError ? lastError.message : "Service Unavailable"}`);
     }
 
     async function handleSend(e) {
@@ -405,6 +570,11 @@
       } catch (e) {}
     }
 
+    // Boot: Concurrent probing on startup and periodic 60s background refresh
+    probeAllProvidersConcurrently().catch(() => {});
+    setInterval(() => {
+      probeAllProvidersConcurrently(true).catch(() => {});
+    }, 60000);
     initVoice();
   </script>
 </body>

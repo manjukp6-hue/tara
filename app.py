@@ -114,6 +114,17 @@ def serve_frontend():
     return HTMLResponse(content=html)
 
 
+@app.get("/endpoints.txt")
+def serve_endpoints_config():
+    """Serves the dynamic endpoints.txt configuration as plain text."""
+    endpoints_txt_path = os.path.join(REPO_ROOT, "endpoints.txt")
+    if not os.path.exists(endpoints_txt_path):
+        raise HTTPException(status_code=404, detail="endpoints.txt not found")
+    with open(endpoints_txt_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    return Response(content=content, media_type="text/plain; charset=utf-8")
+
+
 @app.post("/v1/chat")
 @app.post("/api/v1/chat")
 async def chat_endpoint(request: Request):

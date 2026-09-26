@@ -1,0 +1,16 @@
+[Unit]
+Description=TARA AI Core Production Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/tara
+ExecStart=/opt/tara/venv/bin/uvicorn app:app --host 0.0.0.0 --port 7860
+Restart=always
+RestartSec=5
+Environment=PYTHONPATH=/opt/tara/python
+Environment=PORT=7860
+
+[Install]
+WantedBy=multi-user.target

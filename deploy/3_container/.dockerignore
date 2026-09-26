@@ -1,0 +1,9 @@
+.git
+.gitattributes
+target
+tests
+scratch
+.cargo
+Cargo.*
+*.md
+!README.md

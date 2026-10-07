@@ -17733,12 +17733,12 @@
     "rust/tara_engine/src/cuda/driver.rs": {
       "extension": "rs",
       "file_id": 4503599627720499,
-      "line_count": 1052,
-      "modified_epoch": 1791390692,
+      "line_count": 1277,
+      "modified_epoch": 1791395945,
       "name": "driver.rs",
       "rel_path": "rust/tara_engine/src/cuda/driver.rs",
-      "sha256": "2c4174ef4482d1215ca6b29ba783c5c46d55654661bd78e7229308bcce6971ed",
-      "size_bytes": 37387
+      "sha256": "510a279c2d667b559fac97ff47566db4d6c2e9cd405a5aa4adc5f8587bd1b0f2",
+      "size_bytes": 44645
     },
     "rust/tara_engine/src/cuda/gpu_trainer.rs": {
       "extension": "rs",
@@ -17793,12 +17793,12 @@
     "rust/tara_engine/src/dataset/splitter.rs": {
       "extension": "rs",
       "file_id": 1970324837580031,
-      "line_count": 1346,
-      "modified_epoch": 1791392960,
+      "line_count": 1585,
+      "modified_epoch": 1791396259,
       "name": "splitter.rs",
       "rel_path": "rust/tara_engine/src/dataset/splitter.rs",
-      "sha256": "10bab0e926d28c8ac61606b74d9eaa536d8a63715b08aefd428f7101277a84fa",
-      "size_bytes": 48989
+      "sha256": "c02147e08281c1997c0161fccf640486555865a4e4fc716dace058bcb37cfb9e",
+      "size_bytes": 59051
     },
     "rust/tara_engine/src/dataset/tokenizer_stage.rs": {
       "extension": "rs",
@@ -19531,7 +19531,7 @@
       "size_bytes": 1242
     }
   },
-  "generated_at_utc": "1791395162",
+  "generated_at_utc": "1791396261",
   "schema_version": "1.0.0",
   "total_files": 1953
 }

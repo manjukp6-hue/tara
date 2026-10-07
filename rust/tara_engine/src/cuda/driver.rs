@@ -2,13 +2,14 @@
 //!
 //! Provides zero-dependency, runtime-linked CUDA Driver API bindings with:
 //! - Full context binding & RAII current-context management (`cuCtxPushCurrent` / `cuCtxPopCurrent`)
+//! - Immediate context detachment on creation (`cuCtxCreate` -> `cuCtxPopCurrent`) leaving zero lingering thread-local state
+//! - Explicit pop error propagation via `CudaContextGuard::finish()` and `with_context()`
 //! - Strict lifetime ownership: Buffers and Modules own their Context and Driver, Kernels own their Module
 //! - Prevention of use-after-unload / use-after-destroy bugs
 //! - Detailed JIT diagnostics via `cuModuleLoadDataEx`
 //! - Authentic driver error diagnostics via `cuGetErrorName` and `cuGetErrorString`
 //! - Process-wide driver singleton caching via `OnceLock`
-//! - Fully sound `Send` and `Sync` models serialized through context guard locks
-//! - Completely native Rust, release-grade, and safe.
+//! - All wrapper-mediated CUDA operations are serialized per context and explicitly bind the intended context before execution.
 
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -257,6 +258,7 @@ pub struct CudaDriverInner {
     fn_ctx_destroy: extern "system" fn(*mut c_void) -> c_int,
     fn_ctx_push_current: extern "system" fn(*mut c_void) -> c_int,
     fn_ctx_pop_current: extern "system" fn(*mut *mut c_void) -> c_int,
+    fn_ctx_get_current: extern "system" fn(*mut *mut c_void) -> c_int,
     fn_ctx_synchronize: extern "system" fn() -> c_int,
     fn_mem_get_info: extern "system" fn(*mut usize, *mut usize) -> c_int,
     fn_mem_alloc: extern "system" fn(*mut u64, usize) -> c_int,
@@ -313,6 +315,8 @@ impl CudaDriverInner {
                 .or_else(|_| get_proc_fn(guard.0, "cuCtxPushCurrent"))?;
             let fn_ctx_pop_current = get_proc_fn(guard.0, "cuCtxPopCurrent_v2")
                 .or_else(|_| get_proc_fn(guard.0, "cuCtxPopCurrent"))?;
+            let fn_ctx_get_current = get_proc_fn(guard.0, "cuCtxGetCurrent_v2")
+                .or_else(|_| get_proc_fn(guard.0, "cuCtxGetCurrent"))?;
             let fn_ctx_synchronize = get_proc_fn(guard.0, "cuCtxSynchronize")?;
             let fn_mem_get_info = get_proc_fn(guard.0, "cuMemGetInfo_v2")
                 .or_else(|_| get_proc_fn(guard.0, "cuMemGetInfo"))?;
@@ -349,6 +353,7 @@ impl CudaDriverInner {
                 fn_ctx_destroy,
                 fn_ctx_push_current,
                 fn_ctx_pop_current,
+                fn_ctx_get_current,
                 fn_ctx_synchronize,
                 fn_mem_get_info,
                 fn_mem_alloc,
@@ -501,12 +506,35 @@ impl CudaDriver {
         })
     }
 
+    pub fn current_context(&self) -> Result<*mut c_void, CudaError> {
+        let mut ctx: *mut c_void = std::ptr::null_mut();
+        check_cu!(self.inner, (self.inner.fn_ctx_get_current)(&mut ctx));
+        Ok(ctx)
+    }
+
     pub fn create_context(&self, device: &CudaDeviceInfo) -> Result<Arc<CudaContextInner>, CudaError> {
         let mut ctx: *mut c_void = std::ptr::null_mut();
         check_cu!(
             self.inner,
             (self.inner.fn_ctx_create)(&mut ctx, 0, device.raw_device)
         );
+
+        // Immediately detach the newly created context from the calling thread's context stack.
+        // cuCtxCreate makes the new context current on the calling host thread. Popping it leaves
+        // the thread's context stack restored and ensures the context is an unattached, owned handle.
+        let mut popped: *mut c_void = std::ptr::null_mut();
+        let pop_res = (self.inner.fn_ctx_pop_current)(&mut popped);
+        if pop_res != 0 {
+            let _ = (self.inner.fn_ctx_destroy)(ctx);
+            return Err(CudaError::ApiError(
+                pop_res,
+                format!(
+                    "cuCtxPopCurrent failed during context detachment: {}",
+                    self.inner.get_error_string(pop_res)
+                ),
+            ));
+        }
+
         Ok(Arc::new(CudaContextInner {
             ctx,
             driver: Arc::clone(&self.inner),
@@ -515,25 +543,51 @@ impl CudaDriver {
     }
 }
 
-/// RAII Guard that pushes a CUDA context onto the current host thread, and pops it on drop.
+/// RAII Guard that pushes a CUDA context onto the current host thread, and pops it on drop or finish.
 pub struct CudaContextGuard<'a> {
     driver: &'a CudaDriverInner,
+    popped: bool,
 }
 
 impl<'a> CudaContextGuard<'a> {
-    pub fn push(ctx: *mut c_void, driver: &'a CudaDriverInner) -> Result<Self, CudaError> {
+    /// Pushes the specified context onto the current host thread.
+    /// Unsafe because passing an arbitrary or invalid raw context pointer violates CUDA runtime safety.
+    pub unsafe fn push(ctx: *mut c_void, driver: &'a CudaDriverInner) -> Result<Self, CudaError> {
         let res = (driver.fn_ctx_push_current)(ctx);
         if res != 0 {
             return Err(CudaError::ApiError(res, driver.get_error_string(res)));
         }
-        Ok(Self { driver })
+        Ok(Self { driver, popped: false })
+    }
+
+    /// Explicitly finishes the guard scope, popping the context and propagating any pop error.
+    pub fn finish(mut self) -> Result<(), CudaError> {
+        if self.popped {
+            return Ok(());
+        }
+        self.popped = true;
+        let mut popped: *mut c_void = std::ptr::null_mut();
+        let res = (self.driver.fn_ctx_pop_current)(&mut popped);
+        if res != 0 {
+            return Err(CudaError::ApiError(
+                res,
+                format!(
+                    "cuCtxPopCurrent failed in finish: {}",
+                    self.driver.get_error_string(res)
+                ),
+            ));
+        }
+        Ok(())
     }
 }
 
 impl<'a> Drop for CudaContextGuard<'a> {
     fn drop(&mut self) {
-        let mut popped: *mut c_void = std::ptr::null_mut();
-        let _ = (self.driver.fn_ctx_pop_current)(&mut popped);
+        if !self.popped {
+            self.popped = true;
+            let mut popped: *mut c_void = std::ptr::null_mut();
+            let _ = (self.driver.fn_ctx_pop_current)(&mut popped);
+        }
     }
 }
 
@@ -545,6 +599,38 @@ pub struct CudaContextInner {
 
 unsafe impl Send for CudaContextInner {}
 unsafe impl Sync for CudaContextInner {}
+
+impl CudaContextInner {
+    /// Binds this context to the calling thread for the duration of the guard.
+    pub(crate) fn bind<'a>(&'a self) -> Result<CudaContextGuard<'a>, CudaError> {
+        unsafe { CudaContextGuard::push(self.ctx, &self.driver) }
+    }
+
+    /// Executes an operation with this context bound, serializing access via the context lock,
+    /// popping the context upon completion, and propagating any pop error.
+    pub(crate) fn with_context<T, F>(&self, f: F) -> Result<T, CudaError>
+    where
+        F: FnOnce() -> Result<T, CudaError>,
+    {
+        let _lock = self.lock.lock().unwrap();
+        let guard = self.bind()?;
+        let res = f();
+        match res {
+            Ok(val) => {
+                guard.finish()?;
+                Ok(val)
+            }
+            Err(e) => {
+                let _ = guard.finish();
+                Err(e)
+            }
+        }
+    }
+
+    pub fn raw_context(&self) -> *mut c_void {
+        self.ctx
+    }
+}
 
 impl Drop for CudaContextInner {
     fn drop(&mut self) {
@@ -595,16 +681,20 @@ impl CudaSession {
         &self.driver
     }
 
+    pub fn context(&self) -> &Arc<CudaContextInner> {
+        &self.context
+    }
+
     pub fn get_memory_info(&self) -> Result<(usize, usize), CudaError> {
-        let _lock = self.context.lock.lock().unwrap();
-        let _guard = CudaContextGuard::push(self.context.ctx, &self.context.driver)?;
-        let mut free = 0usize;
-        let mut total = 0usize;
-        check_cu!(
-            self.context.driver,
-            (self.context.driver.fn_mem_get_info)(&mut free, &mut total)
-        );
-        Ok((free, total))
+        self.context.with_context(|| {
+            let mut free = 0usize;
+            let mut total = 0usize;
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_mem_get_info)(&mut free, &mut total)
+            );
+            Ok((free, total))
+        })
     }
 
     pub fn allocate_f32(&self, count: usize) -> Result<CudaBuffer, CudaError> {
@@ -627,13 +717,14 @@ impl CudaSession {
             });
         }
 
-        let _lock = self.context.lock.lock().unwrap();
-        let _guard = CudaContextGuard::push(self.context.ctx, &self.context.driver)?;
         let mut dptr = 0u64;
-        check_cu!(
-            self.context.driver,
-            (self.context.driver.fn_mem_alloc)(&mut dptr, bytes)
-        );
+        self.context.with_context(|| {
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_mem_alloc)(&mut dptr, bytes)
+            );
+            Ok(())
+        })?;
 
         Ok(CudaBuffer {
             dptr,
@@ -651,17 +742,17 @@ impl CudaSession {
                 buffer.len_elements
             )));
         }
-        let _lock = self.context.lock.lock().unwrap();
-        let _guard = CudaContextGuard::push(self.context.ctx, &self.context.driver)?;
-        check_cu!(
-            self.context.driver,
-            (self.context.driver.fn_memcpy_htod)(
-                buffer.dptr,
-                data.as_ptr() as *const c_void,
-                buffer.bytes
-            )
-        );
-        Ok(())
+        self.context.with_context(|| {
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_memcpy_htod)(
+                    buffer.dptr,
+                    data.as_ptr() as *const c_void,
+                    buffer.bytes
+                )
+            );
+            Ok(())
+        })
     }
 
     pub fn upload_f32_slice(&self, buffer: &CudaBuffer, data: &[f32]) -> Result<(), CudaError> {
@@ -673,17 +764,17 @@ impl CudaSession {
             )));
         }
         let bytes_to_copy = std::mem::size_of_val(data);
-        let _lock = self.context.lock.lock().unwrap();
-        let _guard = CudaContextGuard::push(self.context.ctx, &self.context.driver)?;
-        check_cu!(
-            self.context.driver,
-            (self.context.driver.fn_memcpy_htod)(
-                buffer.dptr,
-                data.as_ptr() as *const c_void,
-                bytes_to_copy
-            )
-        );
-        Ok(())
+        self.context.with_context(|| {
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_memcpy_htod)(
+                    buffer.dptr,
+                    data.as_ptr() as *const c_void,
+                    bytes_to_copy
+                )
+            );
+            Ok(())
+        })
     }
 
     pub fn upload_u32(&self, buffer: &CudaBuffer, data: &[u32]) -> Result<(), CudaError> {
@@ -694,17 +785,17 @@ impl CudaSession {
                 buffer.len_elements
             )));
         }
-        let _lock = self.context.lock.lock().unwrap();
-        let _guard = CudaContextGuard::push(self.context.ctx, &self.context.driver)?;
-        check_cu!(
-            self.context.driver,
-            (self.context.driver.fn_memcpy_htod)(
-                buffer.dptr,
-                data.as_ptr() as *const c_void,
-                buffer.bytes
-            )
-        );
-        Ok(())
+        self.context.with_context(|| {
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_memcpy_htod)(
+                    buffer.dptr,
+                    data.as_ptr() as *const c_void,
+                    buffer.bytes
+                )
+            );
+            Ok(())
+        })
     }
 
     pub fn download_u32(&self, buffer: &CudaBuffer, out: &mut [u32]) -> Result<(), CudaError> {
@@ -715,17 +806,17 @@ impl CudaSession {
                 buffer.len_elements
             )));
         }
-        let _lock = self.context.lock.lock().unwrap();
-        let _guard = CudaContextGuard::push(self.context.ctx, &self.context.driver)?;
-        check_cu!(
-            self.context.driver,
-            (self.context.driver.fn_memcpy_dtoh)(
-                out.as_mut_ptr() as *mut c_void,
-                buffer.dptr,
-                buffer.bytes
-            )
-        );
-        Ok(())
+        self.context.with_context(|| {
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_memcpy_dtoh)(
+                    out.as_mut_ptr() as *mut c_void,
+                    buffer.dptr,
+                    buffer.bytes
+                )
+            );
+            Ok(())
+        })
     }
 
     pub fn download_f32(&self, buffer: &CudaBuffer, out: &mut [f32]) -> Result<(), CudaError> {
@@ -736,17 +827,17 @@ impl CudaSession {
                 buffer.len_elements
             )));
         }
-        let _lock = self.context.lock.lock().unwrap();
-        let _guard = CudaContextGuard::push(self.context.ctx, &self.context.driver)?;
-        check_cu!(
-            self.context.driver,
-            (self.context.driver.fn_memcpy_dtoh)(
-                out.as_mut_ptr() as *mut c_void,
-                buffer.dptr,
-                buffer.bytes
-            )
-        );
-        Ok(())
+        self.context.with_context(|| {
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_memcpy_dtoh)(
+                    out.as_mut_ptr() as *mut c_void,
+                    buffer.dptr,
+                    buffer.bytes
+                )
+            );
+            Ok(())
+        })
     }
 
     pub fn download_f32_slice(
@@ -762,27 +853,27 @@ impl CudaSession {
             )));
         }
         let bytes_to_copy = std::mem::size_of_val(out);
-        let _lock = self.context.lock.lock().unwrap();
-        let _guard = CudaContextGuard::push(self.context.ctx, &self.context.driver)?;
-        check_cu!(
-            self.context.driver,
-            (self.context.driver.fn_memcpy_dtoh)(
-                out.as_mut_ptr() as *mut c_void,
-                buffer.dptr,
-                bytes_to_copy
-            )
-        );
-        Ok(())
+        self.context.with_context(|| {
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_memcpy_dtoh)(
+                    out.as_mut_ptr() as *mut c_void,
+                    buffer.dptr,
+                    bytes_to_copy
+                )
+            );
+            Ok(())
+        })
     }
 
     pub fn synchronize(&self) -> Result<(), CudaError> {
-        let _lock = self.context.lock.lock().unwrap();
-        let _guard = CudaContextGuard::push(self.context.ctx, &self.context.driver)?;
-        check_cu!(
-            self.context.driver,
-            (self.context.driver.fn_ctx_synchronize)()
-        );
-        Ok(())
+        self.context.with_context(|| {
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_ctx_synchronize)()
+            );
+            Ok(())
+        })
     }
 
     /// Exact device-to-device copy between two CUDA buffers of matching size.
@@ -809,82 +900,82 @@ impl CudaSession {
                 bytes, dst.bytes, src.bytes
             )));
         }
-        let _lock = self.context.lock.lock().unwrap();
-        let _guard = CudaContextGuard::push(self.context.ctx, &self.context.driver)?;
-        check_cu!(
-            self.context.driver,
-            (self.context.driver.fn_memcpy_dtod)(dst.dptr, src.dptr, bytes)
-        );
-        Ok(())
+        self.context.with_context(|| {
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_memcpy_dtod)(dst.dptr, src.dptr, bytes)
+            );
+            Ok(())
+        })
     }
 
     /// Load and JIT-compile a PTX module into the session's active CUDA context.
     /// Captures detailed compiler diagnostics via `cuModuleLoadDataEx` whenever available.
     pub fn load_ptx_module(&self, ptx_source: &str) -> Result<CudaModuleHandle, CudaError> {
         let c_ptx = CString::new(ptx_source).map_err(|e| CudaError::KernelError(e.to_string()))?;
-        let _lock = self.context.lock.lock().unwrap();
-        let _guard = CudaContextGuard::push(self.context.ctx, &self.context.driver)?;
-
         let mut module: *mut c_void = std::ptr::null_mut();
 
-        if let Some(fn_load_ex) = self.context.driver.fn_module_load_data_ex {
-            const CU_JIT_INFO_LOG_BUFFER: u32 = 3;
-            const CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES: u32 = 4;
-            const CU_JIT_ERROR_LOG_BUFFER: u32 = 5;
-            const CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES: u32 = 6;
+        self.context.with_context(|| {
+            if let Some(fn_load_ex) = self.context.driver.fn_module_load_data_ex {
+                const CU_JIT_INFO_LOG_BUFFER: u32 = 3;
+                const CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES: u32 = 4;
+                const CU_JIT_ERROR_LOG_BUFFER: u32 = 5;
+                const CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES: u32 = 6;
 
-            let mut error_log = vec![0 as c_char; 8192];
-            let mut info_log = vec![0 as c_char; 8192];
-            let error_log_len = error_log.len();
-            let info_log_len = info_log.len();
+                let mut error_log = vec![0 as c_char; 8192];
+                let mut info_log = vec![0 as c_char; 8192];
+                let error_log_len = error_log.len();
+                let info_log_len = info_log.len();
 
-            let mut options = [
-                CU_JIT_INFO_LOG_BUFFER,
-                CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
-                CU_JIT_ERROR_LOG_BUFFER,
-                CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES,
-            ];
-            let mut option_values: [*mut c_void; 4] = [
-                info_log.as_mut_ptr() as *mut c_void,
-                info_log_len as *mut c_void,
-                error_log.as_mut_ptr() as *mut c_void,
-                error_log_len as *mut c_void,
-            ];
+                let mut options = [
+                    CU_JIT_INFO_LOG_BUFFER,
+                    CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
+                    CU_JIT_ERROR_LOG_BUFFER,
+                    CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES,
+                ];
+                let mut option_values: [*mut c_void; 4] = [
+                    info_log.as_mut_ptr() as *mut c_void,
+                    info_log_len as *mut c_void,
+                    error_log.as_mut_ptr() as *mut c_void,
+                    error_log_len as *mut c_void,
+                ];
 
-            let res = fn_load_ex(
-                &mut module,
-                c_ptx.as_ptr(),
-                4,
-                options.as_mut_ptr(),
-                option_values.as_mut_ptr(),
-            );
+                let res = fn_load_ex(
+                    &mut module,
+                    c_ptx.as_ptr(),
+                    4,
+                    options.as_mut_ptr(),
+                    option_values.as_mut_ptr(),
+                );
 
-            if res != 0 {
-                let err_msg = unsafe {
-                    if error_log[0] != 0 {
-                        CStr::from_ptr(error_log.as_ptr())
-                            .to_string_lossy()
-                            .into_owned()
-                    } else {
-                        self.context.driver.get_error_string(res)
-                    }
-                };
-                return Err(CudaError::KernelError(format!(
-                    "PTX JIT compilation failed ({res}): {err_msg}"
-                )));
+                if res != 0 {
+                    let err_msg = unsafe {
+                        if error_log[0] != 0 {
+                            CStr::from_ptr(error_log.as_ptr())
+                                .to_string_lossy()
+                                .into_owned()
+                        } else {
+                            self.context.driver.get_error_string(res)
+                        }
+                    };
+                    return Err(CudaError::KernelError(format!(
+                        "PTX JIT compilation failed ({res}): {err_msg}"
+                    )));
+                }
+            } else {
+                let res = (self.context.driver.fn_module_load_data)(
+                    &mut module,
+                    c_ptx.as_ptr(),
+                );
+                if res != 0 {
+                    return Err(CudaError::ApiError(
+                        res,
+                        self.context.driver.get_error_string(res),
+                    ));
+                }
             }
-        } else {
-            let res = (self.context.driver.fn_module_load_data)(
-                &mut module,
-                c_ptx.as_ptr(),
-            );
-            if res != 0 {
-                return Err(CudaError::ApiError(
-                    res,
-                    self.context.driver.get_error_string(res),
-                ));
-            }
-        }
+            Ok(())
+        })?;
 
         let inner = Arc::new(CudaModuleInner {
             module,
@@ -908,10 +999,10 @@ unsafe impl Sync for CudaBuffer {}
 impl Drop for CudaBuffer {
     fn drop(&mut self) {
         if self.dptr != 0 {
-            let _lock = self.context.lock.lock().unwrap();
-            if let Ok(_guard) = CudaContextGuard::push(self.context.ctx, &self.context.driver) {
+            let _ = self.context.with_context(|| {
                 let _ = (self.context.driver.fn_mem_free)(self.dptr);
-            }
+                Ok(())
+            });
             self.dptr = 0;
         }
     }
@@ -928,10 +1019,10 @@ unsafe impl Sync for CudaModuleInner {}
 impl Drop for CudaModuleInner {
     fn drop(&mut self) {
         if !self.module.is_null() {
-            let _lock = self.context.lock.lock().unwrap();
-            if let Ok(_guard) = CudaContextGuard::push(self.context.ctx, &self.context.driver) {
+            let _ = self.context.with_context(|| {
                 let _ = (self.context.driver.fn_module_unload)(self.module);
-            }
+                Ok(())
+            });
             self.module = std::ptr::null_mut();
         }
     }
@@ -948,17 +1039,18 @@ unsafe impl Sync for CudaModuleHandle {}
 impl CudaModuleHandle {
     pub fn get_kernel(&self, name: &str) -> Result<CudaKernel, CudaError> {
         let c_name = CString::new(name).map_err(|e| CudaError::KernelError(e.to_string()))?;
-        let _lock = self.inner.context.lock.lock().unwrap();
-        let _guard = CudaContextGuard::push(self.inner.context.ctx, &self.inner.context.driver)?;
         let mut func: *mut c_void = std::ptr::null_mut();
-        check_cu!(
-            self.inner.context.driver,
-            (self.inner.context.driver.fn_module_get_function)(
-                &mut func,
-                self.inner.module,
-                c_name.as_ptr()
-            )
-        );
+        self.inner.context.with_context(|| {
+            check_cu!(
+                self.inner.context.driver,
+                (self.inner.context.driver.fn_module_get_function)(
+                    &mut func,
+                    self.inner.module,
+                    c_name.as_ptr()
+                )
+            );
+            Ok(())
+        })?;
         Ok(CudaKernel {
             func,
             module: Arc::clone(&self.inner),
@@ -990,25 +1082,25 @@ impl CudaKernel {
         _param_count: usize,
     ) -> Result<(), CudaError> {
         let ctx = &self.module.context;
-        let _lock = ctx.lock.lock().unwrap();
-        let _guard = CudaContextGuard::push(ctx.ctx, &ctx.driver)?;
-        check_cu!(
-            ctx.driver,
-            (ctx.driver.fn_launch_kernel)(
-                self.func,
-                grid_dim.0,
-                grid_dim.1,
-                grid_dim.2,
-                block_dim.0,
-                block_dim.1,
-                block_dim.2,
-                shared_mem,
-                std::ptr::null_mut(),
-                params.as_mut_ptr(),
-                std::ptr::null_mut(),
-            )
-        );
-        Ok(())
+        ctx.with_context(|| {
+            check_cu!(
+                ctx.driver,
+                (ctx.driver.fn_launch_kernel)(
+                    self.func,
+                    grid_dim.0,
+                    grid_dim.1,
+                    grid_dim.2,
+                    block_dim.0,
+                    block_dim.1,
+                    block_dim.2,
+                    shared_mem,
+                    std::ptr::null_mut(),
+                    params.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                )
+            );
+            Ok(())
+        })
     }
 }
 
@@ -1036,7 +1128,6 @@ mod tests {
 
     #[test]
     fn test_driver_singleton_cached() {
-        // Repeated calls to CudaDriver::load() must return consistent results and share the singleton
         let res1 = CudaDriver::load();
         let res2 = CudaDriver::load();
         match (res1, res2) {
@@ -1047,6 +1138,140 @@ mod tests {
                 assert_eq!(e1.to_string(), e2.to_string());
             }
             _ => panic!("CudaDriver singleton returned inconsistent results across invocations"),
+        }
+    }
+
+    #[test]
+    fn test_context_creation_leaves_no_implicit_current_context() {
+        let driver = match CudaDriver::load() {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        if driver.device_count().unwrap_or(0) <= 0 {
+            return;
+        }
+        let dev = driver.get_device_info(0).unwrap();
+        let context = driver.create_context(&dev).unwrap();
+
+        // After creation, context MUST NOT be current on the creating thread
+        let current = driver.current_context().unwrap();
+        assert!(current.is_null() || current != context.raw_context());
+    }
+
+    #[test]
+    fn test_context_push_pop_stack_restoration() {
+        let driver = match CudaDriver::load() {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        if driver.device_count().unwrap_or(0) <= 0 {
+            return;
+        }
+        let dev = driver.get_device_info(0).unwrap();
+        let ctx_a = driver.create_context(&dev).unwrap();
+        let ctx_b = driver.create_context(&dev).unwrap();
+
+        let initial_current = driver.current_context().unwrap();
+
+        ctx_a.with_context(|| {
+            let cur_a = driver.current_context().unwrap();
+            assert_eq!(cur_a, ctx_a.raw_context());
+
+            ctx_b.with_context(|| {
+                let cur_b = driver.current_context().unwrap();
+                assert_eq!(cur_b, ctx_b.raw_context());
+                Ok(())
+            })?;
+
+            let cur_a_restored = driver.current_context().unwrap();
+            assert_eq!(cur_a_restored, ctx_a.raw_context());
+            Ok(())
+        }).unwrap();
+
+        let final_current = driver.current_context().unwrap();
+        assert_eq!(final_current, initial_current);
+    }
+
+    #[test]
+    fn test_multithreaded_context_sequential_usage() {
+        let session = match CudaSession::init(0) {
+            Ok(s) => Arc::new(s),
+            Err(_) => return,
+        };
+
+        let session_clone = Arc::clone(&session);
+        let handle1 = std::thread::spawn(move || {
+            let buf = session_clone.allocate_f32(4).unwrap();
+            session_clone.upload_f32(&buf, &[1.0, 2.0, 3.0, 4.0]).unwrap();
+            let mut out = [0.0f32; 4];
+            session_clone.download_f32(&buf, &mut out).unwrap();
+            assert_eq!(out, [1.0, 2.0, 3.0, 4.0]);
+            buf
+        });
+        let buf = handle1.join().unwrap();
+
+        let session_clone2 = Arc::clone(&session);
+        let handle2 = std::thread::spawn(move || {
+            session_clone2.upload_f32(&buf, &[5.0, 6.0, 7.0, 8.0]).unwrap();
+            let mut out = [0.0f32; 4];
+            session_clone2.download_f32(&buf, &mut out).unwrap();
+            assert_eq!(out, [5.0, 6.0, 7.0, 8.0]);
+        });
+        handle2.join().unwrap();
+    }
+
+    #[test]
+    fn test_cross_thread_buffer_drop() {
+        let session = match CudaSession::init(0) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        let (free_before, _) = session.get_memory_info().unwrap();
+        let buf = session.allocate_f32(1024 * 1024).unwrap(); // 4 MB
+        let (free_allocated, _) = session.get_memory_info().unwrap();
+        assert!(free_allocated < free_before);
+
+        let handle = std::thread::spawn(move || {
+            drop(buf); // Explicit drop on another thread
+        });
+        handle.join().unwrap();
+
+        let (free_after, _) = session.get_memory_info().unwrap();
+        assert!(
+            free_after > free_allocated,
+            "Expected free VRAM to increase after cross-thread buffer drop (allocated: {}, after: {})",
+            free_allocated,
+            free_after
+        );
+    }
+
+    #[test]
+    fn test_module_kernel_survives_session_scope() {
+        let kernel = {
+            let session = match CudaSession::init(0) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let ptx = r#"
+                .version 7.0
+                .target sm_75
+                .address_size 64
+                .visible .entry noop_kernel() {
+                    ret;
+                }
+            "#;
+            let module = match session.load_ptx_module(ptx) {
+                Ok(m) => m,
+                Err(_) => return,
+            };
+            module.get_kernel("noop_kernel").unwrap()
+        };
+
+        unsafe {
+            let dummy_params: [*mut c_void; 16] = [std::ptr::null_mut(); 16];
+            let res = kernel.launch((1, 1, 1), (1, 1, 1), 0, dummy_params, 0);
+            assert!(res.is_ok());
         }
     }
 }

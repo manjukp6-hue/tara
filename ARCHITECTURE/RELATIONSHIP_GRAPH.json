@@ -12935,6 +12935,7 @@
     "rust/tara_engine/src/cuda/driver.rs": {
       "call_references": [
         "ApiError",
+        "FnOnce",
         "KernelError",
         "LibraryGuard",
         "LibraryNotFound",
@@ -12942,11 +12943,14 @@
         "and_then",
         "as_mut_ptr",
         "as_ptr",
+        "bind",
         "clone",
         "contains",
+        "context",
         "copy_dtod",
         "copy_dtod_bytes",
         "create_context",
+        "current_context",
         "device",
         "device_count",
         "disarm",
@@ -12959,7 +12963,9 @@
         "drop",
         "error",
         "exists",
+        "f",
         "file_name",
+        "finish",
         "flatten",
         "fn_load_ex",
         "get_device_info",
@@ -12972,6 +12978,7 @@
         "is_empty",
         "is_none",
         "is_null",
+        "is_ok",
         "join",
         "launch",
         "len",
@@ -12983,6 +12990,7 @@
         "map",
         "map_err",
         "new",
+        "noop_kernel",
         "null",
         "null_mut",
         "ok",
@@ -12990,12 +12998,18 @@
         "or_else",
         "path",
         "ptr_eq",
+        "raw_context",
         "read_dir",
         "split",
         "starts_with",
         "synchronize",
+        "test_context_creation_leaves_no_implicit_current_context",
+        "test_context_push_pop_stack_restoration",
+        "test_cross_thread_buffer_drop",
         "test_driver_singleton_cached",
         "test_error_string_fallback",
+        "test_module_kernel_survives_session_scope",
+        "test_multithreaded_context_sequential_usage",
         "test_overflow_and_zero_size_handling",
         "to_str",
         "to_string",
@@ -13005,212 +13019,231 @@
         "upload_f32_slice",
         "upload_u32",
         "var",
-        "vec"
+        "vec",
+        "with_context"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "2c4174ef4482d1215ca6b29ba783c5c46d55654661bd78e7229308bcce6971ed",
+      "dynamic_sha256": "510a279c2d667b559fac97ff47566db4d6c2e9cd405a5aa4adc5f8587bd1b0f2",
       "exports": [
         {
           "kind": "Struct",
-          "line_number": 898,
+          "line_number": 989,
           "name": "CudaBuffer",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 519,
+          "line_number": 547,
           "name": "CudaContextGuard",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 540,
+          "line_number": 594,
           "name": "CudaContextInner",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 560,
+          "line_number": 646,
           "name": "CudaDeviceInfo",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 425,
+          "line_number": 430,
           "name": "CudaDriver",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 247,
+          "line_number": 248,
           "name": "CudaDriverInner",
           "visibility": "Public"
         },
         {
           "kind": "Enum",
-          "line_number": 18,
+          "line_number": 19,
           "name": "CudaError",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 970,
+          "line_number": 1062,
           "name": "CudaKernel",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 941,
+          "line_number": 1032,
           "name": "CudaModuleHandle",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 920,
+          "line_number": 1011,
           "name": "CudaModuleInner",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 568,
+          "line_number": 654,
           "name": "CudaSession",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 610,
+          "line_number": 700,
           "name": "allocate_f32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 789,
+          "line_number": 684,
+          "name": "context",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 880,
           "name": "copy_dtod",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 800,
+          "line_number": 891,
           "name": "copy_dtod_bytes",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 504,
+          "line_number": 515,
           "name": "create_context",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 590,
+          "line_number": 509,
+          "name": "current_context",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 676,
           "name": "device",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 452,
+          "line_number": 457,
           "name": "device_count",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 731,
+          "line_number": 822,
           "name": "download_f32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 752,
+          "line_number": 843,
           "name": "download_f32_slice",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 710,
+          "line_number": 801,
           "name": "download_u32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 594,
+          "line_number": 680,
           "name": "driver",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 444,
+          "line_number": 449,
           "name": "driver_version",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 458,
+          "line_number": 564,
+          "name": "finish",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 463,
           "name": "get_device_info",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 381,
+          "line_number": 386,
           "name": "get_error_string",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 949,
+          "line_number": 1040,
           "name": "get_kernel",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 598,
+          "line_number": 688,
           "name": "get_memory_info",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 575,
+          "line_number": 661,
           "name": "init",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 430,
+          "line_number": 435,
           "name": "load",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 823,
+          "line_number": 914,
           "name": "load_ptx_module",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 524,
-          "name": "push",
+          "line_number": 630,
+          "name": "raw_context",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 778,
+          "line_number": 869,
           "name": "synchronize",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 646,
+          "line_number": 737,
           "name": "upload_f32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 667,
+          "line_number": 758,
           "name": "upload_f32_slice",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 689,
+          "line_number": 780,
           "name": "upload_u32",
           "visibility": "Public"
         }
@@ -13225,7 +13258,7 @@
             "CString"
           ],
           "is_public_reexport": false,
-          "line_number": 13,
+          "line_number": 14,
           "raw_path": "std::ffi::{c_char, c_int, c_void, CStr, CString}"
         },
         {
@@ -13233,7 +13266,7 @@
             "Path"
           ],
           "is_public_reexport": false,
-          "line_number": 127,
+          "line_number": 128,
           "raw_path": "std::path::Path"
         },
         {
@@ -13243,13 +13276,13 @@
             "OnceLock"
           ],
           "is_public_reexport": false,
-          "line_number": 14,
+          "line_number": 15,
           "raw_path": "std::sync::{Arc, Mutex, OnceLock}"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 1017,
+          "line_number": 1109,
           "raw_path": "super::*"
         },
         {
@@ -13257,7 +13290,7 @@
             "Error"
           ],
           "is_public_reexport": false,
-          "line_number": 15,
+          "line_number": 16,
           "raw_path": "thiserror::Error"
         }
       ],
@@ -13269,169 +13302,211 @@
       "internal_symbols": [
         {
           "kind": "Const",
-          "line_number": 833,
+          "line_number": 922,
           "name": "CU_JIT_ERROR_LOG_BUFFER",
           "visibility": "Private"
         },
         {
           "kind": "Const",
-          "line_number": 834,
+          "line_number": 923,
           "name": "CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES",
           "visibility": "Private"
         },
         {
           "kind": "Const",
-          "line_number": 831,
+          "line_number": 920,
           "name": "CU_JIT_INFO_LOG_BUFFER",
           "visibility": "Private"
         },
         {
           "kind": "Const",
-          "line_number": 832,
+          "line_number": 921,
           "name": "CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES",
           "visibility": "Private"
         },
         {
           "kind": "Static",
-          "line_number": 421,
+          "line_number": 426,
           "name": "DRIVER_SINGLETON",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 72,
+          "line_number": 73,
           "name": "FreeLibrary",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 71,
+          "line_number": 72,
           "name": "GetProcAddress",
           "visibility": "Private"
         },
         {
           "kind": "Struct",
-          "line_number": 87,
+          "line_number": 88,
           "name": "LibraryGuard",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 70,
+          "line_number": 71,
           "name": "LoadLibraryA",
           "visibility": "Private"
         },
         {
           "kind": "Const",
-          "line_number": 76,
+          "line_number": 77,
           "name": "RTLD_LAZY",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 36,
+          "line_number": 605,
+          "name": "bind",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 37,
           "name": "cuda_err_fallback_string",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 90,
+          "line_number": 91,
           "name": "disarm",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 82,
+          "line_number": 83,
           "name": "dlclose",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 83,
+          "line_number": 84,
           "name": "dlerror",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 80,
+          "line_number": 81,
           "name": "dlopen",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 81,
+          "line_number": 82,
           "name": "dlsym",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 98,
+          "line_number": 99,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 406,
+          "line_number": 411,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 534,
+          "line_number": 585,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 550,
+          "line_number": 636,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 909,
+          "line_number": 1000,
           "name": "drop",
-          "visibility": "Private"
-        },
-        {
-          "kind": "Function",
-          "line_number": 929,
-          "name": "drop",
-          "visibility": "Private"
-        },
-        {
-          "kind": "Function",
-          "line_number": 295,
-          "name": "load",
-          "visibility": "Private"
-        },
-        {
-          "kind": "Function",
-          "line_number": 1038,
-          "name": "test_driver_singleton_cached",
           "visibility": "Private"
         },
         {
           "kind": "Function",
           "line_number": 1020,
+          "name": "drop",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 297,
+          "name": "load",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1145,
+          "name": "test_context_creation_leaves_no_implicit_current_context",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1162,
+          "name": "test_context_push_pop_stack_restoration",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1224,
+          "name": "test_cross_thread_buffer_drop",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1130,
+          "name": "test_driver_singleton_cached",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1112,
           "name": "test_error_string_fallback",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1029,
+          "line_number": 1250,
+          "name": "test_module_kernel_survives_session_scope",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1196,
+          "name": "test_multithreaded_context_sequential_usage",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1121,
           "name": "test_overflow_and_zero_size_handling",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 611,
+          "name": "with_context",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1052,
+      "lines": 1277,
       "module_path": "tara_engine::cuda::driver",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1016,
+          "line_number": 1108,
           "name": "tests"
         }
       ],
@@ -14299,6 +14374,7 @@
         "clone",
         "collect",
         "compute_13gram_hashes",
+        "compute_file_sha256",
         "contains",
         "copied",
         "copy",
@@ -14311,6 +14387,7 @@
         "energy",
         "enumerate",
         "error",
+        "exists",
         "extension",
         "extract_prompt_field",
         "extract_target_field",
@@ -14321,6 +14398,7 @@
         "find",
         "find_leakage",
         "flush",
+        "from_str",
         "get",
         "get_ref",
         "intersection",
@@ -14353,7 +14431,9 @@
         "read",
         "read_canonical_samples_from_file",
         "read_to_string",
+        "recover_or_purge_stale_artifacts",
         "remove_dir_all",
+        "remove_file",
         "rename",
         "rfind",
         "shade",
@@ -14364,16 +14444,21 @@
         "starts_with",
         "sync_all",
         "temp_dir",
+        "test_13gram_boundary_and_normalization_semantics",
+        "test_bidirectional_path_containment_rejected",
         "test_cross_split_zero_leakage_and_isolation",
         "test_dataset_split_deterministic",
+        "test_empty_dataset_rejected",
         "test_end_to_end_split_contaminate_decontaminate_verify_clean",
         "test_leakage_detection_and_decontamination",
         "test_nan_split_ratio_rejected",
         "test_near_duplicate_decontaminated",
         "test_near_duplicate_overlap_detected",
         "test_no_trailing_newline_counted",
+        "test_repeated_split_idempotent_and_different_ratio",
         "test_same_target_different_prompt_detected",
         "test_source_equals_output_rejected",
+        "test_stale_artifact_recovery_and_audit_manifest",
         "test_tara_schema_fields_detected",
         "to_lowercase",
         "to_path_buf",
@@ -14388,153 +14473,158 @@
         "unwrap_or_default",
         "unwrap_or_else",
         "update",
-        "vec",
-        "write"
+        "vec"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "10bab0e926d28c8ac61606b74d9eaa536d8a63715b08aefd428f7101277a84fa",
+      "dynamic_sha256": "c02147e08281c1997c0161fccf640486555865a4e4fc716dace058bcb37cfb9e",
       "exports": [
         {
           "kind": "Struct",
-          "line_number": 208,
+          "line_number": 212,
           "name": "CanonicalSample",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 468,
+          "line_number": 472,
           "name": "DatasetSplitter",
           "visibility": "Public"
         },
         {
           "kind": "Const",
-          "line_number": 29,
+          "line_number": 33,
           "name": "LEAKAGE_OVERLAP_THRESHOLD",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 752,
+          "line_number": 829,
           "name": "LeakageChecker",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 287,
+          "line_number": 291,
           "name": "LeakageIndex",
           "visibility": "Public"
         },
         {
           "kind": "Enum",
-          "line_number": 274,
+          "line_number": 278,
           "name": "LeakageKind",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 102,
+          "line_number": 106,
           "name": "LeakageReport",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 51,
+          "line_number": 55,
           "name": "SplitRatio",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 88,
+          "line_number": 92,
           "name": "SplitReport",
           "visibility": "Public"
         },
         {
           "kind": "Enum",
-          "line_number": 32,
+          "line_number": 36,
           "name": "SplitterError",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 763,
+          "line_number": 840,
           "name": "check_leakage",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 171,
+          "line_number": 175,
           "name": "clean_substantive_prefix",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 188,
+          "line_number": 192,
           "name": "compute_13gram_hashes",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 908,
+          "line_number": 985,
           "name": "compute_file_sha256",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 839,
+          "line_number": 916,
           "name": "decontaminate",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 222,
+          "line_number": 226,
           "name": "extract_canonical_sample",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 128,
+          "line_number": 132,
           "name": "extract_prompt_field",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 150,
+          "line_number": 154,
           "name": "extract_target_field",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 343,
+          "line_number": 347,
           "name": "find_leakage",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 113,
+          "line_number": 117,
           "name": "fnv1a_hash",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 68,
+          "line_number": 72,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 297,
+          "line_number": 301,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 123,
+          "line_number": 127,
           "name": "normalize_text",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 475,
+          "line_number": 477,
+          "name": "recover_or_purge_stale_artifacts",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 516,
           "name": "split",
           "visibility": "Public"
         }
@@ -14546,7 +14636,7 @@
             "Serialize"
           ],
           "is_public_reexport": false,
-          "line_number": 19,
+          "line_number": 23,
           "raw_path": "serde::{Deserialize, Serialize}"
         },
         {
@@ -14554,7 +14644,7 @@
             "Value"
           ],
           "is_public_reexport": false,
-          "line_number": 20,
+          "line_number": 24,
           "raw_path": "serde_json::Value"
         },
         {
@@ -14563,7 +14653,7 @@
             "Sha256"
           ],
           "is_public_reexport": false,
-          "line_number": 909,
+          "line_number": 986,
           "raw_path": "sha2::{Digest, Sha256}"
         },
         {
@@ -14572,7 +14662,7 @@
             "HashSet"
           ],
           "is_public_reexport": false,
-          "line_number": 21,
+          "line_number": 25,
           "raw_path": "std::collections::{HashMap, HashSet}"
         },
         {
@@ -14581,7 +14671,7 @@
             "File"
           ],
           "is_public_reexport": false,
-          "line_number": 22,
+          "line_number": 26,
           "raw_path": "std::fs::{self, File}"
         },
         {
@@ -14589,7 +14679,7 @@
             "Read"
           ],
           "is_public_reexport": false,
-          "line_number": 910,
+          "line_number": 987,
           "raw_path": "std::io::Read"
         },
         {
@@ -14597,7 +14687,7 @@
             "Write"
           ],
           "is_public_reexport": false,
-          "line_number": 929,
+          "line_number": 1006,
           "raw_path": "std::io::Write"
         },
         {
@@ -14608,7 +14698,7 @@
             "Write"
           ],
           "is_public_reexport": false,
-          "line_number": 23,
+          "line_number": 27,
           "raw_path": "std::io::{BufRead, BufReader, BufWriter, Write}"
         },
         {
@@ -14617,7 +14707,7 @@
             "PathBuf"
           ],
           "is_public_reexport": false,
-          "line_number": 24,
+          "line_number": 28,
           "raw_path": "std::path::{Path, PathBuf}"
         },
         {
@@ -14626,13 +14716,13 @@
             "UNIX_EPOCH"
           ],
           "is_public_reexport": false,
-          "line_number": 25,
+          "line_number": 29,
           "raw_path": "std::time::{SystemTime, UNIX_EPOCH}"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 928,
+          "line_number": 1005,
           "raw_path": "super::*"
         },
         {
@@ -14640,7 +14730,7 @@
             "Error"
           ],
           "is_public_reexport": false,
-          "line_number": 26,
+          "line_number": 30,
           "raw_path": "thiserror::Error"
         }
       ],
@@ -14651,121 +14741,151 @@
       "internal_symbols": [
         {
           "kind": "Struct",
-          "line_number": 433,
+          "line_number": 437,
           "name": "DisjointSet",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 58,
+          "line_number": 62,
           "name": "default",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 444,
+          "line_number": 448,
           "name": "find",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 931,
+          "line_number": 1008,
           "name": "make_test_dir",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 438,
+          "line_number": 442,
           "name": "new",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1241,
+          "line_number": 1318,
           "name": "read_canonical_samples_from_file",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1024,
+          "line_number": 1519,
+          "name": "test_13gram_boundary_and_normalization_semantics",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1444,
+          "name": "test_bidirectional_path_containment_rejected",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1101,
           "name": "test_cross_split_zero_leakage_and_isolation",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 942,
+          "line_number": 1019,
           "name": "test_dataset_split_deterministic",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1278,
+          "line_number": 1425,
+          "name": "test_empty_dataset_rejected",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1355,
           "name": "test_end_to_end_split_contaminate_decontaminate_verify_clean",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 969,
+          "line_number": 1046,
           "name": "test_leakage_detection_and_decontamination",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1257,
+          "line_number": 1334,
           "name": "test_nan_split_ratio_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1120,
+          "line_number": 1197,
           "name": "test_near_duplicate_decontaminated",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1086,
+          "line_number": 1163,
           "name": "test_near_duplicate_overlap_detected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1225,
+          "line_number": 1302,
           "name": "test_no_trailing_newline_counted",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1193,
+          "line_number": 1557,
+          "name": "test_repeated_split_idempotent_and_different_ratio",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1270,
           "name": "test_same_target_different_prompt_detected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1269,
+          "line_number": 1346,
           "name": "test_source_equals_output_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1162,
+          "line_number": 1478,
+          "name": "test_stale_artifact_recovery_and_audit_manifest",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1239,
           "name": "test_tara_schema_fields_detected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 455,
+          "line_number": 459,
           "name": "union",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1346,
+      "lines": 1585,
       "module_path": "tara_engine::dataset::splitter",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 927,
+          "line_number": 1004,
           "name": "tests"
         }
       ],
@@ -49904,5 +50024,5 @@
   "schema_version": "1.0.0",
   "total_files": 240,
   "total_modules": 583,
-  "total_symbols": 2213
+  "total_symbols": 2217
 }

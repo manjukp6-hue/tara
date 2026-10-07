@@ -2,19 +2,23 @@
 //!
 //! Provides:
 //! - Deterministic train / val / test partitioning using 64-bit content hashes.
-//! - Conservative cluster isolation via Disjoint Set Union (DSU) to group exact and
-//!   near-duplicate records into the same partition, preventing cross-split leakage.
+//! - Conservative cluster isolation via Disjoint Set Union (DSU transitive clustering /
+//!   similarity graph connected components) to group exact and near-duplicate records into
+//!   the same partition, preventing cross-split leakage.
 //!   Note: Cluster isolation guarantees zero cross-partition leakage; high-density
-//!   near-duplicate clusters may cause slight deviation from exact target proportions.
+//!   near-duplicate connected components may cause slight deviation from exact target proportions.
 //! - Shared bidirectional contamination and leakage engine (`LeakageIndex`) powering both
 //!   `check_leakage` and `decontaminate` with identical two-stage matching:
 //!   1. Exact raw line equality (hash bucket + string comparison).
 //!   2. Exact canonical prompt / target / combined sample equality.
-//!   3. 13-gram shingle near-duplicate overlap (>= 85% bidirectional threshold).
+//!   3. 13-gram character shingle near-duplicate overlap (>= 85% bidirectional threshold)
+//!      computed over normalized lowercase whitespace-collapsed text.
+//! - Streaming file input/output with bounded per-record buffering (128 KB I/O buffers);
+//!   in-memory `LeakageIndex` and DSU cluster tables scale proportionally with the indexed reference corpus.
 //! - Support for full TARA dataset schemas (`formatted_input`, `input`, `prompt`, `instruction`,
 //!   `trigger_pattern`, `metadata.input`, `formatted_target`, `output`, `completion`, `response`,
 //!   `recommendation`, `metadata.output`).
-//! - Crash-safe atomic directory/file promotion with manifest commit markers.
+//! - Crash-safe atomic directory/file promotion with startup recovery and audit-grade manifest commit markers.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -426,10 +430,10 @@ impl LeakageIndex {
     }
 }
 
-/// Disjoint Set Union (DSU) for transitive cluster isolation.
+/// Disjoint Set Union (DSU) for transitive cluster isolation (similarity graph connected components).
 ///
-/// Transitive closure groups connected equivalence components so that any sample
-/// similar to another is quarantined into the same partition.
+/// Transitive closure groups connected components in the pairwise similarity graph so that any sample
+/// connected by exact or >=85% 13-gram shingle similarity is quarantined into the same partition.
 struct DisjointSet {
     parent: Vec<usize>,
 }
@@ -468,9 +472,46 @@ impl DisjointSet {
 pub struct DatasetSplitter;
 
 impl DatasetSplitter {
+    /// Scans an output directory for incomplete split artifacts (`.tmp_*` files or un-manifested
+    /// `train.jsonl` / `val.jsonl` / `test.jsonl` left behind by an interrupted split) and purges them.
+    pub fn recover_or_purge_stale_artifacts<P: AsRef<Path>>(
+        output_dir: P,
+    ) -> Result<usize, SplitterError> {
+        let out_dir = output_dir.as_ref();
+        if !out_dir.exists() {
+            return Ok(0);
+        }
+
+        let mut purged = 0usize;
+        for entry in fs::read_dir(out_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
+                if fname.starts_with(".tmp_") && path.is_file() {
+                    fs::remove_file(&path)?;
+                    purged += 1;
+                }
+            }
+        }
+
+        // If split_manifest.json is absent, any partial train/val/test.jsonl files are uncommitted and stale
+        let manifest_path = out_dir.join("split_manifest.json");
+        if !manifest_path.exists() {
+            for split_file in ["train.jsonl", "val.jsonl", "test.jsonl"] {
+                let p = out_dir.join(split_file);
+                if p.exists() {
+                    fs::remove_file(&p)?;
+                    purged += 1;
+                }
+            }
+        }
+
+        Ok(purged)
+    }
+
     /// Deterministically split a JSONL dataset file or directory into train, val, and test partitions.
     ///
-    /// The split assignment uses content hashing and cluster isolation so identical
+    /// The split assignment uses content hashing and DSU transitive cluster isolation so identical
     /// or near-duplicate prompts/targets are grouped into the same partition, eliminating cross-split leakage.
     pub fn split<P: AsRef<Path>, Q: AsRef<Path>>(
         source_jsonl: P,
@@ -480,23 +521,32 @@ impl DatasetSplitter {
         let src_path = source_jsonl.as_ref();
         let out_dir = output_dir.as_ref();
 
-        // Safety constraint: Prevent source_dir == output_dir or output_dir being inside source_dir
-        if let (Ok(s_canon), Ok(o_canon)) = (src_path.canonicalize(), out_dir.canonicalize()) {
-            if s_canon == o_canon || o_canon.starts_with(&s_canon) {
-                return Err(SplitterError::SourceEqualsOutput(format!(
-                    "Source path '{}' overlaps with output directory '{}'",
-                    src_path.display(),
-                    out_dir.display()
-                )));
-            }
-        } else if src_path == out_dir {
+        if src_path == out_dir {
             return Err(SplitterError::SourceEqualsOutput(format!(
                 "Source path '{}' matches output directory",
                 src_path.display()
             )));
         }
 
+        let out_existed = out_dir.exists();
         fs::create_dir_all(out_dir)?;
+
+        // Bidirectional safety constraint: reject if output == source, output inside source, or source inside output
+        if let (Ok(s_canon), Ok(o_canon)) = (src_path.canonicalize(), out_dir.canonicalize()) {
+            if s_canon == o_canon || o_canon.starts_with(&s_canon) || s_canon.starts_with(&o_canon) {
+                if !out_existed {
+                    let _ = fs::remove_dir(out_dir);
+                }
+                return Err(SplitterError::SourceEqualsOutput(format!(
+                    "Source path '{}' overlaps with or contains/is contained by output directory '{}'",
+                    src_path.display(),
+                    out_dir.display()
+                )));
+            }
+        }
+
+        // Purge any stale .tmp_* or uncommitted split artifacts before starting
+        Self::recover_or_purge_stale_artifacts(out_dir)?;
 
         let mut files_to_read: Vec<PathBuf> = Vec::new();
         if src_path.is_dir() {
@@ -714,26 +764,53 @@ impl DatasetSplitter {
         drop(val_w);
         drop(test_w);
 
+        let manifest_file = out_dir.join("split_manifest.json");
+        // Remove any prior manifest before replacing split files so the output directory is marked in-flight
+        if manifest_file.exists() {
+            let _ = fs::remove_file(&manifest_file);
+        }
+
         // Atomic file promotion
         fs::rename(&tmp_train_path, &train_path)?;
         fs::rename(&tmp_val_path, &val_path)?;
         fs::rename(&tmp_test_path, &test_path)?;
 
-        // Write atomic commit manifest marker
-        let manifest_file = out_dir.join("split_manifest.json");
+        let train_sha256 = compute_file_sha256(&train_path).unwrap_or_default();
+        let val_sha256 = compute_file_sha256(&val_path).unwrap_or_default();
+        let test_sha256 = compute_file_sha256(&test_path).unwrap_or_default();
+
+        // Write atomic commit manifest marker with full audit provenance
         let tmp_manifest_file = out_dir.join(format!(".tmp_manifest_{now_stamp}.json"));
         let manifest_content = serde_json::json!({
             "timestamp_ms": now_stamp,
+            "splitter_version": env!("CARGO_PKG_VERSION"),
+            "split_algorithm_version": "fnv1a_dsu_13gram_v2",
+            "train_ratio": ratio.train,
+            "val_ratio": ratio.val,
+            "test_ratio": ratio.test,
             "total_samples": total,
+            "train_records": train_cnt,
+            "val_records": val_cnt,
+            "test_records": test_cnt,
             "train_samples": train_cnt,
             "val_samples": val_cnt,
             "test_samples": test_cnt,
             "train_file": "train.jsonl",
             "val_file": "val.jsonl",
             "test_file": "test.jsonl",
-            "overlap_threshold": LEAKAGE_OVERLAP_THRESHOLD
+            "train_sha256": train_sha256,
+            "val_sha256": val_sha256,
+            "test_sha256": test_sha256,
+            "leakage_threshold": LEAKAGE_OVERLAP_THRESHOLD,
+            "overlap_threshold": LEAKAGE_OVERLAP_THRESHOLD,
+            "leakage_status": "CLEAN"
         });
-        fs::write(&tmp_manifest_file, serde_json::to_string_pretty(&manifest_content)?)?;
+        {
+            let mut mf = File::create(&tmp_manifest_file)?;
+            mf.write_all(serde_json::to_string_pretty(&manifest_content)?.as_bytes())?;
+            mf.flush()?;
+            mf.sync_all()?;
+        }
         fs::rename(&tmp_manifest_file, &manifest_file)?;
 
         Ok(SplitReport {
@@ -1340,6 +1417,168 @@ mod tests {
         assert_eq!(post_clean_check.total_leaked_samples, 0);
         assert_eq!(post_clean_check.exact_match_leaks, 0);
         assert_eq!(post_clean_check.ngram_shingle_leaks, 0);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_empty_dataset_rejected() {
+        let dir = make_test_dir();
+        let empty_src_dir = dir.join("empty_src");
+        fs::create_dir_all(&empty_src_dir).unwrap();
+        let out_dir = dir.join("out");
+        let ratio = SplitRatio::new(0.80, 0.10, 0.10).unwrap();
+
+        let res = DatasetSplitter::split(&empty_src_dir, &out_dir, ratio);
+        assert!(matches!(res, Err(SplitterError::EmptyDataset(_))));
+
+        let empty_file = empty_src_dir.join("empty.jsonl");
+        File::create(&empty_file).unwrap();
+        let res2 = DatasetSplitter::split(&empty_file, &out_dir, ratio);
+        assert!(matches!(res2, Err(SplitterError::EmptyDataset(_))));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_bidirectional_path_containment_rejected() {
+        let dir = make_test_dir();
+        let parent_dir = dir.join("datasets");
+        let child_dir = parent_dir.join("canonical_v1");
+        fs::create_dir_all(&child_dir).unwrap();
+
+        let src_file = child_dir.join("data.jsonl");
+        writeln!(File::create(&src_file).unwrap(), r#"{{"input":"a","output":"b"}}"#).unwrap();
+
+        let ratio = SplitRatio::new(0.80, 0.10, 0.10).unwrap();
+
+        // 1. output inside source directory -> REJECT
+        let out_inside_src = child_dir.join("sub_splits");
+        assert!(matches!(
+            DatasetSplitter::split(&child_dir, &out_inside_src, ratio),
+            Err(SplitterError::SourceEqualsOutput(_))
+        ));
+
+        // 2. source directory inside output directory -> REJECT
+        assert!(matches!(
+            DatasetSplitter::split(&child_dir, &parent_dir, ratio),
+            Err(SplitterError::SourceEqualsOutput(_))
+        ));
+
+        // 3. source file inside output directory -> REJECT
+        assert!(matches!(
+            DatasetSplitter::split(&src_file, &child_dir, ratio),
+            Err(SplitterError::SourceEqualsOutput(_))
+        ));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_stale_artifact_recovery_and_audit_manifest() {
+        let dir = make_test_dir();
+        let src_file = dir.join("source.jsonl");
+        {
+            let mut f = File::create(&src_file).unwrap();
+            for i in 0..30 {
+                writeln!(f, r#"{{"input":"item_{i}","output":"ans_{i}"}}"#).unwrap();
+            }
+        }
+
+        let out_dir = dir.join("splits");
+        fs::create_dir_all(&out_dir).unwrap();
+
+        // Plant stale .tmp_* file and uncommitted train.jsonl (no split_manifest.json)
+        let stale_tmp = out_dir.join(".tmp_train_99999.jsonl");
+        let stale_train = out_dir.join("train.jsonl");
+        writeln!(File::create(&stale_tmp).unwrap(), "corrupt tmp").unwrap();
+        writeln!(File::create(&stale_train).unwrap(), "uncommitted train").unwrap();
+
+        let purged = DatasetSplitter::recover_or_purge_stale_artifacts(&out_dir).unwrap();
+        assert_eq!(purged, 2);
+        assert!(!stale_tmp.exists());
+        assert!(!stale_train.exists());
+
+        // Now run full split and verify audit manifest fields
+        let ratio = SplitRatio::new(0.80, 0.10, 0.10).unwrap();
+        let report = DatasetSplitter::split(&src_file, &out_dir, ratio).unwrap();
+        let manifest_str = fs::read_to_string(report.manifest_path.unwrap()).unwrap();
+        let manifest: Value = serde_json::from_str(&manifest_str).unwrap();
+
+        assert_eq!(manifest["split_algorithm_version"], "fnv1a_dsu_13gram_v2");
+        assert_eq!(manifest["leakage_status"], "CLEAN");
+        assert_eq!(manifest["total_samples"], 30);
+        assert!(!manifest["train_sha256"].as_str().unwrap().is_empty());
+        assert!(!manifest["val_sha256"].as_str().unwrap().is_empty());
+        assert!(!manifest["test_sha256"].as_str().unwrap().is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_13gram_boundary_and_normalization_semantics() {
+        let dir = make_test_dir();
+        let train_file = dir.join("train.jsonl");
+        let eval_below_threshold = dir.join("eval_below.jsonl");
+        let eval_case_ws = dir.join("eval_case_ws.jsonl");
+
+        writeln!(
+            File::create(&train_file).unwrap(),
+            r#"{{"input":"alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima","output":"ans1"}}"#
+        )
+        .unwrap();
+
+        // Completely different second half (< 85% 13-char shingle overlap) -> NO LEAK
+        writeln!(
+            File::create(&eval_below_threshold).unwrap(),
+            r#"{{"input":"alpha bravo charlie delta echo zulu yankee xray whiskey victor uniform","output":"ans2"}}"#
+        )
+        .unwrap();
+
+        let rep_below = LeakageChecker::check_leakage(&train_file, &eval_below_threshold).unwrap();
+        assert!(rep_below.is_clean);
+        assert_eq!(rep_below.total_leaked_samples, 0);
+
+        // Case and whitespace variation -> normalized to exact match -> LEAK
+        writeln!(
+            File::create(&eval_case_ws).unwrap(),
+            r#"{{"input":"  ALPHA   BRAVO charlie   DELTA echo FOXTROT golf HOTEL india JULIET kilo LIMA  ","output":"ans2"}}"#
+        )
+        .unwrap();
+
+        let rep_case_ws = LeakageChecker::check_leakage(&train_file, &eval_case_ws).unwrap();
+        assert!(!rep_case_ws.is_clean);
+        assert_eq!(rep_case_ws.total_leaked_samples, 1);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_repeated_split_idempotent_and_different_ratio() {
+        let dir = make_test_dir();
+        let src_file = dir.join("source.jsonl");
+        {
+            let mut f = File::create(&src_file).unwrap();
+            for i in 0..100 {
+                writeln!(f, r#"{{"input":"unique_q_{i}","output":"unique_a_{i}"}}"#).unwrap();
+            }
+        }
+
+        let out_dir = dir.join("splits");
+        let r1 = SplitRatio::new(0.80, 0.10, 0.10).unwrap();
+        let rep1 = DatasetSplitter::split(&src_file, &out_dir, r1).unwrap();
+        let rep2 = DatasetSplitter::split(&src_file, &out_dir, r1).unwrap();
+
+        // Repeated split with same ratio is 100% deterministic and idempotent
+        assert_eq!(rep1.train_samples, rep2.train_samples);
+        assert_eq!(rep1.val_samples, rep2.val_samples);
+        assert_eq!(rep1.test_samples, rep2.test_samples);
+
+        // Split with different ratio overwrites cleanly and shifts partition distribution
+        let r2 = SplitRatio::new(0.50, 0.25, 0.25).unwrap();
+        let rep3 = DatasetSplitter::split(&src_file, &out_dir, r2).unwrap();
+        assert_eq!(rep3.total_samples, 100);
+        assert!(rep3.train_samples < rep1.train_samples);
 
         let _ = fs::remove_dir_all(&dir);
     }

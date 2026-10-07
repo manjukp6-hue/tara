@@ -13721,9 +13721,14 @@
         "as_mut_ptr",
         "as_ptr",
         "bind",
+        "borrow",
+        "borrow_mut",
+        "build_harness_driver",
+        "clear",
         "clone",
         "contains",
         "context",
+        "copied",
         "copy_dtod",
         "copy_dtod_bytes",
         "create_context",
@@ -13760,6 +13765,7 @@
         "is_null",
         "is_ok",
         "join",
+        "last",
         "launch",
         "len",
         "load",
@@ -13769,6 +13775,17 @@
         "macro_rules",
         "map",
         "map_err",
+        "mock_cu_ctx_create",
+        "mock_cu_ctx_synchronize",
+        "mock_cu_device_get_attr",
+        "mock_cu_device_get_name",
+        "mock_cu_launch_kernel",
+        "mock_cu_mem_get_info",
+        "mock_cu_memcpy_dtod",
+        "mock_cu_memcpy_dtoh",
+        "mock_cu_memcpy_htod",
+        "mock_cu_module_get_function",
+        "mock_cu_module_load_data",
         "new",
         "noop_kernel",
         "null",
@@ -13777,7 +13794,9 @@
         "ok_or_else",
         "or_else",
         "path",
+        "pop",
         "ptr_eq",
+        "push",
         "raw_context",
         "read_dir",
         "split",
@@ -13786,11 +13805,15 @@
         "test_context_creation_leaves_no_implicit_current_context",
         "test_context_push_pop_stack_restoration",
         "test_cross_thread_buffer_drop",
+        "test_deterministic_context_lifecycle_and_pop_error_propagation_harness",
         "test_driver_singleton_cached",
         "test_error_string_fallback",
         "test_module_kernel_survives_session_scope",
         "test_multithreaded_context_sequential_usage",
         "test_overflow_and_zero_size_handling",
+        "test_session_created_on_thread_a_dropped_on_thread_b",
+        "test_two_sessions_two_contexts_on_single_thread",
+        "thread_local",
         "to_str",
         "to_string",
         "to_string_lossy",
@@ -13800,32 +13823,33 @@
         "upload_u32",
         "var",
         "vec",
+        "with",
         "with_context"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "47174bd896c0c14b1cffe5d9ef9da717dcbaeecbdc0d3220da091171eb1ab529",
+      "dynamic_sha256": "d5f1ac8d7a7b0ef24106f6555d1864db31432c8771e050ac6164559fe455f77f",
       "exports": [
         {
           "kind": "Struct",
-          "line_number": 989,
+          "line_number": 1016,
           "name": "CudaBuffer",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 547,
+          "line_number": 554,
           "name": "CudaContextGuard",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 594,
+          "line_number": 608,
           "name": "CudaContextInner",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 646,
+          "line_number": 664,
           "name": "CudaDeviceInfo",
           "visibility": "Public"
         },
@@ -13849,49 +13873,49 @@
         },
         {
           "kind": "Struct",
-          "line_number": 1072,
+          "line_number": 1099,
           "name": "CudaKernel",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 1042,
+          "line_number": 1069,
           "name": "CudaModuleHandle",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 1021,
+          "line_number": 1048,
           "name": "CudaModuleInner",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 654,
+          "line_number": 672,
           "name": "CudaSession",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 700,
+          "line_number": 727,
           "name": "allocate_f32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 684,
+          "line_number": 702,
           "name": "context",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 880,
+          "line_number": 907,
           "name": "copy_dtod",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 891,
+          "line_number": 918,
           "name": "copy_dtod_bytes",
           "visibility": "Public"
         },
@@ -13909,7 +13933,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 676,
+          "line_number": 694,
           "name": "device",
           "visibility": "Public"
         },
@@ -13921,25 +13945,25 @@
         },
         {
           "kind": "Function",
-          "line_number": 822,
+          "line_number": 849,
           "name": "download_f32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 843,
+          "line_number": 870,
           "name": "download_f32_slice",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 801,
+          "line_number": 828,
           "name": "download_u32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 680,
+          "line_number": 698,
           "name": "driver",
           "visibility": "Public"
         },
@@ -13947,12 +13971,6 @@
           "kind": "Function",
           "line_number": 449,
           "name": "driver_version",
-          "visibility": "Public"
-        },
-        {
-          "kind": "Function",
-          "line_number": 564,
-          "name": "finish",
           "visibility": "Public"
         },
         {
@@ -13969,19 +13987,19 @@
         },
         {
           "kind": "Function",
-          "line_number": 1050,
+          "line_number": 1077,
           "name": "get_kernel",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 688,
+          "line_number": 715,
           "name": "get_memory_info",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 661,
+          "line_number": 679,
           "name": "init",
           "visibility": "Public"
         },
@@ -13993,42 +14011,62 @@
         },
         {
           "kind": "Function",
-          "line_number": 914,
+          "line_number": 941,
           "name": "load_ptx_module",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 630,
+          "line_number": 648,
           "name": "raw_context",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 869,
+          "line_number": 896,
           "name": "synchronize",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 737,
+          "line_number": 764,
           "name": "upload_f32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 758,
+          "line_number": 785,
           "name": "upload_f32_slice",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 780,
+          "line_number": 807,
           "name": "upload_u32",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 625,
+          "name": "with_context",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 708,
+          "name": "with_context",
           "visibility": "Public"
         }
       ],
       "imports": [
+        {
+          "imported_symbols": [
+            "RefCell"
+          ],
+          "is_public_reexport": false,
+          "line_number": 1383,
+          "raw_path": "std::cell::RefCell"
+        },
         {
           "imported_symbols": [
             "c_char",
@@ -14051,6 +14089,17 @@
         },
         {
           "imported_symbols": [
+            "AtomicI32",
+            "AtomicU64",
+            "AtomicUsize",
+            "Ordering"
+          ],
+          "is_public_reexport": false,
+          "line_number": 1384,
+          "raw_path": "std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering}"
+        },
+        {
+          "imported_symbols": [
             "Arc",
             "Mutex",
             "OnceLock"
@@ -14062,7 +14111,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 1119,
+          "line_number": 1146,
           "raw_path": "super::*"
         },
         {
@@ -14083,32 +14132,44 @@
       "internal_symbols": [
         {
           "kind": "Const",
-          "line_number": 922,
+          "line_number": 949,
           "name": "CU_JIT_ERROR_LOG_BUFFER",
           "visibility": "Private"
         },
         {
           "kind": "Const",
-          "line_number": 923,
+          "line_number": 950,
           "name": "CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES",
           "visibility": "Private"
         },
         {
           "kind": "Const",
-          "line_number": 920,
+          "line_number": 947,
           "name": "CU_JIT_INFO_LOG_BUFFER",
           "visibility": "Private"
         },
         {
           "kind": "Const",
-          "line_number": 921,
+          "line_number": 948,
           "name": "CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Static",
+          "line_number": 1392,
+          "name": "DESTROYED_CTXS",
           "visibility": "Private"
         },
         {
           "kind": "Static",
           "line_number": 426,
           "name": "DRIVER_SINGLETON",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Static",
+          "line_number": 1393,
+          "name": "FREED_BUFFERS",
           "visibility": "Private"
         },
         {
@@ -14124,6 +14185,12 @@
           "visibility": "Private"
         },
         {
+          "kind": "Static",
+          "line_number": 1395,
+          "name": "INJECT_POP_ERROR_CODE",
+          "visibility": "Private"
+        },
+        {
           "kind": "Struct",
           "line_number": 88,
           "name": "LibraryGuard",
@@ -14136,15 +14203,45 @@
           "visibility": "Private"
         },
         {
+          "kind": "Static",
+          "line_number": 1387,
+          "name": "MOCK_CTX_STACK",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Static",
+          "line_number": 1390,
+          "name": "NEXT_MOCK_CTX_ID",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Static",
+          "line_number": 1391,
+          "name": "NEXT_MOCK_DPTR",
+          "visibility": "Private"
+        },
+        {
           "kind": "Const",
           "line_number": 77,
           "name": "RTLD_LAZY",
           "visibility": "Private"
         },
         {
+          "kind": "Static",
+          "line_number": 1394,
+          "name": "UNLOADED_MODULES",
+          "visibility": "Private"
+        },
+        {
           "kind": "Function",
-          "line_number": 605,
+          "line_number": 619,
           "name": "bind",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1603,
+          "name": "build_harness_driver",
           "visibility": "Private"
         },
         {
@@ -14197,31 +14294,37 @@
         },
         {
           "kind": "Function",
-          "line_number": 585,
+          "line_number": 599,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 636,
+          "line_number": 654,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1010,
+          "line_number": 1037,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1030,
+          "line_number": 1057,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 997,
+          "line_number": 578,
+          "name": "finish",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1024,
           "name": "fmt",
           "visibility": "Private"
         },
@@ -14233,67 +14336,79 @@
         },
         {
           "kind": "Function",
-          "line_number": 1155,
+          "line_number": 1182,
           "name": "test_context_creation_leaves_no_implicit_current_context",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1172,
+          "line_number": 1199,
           "name": "test_context_push_pop_stack_restoration",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1234,
+          "line_number": 1261,
           "name": "test_cross_thread_buffer_drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1140,
+          "line_number": 1638,
+          "name": "test_deterministic_context_lifecycle_and_pop_error_propagation_harness",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1167,
           "name": "test_driver_singleton_cached",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1122,
+          "line_number": 1149,
           "name": "test_error_string_fallback",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1260,
+          "line_number": 1287,
           "name": "test_module_kernel_survives_session_scope",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1206,
+          "line_number": 1233,
           "name": "test_multithreaded_context_sequential_usage",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1131,
+          "line_number": 1158,
           "name": "test_overflow_and_zero_size_handling",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 611,
-          "name": "with_context",
+          "line_number": 1353,
+          "name": "test_session_created_on_thread_a_dropped_on_thread_b",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1316,
+          "name": "test_two_sessions_two_contexts_on_single_thread",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1287,
+      "lines": 1725,
       "module_path": "tara_engine::cuda::driver",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1118,
+          "line_number": 1145,
           "name": "tests"
         }
       ],

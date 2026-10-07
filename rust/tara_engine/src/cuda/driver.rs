@@ -534,6 +534,13 @@ impl CudaDriver {
                 ),
             ));
         }
+        if popped != ctx {
+            let _ = (self.inner.fn_ctx_destroy)(ctx);
+            return Err(CudaError::KernelError(format!(
+                "cuCtxPopCurrent popped unexpected context {:p} instead of newly created {:p}",
+                popped, ctx
+            )));
+        }
 
         Ok(Arc::new(CudaContextInner {
             ctx,
@@ -551,19 +558,26 @@ pub struct CudaContextGuard<'a> {
 
 impl<'a> CudaContextGuard<'a> {
     /// Pushes the specified context onto the current host thread.
-    /// Unsafe because passing an arbitrary or invalid raw context pointer violates CUDA runtime safety.
-    pub unsafe fn push(ctx: *mut c_void, driver: &'a CudaDriverInner) -> Result<Self, CudaError> {
+    /// Restricted to `pub(crate) unsafe` so external callers cannot pass arbitrary raw pointers.
+    pub(crate) unsafe fn push(
+        ctx: *mut c_void,
+        driver: &'a CudaDriverInner,
+    ) -> Result<Self, CudaError> {
         let res = (driver.fn_ctx_push_current)(ctx);
         if res != 0 {
             return Err(CudaError::ApiError(res, driver.get_error_string(res)));
         }
-        Ok(Self { driver, popped: false })
+        Ok(Self {
+            driver,
+            popped: false,
+        })
     }
 
-    /// Explicitly finishes the guard scope, popping the context and propagating any pop error.
-    pub fn finish(mut self) -> Result<(), CudaError> {
+    /// Explicitly finishes the guard scope, popping the context, returning the popped handle,
+    /// and propagating any asynchronous launch or context-stack error reported by `cuCtxPopCurrent`.
+    pub(crate) fn finish(mut self) -> Result<*mut c_void, CudaError> {
         if self.popped {
-            return Ok(());
+            return Ok(std::ptr::null_mut());
         }
         self.popped = true;
         let mut popped: *mut c_void = std::ptr::null_mut();
@@ -577,7 +591,7 @@ impl<'a> CudaContextGuard<'a> {
                 ),
             ));
         }
-        Ok(())
+        Ok(popped)
     }
 }
 
@@ -607,23 +621,27 @@ impl CudaContextInner {
     }
 
     /// Executes an operation with this context bound, serializing access via the context lock,
-    /// popping the context upon completion, and propagating any pop error.
-    pub(crate) fn with_context<T, F>(&self, f: F) -> Result<T, CudaError>
+    /// popping the context upon completion, verifying popped context identity, and propagating any pop error.
+    pub fn with_context<T, F>(&self, f: F) -> Result<T, CudaError>
     where
         F: FnOnce() -> Result<T, CudaError>,
     {
         let _lock = self.lock.lock().unwrap();
         let guard = self.bind()?;
         let res = f();
-        match res {
-            Ok(val) => {
-                guard.finish()?;
+        let pop_res = guard.finish();
+        match (res, pop_res) {
+            (Ok(val), Ok(popped)) => {
+                if popped != self.ctx {
+                    return Err(CudaError::KernelError(format!(
+                        "CUDA context stack imbalance: expected popped {:p}, got {:p}",
+                        self.ctx, popped
+                    )));
+                }
                 Ok(val)
             }
-            Err(e) => {
-                let _ = guard.finish();
-                Err(e)
-            }
+            (Ok(_), Err(pop_err)) => Err(pop_err),
+            (Err(op_err), _) => Err(op_err),
         }
     }
 
@@ -683,6 +701,15 @@ impl CudaSession {
 
     pub fn context(&self) -> &Arc<CudaContextInner> {
         &self.context
+    }
+
+    /// Executes `f` with this session's CUDA context bound on the calling thread and
+    /// propagates any `cuCtxPopCurrent` error on scope exit.
+    pub fn with_context<T, F>(&self, f: F) -> Result<T, CudaError>
+    where
+        F: FnOnce() -> Result<T, CudaError>,
+    {
+        self.context.with_context(f)
     }
 
     pub fn get_memory_info(&self) -> Result<(usize, usize), CudaError> {
@@ -1283,5 +1310,416 @@ mod tests {
             let res = kernel.launch((1, 1, 1), (1, 1, 1), 0, dummy_params, 0);
             assert!(res.is_ok());
         }
+    }
+
+    #[test]
+    fn test_two_sessions_two_contexts_on_single_thread() {
+        let session_a = match CudaSession::init(0) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let session_b = match CudaSession::init(0) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        assert_ne!(
+            session_a.context().raw_context(),
+            session_b.context().raw_context()
+        );
+
+        let buf_a = session_a.allocate_f32(4).unwrap();
+        let buf_b = session_b.allocate_f32(4).unwrap();
+
+        session_a.upload_f32(&buf_a, &[10.0, 20.0, 30.0, 40.0]).unwrap();
+        session_b.upload_f32(&buf_b, &[50.0, 60.0, 70.0, 80.0]).unwrap();
+
+        let mut out_a = [0.0f32; 4];
+        let mut out_b = [0.0f32; 4];
+        session_a.download_f32(&buf_a, &mut out_a).unwrap();
+        session_b.download_f32(&buf_b, &mut out_b).unwrap();
+        assert_eq!(out_a, [10.0, 20.0, 30.0, 40.0]);
+        assert_eq!(out_b, [50.0, 60.0, 70.0, 80.0]);
+
+        // Verify neither context remains implicitly bound on the calling thread
+        let cur = session_a.driver().current_context().unwrap();
+        assert!(
+            cur.is_null()
+                || (cur != session_a.context().raw_context()
+                    && cur != session_b.context().raw_context())
+        );
+    }
+
+    #[test]
+    fn test_session_created_on_thread_a_dropped_on_thread_b() {
+        let session_a = match CudaSession::init(0) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let raw_ctx_a = session_a.context().raw_context() as usize;
+        let driver = session_a.driver().clone();
+
+        // Thread A must NOT have session_a's context current after init
+        let cur_on_a_before = driver.current_context().unwrap() as usize;
+        assert_ne!(cur_on_a_before, raw_ctx_a);
+
+        // Move session_a to Thread B and drop it there (calling cuCtxDestroy on Thread B)
+        let handle = std::thread::spawn(move || {
+            let buf = session_a.allocate_f32(4).unwrap();
+            session_a.upload_f32(&buf, &[1.0, 2.0, 3.0, 4.0]).unwrap();
+            drop(buf);
+            drop(session_a);
+        });
+        handle.join().unwrap();
+
+        // Thread A's current context must remain unaffected (no dangling destroyed context on Thread A)
+        let cur_on_a_after = driver.current_context().unwrap() as usize;
+        assert_eq!(cur_on_a_after, cur_on_a_before);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Deterministic Thread-Local Context Stack & Pop-Error Injection Harness
+    // ─────────────────────────────────────────────────────────────────────────
+
+    use std::cell::RefCell;
+    use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering};
+
+    thread_local! {
+        static MOCK_CTX_STACK: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+    }
+
+    static NEXT_MOCK_CTX_ID: AtomicUsize = AtomicUsize::new(0x1000);
+    static NEXT_MOCK_DPTR: AtomicU64 = AtomicU64::new(0xA000_0000);
+    static DESTROYED_CTXS: AtomicUsize = AtomicUsize::new(0);
+    static FREED_BUFFERS: AtomicUsize = AtomicUsize::new(0);
+    static UNLOADED_MODULES: AtomicUsize = AtomicUsize::new(0);
+    static INJECT_POP_ERROR_CODE: AtomicI32 = AtomicI32::new(0);
+
+    extern "system" fn mock_cu_init(_flags: c_int) -> c_int {
+        0
+    }
+    extern "system" fn mock_cu_driver_get_version(ver: *mut c_int) -> c_int {
+        unsafe { *ver = 12040 };
+        0
+    }
+    extern "system" fn mock_cu_device_get_count(count: *mut c_int) -> c_int {
+        unsafe { *count = 1 };
+        0
+    }
+    extern "system" fn mock_cu_device_get(dev: *mut c_int, ordinal: c_int) -> c_int {
+        unsafe { *dev = ordinal };
+        0
+    }
+    extern "system" fn mock_cu_device_get_name(
+        name: *mut c_char,
+        _len: c_int,
+        _dev: c_int,
+    ) -> c_int {
+        let s = b"MockCUDA\0";
+        unsafe {
+            std::ptr::copy_nonoverlapping(s.as_ptr() as *const c_char, name, s.len());
+        }
+        0
+    }
+    extern "system" fn mock_cu_device_total_mem(bytes: *mut usize, _dev: c_int) -> c_int {
+        unsafe { *bytes = 1024 * 1024 * 1024 };
+        0
+    }
+    extern "system" fn mock_cu_device_get_attr(
+        pi: *mut c_int,
+        _attrib: c_int,
+        _dev: c_int,
+    ) -> c_int {
+        unsafe { *pi = 8 };
+        0
+    }
+    extern "system" fn mock_cu_ctx_create(
+        pctx: *mut *mut c_void,
+        _flags: c_int,
+        _dev: c_int,
+    ) -> c_int {
+        let id = NEXT_MOCK_CTX_ID.fetch_add(0x10, Ordering::SeqCst);
+        MOCK_CTX_STACK.with(|stack| stack.borrow_mut().push(id));
+        unsafe { *pctx = id as *mut c_void };
+        0
+    }
+    extern "system" fn mock_cu_ctx_destroy(ctx: *mut c_void) -> c_int {
+        if ctx.is_null() {
+            return 201;
+        }
+        DESTROYED_CTXS.fetch_add(1, Ordering::SeqCst);
+        0
+    }
+    extern "system" fn mock_cu_ctx_push_current(ctx: *mut c_void) -> c_int {
+        if ctx.is_null() {
+            return 201;
+        }
+        MOCK_CTX_STACK.with(|stack| stack.borrow_mut().push(ctx as usize));
+        0
+    }
+    extern "system" fn mock_cu_ctx_pop_current(pctx: *mut *mut c_void) -> c_int {
+        let injected = INJECT_POP_ERROR_CODE.load(Ordering::SeqCst);
+        let popped = MOCK_CTX_STACK
+            .with(|stack| stack.borrow_mut().pop())
+            .unwrap_or(0);
+        if !pctx.is_null() {
+            unsafe { *pctx = popped as *mut c_void };
+        }
+        if injected != 0 {
+            return injected;
+        }
+        if popped == 0 {
+            return 201;
+        }
+        0
+    }
+    extern "system" fn mock_cu_ctx_get_current(pctx: *mut *mut c_void) -> c_int {
+        let top = MOCK_CTX_STACK
+            .with(|stack| stack.borrow().last().copied())
+            .unwrap_or(0);
+        unsafe { *pctx = top as *mut c_void };
+        0
+    }
+    extern "system" fn mock_cu_ctx_synchronize() -> c_int {
+        let top = MOCK_CTX_STACK
+            .with(|stack| stack.borrow().last().copied())
+            .unwrap_or(0);
+        if top == 0 {
+            201
+        } else {
+            0
+        }
+    }
+    extern "system" fn mock_cu_mem_get_info(
+        free: *mut usize,
+        total: *mut usize,
+    ) -> c_int {
+        let top = MOCK_CTX_STACK
+            .with(|stack| stack.borrow().last().copied())
+            .unwrap_or(0);
+        if top == 0 {
+            return 201;
+        }
+        unsafe {
+            *free = 512 * 1024 * 1024;
+            *total = 1024 * 1024 * 1024;
+        }
+        0
+    }
+    extern "system" fn mock_cu_mem_alloc(dptr: *mut u64, _bytes: usize) -> c_int {
+        let top = MOCK_CTX_STACK
+            .with(|stack| stack.borrow().last().copied())
+            .unwrap_or(0);
+        if top == 0 {
+            return 201;
+        }
+        unsafe { *dptr = NEXT_MOCK_DPTR.fetch_add(0x1000, Ordering::SeqCst) };
+        0
+    }
+    extern "system" fn mock_cu_mem_free(_dptr: u64) -> c_int {
+        let top = MOCK_CTX_STACK
+            .with(|stack| stack.borrow().last().copied())
+            .unwrap_or(0);
+        if top == 0 {
+            return 201;
+        }
+        FREED_BUFFERS.fetch_add(1, Ordering::SeqCst);
+        0
+    }
+    extern "system" fn mock_cu_memcpy_htod(
+        _dst: u64,
+        _src: *const c_void,
+        _bytes: usize,
+    ) -> c_int {
+        0
+    }
+    extern "system" fn mock_cu_memcpy_dtoh(
+        _dst: *mut c_void,
+        _src: u64,
+        _bytes: usize,
+    ) -> c_int {
+        0
+    }
+    extern "system" fn mock_cu_memcpy_dtod(
+        _dst: u64,
+        _src: u64,
+        _bytes: usize,
+    ) -> c_int {
+        0
+    }
+    extern "system" fn mock_cu_module_load_data(
+        module: *mut *mut c_void,
+        _image: *const c_char,
+    ) -> c_int {
+        let top = MOCK_CTX_STACK
+            .with(|stack| stack.borrow().last().copied())
+            .unwrap_or(0);
+        if top == 0 {
+            return 201;
+        }
+        unsafe { *module = 0xBEEFusize as *mut c_void };
+        0
+    }
+    extern "system" fn mock_cu_module_get_function(
+        hfunc: *mut *mut c_void,
+        _hmod: *mut c_void,
+        _name: *const c_char,
+    ) -> c_int {
+        unsafe { *hfunc = 0xCAFEusize as *mut c_void };
+        0
+    }
+    extern "system" fn mock_cu_module_unload(_hmod: *mut c_void) -> c_int {
+        let top = MOCK_CTX_STACK
+            .with(|stack| stack.borrow().last().copied())
+            .unwrap_or(0);
+        if top == 0 {
+            return 201;
+        }
+        UNLOADED_MODULES.fetch_add(1, Ordering::SeqCst);
+        0
+    }
+    extern "system" fn mock_cu_launch_kernel(
+        _f: *mut c_void,
+        _gx: u32,
+        _gy: u32,
+        _gz: u32,
+        _bx: u32,
+        _by: u32,
+        _bz: u32,
+        _shared: u32,
+        _stream: *mut c_void,
+        _params: *mut *mut c_void,
+        _extra: *mut *mut c_void,
+    ) -> c_int {
+        let top = MOCK_CTX_STACK
+            .with(|stack| stack.borrow().last().copied())
+            .unwrap_or(0);
+        if top == 0 {
+            201
+        } else {
+            0
+        }
+    }
+
+    fn build_harness_driver() -> CudaDriver {
+        CudaDriver {
+            inner: Arc::new(CudaDriverInner {
+                lib_handle: std::ptr::null_mut(),
+                fn_init: mock_cu_init,
+                fn_driver_get_version: mock_cu_driver_get_version,
+                fn_device_get_count: mock_cu_device_get_count,
+                fn_device_get: mock_cu_device_get,
+                fn_device_get_name: mock_cu_device_get_name,
+                fn_device_total_mem: mock_cu_device_total_mem,
+                fn_device_get_attr: mock_cu_device_get_attr,
+                fn_ctx_create: mock_cu_ctx_create,
+                fn_ctx_destroy: mock_cu_ctx_destroy,
+                fn_ctx_push_current: mock_cu_ctx_push_current,
+                fn_ctx_pop_current: mock_cu_ctx_pop_current,
+                fn_ctx_get_current: mock_cu_ctx_get_current,
+                fn_ctx_synchronize: mock_cu_ctx_synchronize,
+                fn_mem_get_info: mock_cu_mem_get_info,
+                fn_mem_alloc: mock_cu_mem_alloc,
+                fn_mem_free: mock_cu_mem_free,
+                fn_memcpy_htod: mock_cu_memcpy_htod,
+                fn_memcpy_dtoh: mock_cu_memcpy_dtoh,
+                fn_memcpy_dtod: mock_cu_memcpy_dtod,
+                fn_module_load_data: mock_cu_module_load_data,
+                fn_module_load_data_ex: None,
+                fn_module_get_function: mock_cu_module_get_function,
+                fn_module_unload: mock_cu_module_unload,
+                fn_launch_kernel: mock_cu_launch_kernel,
+                fn_get_error_name: None,
+                fn_get_error_string: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn test_deterministic_context_lifecycle_and_pop_error_propagation_harness() {
+        MOCK_CTX_STACK.with(|s| s.borrow_mut().clear());
+        INJECT_POP_ERROR_CODE.store(0, Ordering::SeqCst);
+
+        let driver = build_harness_driver();
+        let dev = driver.get_device_info(0).unwrap();
+
+        // 1. Context created -> immediately detached (no implicit current context on creating thread)
+        let ctx_a = driver.create_context(&dev).unwrap();
+        let ctx_b = driver.create_context(&dev).unwrap();
+        assert!(driver.current_context().unwrap().is_null());
+
+        // 2. Current context A -> nested operation on B -> A restored -> null restored on exit
+        ctx_a
+            .with_context(|| {
+                assert_eq!(driver.current_context().unwrap(), ctx_a.raw_context());
+                ctx_b.with_context(|| {
+                    assert_eq!(driver.current_context().unwrap(), ctx_b.raw_context());
+                    Ok(())
+                })?;
+                assert_eq!(driver.current_context().unwrap(), ctx_a.raw_context());
+                Ok(())
+            })
+            .unwrap();
+        assert!(driver.current_context().unwrap().is_null());
+
+        // 3. Inject cuCtxPopCurrent error (700 = CUDA_ERROR_ILLEGAL_ADDRESS):
+        //    with_context MUST propagate the pop error instead of ignoring it!
+        INJECT_POP_ERROR_CODE.store(700, Ordering::SeqCst);
+        let pop_err_res = ctx_a.with_context(|| Ok(()));
+        assert!(
+            matches!(pop_err_res, Err(CudaError::ApiError(700, _))),
+            "with_context must propagate cuCtxPopCurrent failure"
+        );
+
+        // And create_context MUST destroy the newly created context and return Err if cuCtxPopCurrent fails!
+        let destroyed_before = DESTROYED_CTXS.load(Ordering::SeqCst);
+        let create_fail_res = driver.create_context(&dev);
+        assert!(matches!(create_fail_res, Err(CudaError::ApiError(700, _))));
+        assert_eq!(
+            DESTROYED_CTXS.load(Ordering::SeqCst),
+            destroyed_before + 1,
+            "Failed detachment during create_context must destroy the raw context"
+        );
+        INJECT_POP_ERROR_CODE.store(0, Ordering::SeqCst);
+
+        // 4. Cross-thread buffer drop & cross-thread session drop
+        let session = CudaSession {
+            driver: driver.clone(),
+            device: dev.clone(),
+            context: Arc::clone(&ctx_a),
+        };
+        let buf = session.allocate_f32(16).unwrap();
+        let freed_before = FREED_BUFFERS.load(Ordering::SeqCst);
+        let handle = std::thread::spawn(move || {
+            drop(buf);
+        });
+        handle.join().unwrap();
+        assert_eq!(
+            FREED_BUFFERS.load(Ordering::SeqCst),
+            freed_before + 1,
+            "Cross-thread CudaBuffer::drop must bind context and call cuMemFree"
+        );
+
+        // 5. Module and kernel survive session drop and unload cleanly on final kernel drop
+        let unloaded_before = UNLOADED_MODULES.load(Ordering::SeqCst);
+        let kernel = {
+            let temp_ctx = driver.create_context(&dev).unwrap();
+            let temp_session = CudaSession {
+                driver: driver.clone(),
+                device: dev,
+                context: temp_ctx,
+            };
+            let module = temp_session.load_ptx_module(".version 7.0\n").unwrap();
+            module.get_kernel("noop").unwrap()
+        };
+        unsafe {
+            let params: [*mut c_void; 16] = [std::ptr::null_mut(); 16];
+            assert!(kernel.launch((1, 1, 1), (1, 1, 1), 0, params, 0).is_ok());
+        }
+        drop(kernel);
+        assert_eq!(
+            UNLOADED_MODULES.load(Ordering::SeqCst),
+            unloaded_before + 1,
+            "Dropping last CudaKernel must unload module under bound context"
+        );
     }
 }

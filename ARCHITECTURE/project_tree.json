@@ -16534,8 +16534,8 @@
                       "name": "driver.rs",
                       "rel_path": "rust/tara_engine/src/cuda/driver.rs",
                       "entry_type": "file",
-                      "size_bytes": 44983,
-                      "sha256": "47174bd896c0c14b1cffe5d9ef9da717dcbaeecbdc0d3220da091171eb1ab529"
+                      "size_bytes": 61008,
+                      "sha256": "d5f1ac8d7a7b0ef24106f6555d1864db31432c8771e050ac6164559fe455f77f"
                     },
                     {
                       "name": "gpu_trainer.rs",

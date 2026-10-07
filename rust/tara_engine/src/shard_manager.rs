@@ -7,6 +7,7 @@
 //! - Direct tensor extraction with dtype conversion to `Vec<f32>`.
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -22,6 +23,23 @@ pub struct TensorMetadata {
     pub data_offsets: (usize, usize),
     pub shard_filename: String,
     pub data_bytes: usize,
+    pub sha256: [u8; 32],
+}
+
+fn dtype_element_bytes(dtype: &str) -> Result<usize, SafeTensorsError> {
+    if dtype.eq_ignore_ascii_case("F32") || dtype.eq_ignore_ascii_case("FLOAT32") {
+        Ok(4)
+    } else if dtype.eq_ignore_ascii_case("F16")
+        || dtype.eq_ignore_ascii_case("FLOAT16")
+        || dtype.eq_ignore_ascii_case("BF16")
+        || dtype.eq_ignore_ascii_case("BFLOAT16")
+    {
+        Ok(2)
+    } else if dtype.eq_ignore_ascii_case("I8") || dtype.eq_ignore_ascii_case("INT8") {
+        Ok(1)
+    } else {
+        Err(SafeTensorsError::UnsupportedDtype(dtype.to_string()))
+    }
 }
 
 pub struct ShardedSafeTensorsManager {
@@ -121,9 +139,26 @@ impl ShardedSafeTensorsManager {
         shard_path: &Path,
     ) -> Result<(), SafeTensorsError> {
         let mut file = File::open(shard_path)?;
+        let file_len = file.metadata()?.len() as usize;
+        if file_len < 8 {
+            return Err(SafeTensorsError::Truncated {
+                expected: 8,
+                got: file_len,
+            });
+        }
+
         let mut len_buf = [0u8; 8];
         file.read_exact(&mut len_buf)?;
         let header_len = u64::from_le_bytes(len_buf) as usize;
+        let data_start = 8usize.checked_add(header_len).ok_or_else(|| {
+            SafeTensorsError::InvalidHeader("SafeTensors header length overflow".into())
+        })?;
+        if data_start > file_len {
+            return Err(SafeTensorsError::Truncated {
+                expected: data_start,
+                got: file_len,
+            });
+        }
 
         let mut header_bytes = vec![0u8; header_len];
         file.read_exact(&mut header_bytes)?;
@@ -142,7 +177,9 @@ impl ShardedSafeTensorsManager {
                 .and_then(Value::as_str)
                 .unwrap_or("F32")
                 .to_string();
-            let shape = v
+            let elem_bytes = dtype_element_bytes(&dtype)?;
+
+            let shape: Vec<usize> = v
                 .get("shape")
                 .and_then(Value::as_array)
                 .map(|arr| {
@@ -153,26 +190,65 @@ impl ShardedSafeTensorsManager {
                 })
                 .unwrap_or_default();
 
-            let offsets = v
+            let offsets_arr = v
                 .get("data_offsets")
                 .and_then(Value::as_array)
-                .map(|arr| {
-                    let start = arr.first().and_then(Value::as_u64).unwrap_or(0) as usize;
-                    let end = arr.get(1).and_then(Value::as_u64).unwrap_or(0) as usize;
-                    (start, end)
-                })
-                .unwrap_or((0, 0));
+                .ok_or_else(|| SafeTensorsError::BadOffsets(k.clone()))?;
+            if offsets_arr.len() != 2 {
+                return Err(SafeTensorsError::BadOffsets(k.clone()));
+            }
+            let start = offsets_arr[0]
+                .as_u64()
+                .ok_or_else(|| SafeTensorsError::BadOffsets(k.clone()))?
+                as usize;
+            let end = offsets_arr[1]
+                .as_u64()
+                .ok_or_else(|| SafeTensorsError::BadOffsets(k.clone()))?
+                as usize;
+            if start > end {
+                return Err(SafeTensorsError::BadOffsets(k.clone()));
+            }
 
-            let data_bytes = offsets.1.saturating_sub(offsets.0);
+            let abs_end = data_start
+                .checked_add(end)
+                .ok_or_else(|| SafeTensorsError::BadOffsets(k.clone()))?;
+            if abs_end > file_len {
+                return Err(SafeTensorsError::Truncated {
+                    expected: abs_end,
+                    got: file_len,
+                });
+            }
+
+            let data_bytes = end - start;
+            if !shape.is_empty() {
+                let expected_elems: usize = shape.iter().copied().product();
+                let expected_bytes = expected_elems.saturating_mul(elem_bytes);
+                if data_bytes != expected_bytes {
+                    return Err(SafeTensorsError::InvalidHeader(format!(
+                        "Tensor '{}' byte size mismatch: data_offsets span {} bytes, shape {:?} ({}) requires {} bytes",
+                        k, data_bytes, shape, dtype, expected_bytes
+                    )));
+                }
+            }
+
+            // Compute runtime SHA-256 digest of the authentic tensor payload on disk
+            file.seek(SeekFrom::Start((data_start + start) as u64))?;
+            let mut payload_buf = vec![0u8; data_bytes];
+            file.read_exact(&mut payload_buf)?;
+            let mut hasher = Sha256::new();
+            hasher.update(&payload_buf);
+            let sha256: [u8; 32] = hasher.finalize().into();
+
             self.total_weights_bytes += data_bytes as u64;
 
             let meta = TensorMetadata {
                 name: k.clone(),
                 dtype,
                 shape,
-                data_offsets: offsets,
+                data_offsets: (start, end),
                 shard_filename: shard_name.to_string(),
                 data_bytes,
+                sha256,
             };
 
             self.weight_map.insert(k.clone(), shard_name.to_string());
@@ -192,7 +268,7 @@ impl ShardedSafeTensorsManager {
         self.tensor_index.get(name)
     }
 
-    /// Load tensor raw bytes from shard.
+    /// Load tensor raw bytes from shard and verify runtime SHA-256 integrity.
     pub fn get_tensor_bytes(&mut self, tensor_name: &str) -> Result<Vec<u8>, SafeTensorsError> {
         let meta = self
             .tensor_index
@@ -207,13 +283,25 @@ impl ShardedSafeTensorsManager {
 
         let shard_name = meta.shard_filename.clone();
         let (start, end) = meta.data_offsets;
-        let tensor_bytes_len = end.saturating_sub(start);
+        if start > end {
+            return Err(SafeTensorsError::BadOffsets(tensor_name.to_string()));
+        }
+        let tensor_bytes_len = end - start;
 
         // Check if shard is cached
         if let Some((data_start, cached_bytes)) = self.shard_cache.get(&shard_name) {
             let offset = *data_start + start;
             if offset + tensor_bytes_len <= cached_bytes.len() {
                 let bytes = cached_bytes[offset..offset + tensor_bytes_len].to_vec();
+                let mut hasher = Sha256::new();
+                hasher.update(&bytes);
+                let digest: [u8; 32] = hasher.finalize().into();
+                if digest != meta.sha256 {
+                    return Err(SafeTensorsError::InvalidHeader(format!(
+                        "Corrupted cached shard data for tensor '{}': SHA-256 mismatch",
+                        tensor_name
+                    )));
+                }
                 self.touch_lru(&shard_name);
                 return Ok(bytes);
             }
@@ -228,19 +316,48 @@ impl ShardedSafeTensorsManager {
         })?;
 
         let mut file = File::open(shard_path)?;
+        let file_len = file.metadata()?.len() as usize;
+        if file_len < 8 {
+            return Err(SafeTensorsError::Truncated {
+                expected: 8,
+                got: file_len,
+            });
+        }
         let mut len_buf = [0u8; 8];
         file.read_exact(&mut len_buf)?;
         let header_len = u64::from_le_bytes(len_buf) as usize;
-        let data_start = 8 + header_len;
+        let data_start = 8usize.checked_add(header_len).ok_or_else(|| {
+            SafeTensorsError::InvalidHeader("SafeTensors header length overflow".into())
+        })?;
+        let abs_end = data_start
+            .checked_add(end)
+            .ok_or_else(|| SafeTensorsError::BadOffsets(tensor_name.to_string()))?;
+        if abs_end > file_len {
+            return Err(SafeTensorsError::Truncated {
+                expected: abs_end,
+                got: file_len,
+            });
+        }
 
         file.seek(SeekFrom::Start((data_start + start) as u64))?;
         let mut buf = vec![0u8; tensor_bytes_len];
         file.read_exact(&mut buf)?;
 
+        // Verify runtime SHA-256 digest against indexed digest to catch post-index disk corruption
+        let mut hasher = Sha256::new();
+        hasher.update(&buf);
+        let digest: [u8; 32] = hasher.finalize().into();
+        if digest != meta.sha256 {
+            return Err(SafeTensorsError::InvalidHeader(format!(
+                "Disk corruption detected for tensor '{}' in shard '{}': SHA-256 checksum mismatch",
+                tensor_name, shard_name
+            )));
+        }
+
         Ok(buf)
     }
 
-    /// Load and convert tensor data into flat `Vec<f32>`.
+    /// Load and convert tensor data into flat `Vec<f32>`, rejecting non-finite (`NaN`/`Inf`) corruption.
     pub fn load_tensor(&mut self, tensor_name: &str) -> Result<Vec<f32>, SafeTensorsError> {
         let meta = self
             .tensor_index
@@ -256,8 +373,15 @@ impl ShardedSafeTensorsManager {
         let raw_bytes = self.get_tensor_bytes(tensor_name)?;
 
         // Convert based on dtype
-        match meta.dtype.to_uppercase().as_str() {
+        let decoded = match meta.dtype.to_uppercase().as_str() {
             "F32" | "FLOAT32" => {
+                if raw_bytes.len() % 4 != 0 {
+                    return Err(SafeTensorsError::InvalidHeader(format!(
+                        "Unaligned F32 byte length {} for tensor '{}'",
+                        raw_bytes.len(),
+                        tensor_name
+                    )));
+                }
                 let count = raw_bytes.len() / 4;
                 let mut res = Vec::with_capacity(count);
                 for i in 0..count {
@@ -269,9 +393,16 @@ impl ShardedSafeTensorsManager {
                     ];
                     res.push(f32::from_le_bytes(b));
                 }
-                Ok(res)
+                res
             }
             "F16" | "FLOAT16" => {
+                if raw_bytes.len() % 2 != 0 {
+                    return Err(SafeTensorsError::InvalidHeader(format!(
+                        "Unaligned F16 byte length {} for tensor '{}'",
+                        raw_bytes.len(),
+                        tensor_name
+                    )));
+                }
                 let count = raw_bytes.len() / 2;
                 let mut res = Vec::with_capacity(count);
                 for i in 0..count {
@@ -279,9 +410,16 @@ impl ShardedSafeTensorsManager {
                     let val = half::f16::from_le_bytes(b);
                     res.push(val.to_f32());
                 }
-                Ok(res)
+                res
             }
             "BF16" | "BFLOAT16" => {
+                if raw_bytes.len() % 2 != 0 {
+                    return Err(SafeTensorsError::InvalidHeader(format!(
+                        "Unaligned BF16 byte length {} for tensor '{}'",
+                        raw_bytes.len(),
+                        tensor_name
+                    )));
+                }
                 let count = raw_bytes.len() / 2;
                 let mut res = Vec::with_capacity(count);
                 for i in 0..count {
@@ -289,11 +427,20 @@ impl ShardedSafeTensorsManager {
                     let val = half::bf16::from_le_bytes(b);
                     res.push(val.to_f32());
                 }
-                Ok(res)
+                res
             }
-            "I8" | "INT8" => Ok(raw_bytes.into_iter().map(|b| (b as i8) as f32).collect()),
-            other => Err(SafeTensorsError::UnsupportedDtype(other.to_string())),
+            "I8" | "INT8" => raw_bytes.into_iter().map(|b| (b as i8) as f32).collect(),
+            other => return Err(SafeTensorsError::UnsupportedDtype(other.to_string())),
+        };
+
+        if decoded.iter().any(|v| !v.is_finite()) {
+            return Err(SafeTensorsError::InvalidHeader(format!(
+                "Corrupted non-finite (NaN/Inf) weight value detected in tensor '{}'",
+                tensor_name
+            )));
         }
+
+        Ok(decoded)
     }
 
     /// Load all tensors into memory simultaneously.

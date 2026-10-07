@@ -170,3 +170,64 @@ impl CachePolicy for LFUCachePolicy {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tier_should_promote_configurable_margin_pct_0_25_50() {
+        // Formula: threshold = cold + ((cold * margin_pct) / 100) + fixed_margin
+        // Promotes iff hot > threshold.
+        let cold = 20;
+        let fixed_margin = 4;
+
+        // 1. 0% margin_pct -> threshold = 20 + 0 + 4 = 24
+        assert!(!tier_should_promote(24, cold, 0, fixed_margin));
+        assert!(tier_should_promote(25, cold, 0, fixed_margin));
+
+        // 2. 25% margin_pct -> threshold = 20 + 5 + 4 = 29
+        assert!(!tier_should_promote(25, cold, 25, fixed_margin));
+        assert!(!tier_should_promote(29, cold, 25, fixed_margin));
+        assert!(tier_should_promote(30, cold, 25, fixed_margin));
+
+        // 3. 50% margin_pct -> threshold = 20 + 10 + 4 = 34
+        assert!(!tier_should_promote(30, cold, 50, fixed_margin));
+        assert!(!tier_should_promote(34, cold, 50, fixed_margin));
+        assert!(tier_should_promote(35, cold, 50, fixed_margin));
+    }
+
+    #[test]
+    fn test_lfru_policy_respects_custom_margins_and_decay() {
+        let mut policy_25 = LFRUCachePolicy::new(25, 4);
+        let mut policy_50 = LFRUCachePolicy::new(50, 4);
+
+        for _ in 0..20 {
+            policy_25.record_access("cold_key");
+            policy_50.record_access("cold_key");
+        }
+        for _ in 0..30 {
+            policy_25.record_access("cand_key");
+            policy_50.record_access("cand_key");
+        }
+
+        // At cand=30 vs cold=20 (fixed=4):
+        // - 25% threshold is 29 -> 30 > 29 (admitted)
+        // - 50% threshold is 34 -> 30 <= 34 (rejected)
+        assert!(policy_25.should_admit("cand_key", "cold_key"));
+        assert!(!policy_50.should_admit("cand_key", "cold_key"));
+
+        // Pick eviction selects cold_key
+        let residents = vec!["cold_key".to_string(), "cand_key".to_string()];
+        assert_eq!(
+            policy_25.pick_eviction(&residents),
+            Some("cold_key".to_string())
+        );
+
+        // Half-life decay halves heat counts (20 -> 10, 30 -> 15)
+        policy_25.decay();
+        assert_eq!(policy_25.heat.get("cold_key").copied(), Some(10));
+        assert_eq!(policy_25.heat.get("cand_key").copied(), Some(15));
+    }
+}
+

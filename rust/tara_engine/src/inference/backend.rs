@@ -131,6 +131,32 @@ pub enum DeviceKind {
     Cuda,
 }
 
+impl DeviceKind {
+    /// Strictly parses a backend device kind name, failing closed with `Err(BackendError::Unavailable)`
+    /// for any unknown or unsupported backend string (never defaulting to `Cuda`).
+    pub fn try_from_name(name: &str) -> Result<Self, BackendError> {
+        let trimmed = name.trim();
+        if trimmed.eq_ignore_ascii_case("CPU") {
+            Ok(Self::Cpu)
+        } else if trimmed.eq_ignore_ascii_case("CUDA") {
+            Ok(Self::Cuda)
+        } else {
+            Err(BackendError::Unavailable(format!(
+                "Unknown or unsupported device backend kind '{}' (fail-closed)",
+                name
+            )))
+        }
+    }
+}
+
+impl std::str::FromStr for DeviceKind {
+    type Err = BackendError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from_name(s)
+    }
+}
+
 pub trait DeviceBackend: Send + Sync {
     fn name(&self) -> &'static str;
     fn kind(&self) -> DeviceKind;
@@ -138,6 +164,11 @@ pub trait DeviceBackend: Send + Sync {
     fn allocate_tensor(&self, size: usize) -> Result<DeviceTensor, BackendError>;
     fn transfer_to_device(&self, host_tensor: &[f32]) -> Result<DeviceTensor, BackendError>;
     fn transfer_to_host(&self, device_tensor: &DeviceTensor) -> Result<Vec<f32>, BackendError>;
+
+    /// Synchronizes all pending device streams/operations on this backend context.
+    fn synchronize(&self) -> Result<(), BackendError> {
+        Ok(())
+    }
 }
 
 pub struct CPUBackend;
@@ -170,6 +201,10 @@ impl DeviceBackend for CPUBackend {
                 "Cannot transfer CUDA device tensor using CPUBackend".into(),
             )),
         }
+    }
+
+    fn synchronize(&self) -> Result<(), BackendError> {
+        Ok(())
     }
 }
 
@@ -308,6 +343,7 @@ impl DeviceBackend for CUDABackend {
             .ok_or_else(|| BackendError::Unavailable("CUDA session is not initialized".into()))?;
         let buf = session.allocate_f32(host_tensor.len())?;
         session.upload_f32(&buf, host_tensor)?;
+        session.synchronize()?;
         Ok(DeviceTensor::from_cuda_buffer(buf))
     }
 
@@ -319,10 +355,20 @@ impl DeviceBackend for CUDABackend {
                 })?;
                 let mut host = vec![0.0f32; buf.len_elements];
                 session.download_f32(buf, &mut host)?;
+                session.synchronize()?;
                 Ok(host)
             }
             DeviceTensor::Cpu(v) => Ok(v.as_ref().clone()),
         }
+    }
+
+    fn synchronize(&self) -> Result<(), BackendError> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| BackendError::Unavailable("CUDA session is not initialized".into()))?;
+        session.synchronize()?;
+        Ok(())
     }
 }
 
@@ -387,6 +433,7 @@ mod tests {
         let backend = CPUBackend;
         assert_eq!(backend.name(), "CPU");
         assert!(backend.is_available());
+        assert!(backend.synchronize().is_ok());
 
         let tensor = backend.allocate_tensor(8).expect("allocate cpu tensor");
         assert_eq!(tensor.len(), 8);
@@ -401,7 +448,7 @@ mod tests {
             .expect("transfer to device");
         assert_eq!(transferred.as_cpu_slice(), Some(data.as_slice()));
 
-        // O(1) Arc clone must preserve pointer identity
+        // O(1) Arc ownership sharing must preserve pointer identity without cloning payload
         let cloned = transferred.clone();
         assert!(transferred.ptr_eq(&cloned));
 
@@ -409,6 +456,16 @@ mod tests {
             .transfer_to_host(&transferred)
             .expect("transfer to host");
         assert_eq!(retrieved, data);
+    }
+
+    #[test]
+    fn test_device_kind_fail_closed_for_unknown_backend() {
+        assert_eq!(DeviceKind::try_from_name("cpu").unwrap(), DeviceKind::Cpu);
+        assert_eq!(DeviceKind::try_from_name("CUDA").unwrap(), DeviceKind::Cuda);
+        assert!(DeviceKind::try_from_name("METAL").is_err());
+        assert!(DeviceKind::try_from_name("ROCM").is_err());
+        assert!(DeviceKind::try_from_name("").is_err());
+        assert!(DeviceKind::try_from_name("UNKNOWN").is_err());
     }
 
     #[test]
@@ -442,6 +499,7 @@ mod tests {
         let b2 = CUDABackend::new(0);
         if b1.is_available() && b2.is_available() {
             assert!(Arc::ptr_eq(b1.session().unwrap(), b2.session().unwrap()));
+            assert!(b1.synchronize().is_ok());
         }
     }
 

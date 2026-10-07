@@ -16613,15 +16613,15 @@
                       "name": "backend.rs",
                       "rel_path": "rust/tara_engine/src/inference/backend.rs",
                       "entry_type": "file",
-                      "size_bytes": 15290,
-                      "sha256": "a9312d737b30cea3006e6de81b7ef85ca60bbd2fdb5f3fdbe85dd971bf46bcfe"
+                      "size_bytes": 17335,
+                      "sha256": "abef4fa756a2fc74a132cbe65c066d3f00143f6d89467a44445982ff013b014f"
                     },
                     {
                       "name": "cache_policy.rs",
                       "rel_path": "rust/tara_engine/src/inference/cache_policy.rs",
                       "entry_type": "file",
-                      "size_bytes": 5021,
-                      "sha256": "68f88a20d415bf66af5d06fa06654ddc08da608b4c11ba446d74b928766b36bd"
+                      "size_bytes": 7273,
+                      "sha256": "c3fe0054f1f0763647d9b56031e15be105914fce932db55068cb68f5e9bda75c"
                     },
                     {
                       "name": "lookahead.rs",
@@ -16634,8 +16634,8 @@
                       "name": "mod.rs",
                       "rel_path": "rust/tara_engine/src/inference/mod.rs",
                       "entry_type": "file",
-                      "size_bytes": 6329,
-                      "sha256": "728375aab18a066bbb235e70b122fe7dc6b6650c76b4b40c137e11969f395b01"
+                      "size_bytes": 6616,
+                      "sha256": "5fe14096fffcf700a496ad0df063db603a770d07ae79f3ce0052a2be847fc91e"
                     },
                     {
                       "name": "router.rs",
@@ -16655,8 +16655,8 @@
                       "name": "tiered_store.rs",
                       "rel_path": "rust/tara_engine/src/inference/tiered_store.rs",
                       "entry_type": "file",
-                      "size_bytes": 47072,
-                      "sha256": "ff72973c2d5f57fe14e220f0bee44b651bb8dadf1ebdba887767026bda6086ed"
+                      "size_bytes": 89787,
+                      "sha256": "be5c81994d94f9c902f4aaa9066e8d7ab3aa4a163ddd897a0f1057304f13c6a6"
                     }
                   ]
                 },
@@ -16748,8 +16748,8 @@
                   "name": "shard_manager.rs",
                   "rel_path": "rust/tara_engine/src/shard_manager.rs",
                   "entry_type": "file",
-                  "size_bytes": 13614,
-                  "sha256": "db091361d2d49a5cd1d1ae4de5ac82a29b5256c652aff06e5232b319c49df01c"
+                  "size_bytes": 19565,
+                  "sha256": "6917478da2bad00c719346236471fd359c02f134250023db84b4516f93112998"
                 },
                 {
                   "name": "tokenizer.rs",

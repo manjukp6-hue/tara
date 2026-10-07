@@ -34,7 +34,11 @@ pub use telemetry::{
     EvictionRoute, LookupOutcome, RouteTransferSnapshot, StorageTier, TelemetryError,
     TelemetryMonitor, TelemetrySnapshot, TransferRoute, DEFAULT_LATENCY_RESERVOIR_CAPACITY,
 };
-pub use tiered_store::{TierLocation, TieredTensorStore};
+pub use tiered_store::{
+    align_up_bytes, compute_safe_vram_budget, ConcurrentTieredTensorStore, DiskArtifactMeta,
+    DiskRecoveryReport, TierLocation, TierMemoryBudgetReport, TieredTensorStore,
+    DEFAULT_CUDA_ALLOCATION_ALIGNMENT, DEFAULT_VRAM_SAFETY_HEADROOM_PCT,
+};
 
 #[cfg(test)]
 mod tests {
@@ -49,7 +53,7 @@ mod tests {
     #[test]
     fn test_inference_module_send_sync_and_four_layer_contract() {
         // 1. Verify Send + Sync compatibility across the entire 4-layer stack:
-        //    CudaSession / CudaBuffer -> DeviceTensor -> DeviceBackend -> TieredTensorStore / TelemetryMonitor
+        //    CudaSession / CudaBuffer -> DeviceTensor -> DeviceBackend -> TieredTensorStore / ConcurrentTieredTensorStore
         assert_send_sync::<DeviceTensor>();
         assert_send_sync::<CPUBackend>();
         assert_send_sync::<CUDABackend>();
@@ -57,6 +61,7 @@ mod tests {
         assert_send_sync::<Box<dyn CachePolicy>>();
         assert_send_sync::<TelemetryMonitor>();
         assert_send_sync::<TieredTensorStore>();
+        assert_send_sync::<ConcurrentTieredTensorStore>();
 
         // 2. End-to-end integration of BackendRegistry + TieredTensorStore + LookaheadPrefetcher + RoutingTracker
         let test_dir = std::env::temp_dir().join(format!(

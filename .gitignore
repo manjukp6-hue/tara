@@ -47,6 +47,7 @@ storage/models/**/*.bin
 storage/models/**/*.safetensors
 *.safetensors
 !storage/models/tara/model.safetensors
+!storage/models/tara_candidate_v1/model.safetensors
 TARA_TRAINING_PERSISTENT/
 .scratch_hf_space/
 

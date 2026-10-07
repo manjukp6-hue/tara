@@ -43,12 +43,12 @@
     ".gitignore": {
       "extension": "",
       "file_id": 2814749767172450,
-      "line_count": 91,
-      "modified_epoch": 1791365013,
+      "line_count": 92,
+      "modified_epoch": 1791375764,
       "name": ".gitignore",
       "rel_path": ".gitignore",
-      "sha256": "28d1fb8cfa95113eb442152f7f210b6debc6ff7f16d2ae86e546d212720495cf",
-      "size_bytes": 1618
+      "sha256": "8c2058217eae5b5986aa6723974fd0636ea89be94a98f083de8ad5807bd4d740",
+      "size_bytes": 1670
     },
     "AGENTS.md": {
       "extension": "md",
@@ -17834,11 +17834,11 @@
       "extension": "rs",
       "file_id": 5348024558122881,
       "line_count": 316,
-      "modified_epoch": 1791375326,
+      "modified_epoch": 1791375333,
       "name": "device_detector.rs",
       "rel_path": "rust/tara_engine/src/device_detector.rs",
-      "sha256": "f1138ff4511636a1b1887922ddf3eec6045d6cbbd27764b0eea52d08337fc2e3",
-      "size_bytes": 10402
+      "sha256": "e11f32ed99d22303b98bf912172c3808e2f8f58ead8d30dfea5f493a705de614",
+      "size_bytes": 10407
     },
     "rust/tara_engine/src/generate.rs": {
       "extension": "rs",
@@ -19531,7 +19531,7 @@
       "size_bytes": 1242
     }
   },
-  "generated_at_utc": "1791375328",
+  "generated_at_utc": "1791375768",
   "schema_version": "1.0.0",
   "total_files": 1953
 }

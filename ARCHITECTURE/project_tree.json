@@ -16692,8 +16692,8 @@
                   "name": "device_detector.rs",
                   "rel_path": "rust/tara_engine/src/device_detector.rs",
                   "entry_type": "file",
-                  "size_bytes": 10402,
-                  "sha256": "f1138ff4511636a1b1887922ddf3eec6045d6cbbd27764b0eea52d08337fc2e3"
+                  "size_bytes": 10407,
+                  "sha256": "e11f32ed99d22303b98bf912172c3808e2f8f58ead8d30dfea5f493a705de614"
                 },
                 {
                   "name": "generate.rs",
@@ -18240,8 +18240,8 @@
       "name": ".gitignore",
       "rel_path": ".gitignore",
       "entry_type": "file",
-      "size_bytes": 1618,
-      "sha256": "28d1fb8cfa95113eb442152f7f210b6debc6ff7f16d2ae86e546d212720495cf"
+      "size_bytes": 1670,
+      "sha256": "8c2058217eae5b5986aa6723974fd0636ea89be94a98f083de8ad5807bd4d740"
     },
     {
       "name": "AGENTS.md",

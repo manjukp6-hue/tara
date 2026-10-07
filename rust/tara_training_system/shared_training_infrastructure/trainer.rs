@@ -851,6 +851,7 @@ impl NativeSelfTrainer {
                 // Compute d_logits for supervised causal cross-entropy
                 let mut d_logits = vec![0.0f32; seq_len * config.vocab_size];
                 let mut valid_targets = 0usize;
+                let mut sample_loss = 0.0f32;
 
                 for (pos, &token_val) in tokens.iter().enumerate().take(seq_len).skip(*target_start)
                 {
@@ -860,6 +861,9 @@ impl NativeSelfTrainer {
                     let probs = softmax(logits_slice);
                     let target = token_val as usize;
 
+                    let p = probs[target].max(1e-12);
+                    sample_loss += -p.ln();
+
                     for v in 0..config.vocab_size {
                         let ind = if v == target { 1.0f32 } else { 0.0f32 };
                         d_logits[predictor * config.vocab_size + v] = probs[v] - ind;
@@ -868,6 +872,7 @@ impl NativeSelfTrainer {
                 }
 
                 if valid_targets > 0 {
+                    sample_loss /= valid_targets as f32;
                     // Normalise by number of target tokens
                     let norm_factor = 1.0 / valid_targets as f32;
                     for g in d_logits.iter_mut() {
@@ -949,6 +954,17 @@ impl NativeSelfTrainer {
                     }
                     accum_count += 1;
                     steps += 1;
+
+                    if steps % 10 == 0 || steps == 1 {
+                        let max_str = self
+                            .max_steps
+                            .map(|m| m.to_string())
+                            .unwrap_or_else(|| "∞".to_string());
+                        println!(
+                            "[Train] Step {:>4}/{} | Sample Loss: {:.4} | LR: {:.6} | Device: {}",
+                            steps, max_str, sample_loss, learning_rate, device_label
+                        );
+                    }
 
                     if accum_count >= accumulation_steps {
                         if let Some(ref mut gpu_trainer) = gpu_trainer_opt {

@@ -16690,7 +16690,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate": "tara_training_system",
-      "dynamic_sha256": "2d0be494e823c5a1393c8a17fad93e5dd7d99384f527f2864e72e128d7bf5ae4",
+      "dynamic_sha256": "dea0c7b8072ef2f2a5210ab701a3e9e91ca2b2ee84bae7bbdc2ba2462c42e497",
       "enums": [
         "TrainerError",
         "TrainingDevice"
@@ -16734,7 +16734,7 @@
         "rust/tara_server/src/brain.rs"
       ],
       "is_test": true,
-      "lines": 1534,
+      "lines": 1550,
       "module": "tara_training_system::shared_training_infrastructure::trainer",
       "out_links": [
         "rust/tara_engine/src/config.rs",

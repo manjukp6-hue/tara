@@ -427,6 +427,10 @@ impl NativeSelfTrainer {
         // 2. Discover and compile dataset (curriculum + pretraining pool)
         let mut samples = Vec::new();
         let target_samples_limit = self.max_steps.map(|ms| ms * self.batch_size.unwrap_or(4) * 2);
+        let target_limit_str = target_samples_limit
+            .map(|l| format!("{l} samples"))
+            .unwrap_or_else(|| "unlimited".to_string());
+        println!("[Dataset] Loading training data (target quota: {target_limit_str})...");
 
         // 2a. Load Academic Curriculum if available (storage/datasets/curriculum/master_curriculum.jsonl)
         let has_explicit_curriculum = self.curriculum_path.is_some();
@@ -501,6 +505,9 @@ impl NativeSelfTrainer {
                         if let Ok(mut reader) = StreamingDatasetReader::open(&shard_path.to_string_lossy()) {
                             while let Ok(Some(pair)) = reader.next_sample() {
                                 samples.push(pair);
+                                if samples.len() % 1000 == 0 {
+                                    println!("[Dataset] Streamed {} samples...", samples.len());
+                                }
                                 if let Some(limit) = target_samples_limit {
                                     if samples.len() >= limit {
                                         break;
@@ -543,6 +550,7 @@ impl NativeSelfTrainer {
                 "message": "No training samples found in datasets or storage/datasets"
             }));
         }
+        println!("[Dataset] Collected {} total samples.", samples.len());
 
         // 3. Load model weights, config, and tokenizer
         let (mut weights, shapes) = load_model_weights_with_shapes(&self.model_dir)?;
@@ -571,6 +579,7 @@ impl NativeSelfTrainer {
         }
 
         // 5. Tokenize training samples
+        println!("[Tokenizer] Tokenizing {} samples (vocabulary size {})...", samples.len(), config.vocab_size);
         let training_tokens: Vec<(Vec<u32>, usize)> = samples
             .iter()
             .filter_map(|(input, target)| {
@@ -604,6 +613,7 @@ impl NativeSelfTrainer {
                 "samples contain no encodable prompt/target token pairs".into(),
             ));
         }
+        println!("[Tokenizer] Successfully tokenized {} sequence pairs.", training_tokens.len());
 
         // 6. Compute initial loss across representative validation slice
         let mut model = TaraForCausalLM::from_weights_and_config(
@@ -615,7 +625,9 @@ impl NativeSelfTrainer {
 
         let eval_slice_len = training_tokens.len().min(128);
         let eval_tokens = &training_tokens[..eval_slice_len];
+        println!("[Preflight] Evaluating baseline loss across {} samples...", eval_slice_len);
         let initial_loss = compute_model_loss(&model, eval_tokens);
+        println!("[Preflight] Initial baseline loss: {:.4}", initial_loss);
 
         // 7. Full-Network Backpropagation with AdamW and Gradient Accumulation
         // Initialize hardware acceleration device backend

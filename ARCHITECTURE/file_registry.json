@@ -19453,12 +19453,12 @@
     "rust/tara_training_system/shared_training_infrastructure/trainer.rs": {
       "extension": "rs",
       "file_id": 10133099161620255,
-      "line_count": 1581,
-      "modified_epoch": 1791379651,
+      "line_count": 1593,
+      "modified_epoch": 1791382770,
       "name": "trainer.rs",
       "rel_path": "rust/tara_training_system/shared_training_infrastructure/trainer.rs",
-      "sha256": "c25086fa143f68144f5e80de10092d22451a771461f08134dd51ba45d10ad781",
-      "size_bytes": 68038
+      "sha256": "41811d4f9dfb7a4d89a69127f9900a28fb2bda0941c8203ecf4004928558ac8c",
+      "size_bytes": 68933
     },
     "rust/tara_training_system/world_model/deliberative_search.rs": {
       "extension": "rs",
@@ -19531,7 +19531,7 @@
       "size_bytes": 1242
     }
   },
-  "generated_at_utc": "1791382412",
+  "generated_at_utc": "1791382772",
   "schema_version": "1.0.0",
   "total_files": 1953
 }

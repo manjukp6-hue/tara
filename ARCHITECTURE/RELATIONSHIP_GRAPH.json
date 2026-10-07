@@ -7662,14 +7662,15 @@
     "rust/tara_engine/src/bin/manual_trainer.rs": {
       "call_references": [
         "Err",
+        "Number",
         "Some",
-        "Successfully",
         "and_then",
         "any",
         "append_log",
         "args",
         "as_bytes",
         "as_nanos",
+        "as_object_mut",
         "as_os_str",
         "as_secs",
         "as_str",
@@ -7700,9 +7701,10 @@
         "default_weight_decay",
         "default_world_model_chk_dir",
         "display",
-        "evaluate",
+        "execute_manual_trainer",
         "execute_world_model_update",
         "exists",
+        "exit_code",
         "expect",
         "extension",
         "file_name",
@@ -7712,6 +7714,8 @@
         "from_file",
         "from_json_file",
         "from_str",
+        "from_weights_and_config",
+        "generate_collision_free_run_id",
         "get",
         "get_curriculum_snapshots",
         "id",
@@ -7724,6 +7728,7 @@
         "is_file",
         "is_finite",
         "is_ok",
+        "is_some",
         "iter",
         "join",
         "len",
@@ -7749,13 +7754,15 @@
         "receive_and_update",
         "recover_interrupted_promotion",
         "remove_dir_all",
+        "remove_file",
+        "run_and_validate_evaluation",
         "run_controlled_training_with_options",
         "starts_with",
         "sum",
         "temp_dir",
         "test_cli_and_malformed_config_reject_invalid_inputs",
-        "test_path_safety_rejects_production_and_source_overwrites",
-        "test_world_model_real_extraction_and_atomic_promotion",
+        "test_path_safety_rejects_production_traversal_and_overlaps",
+        "test_world_model_stateful_transition_and_atomic_promotion",
         "to_bits",
         "to_le_bytes",
         "to_path_buf",
@@ -7773,15 +7780,27 @@
         "validate_manual_config",
         "values",
         "vec",
-        "verify_candidate_continuation",
+        "verify_candidate",
         "verify_model_bundle",
         "write",
         "write_safetensors_with_shapes",
         "write_working_candidate"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "f6ce9fea67413b2a2d9ab5066db3bc7009252a60213fffc1d425db017c759227",
+      "dynamic_sha256": "ce2a2190d08e3e78af0b190a3d5ee09cba54968f844d77ed6387369691ccff3f",
       "exports": [
+        {
+          "kind": "Const",
+          "line_number": 186,
+          "name": "CANONICAL_PROMOTION_PROMPTS",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Const",
+          "line_number": 184,
+          "name": "EVALUATION_SUITE_ID",
+          "visibility": "Public"
+        },
         {
           "kind": "Struct",
           "line_number": 38,
@@ -7789,20 +7808,62 @@
           "visibility": "Public"
         },
         {
+          "kind": "Const",
+          "line_number": 185,
+          "name": "PROMOTION_PASS_RATE_THRESHOLD",
+          "visibility": "Public"
+        },
+        {
           "kind": "Struct",
-          "line_number": 311,
+          "line_number": 377,
           "name": "ParsedManualCli",
           "visibility": "Public"
         },
         {
+          "kind": "Enum",
+          "line_number": 194,
+          "name": "RunStatus",
+          "visibility": "Public"
+        },
+        {
           "kind": "Function",
-          "line_number": 486,
+          "line_number": 1065,
+          "name": "append_log",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 516,
+          "name": "compute_candidate_weights_sha256",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 745,
           "name": "execute_world_model_update",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 266,
+          "line_number": 204,
+          "name": "exit_code",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1082,
+          "name": "generate_collision_free_run_id",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 214,
+          "name": "has_parent_dir_traversal",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 332,
           "name": "load_manual_config",
           "visibility": "Public"
         },
@@ -7814,7 +7875,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 324,
+          "line_number": 393,
           "name": "parse_manual_cli",
           "visibility": "Public"
         },
@@ -7826,25 +7887,37 @@
         },
         {
           "kind": "Function",
-          "line_number": 623,
+          "line_number": 974,
           "name": "promote_candidate_bundle_atomically",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 184,
+          "line_number": 671,
+          "name": "run_and_validate_evaluation",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 218,
           "name": "validate_manual_config",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 451,
+          "line_number": 662,
+          "name": "verify_candidate",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 626,
           "name": "verify_candidate_continuation",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 406,
+          "line_number": 535,
           "name": "verify_model_bundle",
           "visibility": "Public"
         }
@@ -7881,7 +7954,7 @@
             "HashMap"
           ],
           "is_public_reexport": false,
-          "line_number": 1003,
+          "line_number": 1486,
           "raw_path": "std::collections::HashMap"
         },
         {
@@ -7939,7 +8012,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 1002,
+          "line_number": 1485,
           "raw_path": "super::*"
         },
         {
@@ -7974,7 +8047,7 @@
             "write_safetensors_with_shapes"
           ],
           "is_public_reexport": false,
-          "line_number": 1004,
+          "line_number": 1487,
           "raw_path": "tara_engine::safetensors::write_safetensors_with_shapes"
         },
         {
@@ -8020,12 +8093,6 @@
       ],
       "in_links": [],
       "internal_symbols": [
-        {
-          "kind": "Function",
-          "line_number": 693,
-          "name": "append_log",
-          "visibility": "Private"
-        },
         {
           "kind": "Function",
           "line_number": 128,
@@ -8136,61 +8203,67 @@
         },
         {
           "kind": "Function",
-          "line_number": 706,
+          "line_number": 1091,
+          "name": "execute_manual_trainer",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1471,
           "name": "main",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 674,
+          "line_number": 1043,
           "name": "print_usage",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 295,
+          "line_number": 361,
           "name": "require_arg_value",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1082,
+          "line_number": 1589,
           "name": "test_cli_and_malformed_config_reject_invalid_inputs",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1107,
-          "name": "test_path_safety_rejects_production_and_source_overwrites",
+          "line_number": 1630,
+          "name": "test_path_safety_rejects_production_traversal_and_overlaps",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1122,
-          "name": "test_world_model_real_extraction_and_atomic_promotion",
+          "line_number": 1662,
+          "name": "test_world_model_stateful_transition_and_atomic_promotion",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1006,
+          "line_number": 1489,
           "name": "unique_test_dir",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1020,
+          "line_number": 1503,
           "name": "write_working_candidate",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1162,
+      "lines": 1729,
       "module_path": "tara_engine::bin::manual_trainer",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1001,
+          "line_number": 1484,
           "name": "tests"
         }
       ],
@@ -9424,7 +9497,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "8f3cb1fe728bbe918c9f7356e401975ee6258ff8430247e1c5cc39a2b85b64a7",
+      "dynamic_sha256": "08d353439e802e5de4a959f41460ff7634a0155cf5fda7fee840a028abb16e04",
       "exports": [
         {
           "kind": "Struct",
@@ -9585,7 +9658,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 1758,
+          "line_number": 1759,
           "raw_path": "super::*"
         },
         {
@@ -9618,7 +9691,7 @@
             "write_safetensors_with_shapes"
           ],
           "is_public_reexport": false,
-          "line_number": 1759,
+          "line_number": 1760,
           "raw_path": "tara_engine::safetensors::write_safetensors_with_shapes"
         },
         {
@@ -9652,7 +9725,7 @@
             "promote_directory_atomically"
           ],
           "is_public_reexport": false,
-          "line_number": 1760,
+          "line_number": 1761,
           "raw_path": "tara_engine::trainer::promote_directory_atomically"
         },
         {
@@ -9716,49 +9789,49 @@
         },
         {
           "kind": "Function",
-          "line_number": 1929,
+          "line_number": 1930,
           "name": "test_continuation_verification_and_fingerprint_idempotence",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1992,
+          "line_number": 1993,
           "name": "test_crash_recovery_after_interrupted_backup_rename",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1841,
+          "line_number": 1842,
           "name": "test_dag_cycle_detection_and_topological_sort",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1887,
+          "line_number": 1888,
           "name": "test_validate_stage_definitions_rejects_duplicate_output_and_unsafe_paths",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1762,
+          "line_number": 1763,
           "name": "unique_test_dir",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1776,
+          "line_number": 1777,
           "name": "write_minimal_working_model",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 2017,
+      "lines": 2018,
       "module_path": "tara_engine::bin::tara_training_stages",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1757,
+          "line_number": 1758,
           "name": "tests"
         }
       ],
@@ -9860,6 +9933,7 @@
         "clone",
         "collect",
         "current_dir",
+        "default",
         "ends_with",
         "from",
         "get",
@@ -9876,7 +9950,7 @@
         "unwrap_or_else"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "5f500cbb3e4f01df580e290bb22f12b0acbf976b8ce5bbdaf169d99614a7ca32",
+      "dynamic_sha256": "82dfb9278b1e815074f8fb55d090df8ba42a606e56676f3dce18f123e6fd5922",
       "exports": [],
       "imports": [
         {
@@ -9929,7 +10003,7 @@
         }
       ],
       "is_test": false,
-      "lines": 379,
+      "lines": 380,
       "module_path": "tara_engine::bin::train_candidate",
       "modules_declared": [],
       "out_links": [
@@ -20671,7 +20745,7 @@
         "run_full_self_learning_cycle_isolated"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "7f1720dd68d2a1deedeea56461bc52bafe6711bdad5eaa8c1dff569524b403cc",
+      "dynamic_sha256": "94134a294c5ace33abd0d2a3b0b3aea451dbc4a7352485a9c08f691ad170f927",
       "exports": [
         {
           "kind": "Enum",
@@ -20687,13 +20761,13 @@
         },
         {
           "kind": "Function",
-          "line_number": 32,
+          "line_number": 35,
           "name": "run_controlled_training",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 46,
+          "line_number": 49,
           "name": "run_controlled_training_with_options",
           "visibility": "Public"
         }
@@ -20733,7 +20807,7 @@
       ],
       "internal_symbols": [],
       "is_test": false,
-      "lines": 101,
+      "lines": 113,
       "module_path": "tara_engine::train_candidate",
       "modules_declared": [],
       "out_links": [
@@ -48685,7 +48759,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_training_system",
-      "dynamic_sha256": "0e83d14a0818e73d6e7af68a14963bcdcd20a3d97f8a951a571441c35dfc462d",
+      "dynamic_sha256": "359943673e1d40eb0377b9a7e819314eb84101b14cb397fca926e9523fd97f38",
       "exports": [
         {
           "kind": "Struct",
@@ -48725,7 +48799,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 373,
+          "line_number": 397,
           "name": "estimate_memory_footprint_mb",
           "visibility": "Public"
         },
@@ -48737,7 +48811,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 378,
+          "line_number": 402,
           "name": "get_status",
           "visibility": "Public"
         },
@@ -48761,7 +48835,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 280,
+          "line_number": 283,
           "name": "new",
           "visibility": "Public"
         },
@@ -48779,25 +48853,25 @@
         },
         {
           "kind": "Function",
-          "line_number": 1644,
+          "line_number": 1675,
           "name": "promote_directory_atomically",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1563,
+          "line_number": 1594,
           "name": "recover_interrupted_promotion",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 396,
+          "line_number": 420,
           "name": "run_full_self_learning_cycle",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 405,
+          "line_number": 429,
           "name": "run_full_self_learning_cycle_isolated",
           "visibility": "Public"
         },
@@ -48815,74 +48889,92 @@
         },
         {
           "kind": "Function",
-          "line_number": 355,
+          "line_number": 361,
           "name": "with_batch_size",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 307,
+          "line_number": 313,
           "name": "with_checkpoint_dir",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 313,
+          "line_number": 319,
           "name": "with_checkpoint_interval",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 343,
+          "line_number": 349,
           "name": "with_curriculum_path",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 337,
+          "line_number": 343,
           "name": "with_dataset_dir",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 325,
+          "line_number": 331,
           "name": "with_device",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 349,
+          "line_number": 385,
+          "name": "with_grad_clip_norm",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 355,
           "name": "with_learning_rate",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 367,
+          "line_number": 391,
           "name": "with_max_memory_mb",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 361,
+          "line_number": 367,
           "name": "with_max_steps",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 331,
+          "line_number": 337,
           "name": "with_precision",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 319,
+          "line_number": 325,
           "name": "with_resume",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 300,
+          "line_number": 306,
           "name": "with_resume_from",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 373,
+          "name": "with_warmup_steps",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 379,
+          "name": "with_weight_decay",
           "visibility": "Public"
         }
       ],
@@ -48900,7 +48992,7 @@
             "TaraConfig"
           ],
           "is_public_reexport": false,
-          "line_number": 1745,
+          "line_number": 1776,
           "raw_path": "crate::config::TaraConfig"
         },
         {
@@ -48932,7 +49024,7 @@
             "write_safetensors_with_shapes"
           ],
           "is_public_reexport": false,
-          "line_number": 1746,
+          "line_number": 1777,
           "raw_path": "crate::safetensors::{load_model_weights, write_safetensors_with_shapes}"
         },
         {
@@ -48965,7 +49057,7 @@
             "HashMap"
           ],
           "is_public_reexport": false,
-          "line_number": 1747,
+          "line_number": 1778,
           "raw_path": "std::collections::HashMap"
         },
         {
@@ -49010,7 +49102,7 @@
             "StreamingDatasetReader"
           ],
           "is_public_reexport": false,
-          "line_number": 1744,
+          "line_number": 1775,
           "raw_path": "super::{NativeSelfTrainer, StreamingDatasetReader}"
         },
         {
@@ -49041,7 +49133,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 1714,
+          "line_number": 1745,
           "name": "compute_model_loss",
           "visibility": "Private"
         },
@@ -49059,43 +49151,43 @@
         },
         {
           "kind": "Function",
-          "line_number": 1567,
+          "line_number": 1598,
           "name": "recover_interrupted_promotion_inner",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1702,
+          "line_number": 1733,
           "name": "softmax",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1750,
+          "line_number": 1781,
           "name": "supervised_cycle_updates_real_model_parameters_and_reduces_loss",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1859,
+          "line_number": 1890,
           "name": "test_single_sample_held_out_validation_cleanly_unavailable",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1952,
+          "line_number": 1983,
           "name": "test_streaming_dataset_reader_format_compatibility",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1996,
+      "lines": 2027,
       "module_path": "tara_training_system::shared_training_infrastructure::trainer",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1743,
+          "line_number": 1774,
           "name": "tests"
         }
       ],
@@ -50941,5 +51033,5 @@
   "schema_version": "1.0.0",
   "total_files": 240,
   "total_modules": 583,
-  "total_symbols": 2250
+  "total_symbols": 2264
 }

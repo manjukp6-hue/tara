@@ -1681,6 +1681,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             resume: has_prior_state || explicit_resume_from.is_some(),
             resume_from: explicit_resume_from,
             max_memory_mb: Some(16384.0),
+            ..Default::default()
         };
 
         let result =

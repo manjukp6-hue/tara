@@ -19,6 +19,9 @@ pub struct TrainingOptions {
     pub learning_rate: Option<f32>,
     pub batch_size: Option<usize>,
     pub max_steps: Option<usize>,
+    pub warmup_steps: Option<usize>,
+    pub weight_decay: Option<f32>,
+    pub grad_clip_norm: Option<f32>,
     pub device: Option<String>,
     pub precision: Option<String>,
     pub checkpoint_dir: Option<String>,
@@ -64,6 +67,15 @@ pub fn run_controlled_training_with_options(
     }
     if let Some(ms) = options.max_steps {
         trainer = trainer.with_max_steps(ms);
+    }
+    if let Some(ws) = options.warmup_steps {
+        trainer = trainer.with_warmup_steps(ws);
+    }
+    if let Some(wd) = options.weight_decay {
+        trainer = trainer.with_weight_decay(wd);
+    }
+    if let Some(gcn) = options.grad_clip_norm {
+        trainer = trainer.with_grad_clip_norm(gcn);
     }
     if let Some(mb) = options.max_memory_mb {
         trainer = trainer.with_max_memory_mb(mb);

@@ -267,6 +267,9 @@ pub struct NativeSelfTrainer {
     pub learning_rate: Option<f32>,
     pub batch_size: Option<usize>,
     pub max_steps: Option<usize>,
+    pub warmup_steps: Option<usize>,
+    pub weight_decay: Option<f32>,
+    pub grad_clip_norm: Option<f32>,
     pub device: TrainingDevice,
     pub precision: crate::cuda::TrainingPrecision,
     pub checkpoint_dir: Option<String>,
@@ -287,6 +290,9 @@ impl NativeSelfTrainer {
             learning_rate: None,
             batch_size: None,
             max_steps: None,
+            warmup_steps: None,
+            weight_decay: None,
+            grad_clip_norm: None,
             device: TrainingDevice::Auto,
             precision: crate::cuda::TrainingPrecision::Auto,
             checkpoint_dir: None,
@@ -360,6 +366,24 @@ impl NativeSelfTrainer {
     /// Set an explicit maximum training steps ceiling.
     pub fn with_max_steps(mut self, ms: usize) -> Self {
         self.max_steps = Some(ms);
+        self
+    }
+
+    /// Set an explicit linear learning-rate warmup step count.
+    pub fn with_warmup_steps(mut self, ws: usize) -> Self {
+        self.warmup_steps = Some(ws);
+        self
+    }
+
+    /// Set an explicit AdamW weight decay coefficient.
+    pub fn with_weight_decay(mut self, wd: f32) -> Self {
+        self.weight_decay = Some(wd);
+        self
+    }
+
+    /// Set an explicit gradient clipping norm ceiling.
+    pub fn with_grad_clip_norm(mut self, gcn: f32) -> Self {
+        self.grad_clip_norm = Some(gcn);
         self
     }
 
@@ -759,8 +783,9 @@ impl NativeSelfTrainer {
         let beta1 = 0.9f32;
         let beta2 = 0.999f32;
         let eps = 1e-8f32;
-        let weight_decay = 0.01f32;
-        let max_grad_norm = 1.0f32;
+        let weight_decay = self.weight_decay.unwrap_or(0.01f32);
+        let max_grad_norm = self.grad_clip_norm.unwrap_or(1.0f32);
+        let warmup_steps = self.warmup_steps.unwrap_or(0usize);
         let accumulation_steps = self.batch_size.unwrap_or(4usize);
 
         let mut samples_seen = 0usize;
@@ -1078,6 +1103,12 @@ impl NativeSelfTrainer {
 
                     if accum_count >= accumulation_steps {
                         let mut step_taken = false;
+                        let next_step = optimizer_steps + 1;
+                        let effective_lr = if warmup_steps > 0 && next_step <= warmup_steps {
+                            learning_rate * (next_step as f32 / warmup_steps as f32)
+                        } else {
+                            learning_rate
+                        };
 
                         if let Some(ref mut gpu_trainer) = gpu_trainer_opt {
                             // GPU-accelerated gradient scaling and AdamW step
@@ -1088,7 +1119,7 @@ impl NativeSelfTrainer {
                                 })?;
                             let stepped = gpu_trainer
                                 .step_adamw(
-                                    learning_rate,
+                                    effective_lr,
                                     beta1,
                                     beta2,
                                     eps,
@@ -1117,7 +1148,7 @@ impl NativeSelfTrainer {
                                 &mut weights,
                                 &accum_grads,
                                 &AdamWHyperparams {
-                                    lr: learning_rate,
+                                    lr: effective_lr,
                                     beta1,
                                     beta2,
                                     eps,
@@ -1143,7 +1174,7 @@ impl NativeSelfTrainer {
                                 .unwrap_or_else(|| "∞".to_string());
                             println!(
                                 "[Train] Step {:>4}/{} (samples: {}) | Sample Loss: {:.4} | LR: {:.6} | Device: {}",
-                                optimizer_steps, max_str, samples_seen, sample_loss, learning_rate, device_label
+                                optimizer_steps, max_str, samples_seen, sample_loss, effective_lr, device_label
                             );
                         }
 

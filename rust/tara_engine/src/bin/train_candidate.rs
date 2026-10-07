@@ -301,6 +301,7 @@ fn main() {
         resume,
         resume_from,
         max_memory_mb,
+        ..Default::default()
     };
 
     println!("[1/3] Starting full-network backpropagation training cycle...");

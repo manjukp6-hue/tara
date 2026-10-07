@@ -650,9 +650,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None
             },
             candidate_dir: Some(stage.output_checkpoint.clone()),
-            learning_rate: Some(stage.learning_rate),
-            batch_size: Some(stage.batch_size),
-            max_steps: stage.max_steps,
+            learning_rate: Some(override_learning_rate.unwrap_or(stage.learning_rate)),
+            batch_size: Some(override_batch_size.unwrap_or(stage.batch_size)),
+            max_steps: override_max_steps.or(stage.max_steps),
             device: Some(device.clone()),
             precision: Some(precision.clone()),
             checkpoint_dir: Some(stage.output_checkpoint.clone()),
@@ -664,7 +664,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let result = run_controlled_training_with_options(
             &input_cp,
             ".",
-            stage.epochs,
+            override_epochs.unwrap_or(stage.epochs),
             options,
         )?;
 

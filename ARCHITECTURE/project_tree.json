@@ -16371,8 +16371,8 @@
                       "name": "tara_training_stages.rs",
                       "rel_path": "rust/tara_engine/src/bin/tara_training_stages.rs",
                       "entry_type": "file",
-                      "size_bytes": 30347,
-                      "sha256": "30562373ec7bd10d1618f1f076f432b33cbcccc21b09d746c78b11791896ef92"
+                      "size_bytes": 30462,
+                      "sha256": "dd5723ebe7a78c67e36b210842fe3b364aa8d6c78888853fa66d77758b2bda4a"
                     },
                     {
                       "name": "trace_22layer_gpu_execution.rs",
@@ -18282,8 +18282,8 @@
       "name": "colab_train.sh",
       "rel_path": "colab_train.sh",
       "entry_type": "file",
-      "size_bytes": 5169,
-      "sha256": "081a66cb0cf3847a692396e3dde06410c35b1bc2699e0054f5f418d45b4fd6c5"
+      "size_bytes": 5503,
+      "sha256": "fdfc76f4ae42f55cee4e605c3a7170d6559db77a2d8db4eb84e41405cc746956"
     },
     {
       "name": "start.bat",

@@ -33,33 +33,40 @@ else
 fi
 echo "------------------------------------------------------------------------------"
 
+# Dynamic Step Configuration (Configurable via environment variables or sensible defaults)
+STAGE1_STEPS="${STAGE1_STEPS:-1000}"
+STAGE2_STEPS="${STAGE2_STEPS:-500}"
+STAGE3_STEPS="${STAGE3_STEPS:-200}"
+
 # 3. Execute Stage 1: Foundational Academic Curriculum Pretraining
-echo "=== [STAGE 1: FOUNDATIONAL ACADEMIC CURRICULUM TRAINING] ==="
+echo "=== [STAGE 1: FOUNDATIONAL ACADEMIC CURRICULUM TRAINING ($STAGE1_STEPS STEPS)] ==="
 cargo run --release --bin tara_training_stages -- \
     --stage 1 \
     --device auto \
     --precision auto \
     --batch-size 4 \
+    --max-steps "$STAGE1_STEPS" \
     --epochs 1
 
 echo "Stage 1 Completed Successfully!"
 
 # 4. Execute Stage 2: Ability Acquisition & Self-Evolution Training
-echo "=== [STAGE 2: ABILITY TRAINING & SELF-EVOLUTION] ==="
+echo "=== [STAGE 2: ABILITY TRAINING & SELF-EVOLUTION ($STAGE2_STEPS STEPS)] ==="
 cargo run --release --bin tara_training_stages -- \
     --stage 2 \
     --device auto \
     --precision auto \
     --batch-size 4 \
+    --max-steps "$STAGE2_STEPS" \
     --epochs 1
 
 echo "Stage 2 Completed Successfully!"
 
 # 5. Execute Neural & World Model Joint Co-Training (Mode: Both)
-echo "=== [WORLD MODEL & NEURAL JOINT CO-TRAINING (MODE: BOTH)] ==="
+echo "=== [WORLD MODEL & NEURAL JOINT CO-TRAINING ($STAGE3_STEPS STEPS)] ==="
 cargo run --release --bin manual_trainer -- \
     --mode both \
-    --steps 100 \
+    --steps "$STAGE3_STEPS" \
     --batch-size 4 \
     --dataset storage/datasets/tara_dataset_filtered/canonical
 

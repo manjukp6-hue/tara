@@ -8296,6 +8296,69 @@
       ],
       "rel_path": "rust/tara_engine/src/bin/prove_self_update.rs"
     },
+    "rust/tara_engine/src/bin/split_canonical_100.rs": {
+      "call_references": [
+        "as_bytes",
+        "create",
+        "exists",
+        "flush",
+        "found",
+        "is_empty",
+        "is_none",
+        "lines",
+        "main",
+        "take",
+        "trim"
+      ],
+      "crate_name": "tara_engine",
+      "dynamic_sha256": "9a383afb39fff11c94a00be8c5acb8a3774f1806c4922523688db2e3c3137d91",
+      "exports": [],
+      "imports": [
+        {
+          "imported_symbols": [
+            "self",
+            "File"
+          ],
+          "is_public_reexport": false,
+          "line_number": 4,
+          "raw_path": "std::fs::{self, File}"
+        },
+        {
+          "imported_symbols": [
+            "BufRead",
+            "BufReader",
+            "BufWriter",
+            "Write"
+          ],
+          "is_public_reexport": false,
+          "line_number": 5,
+          "raw_path": "std::io::{BufRead, BufReader, BufWriter, Write}"
+        },
+        {
+          "imported_symbols": [
+            "Path"
+          ],
+          "is_public_reexport": false,
+          "line_number": 6,
+          "raw_path": "std::path::Path"
+        }
+      ],
+      "in_links": [],
+      "internal_symbols": [
+        {
+          "kind": "Function",
+          "line_number": 8,
+          "name": "main",
+          "visibility": "Private"
+        }
+      ],
+      "is_test": false,
+      "lines": 68,
+      "module_path": "tara_engine::bin::split_canonical_100",
+      "modules_declared": [],
+      "out_links": [],
+      "rel_path": "rust/tara_engine/src/bin/split_canonical_100.rs"
+    },
     "rust/tara_engine/src/bin/sync_source_index.rs": {
       "call_references": [
         "Err",
@@ -48615,6 +48678,7 @@
     "tara_engine::bin::process_restart_proof": "rust/tara_engine/src/bin/process_restart_proof.rs",
     "tara_engine::bin::prove_million_scale_knowledge": "rust/tara_engine/src/bin/prove_million_scale_knowledge.rs",
     "tara_engine::bin::prove_self_update": "rust/tara_engine/src/bin/prove_self_update.rs",
+    "tara_engine::bin::split_canonical_100": "rust/tara_engine/src/bin/split_canonical_100.rs",
     "tara_engine::bin::sync_source_index": "rust/tara_engine/src/bin/sync_source_index.rs",
     "tara_engine::bin::tara_dataset_classifier": "rust/tara_engine/src/bin/tara_dataset_classifier.rs",
     "tara_engine::bin::tara_dataset_splitter": "rust/tara_engine/src/bin/tara_dataset_splitter.rs",
@@ -48969,7 +49033,7 @@
     "world_state": "rust/tara_training_system/world_model/world_state.rs"
   },
   "schema_version": "1.0.0",
-  "total_files": 239,
-  "total_modules": 582,
+  "total_files": 240,
+  "total_modules": 583,
   "total_symbols": 2172
 }

@@ -2700,6 +2700,35 @@
       "structs": [],
       "traits": []
     },
+    "rust/tara_engine/src/bin/split_canonical_100.rs": {
+      "calls": [
+        "as_bytes",
+        "create",
+        "exists",
+        "flush",
+        "found",
+        "is_empty",
+        "is_none",
+        "lines",
+        "main",
+        "take",
+        "trim"
+      ],
+      "crate": "tara_engine",
+      "dynamic_sha256": "9a383afb39fff11c94a00be8c5acb8a3774f1806c4922523688db2e3c3137d91",
+      "enums": [],
+      "functions": [
+        "main"
+      ],
+      "in_links": [],
+      "is_test": false,
+      "lines": 68,
+      "module": "tara_engine::bin::split_canonical_100",
+      "out_links": [],
+      "rel_path": "rust/tara_engine/src/bin/split_canonical_100.rs",
+      "structs": [],
+      "traits": []
+    },
     "rust/tara_engine/src/bin/sync_source_index.rs": {
       "calls": [
         "Err",
@@ -17137,5 +17166,5 @@
     }
   },
   "generated_at_utc": "2026-10-04T14:40:00Z",
-  "total_files": 239
+  "total_files": 240
 }

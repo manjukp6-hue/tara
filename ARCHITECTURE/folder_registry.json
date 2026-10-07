@@ -4078,7 +4078,7 @@
       "direct_subdirs_count": 4,
       "name": "rust",
       "rel_path": "rust",
-      "total_descendant_files_count": 240
+      "total_descendant_files_count": 241
     },
     "rust/tara_core": {
       "depth": 2,
@@ -4222,7 +4222,7 @@
       "direct_subdirs_count": 2,
       "name": "tara_engine",
       "rel_path": "rust/tara_engine",
-      "total_descendant_files_count": 66
+      "total_descendant_files_count": 67
     },
     "rust/tara_engine/src": {
       "depth": 3,
@@ -4230,15 +4230,15 @@
       "direct_subdirs_count": 5,
       "name": "src",
       "rel_path": "rust/tara_engine/src",
-      "total_descendant_files_count": 64
+      "total_descendant_files_count": 65
     },
     "rust/tara_engine/src/bin": {
       "depth": 4,
-      "direct_files_count": 21,
+      "direct_files_count": 22,
       "direct_subdirs_count": 0,
       "name": "bin",
       "rel_path": "rust/tara_engine/src/bin",
-      "total_descendant_files_count": 21
+      "total_descendant_files_count": 22
     },
     "rust/tara_engine/src/computation": {
       "depth": 4,
@@ -4689,7 +4689,7 @@
       "total_descendant_files_count": 5
     }
   },
-  "generated_at_utc": "1791364114",
+  "generated_at_utc": "1791368829",
   "schema_version": "1.0.0",
   "total_folders": 586
 }

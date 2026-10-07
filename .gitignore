@@ -79,7 +79,10 @@ downloader/
 # Weak and unverified raw datasets (User directive)
 **/weak/
 storage/datasets/**/weak/
-storage/datasets/tara_dataset_filtered/
+storage/datasets/tara_dataset_filtered/canonical_large/
+storage/datasets/tara_dataset_filtered/checkpoints/
+storage/datasets/tara_dataset_filtered/blacklist/
+storage/datasets/tara_dataset_filtered/raw/
 storage/knowledge/verified_download_pool/
 *.zip
 *.tar.gz

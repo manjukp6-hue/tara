@@ -15887,8 +15887,8 @@
           "name": "download_register.json",
           "rel_path": "downloader/download_register.json",
           "entry_type": "file",
-          "size_bytes": 2195383,
-          "sha256": "f4f238fe381d46d4682e7be825b3af79e51a32ec64ad785a9f98f746cb1dd2b3"
+          "size_bytes": 3102595,
+          "sha256": "94ba6a997d2c13143d250ff6376fdd2c1ad5468eb1e9528af878c10bf2d64038"
         },
         {
           "name": "download_register.rs",
@@ -15901,8 +15901,8 @@
           "name": "download_register.txt",
           "rel_path": "downloader/download_register.txt",
           "entry_type": "file",
-          "size_bytes": 1606612,
-          "sha256": "9d5428bbea7454e1d1b4cba229ce181d3ace803b55bfb80da45282c36772ef6a"
+          "size_bytes": 2254678,
+          "sha256": "31d2fa893d5e93d403510e98886641d6816bd502d852acad6b8028e631a3214c"
         },
         {
           "name": "downloader.rs",
@@ -15922,8 +15922,8 @@
           "name": "license_register.json",
           "rel_path": "downloader/license_register.json",
           "entry_type": "file",
-          "size_bytes": 1483698,
-          "sha256": "7dc60c8f0de49b1c03bd1f7a08623e8b62c8bcac660b337898bb41d3ac6d9c2b"
+          "size_bytes": 2482095,
+          "sha256": "909f5a0435c6d009c246c1191821bdff2ccd010d5fe864d41c4bd3519f2af9a8"
         },
         {
           "name": "license_register.rs",
@@ -15936,8 +15936,8 @@
           "name": "license_register.txt",
           "rel_path": "downloader/license_register.txt",
           "entry_type": "file",
-          "size_bytes": 945345,
-          "sha256": "d2e34782825af967ba8c2301b2882272b80a4924abf860b1aa8b8af00ce34c4d"
+          "size_bytes": 1588778,
+          "sha256": "1bd6cc7a0ab71cd751c5cde0e804f7a284e7590870fb988d2493bb2e7ff1524f"
         }
       ]
     },
@@ -16324,6 +16324,13 @@
                       "entry_type": "file",
                       "size_bytes": 17274,
                       "sha256": "288363ad8b636e66db506442a5ead6217bc4db783198a17555826fd9acf88956"
+                    },
+                    {
+                      "name": "split_canonical_100.rs",
+                      "rel_path": "rust/tara_engine/src/bin/split_canonical_100.rs",
+                      "entry_type": "file",
+                      "size_bytes": 2257,
+                      "sha256": "9a383afb39fff11c94a00be8c5acb8a3774f1806c4922523688db2e3c3137d91"
                     },
                     {
                       "name": "sync_source_index.rs",
@@ -18233,8 +18240,8 @@
       "name": ".gitignore",
       "rel_path": ".gitignore",
       "entry_type": "file",
-      "size_bytes": 1456,
-      "sha256": "cc099415de23a4947e938368106fda4f111a9a2b673717e60d28d0fd647b3b33"
+      "size_bytes": 1618,
+      "sha256": "28d1fb8cfa95113eb442152f7f210b6debc6ff7f16d2ae86e546d212720495cf"
     },
     {
       "name": "AGENTS.md",

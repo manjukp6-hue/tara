@@ -4494,6 +4494,7 @@
         "dlerror",
         "download_f32",
         "download_f32_slice",
+        "download_u32",
         "driver_version",
         "drop",
         "error",
@@ -4528,10 +4529,11 @@
         "to_string_lossy",
         "upload_f32",
         "upload_f32_slice",
+        "upload_u32",
         "var"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "1995822628020687a54fcc6624bbaa1b2bb7b5d1da3aac36fceb8fc05b477997",
+      "dynamic_sha256": "67675e59456f33aff4488621a02972e60917aecaa8ab2e47f1a5177e2ff69187",
       "enums": [
         "CudaError"
       ],
@@ -4551,6 +4553,7 @@
         "dlsym",
         "download_f32",
         "download_f32_slice",
+        "download_u32",
         "driver_version",
         "drop",
         "get_device_info",
@@ -4562,14 +4565,15 @@
         "memcpy_dtod",
         "synchronize",
         "upload_f32",
-        "upload_f32_slice"
+        "upload_f32_slice",
+        "upload_u32"
       ],
       "in_links": [
         "rust/tara_engine/src/cuda/gpu_trainer.rs",
         "rust/tara_engine/src/cuda/mod.rs"
       ],
       "is_test": false,
-      "lines": 671,
+      "lines": 703,
       "module": "tara_engine::cuda::driver",
       "out_links": [],
       "rel_path": "rust/tara_engine/src/cuda/driver.rs",
@@ -4589,14 +4593,12 @@
         "KernelError",
         "accumulate_gradient",
         "add_residual",
-        "as_ptr",
         "as_ref",
         "as_str",
         "backward_linear",
         "backward_lm_head",
         "backward_lm_head_f16",
         "backward_lm_head_fp32",
-        "clear",
         "clone",
         "cloned",
         "collect",
@@ -4604,6 +4606,7 @@
         "download_f32",
         "download_weights",
         "embedding_bwd_kernel",
+        "enumerate",
         "export_optimizer_state",
         "forward_embedding",
         "forward_linear",
@@ -4632,6 +4635,7 @@
         "null_mut",
         "ok_or_else",
         "or_else",
+        "pack_f16_to_u32",
         "precision",
         "register_weights",
         "scale_accumulated_gradients",
@@ -4641,16 +4645,18 @@
         "sum",
         "swiglu_bwd_kernel",
         "synchronize",
+        "to_bits",
         "to_lowercase",
         "trim",
         "unwrap",
         "unwrap_or_else",
         "upload_f32",
+        "upload_u32",
         "values",
         "vec"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "87e55ce71551d899d7ee4d4f57caf981ecf97f206dc69091be5fa5fffc1d4e0d",
+      "dynamic_sha256": "389d2da6225cd07a343a0f3dc79654dde2485d379595e2ccf31d1f4f5a7435ee",
       "enums": [
         "TrainingPrecision"
       ],
@@ -4679,18 +4685,20 @@
         "module_handle",
         "new",
         "new_with_precision",
+        "pack_f16_to_u32",
         "precision",
         "register_weights",
         "scale_accumulated_gradients",
         "set_step_count",
         "step_adamw",
-        "swiglu_bwd_kernel"
+        "swiglu_bwd_kernel",
+        "unpack_u32_to_f16"
       ],
       "in_links": [
         "rust/tara_engine/src/cuda/mod.rs"
       ],
       "is_test": false,
-      "lines": 1356,
+      "lines": 1532,
       "module": "tara_engine::cuda::gpu_trainer",
       "out_links": [
         "rust/tara_engine/src/cuda/driver.rs",
@@ -4710,7 +4718,9 @@
         "adamw_step_kernel",
         "adamw_step_mixed_f16_kernel",
         "embedding_bwd_kernel",
+        "embedding_fwd_f16_kernel",
         "embedding_fwd_kernel",
+        "grad_norm_sq_kernel",
         "lm_head_bwd_input_f16_kernel",
         "lm_head_bwd_input_kernel",
         "lm_head_bwd_weight_f16_kernel",
@@ -4725,7 +4735,7 @@
         "swiglu_fwd_kernel"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "57f21f7d7eebce5cf6334f1de78785affe40d6d126d7195dc6a55d87ca751940",
+      "dynamic_sha256": "8a65f6e01a0fecd528bf9ab5ac8d84c38831f64b7af2103d8c6cddb15d4279bb",
       "enums": [],
       "functions": [],
       "in_links": [
@@ -4733,7 +4743,7 @@
         "rust/tara_engine/src/cuda/mod.rs"
       ],
       "is_test": false,
-      "lines": 1111,
+      "lines": 1223,
       "module": "tara_engine::cuda::kernels",
       "out_links": [],
       "rel_path": "rust/tara_engine/src/cuda/kernels.rs",

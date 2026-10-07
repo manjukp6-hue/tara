@@ -36,6 +36,36 @@ impl std::str::FromStr for TrainingPrecision {
     }
 }
 
+/// Safely packs f16 values into u32 words without out-of-bounds pointer reads or UB.
+pub fn pack_f16_to_u32(values: &[f16]) -> Vec<u32> {
+    let num_words = values.len().div_ceil(2);
+    let mut out = vec![0u32; num_words];
+    for (i, &v) in values.iter().enumerate() {
+        let bits = v.to_bits() as u32;
+        if i % 2 == 0 {
+            out[i / 2] |= bits;
+        } else {
+            out[i / 2] |= bits << 16;
+        }
+    }
+    out
+}
+
+/// Safely unpacks u32 words into f16 values.
+pub fn unpack_u32_to_f16(packed: &[u32], len: usize) -> Vec<f16> {
+    let mut out = Vec::with_capacity(len);
+    for i in 0..len {
+        let word = packed[i / 2];
+        let bits = if i % 2 == 0 {
+            (word & 0xFFFF) as u16
+        } else {
+            ((word >> 16) & 0xFFFF) as u16
+        };
+        out.push(f16::from_bits(bits));
+    }
+    out
+}
+
 pub type OptimizerStateMap = HashMap<String, (Vec<f32>, Vec<f32>)>;
 
 pub struct GpuParamState {
@@ -73,11 +103,13 @@ pub struct CudaTrainer {
     k_lm_bwd_input_f16: CudaKernel,
     // Transformer Layer Kernels
     k_emb_fwd: CudaKernel,
+    k_emb_fwd_f16: CudaKernel,
     k_emb_bwd: CudaKernel,
     k_rms_fwd: CudaKernel,
     k_swiglu_fwd: CudaKernel,
     k_swiglu_bwd: CudaKernel,
     k_res_add: CudaKernel,
+    k_norm_sq: CudaKernel,
     module: CudaModuleHandle,
     step_count: u64,
     // Context session (must drop LAST after all device resources are freed)
@@ -86,7 +118,7 @@ pub struct CudaTrainer {
 
 impl CudaTrainer {
     pub fn new(device_ordinal: i32) -> Result<Self, CudaError> {
-        Self::new_with_precision(device_ordinal, TrainingPrecision::Fp32)
+        Self::new_with_precision(device_ordinal, TrainingPrecision::Auto)
     }
 
     pub fn new_with_precision(
@@ -95,6 +127,21 @@ impl CudaTrainer {
     ) -> Result<Self, CudaError> {
         let session = CudaSession::init(device_ordinal)?;
         let module = session.load_ptx_module(PTX_TARA_KERNELS)?;
+
+        // Dynamically resolve Auto precision based on hardware capability
+        let resolved_precision = match precision {
+            TrainingPrecision::Auto => {
+                let info = session.device();
+                let (major, minor) = info.compute_capability;
+                // Tesla T4 is compute capability 7.5 (Turing). GPUs with CC >= 5.3 have native FP16 support
+                if major > 5 || (major == 5 && minor >= 3) {
+                    TrainingPrecision::Fp16
+                } else {
+                    TrainingPrecision::Fp32
+                }
+            }
+            other => other,
+        };
 
         // Load FP32 kernels
         let k_accum_grads = module.get_kernel("accum_grads_kernel")?;
@@ -112,15 +159,17 @@ impl CudaTrainer {
 
         // Load Transformer Layer kernels
         let k_emb_fwd = module.get_kernel("embedding_fwd_kernel")?;
+        let k_emb_fwd_f16 = module.get_kernel("embedding_fwd_f16_kernel")?;
         let k_emb_bwd = module.get_kernel("embedding_bwd_kernel")?;
         let k_rms_fwd = module.get_kernel("rmsnorm_fwd_kernel")?;
         let k_swiglu_fwd = module.get_kernel("swiglu_fwd_kernel")?;
         let k_swiglu_bwd = module.get_kernel("swiglu_bwd_kernel")?;
         let k_res_add = module.get_kernel("residual_add_kernel")?;
+        let k_norm_sq = module.get_kernel("grad_norm_sq_kernel")?;
 
         Ok(Self {
             params: HashMap::new(),
-            precision,
+            precision: resolved_precision,
             h_weights: HashMap::new(),
             h_m: HashMap::new(),
             h_v: HashMap::new(),
@@ -139,11 +188,13 @@ impl CudaTrainer {
             k_lm_bwd_weight_f16,
             k_lm_bwd_input_f16,
             k_emb_fwd,
+            k_emb_fwd_f16,
             k_emb_bwd,
             k_rms_fwd,
             k_swiglu_fwd,
             k_swiglu_bwd,
             k_res_add,
+            k_norm_sq,
             module,
             step_count: 0,
             session,
@@ -173,13 +224,10 @@ impl CudaTrainer {
         &mut self,
         weights: &HashMap<String, Vec<f32>>,
     ) -> Result<(), CudaError> {
-        self.params.clear();
-        self.h_weights.clear();
-        self.h_m.clear();
-        self.h_v.clear();
-        self.d_chunk_w = None;
-        self.d_chunk_m = None;
-        self.d_chunk_v = None;
+        let mut new_params = HashMap::new();
+        let mut new_h_weights = HashMap::new();
+        let mut new_h_m = HashMap::new();
+        let mut new_h_v = HashMap::new();
 
         let is_f16 = self.precision == TrainingPrecision::Fp16;
         let total_elements: usize = weights.values().map(|v| v.len()).sum();
@@ -188,48 +236,70 @@ impl CudaTrainer {
         let naive_bytes_needed = total_elements * 16; // 4B master + 4B m + 4B v + 4B grad / f16 weights
 
         // Stream optimizer states when VRAM would be overcommitted
-        self.stream_optimizer = naive_bytes_needed > (free_vram * 5) / 10;
+        let stream_opt = naive_bytes_needed > (free_vram * 5) / 10;
 
-        if self.stream_optimizer {
+        let (chunk_w, chunk_m, chunk_v) = if stream_opt {
             let max_tensor_len = weights.values().map(|v| v.len()).max().unwrap_or(0);
-            self.d_chunk_w = Some(self.session.allocate_f32(max_tensor_len)?);
-            self.d_chunk_m = Some(self.session.allocate_f32(max_tensor_len)?);
-            self.d_chunk_v = Some(self.session.allocate_f32(max_tensor_len)?);
-        }
+            (
+                Some(self.session.allocate_f32(max_tensor_len)?),
+                Some(self.session.allocate_f32(max_tensor_len)?),
+                Some(self.session.allocate_f32(max_tensor_len)?),
+            )
+        } else {
+            (None, None, None)
+        };
 
         for (name, vals) in weights {
             let len = vals.len();
 
-            let (d_weight, d_m, d_v) = if self.stream_optimizer {
-                self.h_weights.insert(name.clone(), vals.clone());
-                self.h_m.insert(name.clone(), vec![0.0f32; len]);
-                self.h_v.insert(name.clone(), vec![0.0f32; len]);
-                (None, None, None)
+            let (d_weight, d_m, d_v) = if is_f16 {
+                // In FP16 mode: master weights and moments can be streamed from host when memory-constrained
+                if stream_opt {
+                    new_h_weights.insert(name.clone(), vals.clone());
+                    new_h_m.insert(name.clone(), vec![0.0f32; len]);
+                    new_h_v.insert(name.clone(), vec![0.0f32; len]);
+                    (None, None, None)
+                } else {
+                    let dw = self.session.allocate_f32(len)?;
+                    self.session.upload_f32(&dw, vals)?;
+                    let dm = self.session.allocate_f32(len)?;
+                    let dv = self.session.allocate_f32(len)?;
+                    let zeros = vec![0.0f32; len];
+                    self.session.upload_f32(&dm, &zeros)?;
+                    self.session.upload_f32(&dv, &zeros)?;
+                    (Some(dw), Some(dm), Some(dv))
+                }
             } else {
+                // In FP32 mode: model weights MUST always reside on GPU for forward/backward computation
                 let dw = self.session.allocate_f32(len)?;
                 self.session.upload_f32(&dw, vals)?;
-                let dm = self.session.allocate_f32(len)?;
-                let dv = self.session.allocate_f32(len)?;
-                let zeros = vec![0.0f32; len];
-                self.session.upload_f32(&dm, &zeros)?;
-                self.session.upload_f32(&dv, &zeros)?;
-                (Some(dw), Some(dm), Some(dv))
+
+                if stream_opt {
+                    new_h_m.insert(name.clone(), vec![0.0f32; len]);
+                    new_h_v.insert(name.clone(), vec![0.0f32; len]);
+                    (Some(dw), None, None)
+                } else {
+                    let dm = self.session.allocate_f32(len)?;
+                    let dv = self.session.allocate_f32(len)?;
+                    let zeros = vec![0.0f32; len];
+                    self.session.upload_f32(&dm, &zeros)?;
+                    self.session.upload_f32(&dv, &zeros)?;
+                    (Some(dw), Some(dm), Some(dv))
+                }
             };
 
             let (d_weight_f16, d_grad) = if is_f16 {
-                // FP16 model weight buffer: (len + 1) / 2 floats = len * 2 bytes
+                // FP16 model weight buffer: packed u32 words = len.div_ceil(2)
                 let f16_elements = len.div_ceil(2);
                 let d_wf16 = self.session.allocate_f32(f16_elements)?;
                 // Gradient buffer is kept strictly in FP32 to prevent underflow and preserve precision
                 let d_g = self.session.allocate_f32(len)?;
 
-                // Convert FP32 values to FP16 bytes and upload
+                // Safe conversion and packing without undefined behavior
                 let h_f16: Vec<f16> = vals.iter().map(|&x| f16::from_f32(x)).collect();
-                unsafe {
-                    let ptr = h_f16.as_ptr() as *const f32;
-                    let slice = std::slice::from_raw_parts(ptr, f16_elements);
-                    self.session.upload_f32(&d_wf16, slice)?;
-                }
+                let packed = pack_f16_to_u32(&h_f16);
+                self.session.upload_u32(&d_wf16, &packed)?;
+
                 let zeros = vec![0.0f32; len];
                 self.session.upload_f32(&d_g, &zeros)?;
 
@@ -241,7 +311,7 @@ impl CudaTrainer {
                 (None, d_g)
             };
 
-            self.params.insert(
+            new_params.insert(
                 name.clone(),
                 GpuParamState {
                     d_weight,
@@ -253,7 +323,19 @@ impl CudaTrainer {
                 },
             );
         }
+
         self.session.synchronize()?;
+
+        // Atomic swap: only update trainer state once all GPU allocations succeed
+        self.params = new_params;
+        self.h_weights = new_h_weights;
+        self.h_m = new_h_m;
+        self.h_v = new_h_v;
+        self.d_chunk_w = chunk_w;
+        self.d_chunk_m = chunk_m;
+        self.d_chunk_v = chunk_v;
+        self.stream_optimizer = stream_opt;
+
         Ok(())
     }
 
@@ -343,18 +425,15 @@ impl CudaTrainer {
             CudaError::KernelError("FP16 model weight buffer not initialized".into())
         })?;
 
-        // Allocate FP16 input buffer: (seq_len * hs + 1) / 2 floats
+        // Allocate FP16 input buffer: (seq_len * hs + 1) / 2 floats = packed u32 words
         let normed_f16_elems = (seq_len * hs).div_ceil(2);
         let d_normed = self.session.allocate_f32(normed_f16_elems)?;
         let d_logits = self.session.allocate_f32(seq_len * vs)?; // FP32 logits output
 
-        // Convert input to FP16 and upload
+        // Convert input to FP16 and safely upload without UB
         let h_normed_f16: Vec<f16> = final_normed.iter().map(|&x| f16::from_f32(x)).collect();
-        unsafe {
-            let ptr = h_normed_f16.as_ptr() as *const f32;
-            let slice = std::slice::from_raw_parts(ptr, normed_f16_elems);
-            self.session.upload_f32(&d_normed, slice)?;
-        }
+        let packed = pack_f16_to_u32(&h_normed_f16);
+        self.session.upload_u32(&d_normed, &packed)?;
 
         let total = (seq_len * vs) as u32;
         let block_dim = 128u32;
@@ -532,18 +611,14 @@ impl CudaTrainer {
         let d_dlm = self.session.allocate_f32(total_w)?;
         let d_dnormed = self.session.allocate_f32(total_in)?;
 
-        // Upload FP16 inputs
+        // Upload FP16 inputs safely without UB
         let h_dlog_f16: Vec<f16> = d_logits.iter().map(|&x| f16::from_f32(x)).collect();
-        let h_norm_f16: Vec<f16> = final_normed.iter().map(|&x| f16::from_f32(x)).collect();
-        unsafe {
-            let p1 = h_dlog_f16.as_ptr() as *const f32;
-            let s1 = std::slice::from_raw_parts(p1, dlog_elems);
-            self.session.upload_f32(&d_dlogits, s1)?;
+        let packed_dlog = pack_f16_to_u32(&h_dlog_f16);
+        self.session.upload_u32(&d_dlogits, &packed_dlog)?;
 
-            let p2 = h_norm_f16.as_ptr() as *const f32;
-            let s2 = std::slice::from_raw_parts(p2, norm_elems);
-            self.session.upload_f32(&d_normed, s2)?;
-        }
+        let h_norm_f16: Vec<f16> = final_normed.iter().map(|&x| f16::from_f32(x)).collect();
+        let packed_norm = pack_f16_to_u32(&h_norm_f16);
+        self.session.upload_u32(&d_normed, &packed_norm)?;
 
         let block_dim = 128u32;
 
@@ -629,24 +704,26 @@ impl CudaTrainer {
                     "model.embed_tokens.weight not found in GPU parameters".into(),
                 )
             })?;
-        let dptr_embed = if self.precision == TrainingPrecision::Fp16 {
+
+        let is_f16 = self.precision == TrainingPrecision::Fp16;
+        let dptr_embed = if is_f16 {
             embed_param
                 .d_weight_f16
                 .as_ref()
                 .map(|b| b.dptr)
-                .or_else(|| embed_param.d_weight.as_ref().map(|b| b.dptr))
-                .unwrap_or(0)
+                .ok_or_else(|| CudaError::KernelError("FP16 embedding table not initialized".into()))?
         } else {
-            embed_param.d_weight.as_ref().map(|b| b.dptr).unwrap_or(0)
+            embed_param
+                .d_weight
+                .as_ref()
+                .map(|b| b.dptr)
+                .ok_or_else(|| CudaError::KernelError("FP32 embedding table not initialized".into()))?
         };
 
         let d_tokens = self.session.allocate_f32(seq_len)?;
         let d_out = self.session.allocate_f32(seq_len * hs)?;
 
-        unsafe {
-            let slice = std::slice::from_raw_parts(tokens.as_ptr() as *const f32, seq_len);
-            self.session.upload_f32(&d_tokens, slice)?;
-        }
+        self.session.upload_u32(&d_tokens, tokens)?;
 
         let total = (seq_len * hs) as u32;
         let block_dim = 128u32;
@@ -678,8 +755,13 @@ impl CudaTrainer {
         ];
 
         unsafe {
-            self.k_emb_fwd
-                .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 5)?;
+            if is_f16 {
+                self.k_emb_fwd_f16
+                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 5)?;
+            } else {
+                self.k_emb_fwd
+                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 5)?;
+            }
         }
         self.session.synchronize()?;
 
@@ -703,7 +785,20 @@ impl CudaTrainer {
                 weight_name
             ))
         })?;
-        let dptr_w = weight_param.d_weight.as_ref().map(|b| b.dptr).unwrap_or(0);
+        let dptr_w = if self.precision == TrainingPrecision::Fp16 {
+            weight_param
+                .d_weight_f16
+                .as_ref()
+                .map(|b| b.dptr)
+                .or_else(|| weight_param.d_weight.as_ref().map(|b| b.dptr))
+                .ok_or_else(|| CudaError::KernelError(format!("Weight buffer for '{weight_name}' not found")))?
+        } else {
+            weight_param
+                .d_weight
+                .as_ref()
+                .map(|b| b.dptr)
+                .ok_or_else(|| CudaError::KernelError(format!("Weight buffer for '{weight_name}' not found")))?
+        };
 
         let d_in = self.session.allocate_f32(seq_len * hs)?;
         let d_out = self.session.allocate_f32(seq_len * hs)?;
@@ -765,7 +860,22 @@ impl CudaTrainer {
                 weight_name
             ))
         })?;
-        let dptr_w = weight_param.d_weight.as_ref().map(|b| b.dptr).unwrap_or(0);
+
+        let is_f16 = self.precision == TrainingPrecision::Fp16;
+        let (dptr_w, is_f16_buf) = if is_f16 {
+            if let Some(ref bw16) = weight_param.d_weight_f16 {
+                (bw16.dptr, true)
+            } else if let Some(ref bw) = weight_param.d_weight {
+                (bw.dptr, false)
+            } else {
+                return Err(CudaError::KernelError(format!("Weight '{weight_name}' has no GPU buffer")));
+            }
+        } else {
+            let dw = weight_param.d_weight.as_ref().ok_or_else(|| {
+                CudaError::KernelError(format!("Weight '{weight_name}' has no GPU buffer"))
+            })?;
+            (dw.dptr, false)
+        };
 
         let d_in = self.session.allocate_f32(seq_len * in_dim)?;
         let d_out = self.session.allocate_f32(seq_len * out_dim)?;
@@ -803,8 +913,13 @@ impl CudaTrainer {
         ];
 
         unsafe {
-            self.k_lm_fwd
-                .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 6)?;
+            if is_f16_buf {
+                self.k_lm_fwd_f16
+                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 6)?;
+            } else {
+                self.k_lm_fwd
+                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 6)?;
+            }
         }
         self.session.synchronize()?;
 
@@ -829,7 +944,22 @@ impl CudaTrainer {
                 weight_name
             ))
         })?;
-        let dptr_w = weight_param.d_weight.as_ref().map(|b| b.dptr).unwrap_or(0);
+
+        let is_f16 = self.precision == TrainingPrecision::Fp16;
+        let (dptr_w, is_f16_buf) = if is_f16 {
+            if let Some(ref bw16) = weight_param.d_weight_f16 {
+                (bw16.dptr, true)
+            } else if let Some(ref bw) = weight_param.d_weight {
+                (bw.dptr, false)
+            } else {
+                return Err(CudaError::KernelError(format!("Weight '{weight_name}' has no GPU buffer")));
+            }
+        } else {
+            let dw = weight_param.d_weight.as_ref().ok_or_else(|| {
+                CudaError::KernelError(format!("Weight '{weight_name}' has no GPU buffer"))
+            })?;
+            (dw.dptr, false)
+        };
 
         let d_dout = self.session.allocate_f32(seq_len * out_dim)?;
         let d_in = self.session.allocate_f32(seq_len * in_dim)?;
@@ -870,8 +1000,13 @@ impl CudaTrainer {
             std::ptr::null_mut(),
         ];
         unsafe {
-            self.k_lm_bwd_weight
-                .launch((grid_w, 1, 1), (block_dim, 1, 1), 0, params_w, 6)?;
+            if is_f16_buf {
+                self.k_lm_bwd_weight_f16
+                    .launch((grid_w, 1, 1), (block_dim, 1, 1), 0, params_w, 6)?;
+            } else {
+                self.k_lm_bwd_weight
+                    .launch((grid_w, 1, 1), (block_dim, 1, 1), 0, params_w, 6)?;
+            }
         }
 
         // 2. d_input: [seq_len, in_dim]
@@ -899,8 +1034,13 @@ impl CudaTrainer {
             std::ptr::null_mut(),
         ];
         unsafe {
-            self.k_lm_bwd_input
-                .launch((grid_in, 1, 1), (block_dim, 1, 1), 0, params_in, 6)?;
+            if is_f16_buf {
+                self.k_lm_bwd_input_f16
+                    .launch((grid_in, 1, 1), (block_dim, 1, 1), 0, params_in, 6)?;
+            } else {
+                self.k_lm_bwd_input
+                    .launch((grid_in, 1, 1), (block_dim, 1, 1), 0, params_in, 6)?;
+            }
         }
 
         self.session.synchronize()?;
@@ -1009,28 +1149,37 @@ impl CudaTrainer {
 
     /// Accumulate a batch sample gradient into the GPU gradient buffer.
     pub fn accumulate_gradient(&self, name: &str, grad: &[f32]) -> Result<(), CudaError> {
-        if let Some(param) = self.params.get(name) {
-            let block_dim = 128u32;
-            let grid_dim = (param.len as u32).div_ceil(block_dim);
-
-            // Gradients are always accumulated in FP32 to prevent underflow and preserve precision
-            let d_sample = self.session.allocate_f32(grad.len())?;
-            self.session.upload_f32(&d_sample, grad)?;
-
-            let mut arg_accum = param.d_grad.dptr;
-            let mut arg_sample = d_sample.dptr;
-            let mut arg_n = param.len as u32;
-
-            let mut params = [std::ptr::null_mut(); 16];
-            params[0] = &mut arg_accum as *mut u64 as *mut c_void;
-            params[1] = &mut arg_sample as *mut u64 as *mut c_void;
-            params[2] = &mut arg_n as *mut u32 as *mut c_void;
-            unsafe {
-                self.k_accum_grads
-                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
-            }
-            self.session.synchronize()?;
+        let param = self.params.get(name).ok_or_else(|| {
+            CudaError::KernelError(format!("Parameter '{name}' not found on GPU"))
+        })?;
+        if grad.len() != param.len {
+            return Err(CudaError::KernelError(format!(
+                "Gradient length mismatch for '{name}': expected {}, got {}",
+                param.len,
+                grad.len()
+            )));
         }
+
+        let block_dim = 128u32;
+        let grid_dim = (param.len as u32).div_ceil(block_dim);
+
+        // Gradients are always accumulated in FP32 to prevent underflow and preserve precision
+        let d_sample = self.session.allocate_f32(grad.len())?;
+        self.session.upload_f32(&d_sample, grad)?;
+
+        let mut arg_accum = param.d_grad.dptr;
+        let mut arg_sample = d_sample.dptr;
+        let mut arg_n = param.len as u32;
+
+        let mut params = [std::ptr::null_mut(); 16];
+        params[0] = &mut arg_accum as *mut u64 as *mut c_void;
+        params[1] = &mut arg_sample as *mut u64 as *mut c_void;
+        params[2] = &mut arg_n as *mut u32 as *mut c_void;
+        unsafe {
+            self.k_accum_grads
+                .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
+        }
+        self.session.synchronize()?;
         Ok(())
     }
 
@@ -1069,30 +1218,51 @@ impl CudaTrainer {
         weight_decay: f32,
         max_grad_norm: f32,
     ) -> Result<(), CudaError> {
+        // High-performance GPU-side global norm reduction: sum of squares across all parameters
+        let d_out_sq = self.session.allocate_f32(1)?;
+        let zero_sq = [0.0f32];
+        self.session.upload_f32(&d_out_sq, &zero_sq)?;
+
+        let block_dim = 128u32;
+        for param in self.params.values() {
+            let grid_dim = (param.len as u32).div_ceil(block_dim);
+            let mut arg_grad = param.d_grad.dptr;
+            let mut arg_out_sq = d_out_sq.dptr;
+            let mut arg_n = param.len as u32;
+
+            let mut params = [std::ptr::null_mut(); 16];
+            params[0] = &mut arg_grad as *mut u64 as *mut c_void;
+            params[1] = &mut arg_out_sq as *mut u64 as *mut c_void;
+            params[2] = &mut arg_n as *mut u32 as *mut c_void;
+
+            unsafe {
+                self.k_norm_sq
+                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
+            }
+        }
+        self.session.synchronize()?;
+
+        let mut host_sq = [0.0f32];
+        self.session.download_f32(&d_out_sq, &mut host_sq)?;
+        let total_norm_sq = host_sq[0];
+        let total_norm = total_norm_sq.sqrt();
+
+        // Non-finite gradient safeguard: if NaN or Inf, zero gradients, do NOT update weights, do NOT increment step_count!
+        if !total_norm.is_finite() {
+            eprintln!("[CUDA AdamW] Non-finite global gradient norm ({total_norm}) detected. Skipping optimizer step.");
+            for param in self.params.values() {
+                let zeros = vec![0.0f32; param.len];
+                self.session.upload_f32(&param.d_grad, &zeros)?;
+            }
+            return Ok(());
+        }
+
+        // Only increment step_count once gradients are confirmed finite!
         self.step_count += 1;
         let bc1 = 1.0 - beta1.powi(self.step_count as i32);
         let bc2 = 1.0 - beta2.powi(self.step_count as i32);
         let is_f16 = self.precision == TrainingPrecision::Fp16;
 
-        // Compute global gradient norm in pure FP32 and guard against non-finite values
-        let mut total_norm_sq = 0.0f32;
-        for param in self.params.values() {
-            let mut host_grads = vec![0.0f32; param.len];
-            self.session.download_f32(&param.d_grad, &mut host_grads)?;
-            for &g in &host_grads {
-                if !g.is_finite() {
-                    // Non-finite gradient detected (NaN or Inf), safely clear and abort step
-                    let zeros = vec![0.0f32; param.len];
-                    self.session.upload_f32(&param.d_grad, &zeros)?;
-                    return Ok(());
-                }
-                total_norm_sq += g * g;
-            }
-        }
-        let total_norm = total_norm_sq.sqrt();
-        if !total_norm.is_finite() {
-            return Ok(());
-        }
         let clip_scale = if total_norm > max_grad_norm && total_norm > 0.0 {
             max_grad_norm / total_norm
         } else {
@@ -1312,23 +1482,29 @@ impl CudaTrainer {
 
     /// Restore optimizer states (m, v) when resuming from a checkpoint.
     pub fn load_optimizer_state(&mut self, state: &OptimizerStateMap) -> Result<(), CudaError> {
-        if self.stream_optimizer {
-            for (name, (m, v)) in state {
+        for (name, (m, v)) in state {
+            let param = self.params.get(name).ok_or_else(|| {
+                CudaError::KernelError(format!("Optimizer state parameter '{name}' not found on GPU"))
+            })?;
+            if m.len() != param.len || v.len() != param.len {
+                return Err(CudaError::KernelError(format!(
+                    "Optimizer state length mismatch for '{name}': param.len={}, m.len={}, v.len={}",
+                    param.len,
+                    m.len(),
+                    v.len()
+                )));
+            }
+
+            if self.stream_optimizer {
                 if let Some(hm) = self.h_m.get_mut(name) {
                     *hm = m.clone();
                 }
                 if let Some(hv) = self.h_v.get_mut(name) {
                     *hv = v.clone();
                 }
-            }
-        } else {
-            for (name, (m, v)) in state {
-                if let Some(param) = self.params.get(name) {
-                    if let (Some(ref dm), Some(ref dv)) = (&param.d_m, &param.d_v) {
-                        self.session.upload_f32(dm, m)?;
-                        self.session.upload_f32(dv, v)?;
-                    }
-                }
+            } else if let (Some(ref dm), Some(ref dv)) = (&param.d_m, &param.d_v) {
+                self.session.upload_f32(dm, m)?;
+                self.session.upload_f32(dv, v)?;
             }
         }
         Ok(())

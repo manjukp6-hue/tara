@@ -16534,22 +16534,22 @@
                       "name": "driver.rs",
                       "rel_path": "rust/tara_engine/src/cuda/driver.rs",
                       "entry_type": "file",
-                      "size_bytes": 22819,
-                      "sha256": "1995822628020687a54fcc6624bbaa1b2bb7b5d1da3aac36fceb8fc05b477997"
+                      "size_bytes": 23907,
+                      "sha256": "67675e59456f33aff4488621a02972e60917aecaa8ab2e47f1a5177e2ff69187"
                     },
                     {
                       "name": "gpu_trainer.rs",
                       "rel_path": "rust/tara_engine/src/cuda/gpu_trainer.rs",
                       "entry_type": "file",
-                      "size_bytes": 50507,
-                      "sha256": "87e55ce71551d899d7ee4d4f57caf981ecf97f206dc69091be5fa5fffc1d4e0d"
+                      "size_bytes": 57423,
+                      "sha256": "389d2da6225cd07a343a0f3dc79654dde2485d379595e2ccf31d1f4f5a7435ee"
                     },
                     {
                       "name": "kernels.rs",
                       "rel_path": "rust/tara_engine/src/cuda/kernels.rs",
                       "entry_type": "file",
-                      "size_bytes": 26167,
-                      "sha256": "57f21f7d7eebce5cf6334f1de78785affe40d6d126d7195dc6a55d87ca751940"
+                      "size_bytes": 28736,
+                      "sha256": "8a65f6e01a0fecd528bf9ab5ac8d84c38831f64b7af2103d8c6cddb15d4279bb"
                     },
                     {
                       "name": "mod.rs",

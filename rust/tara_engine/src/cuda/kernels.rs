@@ -829,6 +829,56 @@ $EMB_FWD_DONE:
     ret;
 }
 
+// 13b. FP16 Embedding Forward: out[t * hs + h] = cvt.f32.f16(embed_weight_f16[tokens[t] * hs + h])
+.visible .entry embedding_fwd_f16_kernel(
+    .param .u64 p_tokens,
+    .param .u64 p_embed_f16,
+    .param .u64 p_out,
+    .param .u32 p_seq_len,
+    .param .u32 p_hs
+) {
+    .reg .pred %p;
+    .reg .b16 %h0;
+    .reg .b32 %r<10>;
+    .reg .b64 %rd<10>;
+    .reg .f32 %f0;
+
+    mov.u32 %r0, %ctaid.x;
+    mov.u32 %r1, %ntid.x;
+    mov.u32 %r2, %tid.x;
+    mad.lo.s32 %r3, %r0, %r1, %r2;
+
+    ld.param.u32 %r4, [p_seq_len];
+    ld.param.u32 %r5, [p_hs];
+    mul.lo.u32 %r6, %r4, %r5;
+    setp.ge.u32 %p, %r3, %r6;
+    @%p bra $EMB_FWD_F16_DONE;
+
+    div.u32 %r7, %r3, %r5;
+    rem.u32 %r8, %r3, %r5;
+
+    ld.param.u64 %rd0, [p_tokens];
+    mul.wide.u32 %rd1, %r7, 4;
+    add.u64 %rd2, %rd0, %rd1;
+    ld.global.u32 %r9, [%rd2];
+
+    mul.lo.u32 %r0, %r9, %r5;
+    add.u32 %r0, %r0, %r8;
+    mul.wide.u32 %rd3, %r0, 2;
+    ld.param.u64 %rd4, [p_embed_f16];
+    add.u64 %rd5, %rd4, %rd3;
+    ld.global.b16 %h0, [%rd5];
+    cvt.f32.f16 %f0, %h0;
+
+    ld.param.u64 %rd6, [p_out];
+    mul.wide.u32 %rd7, %r3, 4;
+    add.u64 %rd8, %rd6, %rd7;
+    st.global.f32 [%rd8], %f0;
+
+$EMB_FWD_F16_DONE:
+    ret;
+}
+
 // 14. Embedding Backward: d_embed[tokens[t] * hs + h] += d_hidden[t * hs + h]
 .visible .entry embedding_bwd_kernel(
     .param .u64 p_tokens,
@@ -1106,6 +1156,68 @@ $SWIGLU_BWD_DONE:
     st.global.f32 [%rd6], %f2;
 
 $RES_ADD_DONE:
+    ret;
+}
+
+// 23. Global Gradient Norm Reduction Kernel (block reduction and atomic add for sum of squares)
+.visible .entry grad_norm_sq_kernel(
+    .param .u64 p_grad,
+    .param .u64 p_out_sq,
+    .param .u32 p_n
+) {
+    .reg .pred %p;
+    .reg .b32 %r<5>;
+    .reg .b64 %rd<5>;
+    .reg .f32 %f<5>;
+    .shared .f32 sdata[128];
+
+    mov.u32 %r0, %ctaid.x;
+    mov.u32 %r1, %ntid.x;
+    mov.u32 %r2, %tid.x;
+    mad.lo.s32 %r3, %r0, %r1, %r2;
+
+    ld.param.u32 %r4, [p_n];
+    setp.ge.u32 %p, %r3, %r4;
+
+    mov.f32 %f0, 0.0;
+    @%p bra $NORM_REDUCE_STORE;
+
+    ld.param.u64 %rd1, [p_grad];
+    mul.wide.u32 %rd2, %r3, 4;
+    add.u64 %rd3, %rd1, %rd2;
+    ld.global.f32 %f1, [%rd3];
+    mul.f32 %f0, %f1, %f1;
+
+$NORM_REDUCE_STORE:
+    mul.wide.u32 %rd4, %r2, 4;
+    mov.u64 %rd0, sdata;
+    add.u64 %rd0, %rd0, %rd4;
+    st.shared.f32 [%rd0], %f0;
+    bar.sync 0;
+
+    setp.ne.u32 %p, %r2, 0;
+    @%p bra $NORM_REDUCE_DONE;
+
+    mov.f32 %f2, 0.0;
+    mov.u32 %r0, 0;
+
+$NORM_REDUCE_LOOP:
+    setp.ge.u32 %p, %r0, 128;
+    @%p bra $NORM_REDUCE_ATOMIC;
+
+    mul.wide.u32 %rd4, %r0, 4;
+    mov.u64 %rd0, sdata;
+    add.u64 %rd0, %rd0, %rd4;
+    ld.shared.f32 %f3, [%rd0];
+    add.f32 %f2, %f2, %f3;
+    add.u32 %r0, %r0, 1;
+    bra $NORM_REDUCE_LOOP;
+
+$NORM_REDUCE_ATOMIC:
+    ld.param.u64 %rd1, [p_out_sq];
+    atom.global.add.f32 %f4, [%rd1], %f2;
+
+$NORM_REDUCE_DONE:
     ret;
 }
 "#;

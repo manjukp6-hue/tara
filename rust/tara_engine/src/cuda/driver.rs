@@ -466,6 +466,38 @@ impl CudaSession {
         Ok(())
     }
 
+    pub fn upload_u32(&self, buffer: &CudaBuffer, data: &[u32]) -> Result<(), CudaError> {
+        if data.len() != buffer.len_elements {
+            return Err(CudaError::KernelError(format!(
+                "Upload size mismatch: data has {} elements, buffer has {}",
+                data.len(),
+                buffer.len_elements
+            )));
+        }
+        check_cu!((self.driver.fn_memcpy_htod)(
+            buffer.dptr,
+            data.as_ptr() as *const c_void,
+            buffer.bytes
+        ));
+        Ok(())
+    }
+
+    pub fn download_u32(&self, buffer: &CudaBuffer, out: &mut [u32]) -> Result<(), CudaError> {
+        if out.len() != buffer.len_elements {
+            return Err(CudaError::KernelError(format!(
+                "Download size mismatch: output slice has {} elements, buffer has {}",
+                out.len(),
+                buffer.len_elements
+            )));
+        }
+        check_cu!((self.driver.fn_memcpy_dtoh)(
+            out.as_mut_ptr() as *mut c_void,
+            buffer.dptr,
+            buffer.bytes
+        ));
+        Ok(())
+    }
+
     pub fn download_f32(&self, buffer: &CudaBuffer, out: &mut [f32]) -> Result<(), CudaError> {
         if out.len() != buffer.len_elements {
             return Err(CudaError::KernelError(format!(

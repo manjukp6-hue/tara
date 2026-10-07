@@ -112,6 +112,7 @@ pub struct CudaTrainer {
     k_norm_sq: CudaKernel,
     module: CudaModuleHandle,
     step_count: u64,
+    d_norm_sq: CudaBuffer,
     // Context session (must drop LAST after all device resources are freed)
     session: CudaSession,
 }
@@ -166,6 +167,7 @@ impl CudaTrainer {
         let k_swiglu_bwd = module.get_kernel("swiglu_bwd_kernel")?;
         let k_res_add = module.get_kernel("residual_add_kernel")?;
         let k_norm_sq = module.get_kernel("grad_norm_sq_kernel")?;
+        let d_norm_sq = session.allocate_f32(1)?;
 
         Ok(Self {
             params: HashMap::new(),
@@ -197,6 +199,7 @@ impl CudaTrainer {
             k_norm_sq,
             module,
             step_count: 0,
+            d_norm_sq,
             session,
         })
     }
@@ -1209,6 +1212,7 @@ impl CudaTrainer {
     }
 
     /// Execute AdamW optimization step across all parameters directly on GPU.
+    /// Returns Ok(true) if step was executed, Ok(false) if skipped due to non-finite gradients.
     pub fn step_adamw(
         &mut self,
         lr: f32,
@@ -1217,17 +1221,17 @@ impl CudaTrainer {
         eps: f32,
         weight_decay: f32,
         max_grad_norm: f32,
-    ) -> Result<(), CudaError> {
+    ) -> Result<bool, CudaError> {
         // High-performance GPU-side global norm reduction: sum of squares across all parameters
-        let d_out_sq = self.session.allocate_f32(1)?;
+        // Explicitly zero accumulator on GPU before launching reduction kernels
         let zero_sq = [0.0f32];
-        self.session.upload_f32(&d_out_sq, &zero_sq)?;
+        self.session.upload_f32(&self.d_norm_sq, &zero_sq)?;
 
         let block_dim = 128u32;
         for param in self.params.values() {
             let grid_dim = (param.len as u32).div_ceil(block_dim);
             let mut arg_grad = param.d_grad.dptr;
-            let mut arg_out_sq = d_out_sq.dptr;
+            let mut arg_out_sq = self.d_norm_sq.dptr;
             let mut arg_n = param.len as u32;
 
             let mut params = [std::ptr::null_mut(); 16];
@@ -1243,7 +1247,7 @@ impl CudaTrainer {
         self.session.synchronize()?;
 
         let mut host_sq = [0.0f32];
-        self.session.download_f32(&d_out_sq, &mut host_sq)?;
+        self.session.download_f32(&self.d_norm_sq, &mut host_sq)?;
         let total_norm_sq = host_sq[0];
         let total_norm = total_norm_sq.sqrt();
 
@@ -1254,7 +1258,7 @@ impl CudaTrainer {
                 let zeros = vec![0.0f32; param.len];
                 self.session.upload_f32(&param.d_grad, &zeros)?;
             }
-            return Ok(());
+            return Ok(false);
         }
 
         // Only increment step_count once gradients are confirmed finite!
@@ -1435,7 +1439,7 @@ impl CudaTrainer {
         }
 
         self.session.synchronize()?;
-        Ok(())
+        Ok(true)
     }
 
     /// Retrieve all updated weights from GPU back to host.
@@ -1528,5 +1532,191 @@ impl CudaTrainer {
 
     pub fn module_handle(&self) -> &CudaModuleHandle {
         &self.module
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trainer::{AdamWHyperparams, DynamicAdamW};
+
+    #[test]
+    fn test_gpu_cpu_adamw_numerical_equivalence() {
+        let mut gpu_trainer = match CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32) {
+            Ok(t) => t,
+            Err(_) => {
+                eprintln!("[SKIP] CUDA device not available on this machine.");
+                return;
+            }
+        };
+
+        let n = 256;
+        let mut initial_weights = HashMap::new();
+        let mut w1 = vec![0.0f32; n];
+        let mut w2 = vec![0.0f32; n];
+        for i in 0..n {
+            w1[i] = (i as f32 * 0.05).sin() * 0.1;
+            w2[i] = (i as f32 * 0.03).cos() * 0.1;
+        }
+        initial_weights.insert("layer1.weight".to_string(), w1.clone());
+        initial_weights.insert("layer2.weight".to_string(), w2.clone());
+
+        gpu_trainer.register_weights(&initial_weights).unwrap();
+
+        let mut cpu_weights = initial_weights.clone();
+        let mut cpu_optimizer = DynamicAdamW::new();
+
+        let hp = AdamWHyperparams {
+            lr: 1e-3,
+            beta1: 0.9,
+            beta2: 0.999,
+            eps: 1e-8,
+            weight_decay: 0.01,
+            max_grad_norm: 1.0,
+        };
+
+        // Run 5 steps with deterministic synthetic gradients
+        for step in 1..=5 {
+            let mut g1 = vec![0.0f32; n];
+            let mut g2 = vec![0.0f32; n];
+            for i in 0..n {
+                g1[i] = ((step * 100 + i) as f32 * 0.01).sin() * 0.05;
+                g2[i] = ((step * 100 + i) as f32 * 0.02).cos() * 0.05;
+            }
+            let mut grads = HashMap::new();
+            grads.insert("layer1.weight".to_string(), g1.clone());
+            grads.insert("layer2.weight".to_string(), g2.clone());
+
+            // CPU step
+            let cpu_stepped = cpu_optimizer.step(&mut cpu_weights, &grads, &hp);
+            assert!(cpu_stepped);
+
+            // GPU step
+            gpu_trainer.accumulate_gradient("layer1.weight", &g1).unwrap();
+            gpu_trainer.accumulate_gradient("layer2.weight", &g2).unwrap();
+            let gpu_stepped = gpu_trainer
+                .step_adamw(hp.lr, hp.beta1, hp.beta2, hp.eps, hp.weight_decay, hp.max_grad_norm)
+                .unwrap();
+            assert!(gpu_stepped);
+        }
+
+        let gpu_weights = gpu_trainer.download_weights().unwrap();
+
+        for name in &["layer1.weight", "layer2.weight"] {
+            let cpu_w = &cpu_weights[*name];
+            let gpu_w = &gpu_weights[*name];
+            assert_eq!(cpu_w.len(), gpu_w.len());
+            for i in 0..cpu_w.len() {
+                let diff = (cpu_w[i] - gpu_w[i]).abs();
+                assert!(
+                    diff < 1e-5,
+                    "Numerical divergence in {} at index {}: CPU={}, GPU={}, diff={}",
+                    name,
+                    i,
+                    cpu_w[i],
+                    gpu_w[i],
+                    diff
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_gpu_adamw_non_finite_gradient_skips_step() {
+        let mut gpu_trainer = match CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32) {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+
+        let n = 128;
+        let mut initial_weights = HashMap::new();
+        let w = vec![0.5f32; n];
+        initial_weights.insert("test.weight".to_string(), w.clone());
+        gpu_trainer.register_weights(&initial_weights).unwrap();
+
+        // Accumulate NaN gradient
+        let mut bad_g = vec![0.01f32; n];
+        bad_g[10] = f32::NAN;
+        gpu_trainer.accumulate_gradient("test.weight", &bad_g).unwrap();
+
+        let stepped = gpu_trainer
+            .step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0)
+            .unwrap();
+        assert!(!stepped, "Step with NaN gradient must be skipped");
+        assert_eq!(gpu_trainer.get_step_count(), 0, "Step count must not advance");
+
+        let downloaded = gpu_trainer.download_weights().unwrap();
+        assert_eq!(downloaded["test.weight"], w, "Weights must be unchanged after skipped step");
+    }
+
+    #[test]
+    fn test_gpu_checkpoint_resume_equivalence() {
+        let n = 128;
+        let mut initial_weights = HashMap::new();
+        let mut w = vec![0.0f32; n];
+        for i in 0..n {
+            w[i] = (i as f32 * 0.1).sin();
+        }
+        initial_weights.insert("dense.weight".to_string(), w.clone());
+
+        // Run A: 10 steps continuously
+        let mut trainer_a = match CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32) {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+        trainer_a.register_weights(&initial_weights).unwrap();
+
+        let mut grads_history = Vec::new();
+        for step in 1..=10 {
+            let mut g = vec![0.0f32; n];
+            for i in 0..n {
+                g[i] = ((step * 10 + i) as f32 * 0.05).cos() * 0.02;
+            }
+            grads_history.push(g.clone());
+            trainer_a.accumulate_gradient("dense.weight", &g).unwrap();
+            trainer_a.step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0).unwrap();
+        }
+        let weights_a = trainer_a.download_weights().unwrap();
+
+        // Run B: 5 steps -> checkpoint -> resume -> 5 steps
+        let mut trainer_b = CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32).unwrap();
+        trainer_b.register_weights(&initial_weights).unwrap();
+
+        for g in &grads_history[0..5] {
+            trainer_b.accumulate_gradient("dense.weight", g).unwrap();
+            trainer_b.step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0).unwrap();
+        }
+
+        // Save checkpoint
+        let checkpoint_weights = trainer_b.download_weights().unwrap();
+        let checkpoint_opt_state = trainer_b.export_optimizer_state().unwrap();
+        let checkpoint_step = trainer_b.get_step_count();
+        drop(trainer_b);
+
+        // Resume in new trainer
+        let mut trainer_c = CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32).unwrap();
+        trainer_c.register_weights(&checkpoint_weights).unwrap();
+        trainer_c.load_optimizer_state(&checkpoint_opt_state).unwrap();
+        trainer_c.set_step_count(checkpoint_step);
+
+        for g in &grads_history[5..10] {
+            trainer_c.accumulate_gradient("dense.weight", g).unwrap();
+            trainer_c.step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0).unwrap();
+        }
+        let weights_c = trainer_c.download_weights().unwrap();
+
+        let wa = &weights_a["dense.weight"];
+        let wc = &weights_c["dense.weight"];
+        for i in 0..n {
+            let diff = (wa[i] - wc[i]).abs();
+            assert!(
+                diff < 1e-6,
+                "Checkpoint resume mismatch at index {}: continuous={}, resumed={}, diff={}",
+                i,
+                wa[i],
+                wc[i],
+                diff
+            );
+        }
     }
 }

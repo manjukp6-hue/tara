@@ -4591,6 +4591,7 @@
     "rust/tara_engine/src/cuda/gpu_trainer.rs": {
       "calls": [
         "KernelError",
+        "abs",
         "accumulate_gradient",
         "add_residual",
         "as_ref",
@@ -4602,6 +4603,7 @@
         "clone",
         "cloned",
         "collect",
+        "cos",
         "device",
         "download_f32",
         "download_weights",
@@ -4640,13 +4642,19 @@
         "register_weights",
         "scale_accumulated_gradients",
         "set_step_count",
+        "sin",
         "sqrt",
+        "step",
         "step_adamw",
         "sum",
         "swiglu_bwd_kernel",
         "synchronize",
+        "test_gpu_adamw_non_finite_gradient_skips_step",
+        "test_gpu_checkpoint_resume_equivalence",
+        "test_gpu_cpu_adamw_numerical_equivalence",
         "to_bits",
         "to_lowercase",
+        "to_string",
         "trim",
         "unwrap",
         "unwrap_or_else",
@@ -4656,7 +4664,7 @@
         "vec"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "389d2da6225cd07a343a0f3dc79654dde2485d379595e2ccf31d1f4f5a7435ee",
+      "dynamic_sha256": "34b85465e1b11ac3a3dafef5240327566db21e57845a8692a8397e59ee3ae791",
       "enums": [
         "TrainingPrecision"
       ],
@@ -4692,17 +4700,22 @@
         "set_step_count",
         "step_adamw",
         "swiglu_bwd_kernel",
+        "test_gpu_adamw_non_finite_gradient_skips_step",
+        "test_gpu_checkpoint_resume_equivalence",
+        "test_gpu_cpu_adamw_numerical_equivalence",
         "unpack_u32_to_f16"
       ],
       "in_links": [
         "rust/tara_engine/src/cuda/mod.rs"
       ],
-      "is_test": false,
-      "lines": 1532,
+      "is_test": true,
+      "lines": 1722,
       "module": "tara_engine::cuda::gpu_trainer",
       "out_links": [
         "rust/tara_engine/src/cuda/driver.rs",
-        "rust/tara_engine/src/cuda/kernels.rs"
+        "rust/tara_engine/src/cuda/kernels.rs",
+        "rust/tara_engine/src/cuda/mod.rs",
+        "rust/tara_training_system/shared_training_infrastructure/trainer.rs"
       ],
       "rel_path": "rust/tara_engine/src/cuda/gpu_trainer.rs",
       "structs": [
@@ -4760,6 +4773,7 @@
         "rust/tara_engine/src/bin/expand_candidate.rs",
         "rust/tara_engine/src/bin/trace_22layer_gpu_execution.rs",
         "rust/tara_engine/src/bin/verify_1b_hardware_step.rs",
+        "rust/tara_engine/src/cuda/gpu_trainer.rs",
         "rust/tara_engine/src/lib.rs"
       ],
       "is_test": false,
@@ -16716,7 +16730,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate": "tara_training_system",
-      "dynamic_sha256": "b0d676180cd0dbad6e7cf365b1e26b80cedebe47f54906936606f91301ed706e",
+      "dynamic_sha256": "f828299fb0debbf7b73a89a42cb900fbda3d580084aef5d5c7a2791926ea5a33",
       "enums": [
         "TrainerError",
         "TrainingDevice"
@@ -16753,6 +16767,7 @@
         "with_resume"
       ],
       "in_links": [
+        "rust/tara_engine/src/cuda/gpu_trainer.rs",
         "rust/tara_engine/src/lib.rs",
         "rust/tara_engine/src/self_update.rs",
         "rust/tara_engine/src/train_candidate.rs",
@@ -16760,7 +16775,7 @@
         "rust/tara_server/src/brain.rs"
       ],
       "is_test": true,
-      "lines": 1641,
+      "lines": 1662,
       "module": "tara_training_system::shared_training_infrastructure::trainer",
       "out_links": [
         "rust/tara_engine/src/config.rs",

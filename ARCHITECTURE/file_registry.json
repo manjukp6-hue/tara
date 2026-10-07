@@ -17743,12 +17743,12 @@
     "rust/tara_engine/src/cuda/gpu_trainer.rs": {
       "extension": "rs",
       "file_id": 7036874418118068,
-      "line_count": 1532,
-      "modified_epoch": 1791385444,
+      "line_count": 1722,
+      "modified_epoch": 1791386632,
       "name": "gpu_trainer.rs",
       "rel_path": "rust/tara_engine/src/cuda/gpu_trainer.rs",
-      "sha256": "389d2da6225cd07a343a0f3dc79654dde2485d379595e2ccf31d1f4f5a7435ee",
-      "size_bytes": 57423
+      "sha256": "34b85465e1b11ac3a3dafef5240327566db21e57845a8692a8397e59ee3ae791",
+      "size_bytes": 64546
     },
     "rust/tara_engine/src/cuda/kernels.rs": {
       "extension": "rs",
@@ -19453,12 +19453,12 @@
     "rust/tara_training_system/shared_training_infrastructure/trainer.rs": {
       "extension": "rs",
       "file_id": 10133099161620255,
-      "line_count": 1641,
-      "modified_epoch": 1791384017,
+      "line_count": 1662,
+      "modified_epoch": 1791386686,
       "name": "trainer.rs",
       "rel_path": "rust/tara_training_system/shared_training_infrastructure/trainer.rs",
-      "sha256": "b0d676180cd0dbad6e7cf365b1e26b80cedebe47f54906936606f91301ed706e",
-      "size_bytes": 71422
+      "sha256": "f828299fb0debbf7b73a89a42cb900fbda3d580084aef5d5c7a2791926ea5a33",
+      "size_bytes": 72136
     },
     "rust/tara_training_system/world_model/deliberative_search.rs": {
       "extension": "rs",
@@ -19531,7 +19531,7 @@
       "size_bytes": 1242
     }
   },
-  "generated_at_utc": "1791385446",
+  "generated_at_utc": "1791386688",
   "schema_version": "1.0.0",
   "total_files": 1953
 }

@@ -80,16 +80,13 @@ impl DynamicAdamW {
         weights: &mut HashMap<String, Vec<f32>>,
         grads: &HashMap<String, Vec<f32>>,
         hp: &AdamWHyperparams,
-    ) {
+    ) -> bool {
         let lr = hp.lr;
         let beta1 = hp.beta1;
         let beta2 = hp.beta2;
         let eps = hp.eps;
         let weight_decay = hp.weight_decay;
         let max_grad_norm = hp.max_grad_norm;
-        self.step += 1;
-        let bc1 = 1.0 - beta1.powi(self.step as i32);
-        let bc2 = 1.0 - beta2.powi(self.step as i32);
 
         // 1. Calculate global L2 gradient norm
         let mut total_norm_sq = 0.0f32;
@@ -102,11 +99,14 @@ impl DynamicAdamW {
 
         // Guard: skip the parameter update if gradients are NaN or Inf.
         // This prevents a single degenerate batch from poisoning the entire model.
-        // The caller (run_full_self_learning_cycle) checks final loss for NaN/Inf
-        // and will reject the candidate at the validation gate.
+        // Neither moments nor step count are updated on non-finite gradients.
         if !total_norm.is_finite() {
-            return;
+            return false;
         }
+
+        self.step += 1;
+        let bc1 = 1.0 - beta1.powi(self.step as i32);
+        let bc2 = 1.0 - beta2.powi(self.step as i32);
 
         let clip_scale = if total_norm > max_grad_norm && total_norm > 0.0 {
             max_grad_norm / total_norm
@@ -137,6 +137,7 @@ impl DynamicAdamW {
                 }
             }
         }
+        true
     }
 
     pub fn get_step(&self) -> u64 {
@@ -995,7 +996,7 @@ impl NativeSelfTrainer {
                     samples_seen += 1;
 
                     if accum_count >= accumulation_steps {
-                        optimizer_steps += 1;
+                        let mut step_taken = false;
 
                         if let Some(ref mut gpu_trainer) = gpu_trainer_opt {
                             // GPU-accelerated gradient scaling and AdamW step
@@ -1004,7 +1005,7 @@ impl NativeSelfTrainer {
                                 .map_err(|e| {
                                     TrainerError::Model(format!("GPU gradient scaling failed: {e}"))
                                 })?;
-                            gpu_trainer
+                            let stepped = gpu_trainer
                                 .step_adamw(
                                     learning_rate,
                                     beta1,
@@ -1016,6 +1017,9 @@ impl NativeSelfTrainer {
                                 .map_err(|e| {
                                     TrainerError::Model(format!("GPU AdamW step failed: {e}"))
                                 })?;
+                            if stepped {
+                                step_taken = true;
+                            }
 
                             weights = gpu_trainer.download_weights().map_err(|e| {
                                 TrainerError::Model(format!("GPU weights download failed: {e}"))
@@ -1028,7 +1032,7 @@ impl NativeSelfTrainer {
                                     *val *= factor;
                                 }
                             }
-                            optimizer.step(
+                            let stepped = optimizer.step(
                                 &mut weights,
                                 &accum_grads,
                                 &AdamWHyperparams {
@@ -1040,9 +1044,16 @@ impl NativeSelfTrainer {
                                     max_grad_norm,
                                 },
                             );
+                            if stepped {
+                                step_taken = true;
+                            }
                             accum_grads.clear();
                         }
                         accum_count = 0;
+
+                        if step_taken {
+                            optimizer_steps += 1;
+                        }
 
                         if optimizer_steps % 10 == 0 || optimizer_steps == 1 {
                             let max_str = self
@@ -1187,13 +1198,14 @@ impl NativeSelfTrainer {
 
             // Flush remaining accumulated gradients at epoch boundary
             if accum_count > 0 {
+                let mut step_taken = false;
                 if let Some(ref mut gpu_trainer) = gpu_trainer_opt {
                     gpu_trainer
                         .scale_accumulated_gradients(accum_count)
                         .map_err(|e| {
                             TrainerError::Model(format!("GPU gradient scaling failed: {e}"))
                         })?;
-                    gpu_trainer
+                    let stepped = gpu_trainer
                         .step_adamw(
                             learning_rate,
                             beta1,
@@ -1203,6 +1215,9 @@ impl NativeSelfTrainer {
                             max_grad_norm,
                         )
                         .map_err(|e| TrainerError::Model(format!("GPU AdamW step failed: {e}")))?;
+                    if stepped {
+                        step_taken = true;
+                    }
 
                     weights = gpu_trainer.download_weights().map_err(|e| {
                         TrainerError::Model(format!("GPU weights download failed: {e}"))
@@ -1214,7 +1229,7 @@ impl NativeSelfTrainer {
                             *val *= factor;
                         }
                     }
-                    optimizer.step(
+                    let stepped = optimizer.step(
                         &mut weights,
                         &accum_grads,
                         &AdamWHyperparams {
@@ -1226,7 +1241,13 @@ impl NativeSelfTrainer {
                             max_grad_norm,
                         },
                     );
+                    if stepped {
+                        step_taken = true;
+                    }
                     accum_grads.clear();
+                }
+                if step_taken {
+                    optimizer_steps += 1;
                 }
                 model = TaraForCausalLM::from_weights_and_config(
                     weights.clone(),

@@ -16301,8 +16301,8 @@
                       "name": "manual_trainer.rs",
                       "rel_path": "rust/tara_engine/src/bin/manual_trainer.rs",
                       "entry_type": "file",
-                      "size_bytes": 19271,
-                      "sha256": "8015ba1c1237192c001235a3906e24593697fd5c3ec6c105056de492f10ef118"
+                      "size_bytes": 45547,
+                      "sha256": "f6ce9fea67413b2a2d9ab5066db3bc7009252a60213fffc1d425db017c759227"
                     },
                     {
                       "name": "process_restart_proof.rs",
@@ -16371,8 +16371,8 @@
                       "name": "tara_training_stages.rs",
                       "rel_path": "rust/tara_engine/src/bin/tara_training_stages.rs",
                       "entry_type": "file",
-                      "size_bytes": 45480,
-                      "sha256": "6f317c29f7a68c2084341e13edfa937db3fefb86994973c139272b19d0abc96e"
+                      "size_bytes": 81152,
+                      "sha256": "8f3cb1fe728bbe918c9f7356e401975ee6258ff8430247e1c5cc39a2b85b64a7"
                     },
                     {
                       "name": "trace_22layer_gpu_execution.rs",
@@ -18150,8 +18150,8 @@
                   "name": "trainer.rs",
                   "rel_path": "rust/tara_training_system/shared_training_infrastructure/trainer.rs",
                   "entry_type": "file",
-                  "size_bytes": 79775,
-                  "sha256": "941a3f84a9dc5586401dc7a5e6152be907a38b8f39d97d04a3eb5460db75bb98"
+                  "size_bytes": 85760,
+                  "sha256": "0e83d14a0818e73d6e7af68a14963bcdcd20a3d97f8a951a571441c35dfc462d"
                 }
               ]
             },

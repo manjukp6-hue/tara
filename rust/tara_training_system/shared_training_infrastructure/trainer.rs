@@ -772,15 +772,25 @@ impl NativeSelfTrainer {
         if self.resume {
             let explicit_resume = if let Some(ref r_from) = self.resume_from {
                 let p = Path::new(r_from);
-                if p.join("checkpoint_state.json").exists() {
-                    Some(r_from.clone())
-                } else {
-                    println!(
-                        "[Checkpoint] Notice: explicit resume_from path '{}' has no checkpoint_state.json; checking model directory.",
+                if !p.exists() {
+                    return Err(TrainerError::Model(format!(
+                        "Explicit resume_from path '{}' does not exist",
                         r_from
-                    );
-                    None
+                    )));
                 }
+                if !p.join("checkpoint_state.json").exists() {
+                    return Err(TrainerError::Model(format!(
+                        "Explicit resume_from path '{}' is missing checkpoint_state.json (not continuation-ready)",
+                        r_from
+                    )));
+                }
+                if !p.join("optimizer.safetensors").exists() {
+                    return Err(TrainerError::Model(format!(
+                        "Explicit resume_from path '{}' is missing optimizer.safetensors (not continuation-ready)",
+                        r_from
+                    )));
+                }
+                Some(r_from.clone())
             } else {
                 None
             };
@@ -816,78 +826,109 @@ impl NativeSelfTrainer {
                         "[Checkpoint] Resuming from existing checkpoint at '{}'...",
                         resume_dir
                     );
-                    if let Ok(state_str) = std::fs::read_to_string(&state_file) {
-                        if let Ok(state_json) =
-                            serde_json::from_str::<serde_json::Value>(&state_str)
-                        {
-                            if let Some(s) = state_json
-                                .get("optimizer_step")
-                                .or_else(|| state_json.get("step"))
-                                .and_then(|v| v.as_u64())
-                            {
-                                optimizer_steps = s as usize;
-                            }
-                            if let Some(s) = state_json.get("samples_seen").and_then(|v| v.as_u64()) {
-                                samples_seen = s as usize;
-                            } else {
-                                samples_seen = optimizer_steps * accumulation_steps;
-                            }
-                            if let Some(e) = state_json.get("epoch").and_then(|v| v.as_u64()) {
-                                epochs_completed = e as usize;
-                            }
-                            println!(
-                                "[Checkpoint] Resumed at optimizer step {}, samples {}, epoch {}",
-                                optimizer_steps, samples_seen, epochs_completed
-                            );
-                        }
+                    let state_str = std::fs::read_to_string(&state_file)?;
+                    let state_json: serde_json::Value =
+                        serde_json::from_str(&state_str).map_err(|e| {
+                            TrainerError::Model(format!(
+                                "Corrupt checkpoint_state.json in '{}': {}",
+                                resume_dir, e
+                            ))
+                        })?;
+                    let step_val = state_json
+                        .get("optimizer_step")
+                        .or_else(|| state_json.get("step"))
+                        .and_then(|v| v.as_u64())
+                        .ok_or_else(|| {
+                            TrainerError::Model(format!(
+                                "checkpoint_state.json in '{}' missing valid 'optimizer_step'",
+                                resume_dir
+                            ))
+                        })?;
+                    optimizer_steps = step_val as usize;
+                    if let Some(s) = state_json.get("samples_seen").and_then(|v| v.as_u64()) {
+                        samples_seen = s as usize;
+                    } else {
+                        samples_seen = optimizer_steps * accumulation_steps;
                     }
-                    if let Ok((resumed_weights, _)) =
-                        crate::safetensors::load_model_weights_with_shapes(resume_dir)
-                    {
-                        weights = resumed_weights;
-                        if let Ok(m) = TaraForCausalLM::from_weights_and_config(
-                            weights.clone(),
-                            config.clone(),
-                            &self.model_dir,
-                        ) {
-                            model = m;
-                        }
-                        if let Some(ref mut gpu_trainer) = gpu_trainer_opt {
-                            let _ = gpu_trainer.register_weights(&weights);
-                        }
+                    if let Some(e) = state_json.get("epoch").and_then(|v| v.as_u64()) {
+                        epochs_completed = e as usize;
+                    }
+                    println!(
+                        "[Checkpoint] Resumed at optimizer step {}, samples {}, epoch {}",
+                        optimizer_steps, samples_seen, epochs_completed
+                    );
+
+                    let (resumed_weights, _) =
+                        crate::safetensors::load_model_weights_with_shapes(resume_dir)?;
+                    weights = resumed_weights;
+                    model = TaraForCausalLM::from_weights_and_config(
+                        weights.clone(),
+                        config.clone(),
+                        &self.model_dir,
+                    )
+                    .map_err(|e| TrainerError::Model(e.to_string()))?;
+                    if let Some(ref mut gpu_trainer) = gpu_trainer_opt {
+                        let _ = gpu_trainer.register_weights(&weights);
                     }
 
-                    // Restore optimizer state moments if present
+                    // Restore and strictly validate optimizer state moments
                     let opt_file = cp_path.join("optimizer.safetensors");
                     if opt_file.exists() {
-                        if let Ok((opt_tensors, _)) =
-                            crate::safetensors::load_safetensors_with_shapes(
-                                &opt_file.to_string_lossy(),
-                            )
-                        {
-                            let mut loaded_moments: HashMap<String, (Vec<f32>, Vec<f32>)> =
-                                HashMap::new();
-                            for (k, v) in opt_tensors {
-                                if let Some(base_name) = k.strip_suffix(".adam_m") {
-                                    let entry = loaded_moments
-                                        .entry(base_name.to_string())
-                                        .or_insert_with(|| (Vec::new(), Vec::new()));
-                                    entry.0 = v;
-                                } else if let Some(base_name) = k.strip_suffix(".adam_v") {
-                                    let entry = loaded_moments
-                                        .entry(base_name.to_string())
-                                        .or_insert_with(|| (Vec::new(), Vec::new()));
-                                    entry.1 = v;
+                        let (opt_tensors, _) = crate::safetensors::load_safetensors_with_shapes(
+                            &opt_file.to_string_lossy(),
+                        )
+                        .map_err(|e| {
+                            TrainerError::Model(format!(
+                                "Corrupt optimizer.safetensors in '{}': {}",
+                                resume_dir, e
+                            ))
+                        })?;
+                        if opt_tensors.is_empty() {
+                            return Err(TrainerError::Model(format!(
+                                "optimizer.safetensors in '{}' contains zero tensors",
+                                resume_dir
+                            )));
+                        }
+                        let mut loaded_moments: HashMap<String, (Vec<f32>, Vec<f32>)> =
+                            HashMap::new();
+                        for (k, v) in opt_tensors {
+                            if let Some(base_name) = k.strip_suffix(".adam_m") {
+                                let entry = loaded_moments
+                                    .entry(base_name.to_string())
+                                    .or_insert_with(|| (Vec::new(), Vec::new()));
+                                entry.0 = v;
+                            } else if let Some(base_name) = k.strip_suffix(".adam_v") {
+                                let entry = loaded_moments
+                                    .entry(base_name.to_string())
+                                    .or_insert_with(|| (Vec::new(), Vec::new()));
+                                entry.1 = v;
+                            }
+                        }
+                        for (param_name, w_vec) in &weights {
+                            if let Some((m_vec, v_vec)) = loaded_moments.get(param_name) {
+                                if m_vec.len() != w_vec.len() || v_vec.len() != w_vec.len() {
+                                    return Err(TrainerError::Model(format!(
+                                        "Optimizer moment shape mismatch for '{}': weight len={}, m len={}, v len={}",
+                                        param_name,
+                                        w_vec.len(),
+                                        m_vec.len(),
+                                        v_vec.len()
+                                    )));
                                 }
                             }
-                            if let Some(ref mut gpu_trainer) = gpu_trainer_opt {
-                                let _ = gpu_trainer.load_optimizer_state(&loaded_moments);
-                                gpu_trainer.set_step_count(optimizer_steps as u64);
-                            }
-                            optimizer.load_state(loaded_moments);
-                            optimizer.set_step(optimizer_steps as u64);
-                            println!("[Checkpoint] Successfully restored optimizer moments and step count ({optimizer_steps}).");
                         }
+                        if let Some(ref mut gpu_trainer) = gpu_trainer_opt {
+                            let _ = gpu_trainer.load_optimizer_state(&loaded_moments);
+                            gpu_trainer.set_step_count(optimizer_steps as u64);
+                        }
+                        optimizer.load_state(loaded_moments);
+                        optimizer.set_step(optimizer_steps as u64);
+                        println!("[Checkpoint] Successfully restored optimizer moments and step count ({optimizer_steps}).");
+                    } else if self.resume_from.is_some() {
+                        return Err(TrainerError::Model(format!(
+                            "Explicit resume_from checkpoint '{}' missing optimizer.safetensors",
+                            resume_dir
+                        )));
                     }
                 }
             }
@@ -1382,9 +1423,9 @@ impl NativeSelfTrainer {
 
         // Copy config.json and tokenizer.json into staging directory
         let cfg_dest = format!("{}/config.json", staging_dir);
-        let _ = fs::copy(&config_path, &cfg_dest);
+        fs::copy(&config_path, &cfg_dest)?;
         let tok_dest = format!("{}/tokenizer.json", staging_dir);
-        let _ = fs::copy(&tokenizer_path, &tok_dest);
+        fs::copy(&tokenizer_path, &tok_dest)?;
 
         // Export optimizer state moments so every candidate checkpoint is continuation-ready
         let opt_moments = if let Some(ref gpu_trainer) = gpu_trainer_opt {
@@ -1402,11 +1443,11 @@ impl NativeSelfTrainer {
             opt_tensors.insert(m_name, m_vec);
             opt_tensors.insert(v_name, v_vec);
         }
-        let _ = crate::safetensors::write_safetensors_with_shapes(
+        crate::safetensors::write_safetensors_with_shapes(
             &opt_tensors,
             &opt_shapes,
             &format!("{}/optimizer.safetensors", staging_dir),
-        );
+        )?;
 
         let state_json = json!({
             "step": optimizer_steps,
@@ -1421,7 +1462,7 @@ impl NativeSelfTrainer {
         });
         fs::write(
             format!("{}/checkpoint_state.json", staging_dir),
-            serde_json::to_string_pretty(&state_json).unwrap_or_default(),
+            serde_json::to_string_pretty(&state_json)?,
         )?;
 
         // Compute candidate weights sha256
@@ -1470,60 +1511,40 @@ impl NativeSelfTrainer {
         if target_candidate_dir == self.model_dir {
             // In unit tests where model_dir is the target fixture, copy files across
             for shard in &shard_files {
-                let _ = fs::copy(
+                fs::copy(
                     format!("{}/{}", staging_dir, shard),
                     format!("{}/{}", target_candidate_dir, shard),
-                );
+                )?;
             }
             if Path::new(&format!("{}/model.safetensors.index.json", staging_dir)).exists() {
-                let _ = fs::copy(
+                fs::copy(
                     format!("{}/model.safetensors.index.json", staging_dir),
                     format!("{}/model.safetensors.index.json", target_candidate_dir),
-                );
+                )?;
             }
-            let _ = fs::copy(
+            fs::copy(
                 format!("{}/config.json", staging_dir),
                 format!("{}/config.json", target_candidate_dir),
-            );
-            let _ = fs::copy(
+            )?;
+            fs::copy(
                 format!("{}/tokenizer.json", staging_dir),
                 format!("{}/tokenizer.json", target_candidate_dir),
-            );
+            )?;
             if Path::new(&format!("{}/optimizer.safetensors", staging_dir)).exists() {
-                let _ = fs::copy(
+                fs::copy(
                     format!("{}/optimizer.safetensors", staging_dir),
                     format!("{}/optimizer.safetensors", target_candidate_dir),
-                );
+                )?;
             }
             if Path::new(&format!("{}/checkpoint_state.json", staging_dir)).exists() {
-                let _ = fs::copy(
+                fs::copy(
                     format!("{}/checkpoint_state.json", staging_dir),
                     format!("{}/checkpoint_state.json", target_candidate_dir),
-                );
+                )?;
             }
             let _ = fs::remove_dir_all(&staging_dir);
         } else {
-            // Two-phase atomic directory promotion with crash-safe fallback
-            let target_path = Path::new(&target_candidate_dir);
-            let backup_path = PathBuf::from(format!("{}.bak_{}", target_candidate_dir, now_stamp));
-            if target_path.exists() {
-                fs::rename(target_path, &backup_path)?;
-            }
-            match fs::rename(&staging_dir, target_path) {
-                Ok(_) => {
-                    // Promotion succeeded: safely purge backup
-                    if backup_path.exists() {
-                        let _ = fs::remove_dir_all(&backup_path);
-                    }
-                }
-                Err(e) => {
-                    // Rollback backup on promotion failure to preserve working model
-                    if backup_path.exists() {
-                        let _ = fs::rename(&backup_path, target_path);
-                    }
-                    return Err(TrainerError::Io(e));
-                }
-            }
+            promote_directory_atomically(Path::new(&staging_dir), Path::new(&target_candidate_dir))?;
         }
 
         // Persist status
@@ -1533,6 +1554,148 @@ impl NativeSelfTrainer {
         fs::write(&status_path, serde_json::to_string_pretty(&result)?)?;
 
         Ok(result)
+    }
+}
+
+/// Recovers from an interrupted directory promotion if `<target_dir>` is missing or incomplete
+/// while a valid `<target_dir>.bak_<timestamp>` exists in the same parent directory, and purges
+/// stale `.staging_*` or superseded `.bak_*` directories once `<target_dir>` is verified intact.
+pub fn recover_interrupted_promotion(target_dir: &Path) -> Result<bool, TrainerError> {
+    recover_interrupted_promotion_inner(target_dir, None)
+}
+
+fn recover_interrupted_promotion_inner(
+    target_dir: &Path,
+    active_staging: Option<&Path>,
+) -> Result<bool, TrainerError> {
+    let parent = match target_dir.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    if !parent.exists() {
+        return Ok(false);
+    }
+    let base_name = match target_dir.file_name().and_then(|n| n.to_str()) {
+        Some(n) if !n.is_empty() => n,
+        _ => return Ok(false),
+    };
+
+    let bak_prefix = format!("{}.bak_", base_name);
+    let staging_prefix = format!("{}.staging_", base_name);
+    let active_staging_name = active_staging.and_then(|p| p.file_name()).and_then(|n| n.to_str());
+
+    let mut backups: Vec<PathBuf> = Vec::new();
+    let mut stagings: Vec<PathBuf> = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with(&bak_prefix) {
+                        backups.push(p);
+                    } else if name.starts_with(&staging_prefix)
+                        && Some(name) != active_staging_name
+                    {
+                        stagings.push(p);
+                    }
+                }
+            }
+        }
+    }
+
+    backups.sort();
+    let target_intact = target_dir.exists()
+        && (target_dir.join("config.json").exists()
+            || target_dir.join("world_model_state.json").exists());
+    let mut recovered = false;
+
+    if !target_intact {
+        if let Some(valid_bak) = backups
+            .iter()
+            .rev()
+            .find(|b| b.join("config.json").exists() || b.join("world_model_state.json").exists())
+            .cloned()
+        {
+            if target_dir.exists() {
+                let _ = fs::remove_dir_all(target_dir);
+            }
+            fs::rename(&valid_bak, target_dir)?;
+            recovered = true;
+            backups.retain(|b| b != &valid_bak);
+        }
+    }
+
+    // If target is now intact, clean up stale backups and orphan staging dirs (excluding active_staging)
+    if target_dir.exists() {
+        for b in backups {
+            let _ = fs::remove_dir_all(b);
+        }
+        for s in stagings {
+            let _ = fs::remove_dir_all(s);
+        }
+    }
+
+    Ok(recovered)
+}
+
+/// Atomically promotes `staging_dir` to `target_dir` on the same parent filesystem with
+/// file-level `sync_all`, `.bak_<timestamp>` backup, and automatic rollback if rename fails.
+pub fn promote_directory_atomically(
+    staging_dir: &Path,
+    target_dir: &Path,
+) -> Result<(), TrainerError> {
+    if !staging_dir.exists() || !staging_dir.is_dir() {
+        return Err(TrainerError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Staging directory does not exist: {}", staging_dir.display()),
+        )));
+    }
+
+    // Recover any prior interrupted promotion first while preserving our active staging_dir
+    let _ = recover_interrupted_promotion_inner(target_dir, Some(staging_dir))?;
+
+    if let Some(parent) = target_dir.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+
+    // Flush all regular files in staging_dir to disk before rename
+    if let Ok(entries) = fs::read_dir(staging_dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_file() {
+                if let Ok(f) = File::open(&p) {
+                    let _ = f.sync_all();
+                }
+            }
+        }
+    }
+
+    let now_stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let backup_path = PathBuf::from(format!("{}.bak_{}", target_dir.display(), now_stamp));
+
+    if target_dir.exists() {
+        fs::rename(target_dir, &backup_path)?;
+    }
+
+    match fs::rename(staging_dir, target_dir) {
+        Ok(()) => {
+            if backup_path.exists() {
+                let _ = fs::remove_dir_all(&backup_path);
+            }
+            Ok(())
+        }
+        Err(e) => {
+            if backup_path.exists() {
+                let _ = fs::rename(&backup_path, target_dir);
+            }
+            Err(TrainerError::Io(e))
+        }
     }
 }
 

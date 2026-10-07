@@ -133,9 +133,8 @@ $SCALE_DONE:
     ld.param.f32 %f10, [p_bc1];
     ld.param.f32 %f11, [p_bc2];
 
-    // g = (grad * clip_scale) + weight_decay * weight
-    mul.f32 %f12, %f1, %f9;
-    fma.rn.f32 %f1, %f8, %f0, %f12; // f1 is g
+    // g = grad * clip_scale (decoupled from weight decay)
+    mul.f32 %f1, %f1, %f9; // f1 is g
 
     // m = beta1 * m + (1.0 - beta1) * g
     sub.f32 %f13, 1.0, %f5;
@@ -159,6 +158,11 @@ $SCALE_DONE:
     // delta = lr * m_hat / denom
     mul.f32 %f13, %f4, %f13;
     div.approx.f32 %f13, %f13, %f12;
+
+    // Decoupled weight decay: weight -= lr * weight_decay * weight
+    mul.f32 %f12, %f4, %f8;
+    mul.f32 %f12, %f12, %f0;
+    sub.f32 %f0, %f0, %f12;
 
     // weight -= delta
     sub.f32 %f0, %f0, %f13;
@@ -726,9 +730,8 @@ $SCALE_F16_DONE:
     ld.param.f32 %f10, [p_bc1];
     ld.param.f32 %f11, [p_bc2];
 
-    // g = (grad * clip_scale) + weight_decay * weight
-    mul.f32 %f12, %f1, %f9;
-    fma.rn.f32 %f1, %f8, %f0, %f12;
+    // g = grad * clip_scale (decoupled from weight decay)
+    mul.f32 %f1, %f1, %f9;
 
     // m = beta1 * m + (1.0 - beta1) * g
     sub.f32 %f13, 1.0, %f5;
@@ -752,6 +755,11 @@ $SCALE_F16_DONE:
     // delta = lr * m_hat / denom
     mul.f32 %f13, %f4, %f13;
     div.approx.f32 %f13, %f13, %f12;
+
+    // Decoupled weight decay on master weights: master_weight -= lr * weight_decay * master_weight
+    mul.f32 %f12, %f4, %f8;
+    mul.f32 %f12, %f12, %f0;
+    sub.f32 %f0, %f0, %f12;
 
     // master_weight -= delta
     sub.f32 %f0, %f0, %f13;

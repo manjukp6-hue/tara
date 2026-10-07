@@ -13539,7 +13539,7 @@
         "swiglu_fwd_kernel"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "16bb5bf0df6bbe44cf55971d1d2c42610e5467c0575e4be076804beb76faaec6",
+      "dynamic_sha256": "e704a741f131971023206e6fbb0b211bdaeb98f2d3084de8aa12cca4fbbb32d4",
       "exports": [
         {
           "kind": "Const",
@@ -13555,7 +13555,7 @@
       ],
       "internal_symbols": [],
       "is_test": false,
-      "lines": 1106,
+      "lines": 1114,
       "module_path": "tara_engine::cuda::kernels",
       "modules_declared": [],
       "out_links": [],
@@ -46843,7 +46843,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_training_system",
-      "dynamic_sha256": "41811d4f9dfb7a4d89a69127f9900a28fb2bda0941c8203ecf4004928558ac8c",
+      "dynamic_sha256": "9a32442db835dc97313487ea1876a7eb5e91e79dad368f95fb4a828850c7dd3a",
       "exports": [
         {
           "kind": "Struct",
@@ -46859,13 +46859,13 @@
         },
         {
           "kind": "Struct",
-          "line_number": 259,
+          "line_number": 260,
           "name": "NativeSelfTrainer",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 171,
+          "line_number": 172,
           "name": "StreamingDatasetReader",
           "visibility": "Public"
         },
@@ -46877,37 +46877,37 @@
         },
         {
           "kind": "Enum",
-          "line_number": 237,
+          "line_number": 238,
           "name": "TrainingDevice",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 362,
+          "line_number": 363,
           "name": "estimate_memory_footprint_mb",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 149,
+          "line_number": 150,
           "name": "export_state",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 367,
+          "line_number": 368,
           "name": "get_status",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 141,
+          "line_number": 142,
           "name": "get_step",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 162,
+          "line_number": 163,
           "name": "load_state",
           "visibility": "Public"
         },
@@ -46919,37 +46919,37 @@
         },
         {
           "kind": "Function",
-          "line_number": 277,
+          "line_number": 278,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 186,
+          "line_number": 187,
           "name": "next_sample",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 177,
+          "line_number": 178,
           "name": "open",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 385,
+          "line_number": 386,
           "name": "run_full_self_learning_cycle",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 394,
+          "line_number": 395,
           "name": "run_full_self_learning_cycle_isolated",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 145,
+          "line_number": 146,
           "name": "set_step",
           "visibility": "Public"
         },
@@ -46961,67 +46961,67 @@
         },
         {
           "kind": "Function",
-          "line_number": 344,
+          "line_number": 345,
           "name": "with_batch_size",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 296,
+          "line_number": 297,
           "name": "with_checkpoint_dir",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 302,
+          "line_number": 303,
           "name": "with_checkpoint_interval",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 332,
+          "line_number": 333,
           "name": "with_curriculum_path",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 326,
+          "line_number": 327,
           "name": "with_dataset_dir",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 314,
+          "line_number": 315,
           "name": "with_device",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 338,
+          "line_number": 339,
           "name": "with_learning_rate",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 356,
+          "line_number": 357,
           "name": "with_max_memory_mb",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 350,
+          "line_number": 351,
           "name": "with_max_steps",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 320,
+          "line_number": 321,
           "name": "with_precision",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 308,
+          "line_number": 309,
           "name": "with_resume",
           "visibility": "Public"
         }
@@ -47040,7 +47040,7 @@
             "TaraConfig"
           ],
           "is_public_reexport": false,
-          "line_number": 1435,
+          "line_number": 1478,
           "raw_path": "crate::config::TaraConfig"
         },
         {
@@ -47072,7 +47072,7 @@
             "write_safetensors_with_shapes"
           ],
           "is_public_reexport": false,
-          "line_number": 1436,
+          "line_number": 1479,
           "raw_path": "crate::safetensors::{load_model_weights, write_safetensors_with_shapes}"
         },
         {
@@ -47105,7 +47105,7 @@
             "HashMap"
           ],
           "is_public_reexport": false,
-          "line_number": 1437,
+          "line_number": 1480,
           "raw_path": "std::collections::HashMap"
         },
         {
@@ -47149,7 +47149,7 @@
             "StreamingDatasetReader"
           ],
           "is_public_reexport": false,
-          "line_number": 1434,
+          "line_number": 1477,
           "raw_path": "super::{NativeSelfTrainer, StreamingDatasetReader}"
         },
         {
@@ -47171,13 +47171,13 @@
       "internal_symbols": [
         {
           "kind": "TypeAlias",
-          "line_number": 245,
+          "line_number": 246,
           "name": "Err",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1404,
+          "line_number": 1447,
           "name": "compute_model_loss",
           "visibility": "Private"
         },
@@ -47189,37 +47189,37 @@
         },
         {
           "kind": "Function",
-          "line_number": 246,
+          "line_number": 247,
           "name": "from_str",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1392,
+          "line_number": 1435,
           "name": "softmax",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1440,
+          "line_number": 1483,
           "name": "supervised_cycle_updates_real_model_parameters_and_reduces_loss",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1549,
+          "line_number": 1592,
           "name": "test_streaming_dataset_reader_format_compatibility",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1593,
+      "lines": 1636,
       "module_path": "tara_training_system::shared_training_infrastructure::trainer",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1433,
+          "line_number": 1476,
           "name": "tests"
         }
       ],

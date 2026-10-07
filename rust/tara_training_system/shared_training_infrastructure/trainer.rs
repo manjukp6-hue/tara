@@ -127,12 +127,13 @@ impl DynamicAdamW {
                     .or_insert_with(|| vec![0.0f32; param.len()]);
 
                 for i in 0..param.len() {
-                    let g = (grad[i] * clip_scale) + weight_decay * param[i];
+                    let g = grad[i] * clip_scale;
                     m[i] = beta1 * m[i] + (1.0 - beta1) * g;
                     v[i] = beta2 * v[i] + (1.0 - beta2) * g * g;
                     let m_hat = m[i] / bc1;
                     let v_hat = v[i] / bc2;
                     param[i] -= lr * m_hat / (v_hat.sqrt() + eps);
+                    param[i] -= lr * weight_decay * param[i];
                 }
             }
         }
@@ -615,7 +616,19 @@ impl NativeSelfTrainer {
         }
         println!("[Tokenizer] Successfully tokenized {} sequence pairs.", training_tokens.len());
 
-        // 6. Compute initial loss across representative validation slice
+        // 6. Split into Train (90%) and Held-out Validation (10%) to prevent evaluation contamination
+        let total_seq_count = training_tokens.len();
+        let val_count = (total_seq_count / 10).clamp(16.min(total_seq_count), 256.min(total_seq_count));
+        let train_tokens = training_tokens[..total_seq_count - val_count].to_vec();
+        let val_tokens = training_tokens[total_seq_count - val_count..].to_vec();
+
+        println!(
+            "[Dataset Split] Partitioned {} train sequences and {} held-out validation sequences.",
+            train_tokens.len(),
+            val_tokens.len()
+        );
+
+        // Compute baseline loss strictly across held-out validation sequences
         let mut model = TaraForCausalLM::from_weights_and_config(
             weights.clone(),
             config.clone(),
@@ -623,11 +636,9 @@ impl NativeSelfTrainer {
         )
         .map_err(|e| TrainerError::Model(e.to_string()))?;
 
-        let eval_slice_len = training_tokens.len().min(128);
-        let eval_tokens = &training_tokens[..eval_slice_len];
-        println!("[Preflight] Evaluating baseline loss across {} samples...", eval_slice_len);
-        let initial_loss = compute_model_loss(&model, eval_tokens);
-        println!("[Preflight] Initial baseline loss: {:.4}", initial_loss);
+        println!("[Preflight] Evaluating baseline loss across {} held-out validation samples...", val_tokens.len());
+        let initial_loss = compute_model_loss(&model, &val_tokens);
+        println!("[Preflight] Held-out validation baseline loss: {:.4}", initial_loss);
 
         // 7. Full-Network Backpropagation with AdamW and Gradient Accumulation
         // Initialize hardware acceleration device backend
@@ -724,7 +735,8 @@ impl NativeSelfTrainer {
         let max_grad_norm = 1.0f32;
         let accumulation_steps = self.batch_size.unwrap_or(4usize);
 
-        let mut steps = 0usize;
+        let mut samples_seen = 0usize;
+        let mut optimizer_steps = 0usize;
         let mut epochs_completed = 0;
         let mut best_loss = initial_loss;
 
@@ -762,15 +774,24 @@ impl NativeSelfTrainer {
                         if let Ok(state_json) =
                             serde_json::from_str::<serde_json::Value>(&state_str)
                         {
-                            if let Some(s) = state_json.get("step").and_then(|v| v.as_u64()) {
-                                steps = s as usize;
+                            if let Some(s) = state_json
+                                .get("optimizer_step")
+                                .or_else(|| state_json.get("step"))
+                                .and_then(|v| v.as_u64())
+                            {
+                                optimizer_steps = s as usize;
+                            }
+                            if let Some(s) = state_json.get("samples_seen").and_then(|v| v.as_u64()) {
+                                samples_seen = s as usize;
+                            } else {
+                                samples_seen = optimizer_steps * accumulation_steps;
                             }
                             if let Some(e) = state_json.get("epoch").and_then(|v| v.as_u64()) {
                                 epochs_completed = e as usize;
                             }
                             println!(
-                                "[Checkpoint] Resumed at step {}, epoch {}",
-                                steps, epochs_completed
+                                "[Checkpoint] Resumed at optimizer step {}, samples {}, epoch {}",
+                                optimizer_steps, samples_seen, epochs_completed
                             );
                         }
                     }
@@ -815,19 +836,19 @@ impl NativeSelfTrainer {
                             }
                             if let Some(ref mut gpu_trainer) = gpu_trainer_opt {
                                 let _ = gpu_trainer.load_optimizer_state(&loaded_moments);
-                                gpu_trainer.set_step_count(steps as u64);
+                                gpu_trainer.set_step_count(optimizer_steps as u64);
                             }
                             optimizer.load_state(loaded_moments);
-                            optimizer.set_step(steps as u64);
-                            println!("[Checkpoint] Successfully restored optimizer moments and step count ({steps}).");
+                            optimizer.set_step(optimizer_steps as u64);
+                            println!("[Checkpoint] Successfully restored optimizer moments and step count ({optimizer_steps}).");
                         }
                     }
                 }
             }
         }
 
-        let mut initial_sample_skip = if self.resume && !training_tokens.is_empty() {
-            (steps * accumulation_steps) % training_tokens.len()
+        let mut initial_sample_skip = if self.resume && !train_tokens.is_empty() {
+            samples_seen % train_tokens.len()
         } else {
             0
         };
@@ -840,9 +861,9 @@ impl NativeSelfTrainer {
             let skip_count = initial_sample_skip;
             initial_sample_skip = 0;
 
-            for (tokens, target_start) in training_tokens.iter().skip(skip_count) {
+            for (tokens, target_start) in train_tokens.iter().skip(skip_count) {
                 if let Some(max_s) = self.max_steps {
-                    if steps >= max_s {
+                    if optimizer_steps >= max_s {
                         break;
                     }
                 }
@@ -966,20 +987,11 @@ impl NativeSelfTrainer {
                         }
                     }
                     accum_count += 1;
-                    steps += 1;
-
-                    if steps % 10 == 0 || steps == 1 {
-                        let max_str = self
-                            .max_steps
-                            .map(|m| m.to_string())
-                            .unwrap_or_else(|| "∞".to_string());
-                        println!(
-                            "[Train] Step {:>4}/{} | Sample Loss: {:.4} | LR: {:.6} | Device: {}",
-                            steps, max_str, sample_loss, learning_rate, device_label
-                        );
-                    }
+                    samples_seen += 1;
 
                     if accum_count >= accumulation_steps {
+                        optimizer_steps += 1;
+
                         if let Some(ref mut gpu_trainer) = gpu_trainer_opt {
                             // GPU-accelerated gradient scaling and AdamW step
                             gpu_trainer
@@ -1027,6 +1039,17 @@ impl NativeSelfTrainer {
                         }
                         accum_count = 0;
 
+                        if optimizer_steps % 10 == 0 || optimizer_steps == 1 {
+                            let max_str = self
+                                .max_steps
+                                .map(|m| m.to_string())
+                                .unwrap_or_else(|| "∞".to_string());
+                            println!(
+                                "[Train] Step {:>4}/{} (samples: {}) | Sample Loss: {:.4} | LR: {:.6} | Device: {}",
+                                optimizer_steps, max_str, samples_seen, sample_loss, learning_rate, device_label
+                            );
+                        }
+
                         // Reload model in-memory with updated weights
                         model = TaraForCausalLM::from_weights_and_config(
                             weights.clone(),
@@ -1037,7 +1060,7 @@ impl NativeSelfTrainer {
 
                         // Periodic persistent checkpoint saving with atomic staging
                         if let Some(interval) = self.checkpoint_interval {
-                            if steps > 0 && steps.is_multiple_of(interval) {
+                            if optimizer_steps > 0 && optimizer_steps.is_multiple_of(interval) {
                                 if let Some(ref cp_dir) = self.checkpoint_dir {
                                     let cp_path = Path::new(cp_dir);
                                     let staging_cp = cp_path.join(".staging");
@@ -1098,16 +1121,17 @@ impl NativeSelfTrainer {
                                         Path::new(&self.model_dir).join("tokenizer.json"),
                                         staging_cp.join("tokenizer.json"),
                                     );
-                                    // Validation loss evaluation on held-out/eval slice
-                                    let current_eval_loss = compute_model_loss(&model, eval_tokens);
+                                    // Validation loss evaluation strictly on held-out val_tokens
+                                    let current_eval_loss = compute_model_loss(&model, &val_tokens);
                                     let is_best = current_eval_loss < best_loss;
                                     if is_best {
                                         best_loss = current_eval_loss;
                                     }
 
                                     let state_json = serde_json::json!({
-                                        "step": steps,
-                                        "epoch": epochs_completed,
+                                        "optimizer_step": optimizer_steps,
+                                        "samples_seen": samples_seen,
+                                        "epoch": epoch_idx,
                                         "validation_loss": current_eval_loss,
                                         "best_validation_loss": best_loss,
                                         "is_best": is_best,
@@ -1147,7 +1171,7 @@ impl NativeSelfTrainer {
                                     let _ = std::fs::remove_dir_all(&staging_cp);
                                     println!(
                                         "[Checkpoint] Saved persistent checkpoint to '{}' at step {} (Val Loss: {:.4}, Best: {:.4})",
-                                        cp_dir, steps, current_eval_loss, best_loss
+                                        cp_dir, optimizer_steps, current_eval_loss, best_loss
                                     );
                                 }
                             }
@@ -1209,13 +1233,29 @@ impl NativeSelfTrainer {
 
             epochs_completed = epoch_idx + 1;
             if let Some(max_s) = self.max_steps {
-                if steps >= max_s {
+                if optimizer_steps >= max_s {
                     break;
                 }
             }
         }
 
-        let final_loss = compute_model_loss(&model, eval_tokens);
+        let final_loss = compute_model_loss(&model, &val_tokens);
+
+        // Validation Gate: reject non-finite loss or severe regression
+        if !final_loss.is_finite() {
+            return Err(TrainerError::Model(format!(
+                "Candidate rejected: final validation loss is non-finite ({final_loss}). Model update aborted."
+            )));
+        }
+        if final_loss > initial_loss * 1.5 {
+            return Err(TrainerError::Model(format!(
+                "Candidate rejected: validation loss regressed from {initial_loss:.4} to {final_loss:.4}. Model update aborted."
+            )));
+        }
+        println!(
+            "[Validation Gate] PASSED: initial baseline = {:.4}, final validation loss = {:.4}",
+            initial_loss, final_loss
+        );
 
         // 8. Determine destination and staging directory (Candidate Isolation)
         let now_stamp = SystemTime::now()
@@ -1281,7 +1321,9 @@ impl NativeSelfTrainer {
         );
 
         let state_json = json!({
-            "step": steps,
+            "step": optimizer_steps,
+            "optimizer_step": optimizer_steps,
+            "samples_seen": samples_seen,
             "epoch": epochs_completed,
             "candidate_id": candidate_id,
             "loss_before": initial_loss,
@@ -1289,10 +1331,10 @@ impl NativeSelfTrainer {
             "timestamp": crate::now_iso(),
             "resumable": true,
         });
-        let _ = fs::write(
+        fs::write(
             format!("{}/checkpoint_state.json", staging_dir),
             serde_json::to_string_pretty(&state_json).unwrap_or_default(),
-        );
+        )?;
 
         // Compute candidate weights sha256
         let first_shard = shard_files
@@ -1312,9 +1354,10 @@ impl NativeSelfTrainer {
             "candidate_id": candidate_id,
             "completed_at_epoch_seconds": SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
             "cycles_completed": self.get_status().get("cycles_completed").and_then(Value::as_u64).unwrap_or(0) + 1,
-            "samples_trained": samples.len(),
+            "samples_trained": samples_seen,
             "epochs": epochs_completed,
-            "steps": steps,
+            "steps": optimizer_steps,
+            "optimizer_steps": optimizer_steps,
             "loss_before": initial_loss,
             "loss_after": final_loss,
             "candidate_sha256": candidate_sha256,

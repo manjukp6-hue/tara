@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::inference::backend::{BackendRegistry, DeviceBackend};
+use crate::inference::backend::{BackendRegistry, DeviceBackend, DeviceTensor};
 use crate::inference::cache_policy::{
     CachePolicy, LFRUCachePolicy, DEFAULT_LFRU_FIXED_MARGIN, DEFAULT_LFRU_MARGIN_PCT,
 };
@@ -17,7 +17,7 @@ pub struct TieredTensorStore {
     pub admission_margin_fixed: usize,
 
     // Pools: key -> tensor data
-    pub vram_pool: HashMap<String, Vec<f32>>,
+    pub vram_pool: HashMap<String, DeviceTensor>,
     pub ram_pool: HashMap<String, Vec<f32>>,
     pub disk_keys: HashSet<String>,
 
@@ -47,10 +47,7 @@ impl TieredTensorStore {
     }
 
     pub fn vram_resident_bytes(&self) -> usize {
-        self.vram_pool
-            .values()
-            .map(|v| v.len() * std::mem::size_of::<f32>())
-            .sum()
+        self.vram_pool.values().map(|t| t.bytes()).sum()
     }
 
     pub fn ram_resident_bytes(&self) -> usize {
@@ -69,9 +66,14 @@ impl TieredTensorStore {
 
         // 1. Check VRAM Tier
         if let Some(t) = self.vram_pool.get(key) {
-            let bytes = t.len() * std::mem::size_of::<f32>();
+            let bytes = t.bytes();
             self.telemetry.record_lookup("VRAM", bytes, false);
-            return Ok(t.clone());
+            return self
+                .backend
+                .transfer_to_host(t)
+                .map_err(|e| {
+                    SafeTensorsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                });
         }
 
         // 2. Check RAM Tier
@@ -124,9 +126,11 @@ impl TieredTensorStore {
             if let Some(evict_key) = self.policy.pick_eviction(&resident) {
                 if self.policy.should_admit(key, &evict_key) {
                     if let Some(evicted) = self.vram_pool.remove(&evict_key) {
-                        let ev_bytes = evicted.len() * std::mem::size_of::<f32>();
+                        let ev_bytes = evicted.bytes();
                         self.telemetry.record_eviction("VRAM", "RAM", ev_bytes);
-                        self.ram_pool.insert(evict_key, evicted);
+                        if let Ok(host_vec) = self.backend.transfer_to_host(&evicted) {
+                            self.ram_pool.insert(evict_key, host_vec);
+                        }
                     }
                 } else {
                     return; // Admission rejected due to hysteresis
@@ -137,8 +141,9 @@ impl TieredTensorStore {
         }
 
         if self.vram_resident_bytes() + bytes <= self.vram_capacity_bytes {
-            let dev_tensor = self.backend.transfer_to_device(&t_data);
-            self.vram_pool.insert(key.to_string(), dev_tensor);
+            if let Ok(dev_tensor) = self.backend.transfer_to_device(&t_data) {
+                self.vram_pool.insert(key.to_string(), dev_tensor);
+            }
         }
     }
 
@@ -158,5 +163,19 @@ impl TieredTensorStore {
             }
         }
         loaded
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tiered_store_initialization_and_capacities() {
+        let store = TieredTensorStore::new(1024, 2048, HashSet::new());
+        assert_eq!(store.vram_capacity_bytes, 1024);
+        assert_eq!(store.ram_capacity_bytes, 2048);
+        assert_eq!(store.vram_resident_bytes(), 0);
+        assert_eq!(store.ram_resident_bytes(), 0);
     }
 }

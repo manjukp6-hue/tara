@@ -15,7 +15,10 @@ pub mod router;
 pub mod telemetry;
 pub mod tiered_store;
 
-pub use backend::{BackendRegistry, CPUBackend, CUDABackend, DeviceBackend};
+pub use backend::{
+    BackendError, BackendPolicy, BackendRegistry, CPUBackend, CUDABackend, DeviceBackend,
+    DeviceTensor,
+};
 pub use cache_policy::{
     tier_decay_value, tier_should_promote, CachePolicy, LFRUCachePolicy, LFUCachePolicy,
     LRUCachePolicy,

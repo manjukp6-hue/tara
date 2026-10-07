@@ -2,12 +2,12 @@
   "status": "SYNCED",
   "engine_name": "TARA Architecture Sync Engine",
   "engine_version": "1.0.0",
-  "last_sync_utc": "1791369710",
+  "last_sync_utc": "1791369787",
   "last_scan_mode": "LIVE_WATCHER_SYNC",
   "total_files": 1952,
   "total_folders": 586,
   "reconciliation_duration_ms": 0,
-  "events_processed": 7126,
+  "events_processed": 7184,
   "live_watcher_active": true,
   "live_watcher_mode": "continuous_live_reconciler",
   "ignored_directories": [
@@ -20,5 +20,5 @@
     ".vscode",
     ".idea"
   ],
-  "registries_digest_sha256": "532db5d5d9014e4c9e8c74a493a854270d25e91bbef6663116c717cc77eeeb45"
+  "registries_digest_sha256": "2b4cf531a4843c39d32d8c5d560f7a599a9fcdf076d88ee44e7cbdd5ea132629"
 }

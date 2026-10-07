@@ -46813,7 +46813,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_training_system",
-      "dynamic_sha256": "dea0c7b8072ef2f2a5210ab701a3e9e91ca2b2ee84bae7bbdc2ba2462c42e497",
+      "dynamic_sha256": "c25086fa143f68144f5e80de10092d22451a771461f08134dd51ba45d10ad781",
       "exports": [
         {
           "kind": "Struct",
@@ -47010,7 +47010,7 @@
             "TaraConfig"
           ],
           "is_public_reexport": false,
-          "line_number": 1392,
+          "line_number": 1423,
           "raw_path": "crate::config::TaraConfig"
         },
         {
@@ -47042,7 +47042,7 @@
             "write_safetensors_with_shapes"
           ],
           "is_public_reexport": false,
-          "line_number": 1393,
+          "line_number": 1424,
           "raw_path": "crate::safetensors::{load_model_weights, write_safetensors_with_shapes}"
         },
         {
@@ -47075,7 +47075,7 @@
             "HashMap"
           ],
           "is_public_reexport": false,
-          "line_number": 1394,
+          "line_number": 1425,
           "raw_path": "std::collections::HashMap"
         },
         {
@@ -47119,7 +47119,7 @@
             "StreamingDatasetReader"
           ],
           "is_public_reexport": false,
-          "line_number": 1391,
+          "line_number": 1422,
           "raw_path": "super::{NativeSelfTrainer, StreamingDatasetReader}"
         },
         {
@@ -47147,7 +47147,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 1361,
+          "line_number": 1392,
           "name": "compute_model_loss",
           "visibility": "Private"
         },
@@ -47165,31 +47165,31 @@
         },
         {
           "kind": "Function",
-          "line_number": 1349,
+          "line_number": 1380,
           "name": "softmax",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1397,
+          "line_number": 1428,
           "name": "supervised_cycle_updates_real_model_parameters_and_reduces_loss",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1506,
+          "line_number": 1537,
           "name": "test_streaming_dataset_reader_format_compatibility",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1550,
+      "lines": 1581,
       "module_path": "tara_training_system::shared_training_infrastructure::trainer",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1390,
+          "line_number": 1421,
           "name": "tests"
         }
       ],

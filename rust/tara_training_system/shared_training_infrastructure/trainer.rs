@@ -714,6 +714,7 @@ impl NativeSelfTrainer {
 
         let mut steps = 0usize;
         let mut epochs_completed = 0;
+        let mut best_loss = initial_loss;
 
         // Check for resumable checkpoint state
         if self.resume {
@@ -1085,9 +1086,19 @@ impl NativeSelfTrainer {
                                         Path::new(&self.model_dir).join("tokenizer.json"),
                                         staging_cp.join("tokenizer.json"),
                                     );
+                                    // Validation loss evaluation on held-out/eval slice
+                                    let current_eval_loss = compute_model_loss(&model, eval_tokens);
+                                    let is_best = current_eval_loss < best_loss;
+                                    if is_best {
+                                        best_loss = current_eval_loss;
+                                    }
+
                                     let state_json = serde_json::json!({
                                         "step": steps,
                                         "epoch": epochs_completed,
+                                        "validation_loss": current_eval_loss,
+                                        "best_validation_loss": best_loss,
+                                        "is_best": is_best,
                                         "timestamp": crate::now_iso(),
                                     });
                                     let _ = std::fs::write(
@@ -1104,8 +1115,28 @@ impl NativeSelfTrainer {
                                             let _ = std::fs::copy(entry.path(), dest);
                                         }
                                     }
+
+                                    // Save dedicated best model checkpoint if validation loss improved
+                                    if is_best {
+                                        let best_dir = cp_path.join("best");
+                                        let _ = std::fs::create_dir_all(&best_dir);
+                                        if let Ok(entries) = std::fs::read_dir(&staging_cp) {
+                                            for entry in entries.flatten() {
+                                                let dest = best_dir.join(entry.file_name());
+                                                let _ = std::fs::copy(entry.path(), dest);
+                                            }
+                                        }
+                                        println!(
+                                            "[Checkpoint] ★ New BEST checkpoint saved to '{}/best' (Validation Loss: {:.4})",
+                                            cp_dir, best_loss
+                                        );
+                                    }
+
                                     let _ = std::fs::remove_dir_all(&staging_cp);
-                                    println!("[Checkpoint] Saved atomic persistent checkpoint to '{}' at step {}", cp_dir, steps);
+                                    println!(
+                                        "[Checkpoint] Saved persistent checkpoint to '{}' at step {} (Val Loss: {:.4}, Best: {:.4})",
+                                        cp_dir, steps, current_eval_loss, best_loss
+                                    );
                                 }
                             }
                         }

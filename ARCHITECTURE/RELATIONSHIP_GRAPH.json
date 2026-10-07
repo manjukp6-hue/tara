@@ -14077,7 +14077,8 @@
       "in_links": [
         "rust/tara_engine/src/cuda/gpu_trainer.rs",
         "rust/tara_engine/src/cuda/mod.rs",
-        "rust/tara_engine/src/inference/backend.rs"
+        "rust/tara_engine/src/inference/backend.rs",
+        "rust/tara_engine/src/inference/tiered_store.rs"
       ],
       "internal_symbols": [
         {
@@ -17674,65 +17675,65 @@
         "values_mut"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "a54b405427712f8c5679ed3012f1b99fa5c21839c1d3b9e81a5ebb698d2c6d8d",
+      "dynamic_sha256": "68f88a20d415bf66af5d06fa06654ddc08da608b4c11ba446d74b928766b36bd",
       "exports": [
         {
           "kind": "Trait",
-          "line_number": 32,
+          "line_number": 35,
           "name": "CachePolicy",
           "visibility": "Public"
         },
         {
           "kind": "Const",
-          "line_number": 44,
+          "line_number": 47,
           "name": "DEFAULT_LFRU_FIXED_MARGIN",
           "visibility": "Public"
         },
         {
           "kind": "Const",
-          "line_number": 41,
+          "line_number": 44,
           "name": "DEFAULT_LFRU_MARGIN_PCT",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 46,
+          "line_number": 49,
           "name": "LFRUCachePolicy",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 142,
+          "line_number": 145,
           "name": "LFUCachePolicy",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 116,
+          "line_number": 119,
           "name": "LRUCachePolicy",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 61,
+          "line_number": 64,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 71,
+          "line_number": 74,
           "name": "score",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 21,
+          "line_number": 24,
           "name": "tier_decay_value",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 26,
+          "line_number": 29,
           "name": "tier_lfru_score",
           "visibility": "Public"
         },
@@ -17760,109 +17761,109 @@
       "internal_symbols": [
         {
           "kind": "Function",
-          "line_number": 36,
+          "line_number": 39,
           "name": "decay",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 108,
+          "line_number": 111,
           "name": "decay",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 138,
+          "line_number": 141,
           "name": "decay",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 164,
+          "line_number": 167,
           "name": "decay",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 55,
+          "line_number": 58,
           "name": "default",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 34,
+          "line_number": 37,
           "name": "pick_eviction",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 85,
+          "line_number": 88,
           "name": "pick_eviction",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 127,
+          "line_number": 130,
           "name": "pick_eviction",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 151,
+          "line_number": 154,
           "name": "pick_eviction",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 33,
+          "line_number": 36,
           "name": "record_access",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 79,
+          "line_number": 82,
           "name": "record_access",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 122,
+          "line_number": 125,
           "name": "record_access",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 147,
+          "line_number": 150,
           "name": "record_access",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 35,
+          "line_number": 38,
           "name": "should_admit",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 102,
+          "line_number": 105,
           "name": "should_admit",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 134,
+          "line_number": 137,
           "name": "should_admit",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 158,
+          "line_number": 161,
           "name": "should_admit",
           "visibility": "Private"
         }
       ],
       "is_test": false,
-      "lines": 169,
+      "lines": 172,
       "module_path": "tara_engine::inference::cache_policy",
       "modules_declared": [],
       "out_links": [],
@@ -17949,29 +17950,70 @@
       "rel_path": "rust/tara_engine/src/inference/lookahead.rs"
     },
     "rust/tara_engine/src/inference/mod.rs": {
-      "call_references": [],
+      "call_references": [
+        "clone",
+        "create_dir_all",
+        "default",
+        "get",
+        "insert",
+        "is_cpu",
+        "is_ok",
+        "join",
+        "locate_tier",
+        "lookup",
+        "new",
+        "predict_next",
+        "record_access",
+        "remove_dir_all",
+        "sync_disk_catalog",
+        "temp_dir",
+        "test_inference_module_send_sync_and_four_layer_contract",
+        "to_string",
+        "to_string_lossy",
+        "try_new_with_policy",
+        "unwrap",
+        "vec",
+        "verify_invariants",
+        "write_safetensors_sharded"
+      ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "afb66269fa5778bc7b259e733e0598ef8b228cd7515cd383995621a86cd2c5a9",
+      "dynamic_sha256": "f19b7de91743ccfdc3db2506d39d8208ebb370c57945546c9c82c377e6230d91",
       "exports": [],
       "imports": [
         {
           "imported_symbols": [],
           "is_public_reexport": true,
-          "line_number": 18,
+          "line_number": 23,
           "raw_path": "backend::{"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": true,
-          "line_number": 22,
+          "line_number": 27,
           "raw_path": "cache_policy::{"
+        },
+        {
+          "imported_symbols": [
+            "write_safetensors_sharded"
+          ],
+          "is_public_reexport": false,
+          "line_number": 41,
+          "raw_path": "crate::safetensors::write_safetensors_sharded"
+        },
+        {
+          "imported_symbols": [
+            "ShardedSafeTensorsManager"
+          ],
+          "is_public_reexport": false,
+          "line_number": 42,
+          "raw_path": "crate::shard_manager::ShardedSafeTensorsManager"
         },
         {
           "imported_symbols": [
             "LookaheadPrefetcher"
           ],
           "is_public_reexport": true,
-          "line_number": 26,
+          "line_number": 31,
           "raw_path": "lookahead::LookaheadPrefetcher"
         },
         {
@@ -17979,15 +18021,38 @@
             "RoutingTracker"
           ],
           "is_public_reexport": true,
-          "line_number": 27,
+          "line_number": 32,
           "raw_path": "router::RoutingTracker"
+        },
+        {
+          "imported_symbols": [
+            "HashMap",
+            "HashSet"
+          ],
+          "is_public_reexport": false,
+          "line_number": 39,
+          "raw_path": "std::collections::{HashMap, HashSet}"
+        },
+        {
+          "imported_symbols": [
+            "Arc"
+          ],
+          "is_public_reexport": false,
+          "line_number": 40,
+          "raw_path": "std::sync::Arc"
+        },
+        {
+          "imported_symbols": [],
+          "is_public_reexport": false,
+          "line_number": 38,
+          "raw_path": "super::*"
         },
         {
           "imported_symbols": [
             "TelemetryMonitor"
           ],
           "is_public_reexport": true,
-          "line_number": 28,
+          "line_number": 33,
           "raw_path": "telemetry::TelemetryMonitor"
         },
         {
@@ -17996,7 +18061,7 @@
             "TieredTensorStore"
           ],
           "is_public_reexport": true,
-          "line_number": 29,
+          "line_number": 34,
           "raw_path": "tiered_store::{TierLocation, TieredTensorStore}"
         }
       ],
@@ -18005,45 +18070,64 @@
         "rust/tara_engine/src/inference/tiered_store.rs",
         "rust/tara_engine/src/lib.rs"
       ],
-      "internal_symbols": [],
-      "is_test": false,
-      "lines": 29,
+      "internal_symbols": [
+        {
+          "kind": "Function",
+          "line_number": 44,
+          "name": "assert_send_sync",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 47,
+          "name": "test_inference_module_send_sync_and_four_layer_contract",
+          "visibility": "Private"
+        }
+      ],
+      "is_test": true,
+      "lines": 133,
       "module_path": "tara_engine::inference",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 11,
+          "line_number": 16,
           "name": "backend"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 12,
+          "line_number": 17,
           "name": "cache_policy"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 13,
+          "line_number": 18,
           "name": "lookahead"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 14,
+          "line_number": 19,
           "name": "router"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 15,
+          "line_number": 20,
           "name": "telemetry"
         },
         {
           "custom_path": null,
+          "is_public": false,
+          "line_number": 37,
+          "name": "tests"
+        },
+        {
+          "custom_path": null,
           "is_public": true,
-          "line_number": 16,
+          "line_number": 21,
           "name": "tiered_store"
         }
       ],
@@ -18053,7 +18137,10 @@
         "rust/tara_engine/src/inference/lookahead.rs",
         "rust/tara_engine/src/inference/router.rs",
         "rust/tara_engine/src/inference/telemetry.rs",
-        "rust/tara_engine/src/inference/tiered_store.rs"
+        "rust/tara_engine/src/inference/tiered_store.rs",
+        "rust/tara_engine/src/lib.rs",
+        "rust/tara_engine/src/shard_manager.rs",
+        "rust/tara_training_system/shared_training_infrastructure/safetensors.rs"
       ],
       "rel_path": "rust/tara_engine/src/inference/mod.rs"
     },
@@ -18257,7 +18344,13 @@
     },
     "rust/tara_engine/src/inference/tiered_store.rs": {
       "call_references": [
+        "Some",
         "admit_to_ram",
+        "allocate_tensor",
+        "and_then",
+        "as_cpu_arc",
+        "as_cpu_slice",
+        "as_str",
         "bytes",
         "clone",
         "cloned",
@@ -18265,17 +18358,26 @@
         "contains_key",
         "create_dir_all",
         "default",
+        "filter",
         "get",
         "insert",
         "into",
+        "is_available",
+        "is_cpu",
         "is_disk_key",
+        "is_err",
         "is_ok",
         "keys",
         "kind",
         "len",
+        "list_tensors",
+        "locate_tier",
         "lookup",
+        "lookup_device",
+        "lookup_host",
         "map",
         "map_err",
+        "name",
         "new",
         "pick_eviction",
         "prefetch",
@@ -18290,96 +18392,145 @@
         "retain",
         "select_best_backend",
         "sum",
+        "sync_disk_catalog",
         "temp_dir",
         "test_admit_to_ram_and_lru_eviction",
-        "test_cuda_promotion_and_single_residency",
+        "test_cuda_oom_during_promotion_rolls_back_cleanly",
         "test_hysteresis_blocks_cold_admission",
         "test_oversized_tensor_rejected_from_ram",
+        "test_oversized_tensor_streaming_and_prefetch_hysteresis_enforcement",
+        "test_ram_to_vram_promotion_single_residency_and_zero_dtoh_on_vram_lookup",
         "test_single_residency_and_lookup_with_shards",
         "test_tiered_store_initialization_and_capacities",
+        "test_vram_to_ram_eviction_and_ram_capacity_enforcement",
         "to_string",
         "to_string_lossy",
+        "to_vec",
         "transfer_to_device",
         "transfer_to_host",
+        "try_new_with_policy",
         "try_promote_to_vram",
         "unwrap",
         "values",
         "vec",
+        "verify_invariants",
         "vram_resident_bytes",
         "write_safetensors_sharded"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "c9452d0ccce16466950b1d519902cb61759e0824b76f9e655bb1bb4702cc9bcb",
+      "dynamic_sha256": "d25b0e2ed4a54f7430bda7c25c2ee583b920f9d260c2cd8b94d97dd60e041349",
       "exports": [
         {
+          "kind": "Enum",
+          "line_number": 27,
+          "name": "TierLocation",
+          "visibility": "Public"
+        },
+        {
           "kind": "Struct",
-          "line_number": 22,
+          "line_number": 34,
           "name": "TieredTensorStore",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 92,
+          "line_number": 180,
           "name": "admit_to_ram",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 75,
+          "line_number": 101,
           "name": "is_disk_key",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 212,
+          "line_number": 113,
+          "name": "locate_tier",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 401,
           "name": "lookup",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 39,
+          "line_number": 410,
+          "name": "lookup_device",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 463,
+          "name": "lookup_host",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 53,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 254,
+          "line_number": 487,
           "name": "prefetch",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 83,
+          "line_number": 129,
           "name": "ram_resident_bytes",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 71,
+          "line_number": 97,
           "name": "register_disk_key",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 144,
+          "line_number": 106,
+          "name": "sync_disk_catalog",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 77,
+          "name": "try_new_with_policy",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 255,
           "name": "try_promote_to_vram",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 79,
+          "line_number": 138,
+          "name": "verify_invariants",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 125,
           "name": "vram_resident_bytes",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 61,
+          "line_number": 87,
           "name": "with_backend",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 66,
+          "line_number": 92,
           "name": "with_policy",
           "visibility": "Public"
         }
@@ -18387,35 +18538,39 @@
       "imports": [
         {
           "imported_symbols": [
-            "CPUBackend"
+            "CudaError"
           ],
           "is_public_reexport": false,
-          "line_number": 281,
-          "raw_path": "crate::inference::backend::CPUBackend"
+          "line_number": 533,
+          "raw_path": "crate::cuda::driver::CudaError"
+        },
+        {
+          "imported_symbols": [],
+          "is_public_reexport": false,
+          "line_number": 15,
+          "raw_path": "crate::inference::backend::{"
         },
         {
           "imported_symbols": [
-            "BackendRegistry",
-            "DeviceBackend",
-            "DeviceKind",
-            "DeviceTensor"
+            "CPUBackend",
+            "CUDABackend"
           ],
           "is_public_reexport": false,
-          "line_number": 14,
-          "raw_path": "crate::inference::backend::{BackendRegistry, DeviceBackend, DeviceKind, DeviceTensor}"
+          "line_number": 534,
+          "raw_path": "crate::inference::backend::{CPUBackend, CUDABackend}"
         },
         {
           "imported_symbols": [
             "LRUCachePolicy"
           ],
           "is_public_reexport": false,
-          "line_number": 282,
+          "line_number": 535,
           "raw_path": "crate::inference::cache_policy::LRUCachePolicy"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 15,
+          "line_number": 18,
           "raw_path": "crate::inference::cache_policy::{"
         },
         {
@@ -18423,7 +18578,7 @@
             "TelemetryMonitor"
           ],
           "is_public_reexport": false,
-          "line_number": 18,
+          "line_number": 21,
           "raw_path": "crate::inference::telemetry::TelemetryMonitor"
         },
         {
@@ -18431,7 +18586,7 @@
             "SafeTensorsError"
           ],
           "is_public_reexport": false,
-          "line_number": 19,
+          "line_number": 22,
           "raw_path": "crate::safetensors::SafeTensorsError"
         },
         {
@@ -18439,7 +18594,7 @@
             "write_safetensors_sharded"
           ],
           "is_public_reexport": false,
-          "line_number": 283,
+          "line_number": 536,
           "raw_path": "crate::safetensors::write_safetensors_sharded"
         },
         {
@@ -18447,7 +18602,7 @@
             "ShardedSafeTensorsManager"
           ],
           "is_public_reexport": false,
-          "line_number": 20,
+          "line_number": 23,
           "raw_path": "crate::shard_manager::ShardedSafeTensorsManager"
         },
         {
@@ -18456,7 +18611,7 @@
             "HashSet"
           ],
           "is_public_reexport": false,
-          "line_number": 11,
+          "line_number": 12,
           "raw_path": "std::collections::{HashMap, HashSet}"
         },
         {
@@ -18464,13 +18619,23 @@
             "Arc"
           ],
           "is_public_reexport": false,
-          "line_number": 12,
+          "line_number": 13,
           "raw_path": "std::sync::Arc"
+        },
+        {
+          "imported_symbols": [
+            "AtomicBool",
+            "AtomicUsize",
+            "Ordering"
+          ],
+          "is_public_reexport": false,
+          "line_number": 532,
+          "raw_path": "std::sync::atomic::{AtomicBool, AtomicUsize, Ordering}"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 280,
+          "line_number": 531,
           "raw_path": "super::*"
         }
       ],
@@ -18479,54 +18644,121 @@
       ],
       "internal_symbols": [
         {
+          "kind": "Struct",
+          "line_number": 542,
+          "name": "InstrumentedCudaBackend",
+          "visibility": "Private"
+        },
+        {
           "kind": "Function",
-          "line_number": 325,
+          "line_number": 578,
+          "name": "allocate_tensor",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 574,
+          "name": "is_available",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 570,
+          "name": "kind",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 566,
+          "name": "name",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 550,
+          "name": "new",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 892,
           "name": "test_admit_to_ram_and_lru_eviction",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 299,
-          "name": "test_cuda_promotion_and_single_residency",
+          "line_number": 782,
+          "name": "test_cuda_oom_during_promotion_rolls_back_cleanly",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 368,
+          "line_number": 936,
           "name": "test_hysteresis_blocks_cold_admission",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 357,
+          "line_number": 925,
           "name": "test_oversized_tensor_rejected_from_ram",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 393,
+          "line_number": 827,
+          "name": "test_oversized_tensor_streaming_and_prefetch_hysteresis_enforcement",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 638,
+          "name": "test_ram_to_vram_promotion_single_residency_and_zero_dtoh_on_vram_lookup",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 959,
           "name": "test_single_residency_and_lookup_with_shards",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 286,
+          "line_number": 618,
           "name": "test_tiered_store_initialization_and_capacities",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 711,
+          "name": "test_vram_to_ram_eviction_and_ram_capacity_enforcement",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 592,
+          "name": "transfer_to_device",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 607,
+          "name": "transfer_to_host",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 435,
+      "lines": 1014,
       "module_path": "tara_engine::inference::tiered_store",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 279,
+          "line_number": 530,
           "name": "tests"
         }
       ],
       "out_links": [
+        "rust/tara_engine/src/cuda/driver.rs",
         "rust/tara_engine/src/inference/backend.rs",
         "rust/tara_engine/src/inference/cache_policy.rs",
         "rust/tara_engine/src/inference/mod.rs",
@@ -18693,6 +18925,7 @@
         "rust/tara_engine/src/auto_loader.rs",
         "rust/tara_engine/src/computation/mod.rs",
         "rust/tara_engine/src/config.rs",
+        "rust/tara_engine/src/inference/mod.rs",
         "rust/tara_engine/src/loading_policy.rs",
         "rust/tara_engine/src/model_expansion.rs",
         "rust/tara_engine/src/project_link_engine.rs",
@@ -20663,6 +20896,7 @@
       ],
       "in_links": [
         "rust/tara_engine/src/auto_loader.rs",
+        "rust/tara_engine/src/inference/mod.rs",
         "rust/tara_engine/src/inference/tiered_store.rs",
         "rust/tara_engine/src/lib.rs"
       ],
@@ -48942,6 +49176,7 @@
         "rust/tara_engine/src/bin/manual_trainer.rs",
         "rust/tara_engine/src/bin/prove_self_update.rs",
         "rust/tara_engine/src/bin/tara_training_stages.rs",
+        "rust/tara_engine/src/inference/mod.rs",
         "rust/tara_engine/src/inference/tiered_store.rs",
         "rust/tara_engine/src/lib.rs",
         "rust/tara_engine/src/model_expansion.rs",
@@ -51514,5 +51749,5 @@
   "schema_version": "1.0.0",
   "total_files": 240,
   "total_modules": 583,
-  "total_symbols": 2284
+  "total_symbols": 2291
 }

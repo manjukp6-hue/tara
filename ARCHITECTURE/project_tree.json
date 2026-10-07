@@ -16620,8 +16620,8 @@
                       "name": "cache_policy.rs",
                       "rel_path": "rust/tara_engine/src/inference/cache_policy.rs",
                       "entry_type": "file",
-                      "size_bytes": 4939,
-                      "sha256": "a54b405427712f8c5679ed3012f1b99fa5c21839c1d3b9e81a5ebb698d2c6d8d"
+                      "size_bytes": 5021,
+                      "sha256": "68f88a20d415bf66af5d06fa06654ddc08da608b4c11ba446d74b928766b36bd"
                     },
                     {
                       "name": "lookahead.rs",
@@ -16634,8 +16634,8 @@
                       "name": "mod.rs",
                       "rel_path": "rust/tara_engine/src/inference/mod.rs",
                       "entry_type": "file",
-                      "size_bytes": 1036,
-                      "sha256": "afb66269fa5778bc7b259e733e0598ef8b228cd7515cd383995621a86cd2c5a9"
+                      "size_bytes": 5780,
+                      "sha256": "f19b7de91743ccfdc3db2506d39d8208ebb370c57945546c9c82c377e6230d91"
                     },
                     {
                       "name": "router.rs",
@@ -16655,8 +16655,8 @@
                       "name": "tiered_store.rs",
                       "rel_path": "rust/tara_engine/src/inference/tiered_store.rs",
                       "entry_type": "file",
-                      "size_bytes": 16843,
-                      "sha256": "c9452d0ccce16466950b1d519902cb61759e0824b76f9e655bb1bb4702cc9bcb"
+                      "size_bytes": 42676,
+                      "sha256": "d25b0e2ed4a54f7430bda7c25c2ee583b920f9d260c2cd8b94d97dd60e041349"
                     }
                   ]
                 },

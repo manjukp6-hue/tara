@@ -37,9 +37,11 @@ pub struct TieredTensorStore {
     pub admission_margin_pct: usize,
     pub admission_margin_fixed: usize,
 
-    // Pools: key -> tensor data (single-residency enforced: vram_pool ∩ ram_pool == ∅)
+    // Pools: key -> DeviceTensor (single-residency enforced: vram_pool ∩ ram_pool == ∅)
+    // - vram_pool holds device-resident tensors (`DeviceTensor::Cuda(Arc<CudaBuffer>)`)
+    // - ram_pool holds host-resident tensors (`DeviceTensor::Cpu(Arc<Vec<f32>>)`)
     pub vram_pool: HashMap<String, DeviceTensor>,
-    pub ram_pool: HashMap<String, Arc<Vec<f32>>>,
+    pub ram_pool: HashMap<String, DeviceTensor>,
     pub disk_keys: HashSet<String>,
 
     pub policy: Box<dyn CachePolicy>,
@@ -125,17 +127,14 @@ impl TieredTensorStore {
     }
 
     pub fn ram_resident_bytes(&self) -> usize {
-        self.ram_pool
-            .values()
-            .map(|v| v.len() * std::mem::size_of::<f32>())
-            .sum()
+        self.ram_pool.values().map(|t| t.bytes()).sum()
     }
 
     /// Verifies all structural invariants of the three-tier store:
     /// 1. `vram_resident_bytes() <= vram_capacity_bytes`
     /// 2. `ram_resident_bytes() <= ram_capacity_bytes`
     /// 3. Disjoint memory residency (`vram_pool.keys() ∩ ram_pool.keys() == ∅`)
-    /// 4. No individual resident tensor exceeds its tier capacity.
+    /// 4. Every tensor in `ram_pool` is a CPU-resident `DeviceTensor::Cpu(...)`.
     pub fn verify_invariants(&self) -> Result<(), String> {
         let vram_used = self.vram_resident_bytes();
         if vram_used > self.vram_capacity_bytes {
@@ -162,14 +161,25 @@ impl TieredTensorStore {
             }
         }
 
+        for (k, t) in &self.ram_pool {
+            if !t.is_cpu() {
+                return Err(format!(
+                    "RAM tier representation invariant violated: key '{}' in ram_pool is not DeviceTensor::Cpu",
+                    k
+                ));
+            }
+        }
+
         Ok(())
     }
 
     /// Transactional RAM admission: verifies capacity and hysteresis before evicting cold items.
-    /// Enforces single-residency (will not duplicate a key already in `vram_pool`).
+    /// Enforces single-residency (will not duplicate a key already in `vram_pool`) and stores
+    /// `DeviceTensor::Cpu(Arc<Vec<f32>>)` in `ram_pool`.
     /// Returns true if admitted, false if rejected or oversized.
     pub fn admit_to_ram(&mut self, key: &str, tensor: Arc<Vec<f32>>) -> bool {
-        let bytes = tensor.len() * std::mem::size_of::<f32>();
+        let dev_tensor = DeviceTensor::from_cpu_arc(tensor);
+        let bytes = dev_tensor.bytes();
 
         // Oversized tensor protection: never cache a tensor larger than total RAM capacity
         if self.ram_capacity_bytes == 0 || bytes > self.ram_capacity_bytes {
@@ -183,11 +193,11 @@ impl TieredTensorStore {
 
         // If already resident in RAM, check if updated size fits within capacity
         if let Some(existing) = self.ram_pool.get(key) {
-            let existing_bytes = existing.len() * std::mem::size_of::<f32>();
+            let existing_bytes = existing.bytes();
             if self.ram_resident_bytes().saturating_sub(existing_bytes) + bytes
                 <= self.ram_capacity_bytes
             {
-                self.ram_pool.insert(key.to_string(), tensor);
+                self.ram_pool.insert(key.to_string(), dev_tensor);
                 return true;
             }
         }
@@ -212,7 +222,7 @@ impl TieredTensorStore {
                         return false; // Hysteresis rejects admission
                     }
                     if let Some(resident_tensor) = self.ram_pool.get(&cand) {
-                        freed += resident_tensor.len() * std::mem::size_of::<f32>();
+                        freed += resident_tensor.bytes();
                     }
                     sim_resident.retain(|k| k != &cand);
                     to_evict.push(cand);
@@ -225,13 +235,13 @@ impl TieredTensorStore {
         // Execute planned evictions from RAM to Disk
         for evict_key in to_evict {
             if let Some(evicted) = self.ram_pool.remove(&evict_key) {
-                let ev_bytes = evicted.len() * std::mem::size_of::<f32>();
+                let ev_bytes = evicted.bytes();
                 self.disk_keys.insert(evict_key);
                 self.telemetry.record_eviction("RAM", "DISK", ev_bytes);
             }
         }
 
-        self.ram_pool.insert(key.to_string(), tensor);
+        self.ram_pool.insert(key.to_string(), dev_tensor);
         true
     }
 
@@ -255,7 +265,7 @@ impl TieredTensorStore {
             return true;
         }
 
-        let t_data = match self.ram_pool.get(key) {
+        let t_data = match self.ram_pool.get(key).and_then(|t| t.as_cpu_arc()) {
             Some(t) => Arc::clone(t),
             None => return false,
         };
@@ -410,12 +420,12 @@ impl TieredTensorStore {
             return Ok(t.clone());
         }
 
-        // 2. Check RAM Tier (O(1) Arc<Vec<f32>> clone or promotion to VRAM)
+        // 2. Check RAM Tier (O(1) DeviceTensor::Cpu(Arc<Vec<f32>>) clone or promotion to VRAM)
         if let Some(t) = self.ram_pool.get(key) {
             self.policy.record_access(key);
-            let bytes = t.len() * std::mem::size_of::<f32>();
+            let bytes = t.bytes();
             self.telemetry.record_lookup("RAM", bytes, false);
-            let tensor_arc = Arc::clone(t);
+            let ram_tensor = t.clone();
 
             // Attempt promotion to VRAM if CUDA backend is active
             if self.backend.kind() == DeviceKind::Cuda
@@ -427,7 +437,7 @@ impl TieredTensorStore {
                     return Ok(vram_tensor.clone());
                 }
             }
-            return Ok(DeviceTensor::from_cpu_arc(tensor_arc));
+            return Ok(ram_tensor);
         }
 
         // 3. Disk Miss: Load from SafeTensors shard

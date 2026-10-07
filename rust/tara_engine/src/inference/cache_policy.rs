@@ -10,10 +10,13 @@ use std::collections::HashMap;
 pub fn tier_should_promote(
     hot: usize,
     cold: usize,
-    _margin_pct: usize,
+    margin_pct: usize,
     fixed_margin: usize,
 ) -> bool {
-    let threshold = cold + (cold >> 2) + fixed_margin; // 25% + fixed margin
+    let pct_margin = cold.saturating_mul(margin_pct) / 100;
+    let threshold = cold
+        .saturating_add(pct_margin)
+        .saturating_add(fixed_margin);
     hot > threshold
 }
 

@@ -5690,7 +5690,7 @@
         "values_mut"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "a54b405427712f8c5679ed3012f1b99fa5c21839c1d3b9e81a5ebb698d2c6d8d",
+      "dynamic_sha256": "68f88a20d415bf66af5d06fa06654ddc08da608b4c11ba446d74b928766b36bd",
       "enums": [],
       "functions": [
         "decay",
@@ -5709,7 +5709,7 @@
         "rust/tara_engine/src/inference/tiered_store.rs"
       ],
       "is_test": false,
-      "lines": 169,
+      "lines": 172,
       "module": "tara_engine::inference::cache_policy",
       "out_links": [],
       "rel_path": "rust/tara_engine/src/inference/cache_policy.rs",
@@ -5756,18 +5756,46 @@
       "traits": []
     },
     "rust/tara_engine/src/inference/mod.rs": {
-      "calls": [],
+      "calls": [
+        "clone",
+        "create_dir_all",
+        "default",
+        "get",
+        "insert",
+        "is_cpu",
+        "is_ok",
+        "join",
+        "locate_tier",
+        "lookup",
+        "new",
+        "predict_next",
+        "record_access",
+        "remove_dir_all",
+        "sync_disk_catalog",
+        "temp_dir",
+        "test_inference_module_send_sync_and_four_layer_contract",
+        "to_string",
+        "to_string_lossy",
+        "try_new_with_policy",
+        "unwrap",
+        "vec",
+        "verify_invariants",
+        "write_safetensors_sharded"
+      ],
       "crate": "tara_engine",
-      "dynamic_sha256": "afb66269fa5778bc7b259e733e0598ef8b228cd7515cd383995621a86cd2c5a9",
+      "dynamic_sha256": "f19b7de91743ccfdc3db2506d39d8208ebb370c57945546c9c82c377e6230d91",
       "enums": [],
-      "functions": [],
+      "functions": [
+        "assert_send_sync",
+        "test_inference_module_send_sync_and_four_layer_contract"
+      ],
       "in_links": [
         "rust/tara_engine/src/inference/backend.rs",
         "rust/tara_engine/src/inference/tiered_store.rs",
         "rust/tara_engine/src/lib.rs"
       ],
-      "is_test": false,
-      "lines": 29,
+      "is_test": true,
+      "lines": 133,
       "module": "tara_engine::inference",
       "out_links": [
         "rust/tara_engine/src/inference/backend.rs",
@@ -5775,7 +5803,10 @@
         "rust/tara_engine/src/inference/lookahead.rs",
         "rust/tara_engine/src/inference/router.rs",
         "rust/tara_engine/src/inference/telemetry.rs",
-        "rust/tara_engine/src/inference/tiered_store.rs"
+        "rust/tara_engine/src/inference/tiered_store.rs",
+        "rust/tara_engine/src/lib.rs",
+        "rust/tara_engine/src/shard_manager.rs",
+        "rust/tara_training_system/shared_training_infrastructure/safetensors.rs"
       ],
       "rel_path": "rust/tara_engine/src/inference/mod.rs",
       "structs": [],
@@ -5875,6 +5906,8 @@
         "Some",
         "admit_to_ram",
         "allocate_tensor",
+        "and_then",
+        "as_cpu_arc",
         "as_cpu_slice",
         "as_str",
         "bytes",
@@ -5889,6 +5922,7 @@
         "insert",
         "into",
         "is_available",
+        "is_cpu",
         "is_disk_key",
         "is_err",
         "is_ok",
@@ -5943,7 +5977,7 @@
         "write_safetensors_sharded"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "a8a9fe55dbd3d799b579e8c829d1d2edd7ca7b4d564ad492800e8d0c66958a21",
+      "dynamic_sha256": "d25b0e2ed4a54f7430bda7c25c2ee583b920f9d260c2cd8b94d97dd60e041349",
       "enums": [
         "TierLocation"
       ],
@@ -5985,7 +6019,7 @@
         "rust/tara_engine/src/inference/mod.rs"
       ],
       "is_test": true,
-      "lines": 1004,
+      "lines": 1014,
       "module": "tara_engine::inference::tiered_store",
       "out_links": [
         "rust/tara_engine/src/cuda/driver.rs",
@@ -6020,6 +6054,7 @@
         "rust/tara_engine/src/auto_loader.rs",
         "rust/tara_engine/src/computation/mod.rs",
         "rust/tara_engine/src/config.rs",
+        "rust/tara_engine/src/inference/mod.rs",
         "rust/tara_engine/src/loading_policy.rs",
         "rust/tara_engine/src/model_expansion.rs",
         "rust/tara_engine/src/project_link_engine.rs",
@@ -6678,6 +6713,7 @@
       ],
       "in_links": [
         "rust/tara_engine/src/auto_loader.rs",
+        "rust/tara_engine/src/inference/mod.rs",
         "rust/tara_engine/src/inference/tiered_store.rs",
         "rust/tara_engine/src/lib.rs"
       ],
@@ -16823,6 +16859,7 @@
         "rust/tara_engine/src/bin/manual_trainer.rs",
         "rust/tara_engine/src/bin/prove_self_update.rs",
         "rust/tara_engine/src/bin/tara_training_stages.rs",
+        "rust/tara_engine/src/inference/mod.rs",
         "rust/tara_engine/src/inference/tiered_store.rs",
         "rust/tara_engine/src/lib.rs",
         "rust/tara_engine/src/model_expansion.rs",

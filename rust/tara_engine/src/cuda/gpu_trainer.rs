@@ -1,8 +1,9 @@
 //! Native CUDA Trainer for TARA (FP32 & Mixed-Precision FP16).
 //!
 //! Executes real GPU acceleration on NVIDIA hardware:
-//! - Pure FP32 and genuine FP16 CUDA kernels
-//! - FP32 master weights & FP16 model weights / activations / gradients
+//! - Pure FP32 and genuine mixed-precision FP16 CUDA kernels
+//! - Genuine FP16 model weights on device for bandwidth and VRAM efficiency
+//! - Robust FP32 master weights, activations, gradients, gradient accumulation, and AdamW optimizer moments
 //! - Real-time VRAM tracking and hardware telemetry
 
 use crate::cuda::driver::{
@@ -1211,14 +1212,25 @@ mod tests {
     use super::*;
     use crate::trainer::{AdamWHyperparams, DynamicAdamW};
 
-    #[test]
-    fn test_gpu_cpu_adamw_numerical_equivalence() {
-        let mut gpu_trainer = match CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32) {
-            Ok(t) => t,
-            Err(_) => {
-                eprintln!("[SKIP] CUDA device not available on this machine.");
-                return;
+    fn init_test_gpu(context: &str) -> Option<CudaTrainer> {
+        match CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32) {
+            Ok(t) => Some(t),
+            Err(e) => {
+                if std::env::var("REQUIRE_CUDA").is_ok() || std::env::var("CI_CUDA").is_ok() {
+                    panic!("FATAL: CUDA was explicitly required (REQUIRE_CUDA=1) but {context} failed: {e:?}");
+                } else {
+                    eprintln!("[SKIP: CUDA UNAVAILABLE] {context}: {e:?}");
+                    None
+                }
             }
+        }
+    }
+
+    #[test]
+    fn test_cpu_gpu_adamw_numerical_equivalence() {
+        let mut gpu_trainer = match init_test_gpu("test_cpu_gpu_adamw_numerical_equivalence") {
+            Some(t) => t,
+            None => return,
         };
 
         let n = 256;
@@ -1326,9 +1338,9 @@ mod tests {
 
     #[test]
     fn test_gpu_adamw_non_finite_gradient_skips_step() {
-        let mut gpu_trainer = match CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32) {
-            Ok(t) => t,
-            Err(_) => return,
+        let mut gpu_trainer = match init_test_gpu("test_gpu_adamw_non_finite_gradient_skips_step") {
+            Some(t) => t,
+            None => return,
         };
 
         let n = 128;
@@ -1363,9 +1375,9 @@ mod tests {
         initial_weights.insert("dense.weight".to_string(), w.clone());
 
         // Run A: 10 steps continuously
-        let mut trainer_a = match CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32) {
-            Ok(t) => t,
-            Err(_) => return,
+        let mut trainer_a = match init_test_gpu("test_gpu_checkpoint_resume_numerical_equivalence_A") {
+            Some(t) => t,
+            None => return,
         };
         trainer_a.register_weights(&initial_weights).unwrap();
 
@@ -1382,7 +1394,10 @@ mod tests {
         let weights_a = trainer_a.download_weights().unwrap();
 
         // Run B: 5 steps -> checkpoint -> resume -> 5 steps
-        let mut trainer_b = CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32).unwrap();
+        let mut trainer_b = match init_test_gpu("test_gpu_checkpoint_resume_numerical_equivalence_B") {
+            Some(t) => t,
+            None => return,
+        };
         trainer_b.register_weights(&initial_weights).unwrap();
 
         for g in &grads_history[0..5] {
@@ -1397,7 +1412,10 @@ mod tests {
         drop(trainer_b);
 
         // Resume in new trainer
-        let mut trainer_c = CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32).unwrap();
+        let mut trainer_c = match init_test_gpu("test_gpu_checkpoint_resume_numerical_equivalence_C") {
+            Some(t) => t,
+            None => return,
+        };
         trainer_c.register_weights(&checkpoint_weights).unwrap();
         trainer_c.load_optimizer_state(&checkpoint_opt_state).unwrap();
         trainer_c.set_step_count(checkpoint_step);
@@ -1434,9 +1452,9 @@ mod tests {
         initial_weights.insert("dense.weight".to_string(), w.clone());
 
         // Run A: 10 steps continuously
-        let mut trainer_a = match CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32) {
-            Ok(t) => t,
-            Err(_) => return,
+        let mut trainer_a = match init_test_gpu("test_gpu_checkpoint_full_disk_roundtrip_equivalence_A") {
+            Some(t) => t,
+            None => return,
         };
         trainer_a.register_weights(&initial_weights).unwrap();
 
@@ -1452,11 +1470,17 @@ mod tests {
         }
         let weights_a = trainer_a.download_weights().unwrap();
 
-        // Run B: 5 steps -> write to real disk files -> drop process/trainer -> reload from disk -> 5 steps
+        // Run B: 5 steps -> write to real disk files matching production layout -> reload -> 5 steps
         let temp_dir = std::env::temp_dir().join(format!("tara_gpu_disk_cp_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&temp_dir);
 
-        let mut trainer_b = CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32).unwrap();
+        let mut trainer_b = match init_test_gpu("test_gpu_checkpoint_full_disk_roundtrip_equivalence_B") {
+            Some(t) => t,
+            None => {
+                let _ = std::fs::remove_dir_all(&temp_dir);
+                return;
+            }
+        };
         trainer_b.register_weights(&initial_weights).unwrap();
 
         for g in &grads_history[0..5] {
@@ -1464,19 +1488,33 @@ mod tests {
             trainer_b.step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0).unwrap();
         }
 
-        // Write weights to SafeTensors file on disk
+        // 1. Write weights to model.safetensors on disk
         let disk_weights = trainer_b.download_weights().unwrap();
         let mut disk_shapes = HashMap::new();
         disk_shapes.insert("dense.weight".to_string(), vec![n]);
         let sf_path = temp_dir.join("model.safetensors");
         crate::safetensors::write_safetensors_with_shapes(&disk_weights, &disk_shapes, &sf_path.to_string_lossy()).unwrap();
 
-        // Write optimizer state to JSON on disk
+        // 2. Write production optimizer.safetensors on disk
         let disk_opt = trainer_b.export_optimizer_state().unwrap();
+        let mut opt_tensors: HashMap<String, Vec<f32>> = HashMap::new();
+        let mut opt_shapes: HashMap<String, Vec<usize>> = HashMap::new();
+        for (k, (m_vec, v_vec)) in disk_opt {
+            let m_name = format!("{k}.adam_m");
+            let v_name = format!("{k}.adam_v");
+            opt_shapes.insert(m_name.clone(), vec![m_vec.len()]);
+            opt_shapes.insert(v_name.clone(), vec![v_vec.len()]);
+            opt_tensors.insert(m_name, m_vec);
+            opt_tensors.insert(v_name, v_vec);
+        }
+        let opt_path = temp_dir.join("optimizer.safetensors");
+        crate::safetensors::write_safetensors_with_shapes(&opt_tensors, &opt_shapes, &opt_path.to_string_lossy()).unwrap();
+
+        // 3. Write production checkpoint_state.json metadata
         let disk_step = trainer_b.get_step_count();
         let state_json = serde_json::json!({
             "step": disk_step,
-            "moments": disk_opt,
+            "optimizer_step": disk_step,
         });
         let state_path = temp_dir.join("checkpoint_state.json");
         std::fs::write(&state_path, serde_json::to_string(&state_json).unwrap()).unwrap();
@@ -1484,16 +1522,30 @@ mod tests {
         // Completely destroy trainer_b
         drop(trainer_b);
 
-        // Fresh start: reload from disk
+        // Fresh start: reload from production disk checkpoint layout
         let reloaded_weights = crate::safetensors::load_safetensors(&sf_path.to_string_lossy()).unwrap();
         let reloaded_state_raw = std::fs::read_to_string(&state_path).unwrap();
         let reloaded_state: serde_json::Value = serde_json::from_str(&reloaded_state_raw).unwrap();
         let reloaded_step = reloaded_state["step"].as_u64().unwrap();
-        let reloaded_moments_map: HashMap<String, (Vec<f32>, Vec<f32>)> =
-            serde_json::from_value(reloaded_state["moments"].clone()).unwrap();
+
+        let reloaded_opt_tensors = crate::safetensors::load_safetensors(&opt_path.to_string_lossy()).unwrap();
+        let mut reloaded_moments_map: HashMap<String, (Vec<f32>, Vec<f32>)> = HashMap::new();
+        for (tensor_name, tensor_data) in reloaded_opt_tensors {
+            if let Some(prefix) = tensor_name.strip_suffix(".adam_m") {
+                reloaded_moments_map.entry(prefix.to_string()).or_insert_with(|| (Vec::new(), Vec::new())).0 = tensor_data;
+            } else if let Some(prefix) = tensor_name.strip_suffix(".adam_v") {
+                reloaded_moments_map.entry(prefix.to_string()).or_insert_with(|| (Vec::new(), Vec::new())).1 = tensor_data;
+            }
+        }
 
         // Initialize fresh trainer_c
-        let mut trainer_c = CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32).unwrap();
+        let mut trainer_c = match init_test_gpu("test_gpu_checkpoint_full_disk_roundtrip_equivalence_C") {
+            Some(t) => t,
+            None => {
+                let _ = std::fs::remove_dir_all(&temp_dir);
+                return;
+            }
+        };
         trainer_c.register_weights(&reloaded_weights).unwrap();
         trainer_c.load_optimizer_state(&reloaded_moments_map).unwrap();
         trainer_c.set_step_count(reloaded_step);

@@ -1233,7 +1233,7 @@ $NORM_REDUCE_DONE:
     .reg .pred %p;
     .reg .b16 %h<2>;
     .reg .b32 %r<10>;
-    .reg .b64 %rd<10>;
+    .reg .b64 %rd<12>;
     .reg .f32 %f<10>;
 
     mov.u32 %r0, %ctaid.x;
@@ -1285,8 +1285,8 @@ $RMS_FWD_F16_STORE:
 
     mul.wide.u32 %rd6, %r7, 4;
     add.u64 %rd7, %rd4, %rd6;
-    mul.wide.u32 %rd8_w, %r7, 2;
-    add.u64 %rd8, %rd1, %rd8_w;
+    mul.wide.u32 %rd10, %r7, 2;
+    add.u64 %rd8, %rd1, %rd10;
     add.u64 %rd9, %rd5, %rd6;
 
     ld.global.f32 %f1, [%rd7];
@@ -1315,7 +1315,7 @@ $RMS_FWD_F16_DONE:
     .reg .pred %p;
     .reg .b16 %h<2>;
     .reg .b32 %r<10>;
-    .reg .b64 %rd<10>;
+    .reg .b64 %rd<12>;
     .reg .f32 %f<5>;
 
     mov.u32 %r0, %ctaid.x;
@@ -1356,8 +1356,8 @@ $LIN_FWD_F16_LOOP:
     add.u64 %rd8, %rd4, %rd7;
     ld.global.f32 %f1, [%rd8];
 
-    mul.wide.u32 %rd9_w, %r2, 2;
-    add.u64 %rd9, %rd6, %rd9_w;
+    mul.wide.u32 %rd10, %r2, 2;
+    add.u64 %rd9, %rd6, %rd10;
     ld.global.b16 %h1, [%rd9];
     cvt.f32.f16 %f2, %h1;
 

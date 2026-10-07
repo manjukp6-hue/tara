@@ -74,8 +74,15 @@ impl DeviceTensor {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceKind {
+    Cpu,
+    Cuda,
+}
+
 pub trait DeviceBackend: Send + Sync {
     fn name(&self) -> &'static str;
+    fn kind(&self) -> DeviceKind;
     fn is_available(&self) -> bool;
     fn allocate_tensor(&self, size: usize) -> Result<DeviceTensor, BackendError>;
     fn transfer_to_device(&self, host_tensor: &[f32]) -> Result<DeviceTensor, BackendError>;
@@ -87,6 +94,10 @@ pub struct CPUBackend;
 impl DeviceBackend for CPUBackend {
     fn name(&self) -> &'static str {
         "CPU"
+    }
+
+    fn kind(&self) -> DeviceKind {
+        DeviceKind::Cpu
     }
 
     fn is_available(&self) -> bool {
@@ -177,6 +188,10 @@ impl CUDABackend {
 impl DeviceBackend for CUDABackend {
     fn name(&self) -> &'static str {
         "CUDA"
+    }
+
+    fn kind(&self) -> DeviceKind {
+        DeviceKind::Cuda
     }
 
     fn is_available(&self) -> bool {

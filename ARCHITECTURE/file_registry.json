@@ -17863,12 +17863,12 @@
     "rust/tara_engine/src/inference/backend.rs": {
       "extension": "rs",
       "file_id": 1407374884173778,
-      "line_count": 319,
-      "modified_epoch": 1791391172,
+      "line_count": 334,
+      "modified_epoch": 1791394645,
       "name": "backend.rs",
       "rel_path": "rust/tara_engine/src/inference/backend.rs",
-      "sha256": "4ea415ff1e0ece290060c81c9cc032e3d814bb7dbd1eca16441cd7f233bcb99f",
-      "size_bytes": 9652
+      "sha256": "8af76e1a94b7ab82d2f750ffd433e6bf1ba058a8cc33a7898cbc17dbd737e678",
+      "size_bytes": 9908
     },
     "rust/tara_engine/src/inference/cache_policy.rs": {
       "extension": "rs",
@@ -17913,22 +17913,22 @@
     "rust/tara_engine/src/inference/telemetry.rs": {
       "extension": "rs",
       "file_id": 6473924464965545,
-      "line_count": 97,
-      "modified_epoch": 1790600543,
+      "line_count": 107,
+      "modified_epoch": 1791394707,
       "name": "telemetry.rs",
       "rel_path": "rust/tara_engine/src/inference/telemetry.rs",
-      "sha256": "dc69049895201684526787a5e8c34bb22b2fa547b2d059c6848eea82b017e740",
-      "size_bytes": 2458
+      "sha256": "a0f9deeb8ea03540a88e6e9039a775af7ac674704602a0fdfdfd40e8407e76dc",
+      "size_bytes": 2717
     },
     "rust/tara_engine/src/inference/tiered_store.rs": {
       "extension": "rs",
       "file_id": 5629499534833390,
-      "line_count": 181,
-      "modified_epoch": 1791391285,
+      "line_count": 435,
+      "modified_epoch": 1791395160,
       "name": "tiered_store.rs",
       "rel_path": "rust/tara_engine/src/inference/tiered_store.rs",
-      "sha256": "cded55221fcc6f2fab7ed5dbcef06cb321f481ef16b4b179961b38bd01094a7b",
-      "size_bytes": 6358
+      "sha256": "c9452d0ccce16466950b1d519902cb61759e0824b76f9e655bb1bb4702cc9bcb",
+      "size_bytes": 16843
     },
     "rust/tara_engine/src/lib.rs": {
       "extension": "rs",
@@ -19531,7 +19531,7 @@
       "size_bytes": 1242
     }
   },
-  "generated_at_utc": "1791394137",
+  "generated_at_utc": "1791395162",
   "schema_version": "1.0.0",
   "total_files": 1953
 }

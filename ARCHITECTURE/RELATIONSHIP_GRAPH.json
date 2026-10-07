@@ -16318,6 +16318,7 @@
         "is_cuda",
         "is_empty",
         "is_ok",
+        "kind",
         "len",
         "name",
         "new",
@@ -16335,7 +16336,7 @@
         "vec"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "4ea415ff1e0ece290060c81c9cc032e3d814bb7dbd1eca16441cd7f233bcb99f",
+      "dynamic_sha256": "8af76e1a94b7ab82d2f750ffd433e6bf1ba058a8cc33a7898cbc17dbd737e678",
       "exports": [
         {
           "kind": "Enum",
@@ -16345,32 +16346,38 @@
         },
         {
           "kind": "Enum",
-          "line_number": 230,
+          "line_number": 245,
           "name": "BackendPolicy",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 236,
+          "line_number": 251,
           "name": "BackendRegistry",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 85,
+          "line_number": 92,
           "name": "CPUBackend",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 114,
+          "line_number": 125,
           "name": "CUDABackend",
           "visibility": "Public"
         },
         {
           "kind": "Trait",
-          "line_number": 77,
+          "line_number": 83,
           "name": "DeviceBackend",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Enum",
+          "line_number": 78,
+          "name": "DeviceKind",
           "visibility": "Public"
         },
         {
@@ -16381,7 +16388,7 @@
         },
         {
           "kind": "Const",
-          "line_number": 221,
+          "line_number": 236,
           "name": "PRIMARY_CUDA_DEVICE_ORDINAL",
           "visibility": "Public"
         },
@@ -16429,25 +16436,25 @@
         },
         {
           "kind": "Function",
-          "line_number": 121,
+          "line_number": 132,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 239,
+          "line_number": 254,
           "name": "select_backend",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 261,
+          "line_number": 276,
           "name": "select_best_backend",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 172,
+          "line_number": 183,
           "name": "session",
           "visibility": "Public"
         }
@@ -16474,7 +16481,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 268,
+          "line_number": 283,
           "raw_path": "super::*"
         },
         {
@@ -16493,133 +16500,151 @@
       "internal_symbols": [
         {
           "kind": "Function",
-          "line_number": 80,
+          "line_number": 87,
           "name": "allocate_tensor",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 96,
+          "line_number": 107,
           "name": "allocate_tensor",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 186,
+          "line_number": 201,
           "name": "allocate_tensor",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 224,
+          "line_number": 239,
           "name": "default",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 79,
+          "line_number": 86,
           "name": "is_available",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 92,
+          "line_number": 103,
           "name": "is_available",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 182,
+          "line_number": 197,
           "name": "is_available",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 78,
+          "line_number": 85,
+          "name": "kind",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 99,
+          "name": "kind",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 193,
+          "name": "kind",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 84,
           "name": "name",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 88,
+          "line_number": 95,
           "name": "name",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 178,
+          "line_number": 189,
           "name": "name",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 302,
+          "line_number": 317,
           "name": "test_backend_registry_policy_selection",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 271,
+          "line_number": 286,
           "name": "test_cpu_backend_allocation_and_transfers",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 295,
+          "line_number": 310,
           "name": "test_cuda_backend_ordinal_overflow_handling",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 311,
+          "line_number": 326,
           "name": "test_device_tensor_properties",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 81,
+          "line_number": 88,
           "name": "transfer_to_device",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 100,
+          "line_number": 111,
           "name": "transfer_to_device",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 195,
+          "line_number": 210,
           "name": "transfer_to_device",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 82,
+          "line_number": 89,
           "name": "transfer_to_host",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 104,
+          "line_number": 115,
           "name": "transfer_to_host",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 205,
+          "line_number": 220,
           "name": "transfer_to_host",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 319,
+      "lines": 334,
       "module_path": "tara_engine::inference::backend",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 267,
+          "line_number": 282,
           "name": "tests"
         }
       ],
@@ -17139,12 +17164,13 @@
         "record_eviction",
         "record_lookup",
         "record_prefetch",
+        "record_promotion",
         "record_transfer",
         "to_uppercase",
         "total_hits"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "dc69049895201684526787a5e8c34bb22b2fa547b2d059c6848eea82b017e740",
+      "dynamic_sha256": "a0f9deeb8ea03540a88e6e9039a775af7ac674704602a0fdfdfd40e8407e76dc",
       "exports": [
         {
           "kind": "Struct",
@@ -17154,43 +17180,49 @@
         },
         {
           "kind": "Function",
-          "line_number": 90,
+          "line_number": 100,
           "name": "hit_rate",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 27,
+          "line_number": 28,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 62,
+          "line_number": 64,
           "name": "record_eviction",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 44,
+          "line_number": 46,
           "name": "record_lookup",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 69,
+          "line_number": 79,
           "name": "record_prefetch",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 76,
-          "name": "record_transfer",
+          "line_number": 71,
+          "name": "record_promotion",
           "visibility": "Public"
         },
         {
           "kind": "Function",
           "line_number": 86,
+          "name": "record_transfer",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 96,
           "name": "total_hits",
           "visibility": "Public"
         }
@@ -17212,13 +17244,13 @@
       "internal_symbols": [
         {
           "kind": "Function",
-          "line_number": 21,
+          "line_number": 22,
           "name": "default",
           "visibility": "Private"
         }
       ],
       "is_test": false,
-      "lines": 97,
+      "lines": 107,
       "module_path": "tara_engine::inference::telemetry",
       "modules_declared": [],
       "out_links": [],
@@ -17226,96 +17258,165 @@
     },
     "rust/tara_engine/src/inference/tiered_store.rs": {
       "call_references": [
+        "admit_to_ram",
         "bytes",
         "clone",
         "cloned",
         "collect",
+        "contains_key",
+        "create_dir_all",
         "default",
-        "is_empty",
+        "get",
+        "insert",
+        "into",
+        "is_disk_key",
+        "is_ok",
         "keys",
+        "kind",
         "len",
         "lookup",
         "map",
         "map_err",
-        "name",
         "new",
         "pick_eviction",
         "prefetch",
+        "ptr_eq",
         "ram_resident_bytes",
+        "record_access",
         "record_eviction",
         "record_lookup",
+        "register_disk_key",
         "remove",
+        "remove_dir_all",
+        "retain",
         "select_best_backend",
         "sum",
+        "temp_dir",
+        "test_admit_to_ram_and_lru_eviction",
+        "test_cuda_promotion_and_single_residency",
+        "test_hysteresis_blocks_cold_admission",
+        "test_oversized_tensor_rejected_from_ram",
+        "test_single_residency_and_lookup_with_shards",
         "test_tiered_store_initialization_and_capacities",
         "to_string",
+        "to_string_lossy",
         "transfer_to_device",
         "transfer_to_host",
         "try_promote_to_vram",
+        "unwrap",
         "values",
-        "vram_resident_bytes"
+        "vec",
+        "vram_resident_bytes",
+        "write_safetensors_sharded"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "cded55221fcc6f2fab7ed5dbcef06cb321f481ef16b4b179961b38bd01094a7b",
+      "dynamic_sha256": "c9452d0ccce16466950b1d519902cb61759e0824b76f9e655bb1bb4702cc9bcb",
       "exports": [
         {
           "kind": "Struct",
-          "line_number": 13,
+          "line_number": 22,
           "name": "TieredTensorStore",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 60,
+          "line_number": 92,
+          "name": "admit_to_ram",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 75,
+          "name": "is_disk_key",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 212,
           "name": "lookup",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 30,
+          "line_number": 39,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 150,
+          "line_number": 254,
           "name": "prefetch",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 53,
+          "line_number": 83,
           "name": "ram_resident_bytes",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 116,
+          "line_number": 71,
+          "name": "register_disk_key",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 144,
           "name": "try_promote_to_vram",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 49,
+          "line_number": 79,
           "name": "vram_resident_bytes",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 61,
+          "name": "with_backend",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 66,
+          "name": "with_policy",
           "visibility": "Public"
         }
       ],
       "imports": [
         {
           "imported_symbols": [
+            "CPUBackend"
+          ],
+          "is_public_reexport": false,
+          "line_number": 281,
+          "raw_path": "crate::inference::backend::CPUBackend"
+        },
+        {
+          "imported_symbols": [
             "BackendRegistry",
             "DeviceBackend",
+            "DeviceKind",
             "DeviceTensor"
           ],
           "is_public_reexport": false,
-          "line_number": 5,
-          "raw_path": "crate::inference::backend::{BackendRegistry, DeviceBackend, DeviceTensor}"
+          "line_number": 14,
+          "raw_path": "crate::inference::backend::{BackendRegistry, DeviceBackend, DeviceKind, DeviceTensor}"
+        },
+        {
+          "imported_symbols": [
+            "LRUCachePolicy"
+          ],
+          "is_public_reexport": false,
+          "line_number": 282,
+          "raw_path": "crate::inference::cache_policy::LRUCachePolicy"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 6,
+          "line_number": 15,
           "raw_path": "crate::inference::cache_policy::{"
         },
         {
@@ -17323,7 +17424,7 @@
             "TelemetryMonitor"
           ],
           "is_public_reexport": false,
-          "line_number": 9,
+          "line_number": 18,
           "raw_path": "crate::inference::telemetry::TelemetryMonitor"
         },
         {
@@ -17331,15 +17432,23 @@
             "SafeTensorsError"
           ],
           "is_public_reexport": false,
-          "line_number": 10,
+          "line_number": 19,
           "raw_path": "crate::safetensors::SafeTensorsError"
+        },
+        {
+          "imported_symbols": [
+            "write_safetensors_sharded"
+          ],
+          "is_public_reexport": false,
+          "line_number": 283,
+          "raw_path": "crate::safetensors::write_safetensors_sharded"
         },
         {
           "imported_symbols": [
             "ShardedSafeTensorsManager"
           ],
           "is_public_reexport": false,
-          "line_number": 11,
+          "line_number": 20,
           "raw_path": "crate::shard_manager::ShardedSafeTensorsManager"
         },
         {
@@ -17348,13 +17457,21 @@
             "HashSet"
           ],
           "is_public_reexport": false,
-          "line_number": 3,
+          "line_number": 11,
           "raw_path": "std::collections::{HashMap, HashSet}"
+        },
+        {
+          "imported_symbols": [
+            "Arc"
+          ],
+          "is_public_reexport": false,
+          "line_number": 12,
+          "raw_path": "std::sync::Arc"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 171,
+          "line_number": 280,
           "raw_path": "super::*"
         }
       ],
@@ -17364,19 +17481,49 @@
       "internal_symbols": [
         {
           "kind": "Function",
-          "line_number": 174,
+          "line_number": 325,
+          "name": "test_admit_to_ram_and_lru_eviction",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 299,
+          "name": "test_cuda_promotion_and_single_residency",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 368,
+          "name": "test_hysteresis_blocks_cold_admission",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 357,
+          "name": "test_oversized_tensor_rejected_from_ram",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 393,
+          "name": "test_single_residency_and_lookup_with_shards",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 286,
           "name": "test_tiered_store_initialization_and_capacities",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 181,
+      "lines": 435,
       "module_path": "tara_engine::inference::tiered_store",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 170,
+          "line_number": 279,
           "name": "tests"
         }
       ],
@@ -49757,5 +49904,5 @@
   "schema_version": "1.0.0",
   "total_files": 240,
   "total_modules": 583,
-  "total_symbols": 2206
+  "total_symbols": 2213
 }

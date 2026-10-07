@@ -11,6 +11,7 @@ pub struct TelemetryMonitor {
     pub prefetched: usize,
     pub prefetch_hits: usize,
     pub evictions: usize,
+    pub promotions: usize,
     pub bytes_read_disk: usize,
     pub bytes_transferred_vram: usize,
     pub total_transfer_time_ms: f64,
@@ -34,6 +35,7 @@ impl TelemetryMonitor {
             prefetched: 0,
             prefetch_hits: 0,
             evictions: 0,
+            promotions: 0,
             bytes_read_disk: 0,
             bytes_transferred_vram: 0,
             total_transfer_time_ms: 0.0,
@@ -64,6 +66,14 @@ impl TelemetryMonitor {
             return;
         }
         self.evictions += 1;
+    }
+
+    pub fn record_promotion(&mut self, size_bytes: usize) {
+        if !self.enabled {
+            return;
+        }
+        self.promotions += 1;
+        self.bytes_transferred_vram += size_bytes;
     }
 
     pub fn record_prefetch(&mut self, count: usize) {

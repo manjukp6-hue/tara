@@ -16634,8 +16634,8 @@
                       "name": "mod.rs",
                       "rel_path": "rust/tara_engine/src/inference/mod.rs",
                       "entry_type": "file",
-                      "size_bytes": 5780,
-                      "sha256": "f19b7de91743ccfdc3db2506d39d8208ebb370c57945546c9c82c377e6230d91"
+                      "size_bytes": 6329,
+                      "sha256": "728375aab18a066bbb235e70b122fe7dc6b6650c76b4b40c137e11969f395b01"
                     },
                     {
                       "name": "router.rs",
@@ -16648,15 +16648,15 @@
                       "name": "telemetry.rs",
                       "rel_path": "rust/tara_engine/src/inference/telemetry.rs",
                       "entry_type": "file",
-                      "size_bytes": 2717,
-                      "sha256": "a0f9deeb8ea03540a88e6e9039a775af7ac674704602a0fdfdfd40e8407e76dc"
+                      "size_bytes": 36943,
+                      "sha256": "86e208ec5ac8ba2d20114d5b6538f8fef6c4a58f6299c043afe65911e0d1017d"
                     },
                     {
                       "name": "tiered_store.rs",
                       "rel_path": "rust/tara_engine/src/inference/tiered_store.rs",
                       "entry_type": "file",
-                      "size_bytes": 42676,
-                      "sha256": "d25b0e2ed4a54f7430bda7c25c2ee583b920f9d260c2cd8b94d97dd60e041349"
+                      "size_bytes": 47072,
+                      "sha256": "ff72973c2d5f57fe14e220f0bee44b651bb8dadf1ebdba887767026bda6086ed"
                     }
                   ]
                 },

@@ -30,7 +30,10 @@ pub use cache_policy::{
 };
 pub use lookahead::LookaheadPrefetcher;
 pub use router::RoutingTracker;
-pub use telemetry::TelemetryMonitor;
+pub use telemetry::{
+    EvictionRoute, LookupOutcome, RouteTransferSnapshot, StorageTier, TelemetryError,
+    TelemetryMonitor, TelemetrySnapshot, TransferRoute, DEFAULT_LATENCY_RESERVOIR_CAPACITY,
+};
 pub use tiered_store::{TierLocation, TieredTensorStore};
 
 #[cfg(test)]
@@ -46,12 +49,13 @@ mod tests {
     #[test]
     fn test_inference_module_send_sync_and_four_layer_contract() {
         // 1. Verify Send + Sync compatibility across the entire 4-layer stack:
-        //    CudaSession / CudaBuffer -> DeviceTensor -> DeviceBackend -> TieredTensorStore
+        //    CudaSession / CudaBuffer -> DeviceTensor -> DeviceBackend -> TieredTensorStore / TelemetryMonitor
         assert_send_sync::<DeviceTensor>();
         assert_send_sync::<CPUBackend>();
         assert_send_sync::<CUDABackend>();
         assert_send_sync::<Box<dyn DeviceBackend>>();
         assert_send_sync::<Box<dyn CachePolicy>>();
+        assert_send_sync::<TelemetryMonitor>();
         assert_send_sync::<TieredTensorStore>();
 
         // 2. End-to-end integration of BackendRegistry + TieredTensorStore + LookaheadPrefetcher + RoutingTracker
@@ -104,7 +108,13 @@ mod tests {
 
         assert_eq!(store.locate_tier("layer1.weight"), TierLocation::Ram);
         assert!(store.ram_pool.get("layer1.weight").unwrap().is_cpu());
-        assert_eq!(store.telemetry.prefetched, 1);
+        assert_eq!(store.telemetry.prefetched(), 1);
+        assert_eq!(store.telemetry.prefetch_hits(), 0);
+
+        // Consume prefetched layer1.weight and verify prefetch_hits increments to 1
+        let t1 = store.lookup("layer1.weight", &mut shard_mgr).unwrap();
+        assert!(t1.is_cpu());
+        assert_eq!(store.telemetry.prefetch_hits(), 1);
 
         // Record routing transitions
         let mut router = RoutingTracker::default();
@@ -115,7 +125,7 @@ mod tests {
             vec!["layer1.weight".to_string()]
         );
 
-        // Verify store invariants across all tiers
+        // Verify store and telemetry invariants across all tiers
         assert!(store.verify_invariants().is_ok());
 
         // Verify multi-thread Send + Sync sharing of Arc<TieredTensorStore>

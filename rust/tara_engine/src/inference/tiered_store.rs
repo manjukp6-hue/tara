@@ -8,9 +8,11 @@
 //! - Oversized tensor streaming without cache pollution or RAM eviction
 //! - Transactional all-or-nothing admission and promotion with rollback on CUDA OOM
 //! - Authoritative 3-tier state machine (`TierLocation`: `Vram`, `Ram`, `Disk`, `NotFound`)
+//! - Strongly-typed atomic telemetry (`LookupOutcome`, `EvictionRoute`, `TransferRoute`, and prefetch-hit tracking)
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::inference::backend::{
     BackendError, BackendPolicy, BackendRegistry, DeviceBackend, DeviceKind, DeviceTensor,
@@ -18,7 +20,9 @@ use crate::inference::backend::{
 use crate::inference::cache_policy::{
     CachePolicy, LFRUCachePolicy, DEFAULT_LFRU_FIXED_MARGIN, DEFAULT_LFRU_MARGIN_PCT,
 };
-use crate::inference::telemetry::TelemetryMonitor;
+use crate::inference::telemetry::{
+    EvictionRoute, LookupOutcome, TelemetryMonitor, TransferRoute,
+};
 use crate::safetensors::SafeTensorsError;
 use crate::shard_manager::ShardedSafeTensorsManager;
 
@@ -43,6 +47,7 @@ pub struct TieredTensorStore {
     pub vram_pool: HashMap<String, DeviceTensor>,
     pub ram_pool: HashMap<String, DeviceTensor>,
     pub disk_keys: HashSet<String>,
+    pub prefetched_unconsumed: HashSet<String>,
 
     pub policy: Box<dyn CachePolicy>,
     pub telemetry: TelemetryMonitor,
@@ -63,6 +68,7 @@ impl TieredTensorStore {
             vram_pool: HashMap::new(),
             ram_pool: HashMap::new(),
             disk_keys,
+            prefetched_unconsumed: HashSet::new(),
             policy: Box::new(LFRUCachePolicy::new(
                 DEFAULT_LFRU_MARGIN_PCT,
                 DEFAULT_LFRU_FIXED_MARGIN,
@@ -130,11 +136,12 @@ impl TieredTensorStore {
         self.ram_pool.values().map(|t| t.bytes()).sum()
     }
 
-    /// Verifies all structural invariants of the three-tier store:
+    /// Verifies all structural and telemetry invariants of the three-tier store:
     /// 1. `vram_resident_bytes() <= vram_capacity_bytes`
     /// 2. `ram_resident_bytes() <= ram_capacity_bytes`
     /// 3. Disjoint memory residency (`vram_pool.keys() ∩ ram_pool.keys() == ∅`)
-    /// 4. Every tensor in `ram_pool` is a CPU-resident `DeviceTensor::Cpu(...)`.
+    /// 4. Every tensor in `ram_pool` is a CPU-resident `DeviceTensor::Cpu(...)`
+    /// 5. Telemetry accounting invariants (`telemetry.verify_invariants()`).
     pub fn verify_invariants(&self) -> Result<(), String> {
         let vram_used = self.vram_resident_bytes();
         if vram_used > self.vram_capacity_bytes {
@@ -169,6 +176,10 @@ impl TieredTensorStore {
                 ));
             }
         }
+
+        self.telemetry
+            .verify_invariants()
+            .map_err(|e| e.to_string())?;
 
         Ok(())
     }
@@ -236,8 +247,10 @@ impl TieredTensorStore {
         for evict_key in to_evict {
             if let Some(evicted) = self.ram_pool.remove(&evict_key) {
                 let ev_bytes = evicted.bytes();
+                self.prefetched_unconsumed.remove(&evict_key);
                 self.disk_keys.insert(evict_key);
-                self.telemetry.record_eviction("RAM", "DISK", ev_bytes);
+                self.telemetry
+                    .record_eviction_route(EvictionRoute::RamToDisk, ev_bytes as u64);
             }
         }
 
@@ -262,6 +275,7 @@ impl TieredTensorStore {
 
         if self.vram_pool.contains_key(key) {
             self.ram_pool.remove(key);
+            self.prefetched_unconsumed.remove(key);
             return true;
         }
 
@@ -280,11 +294,15 @@ impl TieredTensorStore {
 
         // Fast path: no VRAM eviction required — attempt device transfer BEFORE mutating any pool
         if needed_bytes == 0 {
+            let htod_start = Instant::now();
             match self.backend.transfer_to_device(&t_data) {
                 Ok(dev_tensor) => {
+                    let htod_ms = htod_start.elapsed().as_secs_f64() * 1000.0;
                     self.ram_pool.remove(key);
+                    self.prefetched_unconsumed.remove(key);
                     self.vram_pool.insert(key.to_string(), dev_tensor);
-                    self.telemetry.record_promotion(bytes);
+                    self.telemetry
+                        .record_promotion_with_duration(bytes, htod_ms);
                     return true;
                 }
                 Err(_) => {
@@ -315,16 +333,23 @@ impl TieredTensorStore {
         }
 
         // Stage all planned VRAM eviction victims into host memory BEFORE mutating pools
-        let mut staged_victims: Vec<(String, usize, Arc<Vec<f32>>)> =
+        let mut staged_victims: Vec<(String, usize, f64, Arc<Vec<f32>>)> =
             Vec::with_capacity(to_evict.len());
         for evict_key in &to_evict {
             let Some(evicted_dev) = self.vram_pool.get(evict_key) else {
                 return false;
             };
             let ev_bytes = evicted_dev.bytes();
+            let dtoh_start = Instant::now();
             match self.backend.transfer_to_host(evicted_dev) {
                 Ok(host_vec) => {
-                    staged_victims.push((evict_key.clone(), ev_bytes, Arc::new(host_vec)));
+                    let dtoh_ms = dtoh_start.elapsed().as_secs_f64() * 1000.0;
+                    staged_victims.push((
+                        evict_key.clone(),
+                        ev_bytes,
+                        dtoh_ms,
+                        Arc::new(host_vec),
+                    ));
                 }
                 Err(_) => {
                     // Abort cleanly before any pool mutation
@@ -334,28 +359,39 @@ impl TieredTensorStore {
         }
 
         // Remove and drop VRAM victims so physical GPU memory is freed before allocating the promoted tensor
-        for (evict_key, _, _) in &staged_victims {
+        for (evict_key, _, _, _) in &staged_victims {
             self.vram_pool.remove(evict_key);
         }
 
         // Attempt HtoD allocation and upload for the promoted tensor
+        let htod_start = Instant::now();
         match self.backend.transfer_to_device(&t_data) {
             Ok(dev_tensor) => {
+                let htod_ms = htod_start.elapsed().as_secs_f64() * 1000.0;
                 // 1. Remove `key` from RAM first and insert into VRAM:
                 //    - Frees `key`'s RAM slot so demoted VRAM victims can use it
                 //    - Ensures `key` can never be evicted from RAM during victim demotion
                 //    - Preserves strict single-residency at every step
                 self.ram_pool.remove(key);
+                self.prefetched_unconsumed.remove(key);
                 self.vram_pool.insert(key.to_string(), dev_tensor);
-                self.telemetry.record_promotion(bytes);
+                self.telemetry
+                    .record_promotion_with_duration(bytes, htod_ms);
 
                 // 2. Demote staged VRAM victims into RAM (if capacity & hysteresis permit) or Disk
-                for (evict_key, ev_bytes, host_arc) in staged_victims {
+                for (evict_key, ev_bytes, dtoh_ms, host_arc) in staged_victims {
+                    self.telemetry.record_transfer_route(
+                        TransferRoute::VramToRam,
+                        ev_bytes as u64,
+                        dtoh_ms,
+                    );
                     if self.admit_to_ram(&evict_key, host_arc) {
-                        self.telemetry.record_eviction("VRAM", "RAM", ev_bytes);
+                        self.telemetry
+                            .record_eviction_route(EvictionRoute::VramToRam, ev_bytes as u64);
                     } else {
                         self.disk_keys.insert(evict_key);
-                        self.telemetry.record_eviction("VRAM", "DISK", ev_bytes);
+                        self.telemetry
+                            .record_eviction_route(EvictionRoute::VramToDisk, ev_bytes as u64);
                     }
                 }
                 true
@@ -364,7 +400,7 @@ impl TieredTensorStore {
                 // Rollback on CUDA OOM / transfer failure:
                 // `key` was never removed from `ram_pool`, so `key` remains safely in RAM.
                 // Restore staged victims back to VRAM if possible, otherwise demote to RAM/Disk.
-                for (evict_key, ev_bytes, host_arc) in staged_victims {
+                for (evict_key, ev_bytes, dtoh_ms, host_arc) in staged_victims {
                     let can_fit_vram =
                         self.vram_resident_bytes() + ev_bytes <= self.vram_capacity_bytes;
                     let restored_to_vram = if can_fit_vram {
@@ -379,11 +415,18 @@ impl TieredTensorStore {
                     };
 
                     if !restored_to_vram {
+                        self.telemetry.record_transfer_route(
+                            TransferRoute::VramToRam,
+                            ev_bytes as u64,
+                            dtoh_ms,
+                        );
                         if self.admit_to_ram(&evict_key, host_arc) {
-                            self.telemetry.record_eviction("VRAM", "RAM", ev_bytes);
+                            self.telemetry
+                                .record_eviction_route(EvictionRoute::VramToRam, ev_bytes as u64);
                         } else {
                             self.disk_keys.insert(evict_key);
-                            self.telemetry.record_eviction("VRAM", "DISK", ev_bytes);
+                            self.telemetry
+                                .record_eviction_route(EvictionRoute::VramToDisk, ev_bytes as u64);
                         }
                     }
                 }
@@ -416,7 +459,8 @@ impl TieredTensorStore {
         if let Some(t) = self.vram_pool.get(key) {
             self.policy.record_access(key);
             let bytes = t.bytes();
-            self.telemetry.record_lookup("VRAM", bytes, false);
+            self.telemetry
+                .record_lookup_outcome(LookupOutcome::VramHit, bytes as u64);
             return Ok(t.clone());
         }
 
@@ -424,7 +468,9 @@ impl TieredTensorStore {
         if let Some(t) = self.ram_pool.get(key) {
             self.policy.record_access(key);
             let bytes = t.bytes();
-            self.telemetry.record_lookup("RAM", bytes, false);
+            let from_prefetch = self.prefetched_unconsumed.remove(key);
+            self.telemetry
+                .record_lookup_outcome(LookupOutcome::RamHit { from_prefetch }, bytes as u64);
             let ram_tensor = t.clone();
 
             // Attempt promotion to VRAM if CUDA backend is active
@@ -441,10 +487,25 @@ impl TieredTensorStore {
         }
 
         // 3. Disk Miss: Load from SafeTensors shard
-        let tensor = shard_manager.load_tensor(key)?;
+        let load_start = Instant::now();
+        let tensor = match shard_manager.load_tensor(key) {
+            Ok(t) => t,
+            Err(e) => {
+                self.telemetry
+                    .record_lookup_outcome(LookupOutcome::NotFoundMiss, 0);
+                return Err(e);
+            }
+        };
+        let load_ms = load_start.elapsed().as_secs_f64() * 1000.0;
         self.disk_keys.insert(key.to_string());
         let bytes = tensor.len() * std::mem::size_of::<f32>();
-        self.telemetry.record_lookup("DISK", bytes, false);
+        self.telemetry
+            .record_lookup_outcome(LookupOutcome::DiskLoad, bytes as u64);
+        self.telemetry.record_transfer_route(
+            TransferRoute::DiskToRam,
+            bytes as u64,
+            load_ms,
+        );
 
         let tensor_arc = Arc::new(tensor);
 
@@ -469,12 +530,19 @@ impl TieredTensorStore {
         match dev_tensor {
             DeviceTensor::Cpu(arc_vec) => Ok(arc_vec),
             DeviceTensor::Cuda(_) => {
+                let dtoh_start = Instant::now();
                 let host_vec = self.backend.transfer_to_host(&dev_tensor).map_err(|e| {
                     SafeTensorsError::Io(std::io::Error::new(
                         std::io::ErrorKind::Other,
                         e.to_string(),
                     ))
                 })?;
+                let dtoh_ms = dtoh_start.elapsed().as_secs_f64() * 1000.0;
+                self.telemetry.record_transfer_route(
+                    TransferRoute::VramToRam,
+                    dev_tensor.bytes() as u64,
+                    dtoh_ms,
+                );
                 Ok(Arc::new(host_vec))
             }
         }
@@ -507,7 +575,9 @@ impl TieredTensorStore {
                 }
             }
 
+            let load_start = Instant::now();
             if let Ok(t) = shard_manager.load_tensor(k) {
+                let load_ms = load_start.elapsed().as_secs_f64() * 1000.0;
                 self.disk_keys.insert(k.clone());
                 let bytes = t.len() * std::mem::size_of::<f32>();
                 if bytes > self.ram_capacity_bytes {
@@ -517,7 +587,13 @@ impl TieredTensorStore {
                 self.policy.record_access(k);
                 let tensor_arc = Arc::new(t);
                 if self.admit_to_ram(k, tensor_arc) {
+                    self.prefetched_unconsumed.insert(k.clone());
                     self.telemetry.record_prefetch(1);
+                    self.telemetry.record_transfer_route(
+                        TransferRoute::DiskToRam,
+                        bytes as u64,
+                        load_ms,
+                    );
                     loaded += 1;
                 }
             }
@@ -621,6 +697,8 @@ mod tests {
         assert_eq!(store.ram_capacity_bytes, 2048);
         assert_eq!(store.vram_resident_bytes(), 0);
         assert_eq!(store.ram_resident_bytes(), 0);
+        assert_eq!(store.telemetry.cache_hit_rate(), None);
+        assert_eq!(store.telemetry.hit_rate(), 0.0);
         assert!(matches!(
             store.backend.kind(),
             DeviceKind::Cpu | DeviceKind::Cuda
@@ -665,7 +743,8 @@ mod tests {
         // 1. First lookup: Disk miss -> admitted to RAM
         let dev1 = store.lookup("hot_layer", &mut shard_mgr).unwrap();
         assert_eq!(store.locate_tier("hot_layer"), TierLocation::Ram);
-        assert_eq!(store.telemetry.disk_misses, 1);
+        assert_eq!(store.telemetry.disk_loads(), 1);
+        assert_eq!(store.telemetry.disk_misses(), 1);
         assert_eq!(htod_calls.load(Ordering::SeqCst), 0);
         assert_eq!(dtoh_calls.load(Ordering::SeqCst), 0);
         assert_eq!(dev1.bytes(), 16);
@@ -676,7 +755,15 @@ mod tests {
         assert_eq!(store.locate_tier("hot_layer"), TierLocation::Vram);
         assert!(store.vram_pool.contains_key("hot_layer"));
         assert!(!store.ram_pool.contains_key("hot_layer"));
-        assert_eq!(store.telemetry.promotions, 1);
+        assert_eq!(store.telemetry.promotions(), 1);
+        assert_eq!(store.telemetry.bytes_transferred_vram(), 16);
+        assert_eq!(
+            store
+                .telemetry
+                .route_stats(TransferRoute::RamToVram)
+                .count,
+            1
+        );
         assert_eq!(htod_calls.load(Ordering::SeqCst), 1);
         assert_eq!(dtoh_calls.load(Ordering::SeqCst), 0);
         assert!(store.verify_invariants().is_ok());
@@ -684,7 +771,7 @@ mod tests {
         // 3. Third & Fourth lookups: VRAM hits -> MUST return cloned DeviceTensor handle with ZERO DtoH calls!
         let dev3 = store.lookup("hot_layer", &mut shard_mgr).unwrap();
         let dev4 = store.lookup("hot_layer", &mut shard_mgr).unwrap();
-        assert_eq!(store.telemetry.vram_hits, 2);
+        assert_eq!(store.telemetry.vram_hits(), 2);
         assert_eq!(
             dtoh_calls.load(Ordering::SeqCst),
             0,
@@ -699,6 +786,13 @@ mod tests {
         let host_arc = store.lookup_host("hot_layer", &mut shard_mgr).unwrap();
         assert_eq!(*host_arc, vec![1.0, 2.0, 3.0, 4.0]);
         assert_eq!(dtoh_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            store
+                .telemetry
+                .route_stats(TransferRoute::VramToRam)
+                .count,
+            1
+        );
         assert!(store.verify_invariants().is_ok());
 
         let _ = std::fs::remove_dir_all(&test_dir);
@@ -754,24 +848,24 @@ mod tests {
         assert_eq!(store.locate_tier("t2"), TierLocation::Ram);
         assert_eq!(store.vram_resident_bytes(), 16);
         assert_eq!(store.ram_resident_bytes(), 32);
+        assert_eq!(store.telemetry.evictions_vram_to_ram(), 1);
+        assert_eq!(store.telemetry.bytes_demoted_vram_to_ram(), 16);
         assert!(store.verify_invariants().is_ok());
 
-        // Now test when RAM capacity is smaller than demoted VRAM tensor (e.g. shrink RAM capacity to 16 bytes
-        // and make t2 hotter than t3 so demoted t3 cannot evict t2 and must fall back to DISK)
+        // Now test when RAM capacity is smaller than demoted VRAM tensor
         store.ram_capacity_bytes = 16;
-        // Evict t1 from RAM first to start with 16B RAM (t2) and 16B VRAM (t3)
         store.ram_pool.remove("t1");
         store.disk_keys.insert("t1".to_string());
         assert_eq!(store.ram_resident_bytes(), 16);
         assert!(store.verify_invariants().is_ok());
 
-        // Touch t2 so t2 is newer than t3; promote t2 to VRAM -> t3 is demoted into the 16B freed by t2
         store.policy.record_access("t2");
         assert!(store.try_promote_to_vram("t2"));
         assert_eq!(store.locate_tier("t2"), TierLocation::Vram);
         assert_eq!(store.locate_tier("t3"), TierLocation::Ram);
         assert_eq!(store.vram_resident_bytes(), 16);
         assert_eq!(store.ram_resident_bytes(), 16);
+        assert_eq!(store.telemetry.evictions_vram_to_ram(), 2);
         assert!(store.verify_invariants().is_ok());
     }
 
@@ -917,7 +1011,9 @@ mod tests {
         assert_eq!(store.locate_tier("tensor1"), TierLocation::Ram);
         assert_eq!(store.locate_tier("tensor2"), TierLocation::Disk);
         assert_eq!(store.locate_tier("tensor3"), TierLocation::Ram);
-        assert_eq!(store.telemetry.evictions, 1);
+        assert_eq!(store.telemetry.evictions(), 1);
+        assert_eq!(store.telemetry.evictions_ram_to_disk(), 1);
+        assert_eq!(store.telemetry.bytes_evicted_ram_to_disk(), 20);
         assert!(store.verify_invariants().is_ok());
     }
 
@@ -951,7 +1047,7 @@ mod tests {
         assert!(!store.admit_to_ram("cold_candidate", t_candidate));
         assert_eq!(store.locate_tier("hot_resident"), TierLocation::Ram);
         assert_eq!(store.locate_tier("cold_candidate"), TierLocation::NotFound);
-        assert_eq!(store.telemetry.evictions, 0);
+        assert_eq!(store.telemetry.evictions(), 0);
         assert!(store.verify_invariants().is_ok());
     }
 
@@ -982,22 +1078,28 @@ mod tests {
         // 1. First lookup loads from disk into RAM
         let loaded_a = store.lookup("weight_a", &mut shard_mgr).unwrap();
         assert_eq!(loaded_a.as_cpu_slice(), Some(&[1.0, 2.0, 3.0, 4.0][..]));
-        assert_eq!(store.telemetry.disk_misses, 1);
-        assert_eq!(store.telemetry.ram_hits, 0);
+        assert_eq!(store.telemetry.disk_loads(), 1);
+        assert_eq!(store.telemetry.ram_hits(), 0);
         assert_eq!(store.locate_tier("weight_a"), TierLocation::Ram);
 
         // 2. Second lookup is an O(1) RAM cache hit returning identical Arc pointer
         let loaded_a2 = store.lookup("weight_a", &mut shard_mgr).unwrap();
         assert_eq!(loaded_a2.as_cpu_slice(), Some(&[1.0, 2.0, 3.0, 4.0][..]));
         assert!(loaded_a.ptr_eq(&loaded_a2));
-        assert_eq!(store.telemetry.ram_hits, 1);
-        assert_eq!(store.telemetry.disk_misses, 1);
+        assert_eq!(store.telemetry.ram_hits(), 1);
+        assert_eq!(store.telemetry.disk_loads(), 1);
+        assert_eq!(store.telemetry.prefetch_hits(), 0);
 
-        // 3. Prefetch weight_b into RAM
+        // 3. Prefetch weight_b into RAM and verify subsequent lookup records a genuine prefetch_hit
         let prefetched = store.prefetch(&["weight_b".to_string()], &mut shard_mgr);
         assert_eq!(prefetched, 1);
-        assert_eq!(store.telemetry.prefetched, 1);
+        assert_eq!(store.telemetry.prefetched(), 1);
         assert_eq!(store.locate_tier("weight_b"), TierLocation::Ram);
+
+        let loaded_b = store.lookup("weight_b", &mut shard_mgr).unwrap();
+        assert_eq!(loaded_b.as_cpu_slice(), Some(&[5.0, 6.0, 7.0, 8.0][..]));
+        assert_eq!(store.telemetry.prefetch_hits(), 1);
+        assert_eq!(store.telemetry.prefetch_hit_rate(), Some(1.0));
         assert!(store.verify_invariants().is_ok());
 
         // 4. Strict BackendPolicy::Cuda(9999) via try_new_with_policy must return Err

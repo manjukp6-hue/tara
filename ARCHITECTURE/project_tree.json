@@ -16534,8 +16534,8 @@
                       "name": "driver.rs",
                       "rel_path": "rust/tara_engine/src/cuda/driver.rs",
                       "entry_type": "file",
-                      "size_bytes": 44645,
-                      "sha256": "510a279c2d667b559fac97ff47566db4d6c2e9cd405a5aa4adc5f8587bd1b0f2"
+                      "size_bytes": 44983,
+                      "sha256": "47174bd896c0c14b1cffe5d9ef9da717dcbaeecbdc0d3220da091171eb1ab529"
                     },
                     {
                       "name": "gpu_trainer.rs",
@@ -16613,8 +16613,8 @@
                       "name": "backend.rs",
                       "rel_path": "rust/tara_engine/src/inference/backend.rs",
                       "entry_type": "file",
-                      "size_bytes": 9908,
-                      "sha256": "8af76e1a94b7ab82d2f750ffd433e6bf1ba058a8cc33a7898cbc17dbd737e678"
+                      "size_bytes": 15290,
+                      "sha256": "a9312d737b30cea3006e6de81b7ef85ca60bbd2fdb5f3fdbe85dd971bf46bcfe"
                     },
                     {
                       "name": "cache_policy.rs",
@@ -16634,8 +16634,8 @@
                       "name": "mod.rs",
                       "rel_path": "rust/tara_engine/src/inference/mod.rs",
                       "entry_type": "file",
-                      "size_bytes": 1008,
-                      "sha256": "972ccbdaea26639d714ed767c947861b8c10910fac24b2aa8c6b8e4498e4e529"
+                      "size_bytes": 1036,
+                      "sha256": "afb66269fa5778bc7b259e733e0598ef8b228cd7515cd383995621a86cd2c5a9"
                     },
                     {
                       "name": "router.rs",

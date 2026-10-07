@@ -17733,12 +17733,12 @@
     "rust/tara_engine/src/cuda/driver.rs": {
       "extension": "rs",
       "file_id": 4503599627720499,
-      "line_count": 1277,
-      "modified_epoch": 1791395945,
+      "line_count": 1287,
+      "modified_epoch": 1791403551,
       "name": "driver.rs",
       "rel_path": "rust/tara_engine/src/cuda/driver.rs",
-      "sha256": "510a279c2d667b559fac97ff47566db4d6c2e9cd405a5aa4adc5f8587bd1b0f2",
-      "size_bytes": 44645
+      "sha256": "47174bd896c0c14b1cffe5d9ef9da717dcbaeecbdc0d3220da091171eb1ab529",
+      "size_bytes": 44983
     },
     "rust/tara_engine/src/cuda/gpu_trainer.rs": {
       "extension": "rs",
@@ -17863,12 +17863,12 @@
     "rust/tara_engine/src/inference/backend.rs": {
       "extension": "rs",
       "file_id": 1407374884173778,
-      "line_count": 334,
-      "modified_epoch": 1791394645,
+      "line_count": 458,
+      "modified_epoch": 1791403647,
       "name": "backend.rs",
       "rel_path": "rust/tara_engine/src/inference/backend.rs",
-      "sha256": "8af76e1a94b7ab82d2f750ffd433e6bf1ba058a8cc33a7898cbc17dbd737e678",
-      "size_bytes": 9908
+      "sha256": "a9312d737b30cea3006e6de81b7ef85ca60bbd2fdb5f3fdbe85dd971bf46bcfe",
+      "size_bytes": 15290
     },
     "rust/tara_engine/src/inference/cache_policy.rs": {
       "extension": "rs",
@@ -17894,11 +17894,11 @@
       "extension": "rs",
       "file_id": 19703248370366415,
       "line_count": 29,
-      "modified_epoch": 1791391186,
+      "modified_epoch": 1791403705,
       "name": "mod.rs",
       "rel_path": "rust/tara_engine/src/inference/mod.rs",
-      "sha256": "972ccbdaea26639d714ed767c947861b8c10910fac24b2aa8c6b8e4498e4e529",
-      "size_bytes": 1008
+      "sha256": "afb66269fa5778bc7b259e733e0598ef8b228cd7515cd383995621a86cd2c5a9",
+      "size_bytes": 1036
     },
     "rust/tara_engine/src/inference/router.rs": {
       "extension": "rs",
@@ -19531,7 +19531,7 @@
       "size_bytes": 1242
     }
   },
-  "generated_at_utc": "1791403049",
+  "generated_at_utc": "1791403708",
   "schema_version": "1.0.0",
   "total_files": 1953
 }

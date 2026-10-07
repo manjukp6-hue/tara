@@ -17,7 +17,7 @@ pub mod tiered_store;
 
 pub use backend::{
     BackendError, BackendPolicy, BackendRegistry, CPUBackend, CUDABackend, DeviceBackend,
-    DeviceTensor,
+    DeviceKind, DeviceTensor,
 };
 pub use cache_policy::{
     tier_decay_value, tier_should_promote, CachePolicy, LFRUCachePolicy, LFUCachePolicy,
@@ -26,4 +26,4 @@ pub use cache_policy::{
 pub use lookahead::LookaheadPrefetcher;
 pub use router::RoutingTracker;
 pub use telemetry::TelemetryMonitor;
-pub use tiered_store::TieredTensorStore;
+pub use tiered_store::{TierLocation, TieredTensorStore};

@@ -993,6 +993,16 @@ pub struct CudaBuffer {
     context: Arc<CudaContextInner>,
 }
 
+impl std::fmt::Debug for CudaBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CudaBuffer")
+            .field("dptr", &format_args!("0x{:x}", self.dptr))
+            .field("len_elements", &self.len_elements)
+            .field("bytes", &self.bytes)
+            .finish()
+    }
+}
+
 unsafe impl Send for CudaBuffer {}
 unsafe impl Sync for CudaBuffer {}
 

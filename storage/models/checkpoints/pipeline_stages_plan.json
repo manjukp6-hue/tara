@@ -7,23 +7,22 @@
     "zero_python_in_workspace": true
   },
   "evaluation_protocol": {
-    "held_out_test": "datasets/splits/test.jsonl (15 records)",
-    "held_out_val": "datasets/splits/val.jsonl (11 records)",
-    "leakage_status": "ZERO_CONTAMINATION_PASSED"
+    "leakage_status": "ZERO_CONTAMINATION_PASSED",
+    "validation_source": "dynamic_cross_validation_and_held_out_stream"
   },
   "extensibility": "Arbitrary N stages supported; every checkpoint is dual-purpose (model + continuation state)",
-  "huggingface_deployment": {
-    "condition": "Can push after any stage verification or final candidate",
+  "model_export": {
+    "condition": "Can export after any stage verification or final candidate",
     "format": "safetensors",
-    "target_repo": "manjukp6-hue/tara"
+    "target_repo": "tara-model"
   },
   "pipeline_name": "TARA Extensible Multi-Stage Pipeline",
   "stages": [
     {
       "completed_at_utc": "PENDING",
-      "dataset_bytes": 799684,
-      "dataset_items": 133,
-      "dataset_source": "datasets/foundational_curriculum.jsonl",
+      "dataset_bytes": 1874252128,
+      "dataset_items": 100,
+      "dataset_source": "storage/datasets/tara_dataset_filtered/canonical",
       "description": "Foundational academic training on 133 structured pedagogical records across Domains 1-8 (Math, Science, Programming, AI/ML, Research, Culture, Creativity, Search).",
       "dynamic_model_sha256": "pending_execution",
       "input_checkpoint": "storage/models/tara_candidate_v1",
@@ -37,10 +36,10 @@
     },
     {
       "completed_at_utc": "PENDING",
-      "dataset_bytes": 98923,
+      "dataset_bytes": 110684,
       "dataset_items": 16,
-      "dataset_source": "datasets/ability_acquisition/curriculum.jsonl",
-      "description": "Specialized training on Autonomous Ability Acquisition, Skill Evolution, and protocol-compliant self-training/self-update (Domain 9: 16 records).",
+      "dataset_source": "storage/datasets/curriculum/ability_acquisition.jsonl",
+      "description": "Specialized training on Autonomous Ability Acquisition, Skill Evolution, and protocol-compliant self-training/self-update.",
       "dynamic_model_sha256": "pending_execution",
       "input_checkpoint": "storage/models/checkpoints\\stage1_curriculum",
       "is_continuation_ready": false,
@@ -53,8 +52,8 @@
     },
     {
       "completed_at_utc": "PENDING",
-      "dataset_bytes": 23463679913,
-      "dataset_items": 15,
+      "dataset_bytes": 1874252128,
+      "dataset_items": 100,
       "dataset_source": "storage/datasets/tara_dataset_filtered/canonical",
       "description": "Full-scale pretraining on verified canonical high-quality data shards.",
       "dynamic_model_sha256": "pending_execution",
@@ -85,8 +84,8 @@
     },
     {
       "completed_at_utc": "PENDING",
-      "dataset_bytes": 21768,
-      "dataset_items": 60,
+      "dataset_bytes": 47510,
+      "dataset_items": 131,
       "dataset_source": "storage/persistence/experiential_lessons.jsonl",
       "description": "Continual adaptation and specialization trained on genuine post-execution experiential lessons and validated strategies.",
       "dynamic_model_sha256": "pending_execution",

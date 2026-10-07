@@ -13204,39 +13204,43 @@
         "add_residual",
         "as_ref",
         "as_str",
+        "as_u64",
         "backward_linear",
         "backward_lm_head",
-        "backward_lm_head_f16",
-        "backward_lm_head_fp32",
         "clone",
         "cloned",
         "collect",
         "cos",
+        "create_dir_all",
         "device",
         "download_f32",
         "download_weights",
         "embedding_bwd_kernel",
         "enumerate",
         "export_optimizer_state",
+        "export_state",
         "forward_embedding",
         "forward_linear",
         "forward_lm_head",
-        "forward_lm_head_f16",
-        "forward_lm_head_fp32",
         "forward_rmsnorm",
         "forward_swiglu",
+        "from_str",
         "get",
         "get_kernel",
         "get_memory_info",
+        "get_step",
         "get_step_count",
         "get_vram_info",
+        "id",
         "insert",
         "into",
         "is_finite",
         "iter",
+        "join",
         "launch",
         "len",
         "load_optimizer_state",
+        "load_safetensors",
         "map",
         "max",
         "module_handle",
@@ -13244,9 +13248,9 @@
         "new_with_precision",
         "null_mut",
         "ok_or_else",
-        "or_else",
         "pack_f16_to_u32",
         "precision",
+        "read_to_string",
         "register_weights",
         "scale_accumulated_gradients",
         "set_step_count",
@@ -13257,22 +13261,27 @@
         "sum",
         "swiglu_bwd_kernel",
         "synchronize",
+        "temp_dir",
         "test_gpu_adamw_non_finite_gradient_skips_step",
-        "test_gpu_checkpoint_resume_equivalence",
+        "test_gpu_checkpoint_full_disk_roundtrip_equivalence",
+        "test_gpu_checkpoint_resume_numerical_equivalence",
         "test_gpu_cpu_adamw_numerical_equivalence",
         "to_bits",
         "to_lowercase",
         "to_string",
+        "to_string_lossy",
         "trim",
         "unwrap",
         "unwrap_or_else",
         "upload_f32",
         "upload_u32",
         "values",
-        "vec"
+        "vec",
+        "write",
+        "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "34b85465e1b11ac3a3dafef5240327566db21e57845a8692a8397e59ee3ae791",
+      "dynamic_sha256": "05e25b21db184045082b7a60e80cecd7fa3d7cd9620a3530e07b5686a4258bc0",
       "exports": [
         {
           "kind": "Struct",
@@ -13300,25 +13309,25 @@
         },
         {
           "kind": "Function",
-          "line_number": 1154,
+          "line_number": 825,
           "name": "accumulate_gradient",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1107,
+          "line_number": 778,
           "name": "add_residual",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 935,
+          "line_number": 611,
           "name": "backward_linear",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 483,
+          "line_number": 358,
           "name": "backward_lm_head",
           "visibility": "Public"
         },
@@ -13330,55 +13339,55 @@
         },
         {
           "kind": "Function",
-          "line_number": 1446,
+          "line_number": 1117,
           "name": "download_weights",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1525,
+          "line_number": 1196,
           "name": "embedding_bwd_kernel",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1462,
+          "line_number": 1133,
           "name": "export_optimizer_state",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 700,
+          "line_number": 370,
           "name": "forward_embedding",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 852,
+          "line_number": 528,
           "name": "forward_linear",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 346,
+          "line_number": 347,
           "name": "forward_lm_head",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 777,
+          "line_number": 447,
           "name": "forward_rmsnorm",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1060,
+          "line_number": 731,
           "name": "forward_swiglu",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1517,
+          "line_number": 1188,
           "name": "get_step_count",
           "visibility": "Public"
         },
@@ -13390,13 +13399,13 @@
         },
         {
           "kind": "Function",
-          "line_number": 1488,
+          "line_number": 1159,
           "name": "load_optimizer_state",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1533,
+          "line_number": 1204,
           "name": "module_handle",
           "visibility": "Public"
         },
@@ -13432,25 +13441,25 @@
         },
         {
           "kind": "Function",
-          "line_number": 1190,
+          "line_number": 861,
           "name": "scale_accumulated_gradients",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1521,
+          "line_number": 1192,
           "name": "set_step_count",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1216,
+          "line_number": 887,
           "name": "step_adamw",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1529,
+          "line_number": 1200,
           "name": "swiglu_bwd_kernel",
           "visibility": "Public"
         },
@@ -13482,7 +13491,7 @@
             "DynamicAdamW"
           ],
           "is_public_reexport": false,
-          "line_number": 1541,
+          "line_number": 1212,
           "raw_path": "crate::trainer::{AdamWHyperparams, DynamicAdamW}"
         },
         {
@@ -13512,7 +13521,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 1540,
+          "line_number": 1211,
           "raw_path": "super::*"
         }
       ],
@@ -13528,61 +13537,43 @@
         },
         {
           "kind": "Function",
-          "line_number": 592,
-          "name": "backward_lm_head_f16",
-          "visibility": "Private"
-        },
-        {
-          "kind": "Function",
-          "line_number": 498,
-          "name": "backward_lm_head_fp32",
-          "visibility": "Private"
-        },
-        {
-          "kind": "Function",
-          "line_number": 417,
-          "name": "forward_lm_head_f16",
-          "visibility": "Private"
-        },
-        {
-          "kind": "Function",
-          "line_number": 360,
-          "name": "forward_lm_head_fp32",
-          "visibility": "Private"
-        },
-        {
-          "kind": "Function",
           "line_number": 27,
           "name": "from_str",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1625,
+          "line_number": 1328,
           "name": "test_gpu_adamw_non_finite_gradient_skips_step",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1653,
-          "name": "test_gpu_checkpoint_resume_equivalence",
+          "line_number": 1427,
+          "name": "test_gpu_checkpoint_full_disk_roundtrip_equivalence",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1544,
+          "line_number": 1356,
+          "name": "test_gpu_checkpoint_resume_numerical_equivalence",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1215,
           "name": "test_gpu_cpu_adamw_numerical_equivalence",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1722,
+      "lines": 1523,
       "module_path": "tara_engine::cuda::gpu_trainer",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1539,
+          "line_number": 1210,
           "name": "tests"
         }
       ],
@@ -13604,6 +13595,8 @@
         "embedding_fwd_f16_kernel",
         "embedding_fwd_kernel",
         "grad_norm_sq_kernel",
+        "linear_bwd_input_f16_kernel",
+        "linear_fwd_f16_kernel",
         "lm_head_bwd_input_f16_kernel",
         "lm_head_bwd_input_kernel",
         "lm_head_bwd_weight_f16_kernel",
@@ -13611,6 +13604,7 @@
         "lm_head_fwd_f16_kernel",
         "lm_head_fwd_kernel",
         "residual_add_kernel",
+        "rmsnorm_fwd_f16_kernel",
         "rmsnorm_fwd_kernel",
         "scale_grads_f16_kernel",
         "scale_grads_kernel",
@@ -13618,7 +13612,7 @@
         "swiglu_fwd_kernel"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "8a65f6e01a0fecd528bf9ab5ac8d84c38831f64b7af2103d8c6cddb15d4279bb",
+      "dynamic_sha256": "1f34f55915dfb53412bcdc599683e26ccef1ff6ca7ff035db67794824e588365",
       "exports": [
         {
           "kind": "Const",
@@ -13634,7 +13628,7 @@
       ],
       "internal_symbols": [],
       "is_test": false,
-      "lines": 1223,
+      "lines": 1449,
       "module_path": "tara_engine::cuda::kernels",
       "modules_declared": [],
       "out_links": [],
@@ -46852,6 +46846,7 @@
         "is_file",
         "is_finite",
         "is_none",
+        "is_null",
         "is_some",
         "iter",
         "iter_mut",
@@ -46901,6 +46896,7 @@
         "supervised_cycle_updates_real_model_parameters_and_reduces_loss",
         "temp_dir",
         "tensor_shape",
+        "test_single_sample_held_out_validation_cleanly_unavailable",
         "test_streaming_dataset_reader_format_compatibility",
         "to_lowercase",
         "to_map",
@@ -46923,7 +46919,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_training_system",
-      "dynamic_sha256": "f828299fb0debbf7b73a89a42cb900fbda3d580084aef5d5c7a2791926ea5a33",
+      "dynamic_sha256": "932e8eb6dd4ba22b5698f40441e932a286991136bf68f0eb381375f690ff8475",
       "exports": [
         {
           "kind": "Struct",
@@ -47120,7 +47116,7 @@
             "TaraConfig"
           ],
           "is_public_reexport": false,
-          "line_number": 1504,
+          "line_number": 1539,
           "raw_path": "crate::config::TaraConfig"
         },
         {
@@ -47152,7 +47148,7 @@
             "write_safetensors_with_shapes"
           ],
           "is_public_reexport": false,
-          "line_number": 1505,
+          "line_number": 1540,
           "raw_path": "crate::safetensors::{load_model_weights, write_safetensors_with_shapes}"
         },
         {
@@ -47185,7 +47181,7 @@
             "HashMap"
           ],
           "is_public_reexport": false,
-          "line_number": 1506,
+          "line_number": 1541,
           "raw_path": "std::collections::HashMap"
         },
         {
@@ -47229,7 +47225,7 @@
             "StreamingDatasetReader"
           ],
           "is_public_reexport": false,
-          "line_number": 1503,
+          "line_number": 1538,
           "raw_path": "super::{NativeSelfTrainer, StreamingDatasetReader}"
         },
         {
@@ -47258,7 +47254,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 1473,
+          "line_number": 1508,
           "name": "compute_model_loss",
           "visibility": "Private"
         },
@@ -47276,31 +47272,37 @@
         },
         {
           "kind": "Function",
-          "line_number": 1461,
+          "line_number": 1496,
           "name": "softmax",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1509,
+          "line_number": 1544,
           "name": "supervised_cycle_updates_real_model_parameters_and_reduces_loss",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1618,
+          "line_number": 1653,
+          "name": "test_single_sample_held_out_validation_cleanly_unavailable",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1746,
           "name": "test_streaming_dataset_reader_format_compatibility",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1662,
+      "lines": 1790,
       "module_path": "tara_training_system::shared_training_infrastructure::trainer",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1502,
+          "line_number": 1537,
           "name": "tests"
         }
       ],

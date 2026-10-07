@@ -1220,4 +1220,230 @@ $NORM_REDUCE_ATOMIC:
 $NORM_REDUCE_DONE:
     ret;
 }
+
+// 21. RMSNorm Forward with FP16 weights: y = (x / rms) * gamma (gamma is FP16)
+.visible .entry rmsnorm_fwd_f16_kernel(
+    .param .u64 p_input,
+    .param .u64 p_weight,
+    .param .u64 p_out,
+    .param .f32 p_eps,
+    .param .u32 p_seq_len,
+    .param .u32 p_hs
+) {
+    .reg .pred %p;
+    .reg .b16 %h<2>;
+    .reg .b32 %r<10>;
+    .reg .b64 %rd<10>;
+    .reg .f32 %f<10>;
+
+    mov.u32 %r0, %ctaid.x;
+    mov.u32 %r1, %ntid.x;
+    mov.u32 %r2, %tid.x;
+    mad.lo.s32 %r3, %r0, %r1, %r2;
+
+    ld.param.u32 %r4, [p_seq_len];
+    setp.ge.u32 %p, %r3, %r4;
+    @%p bra $RMS_FWD_F16_DONE;
+
+    ld.param.u32 %r5, [p_hs];
+    ld.param.u64 %rd0, [p_input];
+    ld.param.u64 %rd1, [p_weight];
+    ld.param.u64 %rd2, [p_out];
+
+    mul.lo.u32 %r6, %r3, %r5;
+    mul.wide.u32 %rd3, %r6, 4;
+    add.u64 %rd4, %rd0, %rd3;
+    add.u64 %rd5, %rd2, %rd3;
+
+    mov.f32 %f0, 0.0;
+    mov.u32 %r7, 0;
+
+$RMS_FWD_F16_SUM:
+    setp.ge.u32 %p, %r7, %r5;
+    @%p bra $RMS_FWD_F16_NORM;
+
+    mul.wide.u32 %rd6, %r7, 4;
+    add.u64 %rd7, %rd4, %rd6;
+    ld.global.f32 %f1, [%rd7];
+    fma.rn.f32 %f0, %f1, %f1, %f0;
+
+    add.u32 %r7, %r7, 1;
+    bra $RMS_FWD_F16_SUM;
+
+$RMS_FWD_F16_NORM:
+    cvt.rn.f32.u32 %f2, %r5;
+    div.approx.f32 %f3, %f0, %f2;
+    ld.param.f32 %f4, [p_eps];
+    add.f32 %f3, %f3, %f4;
+    rsqrt.approx.f32 %f5, %f3;
+
+    mov.u32 %r7, 0;
+
+$RMS_FWD_F16_STORE:
+    setp.ge.u32 %p, %r7, %r5;
+    @%p bra $RMS_FWD_F16_DONE;
+
+    mul.wide.u32 %rd6, %r7, 4;
+    add.u64 %rd7, %rd4, %rd6;
+    mul.wide.u32 %rd8_w, %r7, 2;
+    add.u64 %rd8, %rd1, %rd8_w;
+    add.u64 %rd9, %rd5, %rd6;
+
+    ld.global.f32 %f1, [%rd7];
+    ld.global.b16 %h1, [%rd8];
+    cvt.f32.f16 %f6, %h1;
+    mul.f32 %f7, %f1, %f5;
+    mul.f32 %f7, %f7, %f6;
+    st.global.f32 [%rd9], %f7;
+
+    add.u32 %r7, %r7, 1;
+    bra $RMS_FWD_F16_STORE;
+
+$RMS_FWD_F16_DONE:
+    ret;
+}
+
+// 22. Linear Forward with FP16 weights & FP32 activations: out = input * weight^T
+.visible .entry linear_fwd_f16_kernel(
+    .param .u64 p_input,
+    .param .u64 p_weight,
+    .param .u64 p_out,
+    .param .u32 p_seq_len,
+    .param .u32 p_in_dim,
+    .param .u32 p_out_dim
+) {
+    .reg .pred %p;
+    .reg .b16 %h<2>;
+    .reg .b32 %r<10>;
+    .reg .b64 %rd<10>;
+    .reg .f32 %f<5>;
+
+    mov.u32 %r0, %ctaid.x;
+    mov.u32 %r1, %ntid.x;
+    mov.u32 %r2, %tid.x;
+    mad.lo.s32 %r3, %r0, %r1, %r2;
+
+    ld.param.u32 %r4, [p_seq_len];
+    ld.param.u32 %r5, [p_out_dim];
+    mul.lo.u32 %r6, %r4, %r5;
+
+    setp.ge.u32 %p, %r3, %r6;
+    @%p bra $LIN_FWD_F16_DONE;
+
+    div.u32 %r7, %r3, %r5; // t
+    rem.u32 %r8, %r3, %r5; // o
+
+    ld.param.u32 %r9, [p_in_dim];
+    ld.param.u64 %rd1, [p_input];
+    ld.param.u64 %rd2, [p_weight];
+
+    mul.lo.u32 %r0, %r7, %r9;
+    mul.wide.u32 %rd3, %r0, 4;
+    add.u64 %rd4, %rd1, %rd3; // input row base
+
+    mul.lo.u32 %r1, %r8, %r9;
+    mul.wide.u32 %rd5, %r1, 2;
+    add.u64 %rd6, %rd2, %rd5; // weight row base (FP16 stride 2)
+
+    mov.f32 %f0, 0.0;
+    mov.u32 %r2, 0;
+
+$LIN_FWD_F16_LOOP:
+    setp.ge.u32 %p, %r2, %r9;
+    @%p bra $LIN_FWD_F16_STORE;
+
+    mul.wide.u32 %rd7, %r2, 4;
+    add.u64 %rd8, %rd4, %rd7;
+    ld.global.f32 %f1, [%rd8];
+
+    mul.wide.u32 %rd9_w, %r2, 2;
+    add.u64 %rd9, %rd6, %rd9_w;
+    ld.global.b16 %h1, [%rd9];
+    cvt.f32.f16 %f2, %h1;
+
+    fma.rn.f32 %f0, %f1, %f2, %f0;
+
+    add.u32 %r2, %r2, 1;
+    bra $LIN_FWD_F16_LOOP;
+
+$LIN_FWD_F16_STORE:
+    ld.param.u64 %rd1, [p_out];
+    mul.wide.u32 %rd3, %r3, 4;
+    add.u64 %rd4, %rd1, %rd3;
+    st.global.f32 [%rd4], %f0;
+
+$LIN_FWD_F16_DONE:
+    ret;
+}
+
+// 23. Linear Backward Input Gradient with FP16 weights: d_in[t, i] = sum_o (d_out[t, o] * weight[o, i])
+.visible .entry linear_bwd_input_f16_kernel(
+    .param .u64 p_dout,
+    .param .u64 p_weight,
+    .param .u64 p_din,
+    .param .u32 p_seq_len,
+    .param .u32 p_in_dim,
+    .param .u32 p_out_dim
+) {
+    .reg .pred %p;
+    .reg .b16 %h<2>;
+    .reg .b32 %r<10>;
+    .reg .b64 %rd<10>;
+    .reg .f32 %f<5>;
+
+    mov.u32 %r0, %ctaid.x;
+    mov.u32 %r1, %ntid.x;
+    mov.u32 %r2, %tid.x;
+    mad.lo.s32 %r3, %r0, %r1, %r2;
+
+    ld.param.u32 %r4, [p_seq_len];
+    ld.param.u32 %r5, [p_in_dim];
+    mul.lo.u32 %r6, %r4, %r5;
+
+    setp.ge.u32 %p, %r3, %r6;
+    @%p bra $LIN_BWD_IN_F16_DONE;
+
+    div.u32 %r7, %r3, %r5; // t
+    rem.u32 %r8, %r3, %r5; // i
+
+    ld.param.u32 %r9, [p_out_dim];
+    ld.param.u64 %rd1, [p_dout];
+    ld.param.u64 %rd2, [p_weight];
+
+    mov.f32 %f0, 0.0;
+    mov.u32 %r2, 0;
+
+$LIN_BWD_IN_F16_LOOP:
+    setp.ge.u32 %p, %r2, %r9;
+    @%p bra $LIN_BWD_IN_F16_STORE;
+
+    // dout[t, o] -> t * out_dim + o
+    mul.lo.u32 %r0, %r7, %r9;
+    add.u32 %r0, %r0, %r2;
+    mul.wide.u32 %rd3, %r0, 4;
+    add.u64 %rd4, %rd1, %rd3;
+    ld.global.f32 %f1, [%rd4];
+
+    // weight[o, i] -> o * in_dim + i (FP16 stride 2)
+    mul.lo.u32 %r1, %r2, %r5;
+    add.u32 %r1, %r1, %r8;
+    mul.wide.u32 %rd5, %r1, 2;
+    add.u64 %rd6, %rd2, %rd5;
+    ld.global.b16 %h1, [%rd6];
+    cvt.f32.f16 %f2, %h1;
+
+    fma.rn.f32 %f0, %f1, %f2, %f0;
+
+    add.u32 %r2, %r2, 1;
+    bra $LIN_BWD_IN_F16_LOOP;
+
+$LIN_BWD_IN_F16_STORE:
+    ld.param.u64 %rd1, [p_din];
+    mul.wide.u32 %rd3, %r3, 4;
+    add.u64 %rd4, %rd1, %rd3;
+    st.global.f32 [%rd4], %f0;
+
+$LIN_BWD_IN_F16_DONE:
+    ret;
+}
 "#;

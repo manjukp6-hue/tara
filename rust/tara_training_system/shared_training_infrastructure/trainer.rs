@@ -625,14 +625,21 @@ impl NativeSelfTrainer {
             let val = training_tokens[total_seq_count - val_count..].to_vec();
             (train, val)
         } else {
-            (training_tokens.clone(), training_tokens.clone())
+            (training_tokens.clone(), Vec::new())
         };
 
-        println!(
-            "[Dataset Split] Partitioned {} train sequences and {} held-out validation sequences.",
-            train_tokens.len(),
-            val_tokens.len()
-        );
+        if val_tokens.is_empty() {
+            println!(
+                "[Dataset Split] Partitioned {} train sequence(s). Held-out validation is unavailable (single-sequence boundary — zero self-contamination).",
+                train_tokens.len()
+            );
+        } else {
+            println!(
+                "[Dataset Split] Partitioned {} train sequences and {} held-out validation sequences.",
+                train_tokens.len(),
+                val_tokens.len()
+            );
+        }
 
         // Compute baseline loss strictly across held-out validation sequences
         let mut model = TaraForCausalLM::from_weights_and_config(
@@ -642,9 +649,15 @@ impl NativeSelfTrainer {
         )
         .map_err(|e| TrainerError::Model(e.to_string()))?;
 
-        println!("[Preflight] Evaluating baseline loss across {} held-out validation samples...", val_tokens.len());
-        let initial_loss = compute_model_loss(&model, &val_tokens);
-        println!("[Preflight] Held-out validation baseline loss: {:.4}", initial_loss);
+        let initial_loss: Option<f64> = if val_tokens.is_empty() {
+            println!("[Preflight] Skipping baseline validation loss (held-out validation unavailable).");
+            None
+        } else {
+            println!("[Preflight] Evaluating baseline loss across {} held-out validation samples...", val_tokens.len());
+            let loss = compute_model_loss(&model, &val_tokens);
+            println!("[Preflight] Held-out validation baseline loss: {:.4}", loss);
+            Some(loss)
+        };
 
         // 7. Full-Network Backpropagation with AdamW and Gradient Accumulation
         // Initialize hardware acceleration device backend
@@ -744,7 +757,7 @@ impl NativeSelfTrainer {
         let mut samples_seen = 0usize;
         let mut optimizer_steps = 0usize;
         let mut epochs_completed = 0;
-        let mut best_loss = initial_loss;
+        let mut best_loss = initial_loss.unwrap_or(f64::INFINITY);
 
         // Check for resumable checkpoint state
         if self.resume {
@@ -1138,18 +1151,25 @@ impl NativeSelfTrainer {
                                         staging_cp.join("tokenizer.json"),
                                     );
                                     // Validation loss evaluation strictly on held-out val_tokens
-                                    let current_eval_loss = compute_model_loss(&model, &val_tokens);
-                                    let is_best = current_eval_loss < best_loss;
-                                    if is_best {
-                                        best_loss = current_eval_loss;
-                                    }
+                                    let current_eval_loss = if val_tokens.is_empty() {
+                                        None
+                                    } else {
+                                        Some(compute_model_loss(&model, &val_tokens))
+                                    };
+                                    let is_best = match current_eval_loss {
+                                        Some(loss) if loss < best_loss => {
+                                            best_loss = loss;
+                                            true
+                                        }
+                                        _ => false,
+                                    };
 
                                     let state_json = serde_json::json!({
                                         "optimizer_step": optimizer_steps,
                                         "samples_seen": samples_seen,
                                         "epoch": epoch_idx,
                                         "validation_loss": current_eval_loss,
-                                        "best_validation_loss": best_loss,
+                                        "best_validation_loss": if val_tokens.is_empty() { None } else { Some(best_loss) },
                                         "is_best": is_best,
                                         "timestamp": crate::now_iso(),
                                     });
@@ -1185,9 +1205,17 @@ impl NativeSelfTrainer {
                                     }
 
                                     let _ = std::fs::remove_dir_all(&staging_cp);
+                                    let val_loss_str = current_eval_loss
+                                        .map(|l| format!("{:.4}", l))
+                                        .unwrap_or_else(|| "N/A".to_string());
+                                    let best_loss_str = if val_tokens.is_empty() {
+                                        "N/A".to_string()
+                                    } else {
+                                        format!("{:.4}", best_loss)
+                                    };
                                     println!(
-                                        "[Checkpoint] Saved persistent checkpoint to '{}' at step {} (Val Loss: {:.4}, Best: {:.4})",
-                                        cp_dir, optimizer_steps, current_eval_loss, best_loss
+                                        "[Checkpoint] Saved persistent checkpoint to '{}' at step {} (Val Loss: {}, Best: {})",
+                                        cp_dir, optimizer_steps, val_loss_str, best_loss_str
                                     );
                                 }
                             }
@@ -1265,23 +1293,30 @@ impl NativeSelfTrainer {
             }
         }
 
-        let final_loss = compute_model_loss(&model, &val_tokens);
-
-        // Validation Gate: reject non-finite loss or severe regression
-        if !final_loss.is_finite() {
-            return Err(TrainerError::Model(format!(
-                "Candidate rejected: final validation loss is non-finite ({final_loss}). Model update aborted."
-            )));
-        }
-        if final_loss > initial_loss * 1.5 {
-            return Err(TrainerError::Model(format!(
-                "Candidate rejected: validation loss regressed from {initial_loss:.4} to {final_loss:.4}. Model update aborted."
-            )));
-        }
-        println!(
-            "[Validation Gate] PASSED: initial baseline = {:.4}, final validation loss = {:.4}",
-            initial_loss, final_loss
-        );
+        let final_loss: Option<f64> = if val_tokens.is_empty() {
+            println!("[Validation Gate] Held-out validation unavailable (single-sequence boundary). Skipping regression check.");
+            None
+        } else {
+            let fl = compute_model_loss(&model, &val_tokens);
+            // Validation Gate: reject non-finite loss or severe regression
+            if !fl.is_finite() {
+                return Err(TrainerError::Model(format!(
+                    "Candidate rejected: final validation loss is non-finite ({fl}). Model update aborted."
+                )));
+            }
+            if let Some(init_l) = initial_loss {
+                if init_l > 0.0 && fl > init_l * 1.5 {
+                    return Err(TrainerError::Model(format!(
+                        "Candidate rejected: validation loss regressed from {init_l:.4} to {fl:.4}. Model update aborted."
+                    )));
+                }
+                println!(
+                    "[Validation Gate] PASSED: initial baseline = {:.4}, final validation loss = {:.4}",
+                    init_l, fl
+                );
+            }
+            Some(fl)
+        };
 
         // 8. Determine destination and staging directory (Candidate Isolation)
         let now_stamp = SystemTime::now()
@@ -1594,7 +1629,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             dataset_dir.join("examples.jsonl"),
-            r#"{"input":"a","output":"b"}"#,
+            "{\"input\":\"a\",\"output\":\"b\"}\n{\"input\":\"a\",\"output\":\"b\"}\n",
         )
         .unwrap();
 
@@ -1611,6 +1646,99 @@ mod tests {
             updated["model.embed_tokens.weight"],
             weights["model.embed_tokens.weight"]
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_single_sample_held_out_validation_cleanly_unavailable() {
+        let temp_dir = std::env::temp_dir().join(format!("tara_train_single_{}", std::process::id()));
+        let root = temp_dir.clone();
+        let model_dir = root.join("model");
+        let dataset_dir = root.join("dataset");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::create_dir_all(&dataset_dir).unwrap();
+
+        let config = TaraConfig {
+            vocab_size: 3,
+            hidden_size: 2,
+            intermediate_size: 2,
+            num_hidden_layers: 1,
+            num_attention_heads: 1,
+            num_key_value_heads: 1,
+            head_dim: 2,
+            max_position_embeddings: 8,
+            rope_theta: 10_000.0,
+            rms_norm_eps: 1e-5,
+            initializer_range: 0.02,
+            version: "test".into(),
+            model_type: "tara".into(),
+        };
+        std::fs::write(
+            model_dir.join("config.json"),
+            serde_json::to_string(&config).unwrap(),
+        )
+        .unwrap();
+
+        let mut vocab = HashMap::new();
+        vocab.insert("<unk>".to_string(), 0);
+        vocab.insert("a".to_string(), 1);
+        vocab.insert("b".to_string(), 2);
+        let tokenizer_data = serde_json::json!({
+            "vocab": vocab
+        });
+        std::fs::write(
+            model_dir.join("tokenizer.json"),
+            serde_json::to_string(&tokenizer_data).unwrap(),
+        )
+        .unwrap();
+
+        let mut weights = HashMap::new();
+        weights.insert("model.embed_tokens.weight".to_string(), vec![0.1; 6]);
+        weights.insert("model.layers.0.input_layernorm.weight".to_string(), vec![1.0; 2]);
+        weights.insert("model.layers.0.self_attn.q_proj.weight".to_string(), vec![0.1; 4]);
+        weights.insert("model.layers.0.self_attn.k_proj.weight".to_string(), vec![0.1; 4]);
+        weights.insert("model.layers.0.self_attn.v_proj.weight".to_string(), vec![0.1; 4]);
+        weights.insert("model.layers.0.self_attn.o_proj.weight".to_string(), vec![0.1; 4]);
+        weights.insert("model.layers.0.post_attention_layernorm.weight".to_string(), vec![1.0; 2]);
+        weights.insert("model.layers.0.mlp.gate_proj.weight".to_string(), vec![0.1; 4]);
+        weights.insert("model.layers.0.mlp.up_proj.weight".to_string(), vec![0.1; 4]);
+        weights.insert("model.layers.0.mlp.down_proj.weight".to_string(), vec![0.1; 4]);
+        weights.insert("model.norm.weight".to_string(), vec![1.0; 2]);
+        weights.insert("lm_head.weight".to_string(), vec![0.1; 6]);
+
+        let shapes: HashMap<String, Vec<usize>> = weights
+            .iter()
+            .map(|(name, _)| {
+                let shape = match name.as_str() {
+                    "model.embed_tokens.weight" | "lm_head.weight" => vec![3, 2],
+                    "model.norm.weight"
+                    | "model.layers.0.input_layernorm.weight"
+                    | "model.layers.0.post_attention_layernorm.weight" => vec![2],
+                    _ => vec![2, 2],
+                };
+                (name.clone(), shape)
+            })
+            .collect();
+        write_safetensors_with_shapes(
+            &weights,
+            &shapes,
+            &model_dir.join("model.safetensors").to_string_lossy(),
+        )
+        .unwrap();
+        std::fs::write(
+            dataset_dir.join("examples.jsonl"),
+            r#"{"input":"a","output":"b"}"#,
+        )
+        .unwrap();
+
+        let trainer = NativeSelfTrainer::new(&model_dir.to_string_lossy(), &root.to_string_lossy())
+            .with_dataset_dir(&dataset_dir);
+        let result = trainer
+            .run_full_self_learning_cycle(2, true)
+            .expect("train model");
+        assert_eq!(result["status"], "COMPLETED");
+        assert!(result["loss_before"].is_null());
+        assert!(result["loss_after"].is_null());
         let _ = std::fs::remove_dir_all(root);
     }
 

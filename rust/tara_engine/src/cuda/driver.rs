@@ -66,6 +66,7 @@ extern "C" {
     fn dlopen(filename: *const c_char, flag: c_int) -> *mut c_void;
     fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
     fn dlclose(handle: *mut c_void) -> c_int;
+    fn dlerror() -> *const c_char;
 }
 
 unsafe fn load_driver_lib() -> Result<*mut c_void, CudaError> {
@@ -83,16 +84,104 @@ unsafe fn load_driver_lib() -> Result<*mut c_void, CudaError> {
 
     #[cfg(unix)]
     {
-        let candidates = [b"libcuda.so.1\0".as_ptr(), b"libcuda.so\0".as_ptr()];
-        for &name in &candidates {
-            let handle = dlopen(name as *const c_char, 1); // RTLD_LAZY
-            if !handle.is_null() {
-                return Ok(handle);
+        use std::path::Path;
+
+        let mut candidates: Vec<CString> = Vec::new();
+        // Bare filenames (searches standard dynamic linker paths and LD_LIBRARY_PATH)
+        if let Ok(c) = CString::new("libcuda.so.1") {
+            candidates.push(c);
+        }
+        if let Ok(c) = CString::new("libcuda.so") {
+            candidates.push(c);
+        }
+
+        // Standard cloud, distribution, and container driver locations
+        let standard_paths = [
+            "/usr/lib64-nvidia/libcuda.so.1",
+            "/usr/lib64-nvidia/libcuda.so",
+            "/usr/local/cuda/compat/libcuda.so.1",
+            "/usr/local/cuda/compat/libcuda.so",
+            "/usr/lib/x86_64-linux-gnu/libcuda.so.1",
+            "/usr/lib/x86_64-linux-gnu/libcuda.so",
+            "/usr/lib64/libcuda.so.1",
+            "/usr/lib64/libcuda.so",
+            "/usr/lib/libcuda.so.1",
+            "/usr/lib/libcuda.so",
+        ];
+        for path in standard_paths {
+            if Path::new(path).exists() {
+                if let Ok(c) = CString::new(path) {
+                    candidates.push(c);
+                }
             }
         }
-        Err(CudaError::LibraryNotFound(
-            "libcuda.so.1 could not be loaded. Ensure NVIDIA driver is installed.".into(),
-        ))
+
+        // Dynamically inspect all directories declared in LD_LIBRARY_PATH
+        if let Ok(ld_path) = std::env::var("LD_LIBRARY_PATH") {
+            for dir in ld_path.split(':') {
+                if !dir.is_empty() {
+                    let p1 = format!("{dir}/libcuda.so.1");
+                    if Path::new(&p1).exists() {
+                        if let Ok(c) = CString::new(p1) {
+                            candidates.push(c);
+                        }
+                    }
+                    let p2 = format!("{dir}/libcuda.so");
+                    if Path::new(&p2).exists() {
+                        if let Ok(c) = CString::new(p2) {
+                            candidates.push(c);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Dynamically probe /usr/local/cuda*/compat for version-specific drivers
+        if let Ok(entries) = std::fs::read_dir("/usr/local") {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with("cuda") {
+                        let compat1 = p.join("compat").join("libcuda.so.1");
+                        if compat1.exists() {
+                            if let Ok(c) = CString::new(compat1.to_string_lossy().to_string()) {
+                                candidates.push(c);
+                            }
+                        }
+                        let compat2 = p.join("compat").join("libcuda.so");
+                        if compat2.exists() {
+                            if let Ok(c) = CString::new(compat2.to_string_lossy().to_string()) {
+                                candidates.push(c);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut last_error = String::new();
+        for candidate in &candidates {
+            let handle = dlopen(candidate.as_ptr(), 1); // RTLD_LAZY
+            if !handle.is_null() {
+                return Ok(handle);
+            } else {
+                let err_ptr = dlerror();
+                if !err_ptr.is_null() {
+                    let c_str = std::ffi::CStr::from_ptr(err_ptr);
+                    last_error = c_str.to_string_lossy().to_string();
+                }
+            }
+        }
+
+        let err_detail = if last_error.is_empty() {
+            "No candidate matched or driver library not found in search paths".to_string()
+        } else {
+            last_error
+        };
+
+        Err(CudaError::LibraryNotFound(format!(
+            "CUDA driver library (libcuda.so.1) could not be loaded: {err_detail}. Checked default linker paths, /usr/lib64-nvidia, /usr/local/cuda/compat, and LD_LIBRARY_PATH."
+        )))
     }
 }
 

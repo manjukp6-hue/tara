@@ -12861,23 +12861,30 @@
         "ApiError",
         "LibraryNotFound",
         "allocate_f32",
+        "and_then",
         "as_mut_ptr",
         "as_ptr",
         "copy_dtod",
         "create_context",
         "device",
         "device_count",
+        "dlerror",
         "download_f32",
         "download_f32_slice",
         "driver_version",
         "drop",
         "error",
+        "exists",
+        "file_name",
+        "flatten",
         "get_device_info",
         "get_kernel",
         "get_memory_info",
         "into",
         "into_owned",
+        "is_empty",
         "is_null",
+        "join",
         "launch",
         "len",
         "load",
@@ -12886,37 +12893,44 @@
         "macro_rules",
         "map_err",
         "memcpy_dtod",
+        "new",
         "null_mut",
+        "path",
+        "read_dir",
+        "split",
+        "starts_with",
         "synchronize",
+        "to_str",
         "to_string",
         "to_string_lossy",
         "upload_f32",
-        "upload_f32_slice"
+        "upload_f32_slice",
+        "var"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "1c7e3ca033e26518b1af441c774b0c206a0f4ae2aee4a151ff5087128d6b03b6",
+      "dynamic_sha256": "1995822628020687a54fcc6624bbaa1b2bb7b5d1da3aac36fceb8fc05b477997",
       "exports": [
         {
           "kind": "Struct",
-          "line_number": 455,
+          "line_number": 544,
           "name": "CudaBuffer",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 285,
+          "line_number": 374,
           "name": "CudaContextHandle",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 277,
+          "line_number": 366,
           "name": "CudaDeviceInfo",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 118,
+          "line_number": 207,
           "name": "CudaDriver",
           "visibility": "Public"
         },
@@ -12928,127 +12942,127 @@
         },
         {
           "kind": "Struct",
-          "line_number": 533,
+          "line_number": 622,
           "name": "CudaKernel",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 474,
+          "line_number": 563,
           "name": "CudaModuleHandle",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 292,
+          "line_number": 381,
           "name": "CudaSession",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 325,
+          "line_number": 414,
           "name": "allocate_f32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 425,
+          "line_number": 514,
           "name": "copy_dtod",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 264,
+          "line_number": 353,
           "name": "create_context",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 314,
+          "line_number": 403,
           "name": "device",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 229,
+          "line_number": 318,
           "name": "device_count",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 380,
+          "line_number": 469,
           "name": "download_f32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 398,
+          "line_number": 487,
           "name": "download_f32_slice",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 221,
+          "line_number": 310,
           "name": "driver_version",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 235,
+          "line_number": 324,
           "name": "get_device_info",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 497,
+          "line_number": 586,
           "name": "get_kernel",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 318,
+          "line_number": 407,
           "name": "get_memory_info",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 299,
+          "line_number": 388,
           "name": "init",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 159,
+          "line_number": 248,
           "name": "load",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 430,
+          "line_number": 519,
           "name": "load_ptx_module",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 270,
+          "line_number": 359,
           "name": "memcpy_dtod",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 419,
+          "line_number": 508,
           "name": "synchronize",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 345,
+          "line_number": 434,
           "name": "upload_f32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 363,
+          "line_number": 452,
           "name": "upload_f32_slice",
           "visibility": "Public"
         }
@@ -13065,6 +13079,14 @@
           "is_public_reexport": false,
           "line_number": 8,
           "raw_path": "std::ffi::{c_char, c_int, c_void, CStr, CString}"
+        },
+        {
+          "imported_symbols": [
+            "Path"
+          ],
+          "is_public_reexport": false,
+          "line_number": 87,
+          "raw_path": "std::path::Path"
         },
         {
           "imported_symbols": [
@@ -13112,6 +13134,12 @@
         },
         {
           "kind": "Function",
+          "line_number": 69,
+          "name": "dlerror",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
           "line_number": 66,
           "name": "dlopen",
           "visibility": "Private"
@@ -13124,31 +13152,31 @@
         },
         {
           "kind": "Function",
-          "line_number": 447,
+          "line_number": 536,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 466,
+          "line_number": 555,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 509,
+          "line_number": 598,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 518,
+          "line_number": 607,
           "name": "drop",
           "visibility": "Private"
         }
       ],
       "is_test": false,
-      "lines": 582,
+      "lines": 671,
       "module_path": "tara_engine::cuda::driver",
       "modules_declared": [],
       "out_links": [],

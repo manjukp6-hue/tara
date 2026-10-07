@@ -23,6 +23,9 @@ fi
 # Ensure cargo is on PATH
 export PATH="$HOME/.cargo/bin:$PATH"
 
+# Ensure NVIDIA driver and CUDA libraries are discoverable in Colab / Linux containers
+export LD_LIBRARY_PATH="/usr/lib64-nvidia:/usr/local/cuda/compat:/usr/local/cuda-12.8/compat:${LD_LIBRARY_PATH:-}"
+
 # 2. Hardware Inspection
 echo "------------------------------------------------------------------------------"
 echo "[HARDWARE] Inspecting Cloud GPU Acceleration..."

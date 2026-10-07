@@ -16534,8 +16534,8 @@
                       "name": "driver.rs",
                       "rel_path": "rust/tara_engine/src/cuda/driver.rs",
                       "entry_type": "file",
-                      "size_bytes": 19275,
-                      "sha256": "1c7e3ca033e26518b1af441c774b0c206a0f4ae2aee4a151ff5087128d6b03b6"
+                      "size_bytes": 22819,
+                      "sha256": "1995822628020687a54fcc6624bbaa1b2bb7b5d1da3aac36fceb8fc05b477997"
                     },
                     {
                       "name": "gpu_trainer.rs",
@@ -18282,8 +18282,8 @@
       "name": "colab_train.sh",
       "rel_path": "colab_train.sh",
       "entry_type": "file",
-      "size_bytes": 5503,
-      "sha256": "fdfc76f4ae42f55cee4e605c3a7170d6559db77a2d8db4eb84e41405cc746956"
+      "size_bytes": 5706,
+      "sha256": "ef5789f0efd8a52490b0a5f74e3b3759ba07a478d71c2d934743cba8d642f940"
     },
     {
       "name": "start.bat",

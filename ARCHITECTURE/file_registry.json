@@ -17473,12 +17473,12 @@
     "rust/tara_engine/src/bin/tara_dataset_splitter.rs": {
       "extension": "rs",
       "file_id": 3096224744222610,
-      "line_count": 243,
-      "modified_epoch": 1791271712,
+      "line_count": 298,
+      "modified_epoch": 1791393199,
       "name": "tara_dataset_splitter.rs",
       "rel_path": "rust/tara_engine/src/bin/tara_dataset_splitter.rs",
-      "sha256": "f75395ec52dd880d7d7c93c8d900b6bf55a32ac4eb47a733d1a8837b4172fabf",
-      "size_bytes": 9688
+      "sha256": "81bb5c921795fadfab0f83bd53d846faa9d258b762dcecc41b7df908be65270c",
+      "size_bytes": 12500
     },
     "rust/tara_engine/src/bin/tara_github_sync.rs": {
       "extension": "rs",
@@ -17793,12 +17793,12 @@
     "rust/tara_engine/src/dataset/splitter.rs": {
       "extension": "rs",
       "file_id": 1970324837580031,
-      "line_count": 723,
-      "modified_epoch": 1791207608,
+      "line_count": 1346,
+      "modified_epoch": 1791392960,
       "name": "splitter.rs",
       "rel_path": "rust/tara_engine/src/dataset/splitter.rs",
-      "sha256": "54d1f8493f77b4473619574c725f8eb45e817b919affd0b1642b81d0236594c0",
-      "size_bytes": 25761
+      "sha256": "10bab0e926d28c8ac61606b74d9eaa536d8a63715b08aefd428f7101277a84fa",
+      "size_bytes": 48989
     },
     "rust/tara_engine/src/dataset/tokenizer_stage.rs": {
       "extension": "rs",
@@ -19531,7 +19531,7 @@
       "size_bytes": 1242
     }
   },
-  "generated_at_utc": "1791391988",
+  "generated_at_utc": "1791393201",
   "schema_version": "1.0.0",
   "total_files": 1953
 }

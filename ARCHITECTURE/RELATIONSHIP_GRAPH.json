@@ -8590,15 +8590,18 @@
     "rust/tara_engine/src/bin/tara_dataset_splitter.rs": {
       "call_references": [
         "Err",
+        "and_then",
         "any",
         "args",
         "as_str",
         "audit",
         "check_leakage",
         "collect",
+        "decontaminate",
         "display",
         "elapsed",
         "exists",
+        "file_name",
         "from",
         "into",
         "is_dir",
@@ -8611,10 +8614,12 @@
         "parent",
         "print_usage",
         "split",
+        "to_str",
+        "unwrap_or",
         "unwrap_or_else"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "f75395ec52dd880d7d7c93c8d900b6bf55a32ac4eb47a733d1a8837b4172fabf",
+      "dynamic_sha256": "81bb5c921795fadfab0f83bd53d846faa9d258b762dcecc41b7df908be65270c",
       "exports": [],
       "imports": [
         {
@@ -8665,7 +8670,7 @@
       "internal_symbols": [
         {
           "kind": "Function",
-          "line_number": 26,
+          "line_number": 31,
           "name": "main",
           "visibility": "Private"
         },
@@ -8677,7 +8682,7 @@
         }
       ],
       "is_test": false,
-      "lines": 243,
+      "lines": 298,
       "module_path": "tara_engine::bin::tara_dataset_splitter",
       "modules_declared": [],
       "out_links": [
@@ -14270,35 +14275,51 @@
         "abs",
         "and_then",
         "as_bytes",
+        "as_millis",
         "as_nanos",
         "as_ref",
+        "as_str",
+        "canonicalize",
         "chars",
         "check_leakage",
+        "clean_substantive_prefix",
         "clear",
         "clone",
         "collect",
         "compute_13gram_hashes",
         "contains",
         "copied",
+        "copy",
+        "count",
         "create",
         "create_dir_all",
         "decontaminate",
         "default",
         "display",
+        "energy",
         "enumerate",
         "error",
         "extension",
-        "extract_substantive_text",
+        "extract_prompt_field",
+        "extract_target_field",
+        "file_name",
         "filter",
         "filter_map",
         "finalize",
         "find",
+        "find_leakage",
         "flush",
         "get",
+        "get_ref",
+        "intersection",
         "into_iter",
         "is_dir",
         "is_empty",
+        "is_err",
         "is_file",
+        "is_finite",
+        "is_ok",
+        "is_some",
         "iter",
         "join",
         "keys",
@@ -14308,100 +14329,200 @@
         "map",
         "map_err",
         "new",
+        "next",
+        "normalize_text",
         "now",
         "ok",
+        "open",
         "or_default",
+        "parent",
         "path",
         "qs",
         "read",
+        "read_canonical_samples_from_file",
+        "read_to_string",
         "remove_dir_all",
+        "rename",
         "rfind",
+        "shade",
         "sort",
         "sort_by_key",
         "split",
         "split_whitespace",
+        "starts_with",
+        "sync_all",
         "temp_dir",
         "test_cross_split_zero_leakage_and_isolation",
         "test_dataset_split_deterministic",
+        "test_end_to_end_split_contaminate_decontaminate_verify_clean",
         "test_leakage_detection_and_decontamination",
+        "test_nan_split_ratio_rejected",
+        "test_near_duplicate_decontaminated",
+        "test_near_duplicate_overlap_detected",
+        "test_no_trailing_newline_counted",
+        "test_same_target_different_prompt_detected",
+        "test_source_equals_output_rejected",
+        "test_tara_schema_fields_detected",
         "to_lowercase",
         "to_path_buf",
         "to_str",
         "to_string",
         "to_string_lossy",
+        "to_string_pretty",
         "trim",
         "union",
         "unwrap",
+        "unwrap_or",
+        "unwrap_or_default",
         "unwrap_or_else",
         "update",
-        "vec"
+        "vec",
+        "write"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "54d1f8493f77b4473619574c725f8eb45e817b919affd0b1642b81d0236594c0",
+      "dynamic_sha256": "10bab0e926d28c8ac61606b74d9eaa536d8a63715b08aefd428f7101277a84fa",
       "exports": [
         {
           "kind": "Struct",
-          "line_number": 177,
-          "name": "DatasetSplitter",
+          "line_number": 208,
+          "name": "CanonicalSample",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 363,
+          "line_number": 468,
+          "name": "DatasetSplitter",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Const",
+          "line_number": 29,
+          "name": "LEAKAGE_OVERLAP_THRESHOLD",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Struct",
+          "line_number": 752,
           "name": "LeakageChecker",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 70,
+          "line_number": 287,
+          "name": "LeakageIndex",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Enum",
+          "line_number": 274,
+          "name": "LeakageKind",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Struct",
+          "line_number": 102,
           "name": "LeakageReport",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 30,
+          "line_number": 51,
           "name": "SplitRatio",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 58,
+          "line_number": 88,
           "name": "SplitReport",
           "visibility": "Public"
         },
         {
           "kind": "Enum",
-          "line_number": 17,
+          "line_number": 32,
           "name": "SplitterError",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 371,
+          "line_number": 763,
           "name": "check_leakage",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 550,
+          "line_number": 171,
+          "name": "clean_substantive_prefix",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 188,
+          "name": "compute_13gram_hashes",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 908,
           "name": "compute_file_sha256",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 499,
+          "line_number": 839,
           "name": "decontaminate",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 47,
+          "line_number": 222,
+          "name": "extract_canonical_sample",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 128,
+          "name": "extract_prompt_field",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 150,
+          "name": "extract_target_field",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 343,
+          "name": "find_leakage",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 113,
+          "name": "fnv1a_hash",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 68,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 184,
+          "line_number": 297,
+          "name": "new",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 123,
+          "name": "normalize_text",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 475,
           "name": "split",
           "visibility": "Public"
         }
@@ -14413,7 +14534,7 @@
             "Serialize"
           ],
           "is_public_reexport": false,
-          "line_number": 8,
+          "line_number": 19,
           "raw_path": "serde::{Deserialize, Serialize}"
         },
         {
@@ -14421,7 +14542,7 @@
             "Value"
           ],
           "is_public_reexport": false,
-          "line_number": 9,
+          "line_number": 20,
           "raw_path": "serde_json::Value"
         },
         {
@@ -14430,7 +14551,7 @@
             "Sha256"
           ],
           "is_public_reexport": false,
-          "line_number": 551,
+          "line_number": 909,
           "raw_path": "sha2::{Digest, Sha256}"
         },
         {
@@ -14439,7 +14560,7 @@
             "HashSet"
           ],
           "is_public_reexport": false,
-          "line_number": 10,
+          "line_number": 21,
           "raw_path": "std::collections::{HashMap, HashSet}"
         },
         {
@@ -14448,7 +14569,7 @@
             "File"
           ],
           "is_public_reexport": false,
-          "line_number": 11,
+          "line_number": 22,
           "raw_path": "std::fs::{self, File}"
         },
         {
@@ -14456,7 +14577,7 @@
             "Read"
           ],
           "is_public_reexport": false,
-          "line_number": 552,
+          "line_number": 910,
           "raw_path": "std::io::Read"
         },
         {
@@ -14464,7 +14585,7 @@
             "Write"
           ],
           "is_public_reexport": false,
-          "line_number": 571,
+          "line_number": 929,
           "raw_path": "std::io::Write"
         },
         {
@@ -14475,21 +14596,31 @@
             "Write"
           ],
           "is_public_reexport": false,
-          "line_number": 12,
+          "line_number": 23,
           "raw_path": "std::io::{BufRead, BufReader, BufWriter, Write}"
         },
         {
           "imported_symbols": [
-            "Path"
+            "Path",
+            "PathBuf"
           ],
           "is_public_reexport": false,
-          "line_number": 13,
-          "raw_path": "std::path::Path"
+          "line_number": 24,
+          "raw_path": "std::path::{Path, PathBuf}"
+        },
+        {
+          "imported_symbols": [
+            "SystemTime",
+            "UNIX_EPOCH"
+          ],
+          "is_public_reexport": false,
+          "line_number": 25,
+          "raw_path": "std::time::{SystemTime, UNIX_EPOCH}"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 570,
+          "line_number": 928,
           "raw_path": "super::*"
         },
         {
@@ -14497,7 +14628,7 @@
             "Error"
           ],
           "is_public_reexport": false,
-          "line_number": 14,
+          "line_number": 26,
           "raw_path": "thiserror::Error"
         }
       ],
@@ -14508,91 +14639,121 @@
       "internal_symbols": [
         {
           "kind": "Struct",
-          "line_number": 142,
+          "line_number": 433,
           "name": "DisjointSet",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 120,
-          "name": "compute_13gram_hashes",
-          "visibility": "Private"
-        },
-        {
-          "kind": "Function",
-          "line_number": 37,
+          "line_number": 58,
           "name": "default",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 102,
-          "name": "extract_substantive_text",
-          "visibility": "Private"
-        },
-        {
-          "kind": "Function",
-          "line_number": 90,
-          "name": "extract_text_sample",
-          "visibility": "Private"
-        },
-        {
-          "kind": "Function",
-          "line_number": 153,
+          "line_number": 444,
           "name": "find",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 81,
-          "name": "fnv1a_hash",
-          "visibility": "Private"
-        },
-        {
-          "kind": "Function",
-          "line_number": 573,
+          "line_number": 931,
           "name": "make_test_dir",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 147,
+          "line_number": 438,
           "name": "new",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 663,
+          "line_number": 1241,
+          "name": "read_canonical_samples_from_file",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1024,
           "name": "test_cross_split_zero_leakage_and_isolation",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 584,
+          "line_number": 942,
           "name": "test_dataset_split_deterministic",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 610,
+          "line_number": 1278,
+          "name": "test_end_to_end_split_contaminate_decontaminate_verify_clean",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 969,
           "name": "test_leakage_detection_and_decontamination",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 164,
+          "line_number": 1257,
+          "name": "test_nan_split_ratio_rejected",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1120,
+          "name": "test_near_duplicate_decontaminated",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1086,
+          "name": "test_near_duplicate_overlap_detected",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1225,
+          "name": "test_no_trailing_newline_counted",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1193,
+          "name": "test_same_target_different_prompt_detected",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1269,
+          "name": "test_source_equals_output_rejected",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1162,
+          "name": "test_tara_schema_fields_detected",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 455,
           "name": "union",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 723,
+      "lines": 1346,
       "module_path": "tara_engine::dataset::splitter",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 569,
+          "line_number": 927,
           "name": "tests"
         }
       ],
@@ -49584,5 +49745,5 @@
   "schema_version": "1.0.0",
   "total_files": 240,
   "total_modules": 583,
-  "total_symbols": 2195
+  "total_symbols": 2206
 }

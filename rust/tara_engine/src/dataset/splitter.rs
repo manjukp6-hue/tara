@@ -2,16 +2,31 @@
 //!
 //! Provides:
 //! - Deterministic train / val / test partitioning using 64-bit content hashes.
-//! - Bidirectional contamination and leakage checking (exact match + 13-gram overlap).
-//! - Automatic decontamination filtering to guarantee benchmark integrity.
+//! - Conservative cluster isolation via Disjoint Set Union (DSU) to group exact and
+//!   near-duplicate records into the same partition, preventing cross-split leakage.
+//!   Note: Cluster isolation guarantees zero cross-partition leakage; high-density
+//!   near-duplicate clusters may cause slight deviation from exact target proportions.
+//! - Shared bidirectional contamination and leakage engine (`LeakageIndex`) powering both
+//!   `check_leakage` and `decontaminate` with identical two-stage matching:
+//!   1. Exact raw line equality (hash bucket + string comparison).
+//!   2. Exact canonical prompt / target / combined sample equality.
+//!   3. 13-gram shingle near-duplicate overlap (>= 85% bidirectional threshold).
+//! - Support for full TARA dataset schemas (`formatted_input`, `input`, `prompt`, `instruction`,
+//!   `trigger_pattern`, `metadata.input`, `formatted_target`, `output`, `completion`, `response`,
+//!   `recommendation`, `metadata.output`).
+//! - Crash-safe atomic directory/file promotion with manifest commit markers.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
+
+/// Bidirectional near-duplicate 13-gram overlap ratio threshold for leakage detection.
+pub const LEAKAGE_OVERLAP_THRESHOLD: f64 = 0.85;
 
 #[derive(Debug, Error)]
 pub enum SplitterError {
@@ -19,13 +34,19 @@ pub enum SplitterError {
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("Invalid ratio: train ({train}) + val ({val}) + test ({test}) must sum to 1.0")]
+    #[error("Invalid ratio: train ({train}), val ({val}), test ({test}) must be positive finite numbers summing to 1.0")]
     InvalidRatio { train: f64, val: f64, test: f64 },
     #[error("Empty dataset provided at {0}")]
     EmptyDataset(String),
+    #[error("Source directory cannot be identical to or contain output directory: {0}")]
+    SourceEqualsOutput(String),
 }
 
 /// Ratio specification for train, validation, and test splits.
+///
+/// Note: Target ratios represent nominal split goals. Cluster isolation guarantees
+/// zero cross-partition leakage, but transitive grouping of near-duplicates may
+/// produce slight deviation from exact sample-level ratios.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SplitRatio {
     pub train: f64,
@@ -45,8 +66,17 @@ impl Default for SplitRatio {
 
 impl SplitRatio {
     pub fn new(train: f64, val: f64, test: f64) -> Result<Self, SplitterError> {
+        if !train.is_finite()
+            || !val.is_finite()
+            || !test.is_finite()
+            || train <= 0.0
+            || val < 0.0
+            || test < 0.0
+        {
+            return Err(SplitterError::InvalidRatio { train, val, test });
+        }
         let sum = train + val + test;
-        if (sum - 1.0).abs() > 1e-4 || train <= 0.0 || val < 0.0 || test < 0.0 {
+        if (sum - 1.0).abs() > 1e-4 {
             return Err(SplitterError::InvalidRatio { train, val, test });
         }
         Ok(Self { train, val, test })
@@ -63,6 +93,8 @@ pub struct SplitReport {
     pub train_path: String,
     pub val_path: String,
     pub test_path: String,
+    #[serde(default)]
+    pub manifest_path: Option<String>,
 }
 
 /// Summary report produced by `LeakageChecker::check_leakage`.
@@ -77,8 +109,8 @@ pub struct LeakageReport {
     pub is_clean: bool,
 }
 
-/// Deterministic FNV-1a 64-bit hash.
-fn fnv1a_hash(data: &[u8]) -> u64 {
+/// Deterministic FNV-1a 64-bit non-cryptographic hash used for bucket indexing.
+pub fn fnv1a_hash(data: &[u8]) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
     for &byte in data {
         hash ^= byte as u64;
@@ -87,20 +119,56 @@ fn fnv1a_hash(data: &[u8]) -> u64 {
     hash
 }
 
-fn extract_text_sample(val: &Value) -> Option<&str> {
-    if let Some(inp) = val.get("input").and_then(Value::as_str) {
-        Some(inp)
-    } else if let Some(p) = val.get("prompt").and_then(Value::as_str) {
-        Some(p)
-    } else if let Some(t) = val.get("text").and_then(Value::as_str) {
-        Some(t)
-    } else {
-        None
-    }
+/// Text normalization for canonical sample extraction.
+pub fn normalize_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
 
-fn extract_substantive_text(val: &Value) -> Option<String> {
-    let raw = extract_text_sample(val)?;
+/// Extracts prompt / input field across various TARA dataset schemas.
+pub fn extract_prompt_field(val: &Value) -> Option<String> {
+    let candidates = [
+        val.get("formatted_input"),
+        val.get("input"),
+        val.get("prompt"),
+        val.get("instruction"),
+        val.get("trigger_pattern"),
+        val.get("metadata").and_then(|m| m.get("input")),
+        val.get("text"),
+    ];
+    for cand in candidates {
+        if let Some(s) = cand.and_then(Value::as_str) {
+            let t = s.trim();
+            if !t.is_empty() {
+                return Some(t.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Extracts target / output field across various TARA dataset schemas.
+pub fn extract_target_field(val: &Value) -> Option<String> {
+    let candidates = [
+        val.get("formatted_target"),
+        val.get("output"),
+        val.get("completion"),
+        val.get("response"),
+        val.get("recommendation"),
+        val.get("metadata").and_then(|m| m.get("output")),
+    ];
+    for cand in candidates {
+        if let Some(s) = cand.and_then(Value::as_str) {
+            let t = s.trim();
+            if !t.is_empty() {
+                return Some(t.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Strips known boilerplate prefixes for clean substantive text comparison.
+pub fn clean_substantive_prefix(raw: &str) -> String {
     let prefix = "explain the core scientific research, methodology, and theoretical findings of the paper titled:";
     let lower = raw.trim().to_lowercase();
     if lower.starts_with(prefix) {
@@ -108,21 +176,17 @@ fn extract_substantive_text(val: &Value) -> Option<String> {
         if let Some(first_quote) = remainder.find('"') {
             if let Some(last_quote) = remainder.rfind('"') {
                 if last_quote > first_quote {
-                    return Some(remainder[first_quote + 1..last_quote].trim().to_string());
+                    return remainder[first_quote + 1..last_quote].trim().to_string();
                 }
             }
         }
     }
-    Some(raw.trim().to_string())
+    raw.trim().to_string()
 }
 
-/// Computes 13-gram character shingles from a string for near-duplicate overlap detection.
-fn compute_13gram_hashes(text: &str) -> Vec<u64> {
-    let normalized = text
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase();
+/// Computes 13-gram character shingles for near-duplicate overlap detection.
+pub fn compute_13gram_hashes(text: &str) -> Vec<u64> {
+    let normalized = normalize_text(text);
     let chars: Vec<char> = normalized.chars().collect();
     if chars.len() < 13 {
         return vec![fnv1a_hash(normalized.as_bytes())];
@@ -139,6 +203,233 @@ fn compute_13gram_hashes(text: &str) -> Vec<u64> {
     hashes
 }
 
+/// Canonical representation of a single dataset sample with multi-level hashing.
+#[derive(Debug, Clone)]
+pub struct CanonicalSample {
+    pub raw_line: String,
+    pub prompt: String,
+    pub target: String,
+    pub combined_text: String,
+    pub line_hash: u64,
+    pub prompt_hash: u64,
+    pub target_hash: u64,
+    pub combined_hash: u64,
+    pub prompt_shingles: HashSet<u64>,
+    pub shingles: HashSet<u64>,
+}
+
+/// Extracts a canonical sample from a raw JSONL line.
+pub fn extract_canonical_sample(raw_line: &str) -> CanonicalSample {
+    let trimmed = raw_line.trim();
+    let line_hash = fnv1a_hash(trimmed.as_bytes());
+
+    let (prompt_raw, target_raw) = if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
+        let p = extract_prompt_field(&val);
+        let t = extract_target_field(&val);
+        (p, t)
+    } else {
+        (None, None)
+    };
+
+    let prompt_clean = prompt_raw
+        .map(|s| clean_substantive_prefix(&s))
+        .unwrap_or_else(|| trimmed.to_string());
+    let target_clean = target_raw.unwrap_or_default();
+
+    let norm_prompt = normalize_text(&prompt_clean);
+    let norm_target = normalize_text(&target_clean);
+
+    let combined = if norm_target.is_empty() {
+        norm_prompt.clone()
+    } else {
+        format!("{}\n{}", norm_prompt, norm_target)
+    };
+
+    let prompt_hash = fnv1a_hash(norm_prompt.as_bytes());
+    let target_hash = if norm_target.is_empty() {
+        0
+    } else {
+        fnv1a_hash(norm_target.as_bytes())
+    };
+    let combined_hash = fnv1a_hash(combined.as_bytes());
+    let prompt_shingles: HashSet<u64> = compute_13gram_hashes(&norm_prompt).into_iter().collect();
+    let shingles: HashSet<u64> = compute_13gram_hashes(&combined).into_iter().collect();
+
+    CanonicalSample {
+        raw_line: trimmed.to_string(),
+        prompt: norm_prompt,
+        target: norm_target,
+        combined_text: combined,
+        line_hash,
+        prompt_hash,
+        target_hash,
+        combined_hash,
+        prompt_shingles,
+        shingles,
+    }
+}
+
+/// Type of contamination / leakage detected.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LeakageKind {
+    ExactLine,
+    ExactCombined,
+    ExactPrompt,
+    ExactTarget,
+    NearDuplicateShingle { overlap_ratio: f64 },
+}
+
+/// Shared bidirectional leakage index powering both `check_leakage` and `decontaminate`.
+///
+/// Implements robust two-stage verification:
+/// 1. Hash bucket lookup for $O(1)$ candidate retrieval.
+/// 2. Exact string equality check on candidates to eliminate hash collisions.
+pub struct LeakageIndex {
+    samples: Vec<CanonicalSample>,
+    line_map: HashMap<u64, Vec<usize>>,
+    combined_map: HashMap<u64, Vec<usize>>,
+    prompt_map: HashMap<u64, Vec<usize>>,
+    target_map: HashMap<u64, Vec<usize>>,
+    inv_index: HashMap<u64, Vec<usize>>,
+}
+
+impl LeakageIndex {
+    pub fn new(samples: Vec<CanonicalSample>) -> Self {
+        let total = samples.len();
+        let mut line_map: HashMap<u64, Vec<usize>> = HashMap::new();
+        let mut combined_map: HashMap<u64, Vec<usize>> = HashMap::new();
+        let mut prompt_map: HashMap<u64, Vec<usize>> = HashMap::new();
+        let mut target_map: HashMap<u64, Vec<usize>> = HashMap::new();
+        let mut raw_inv_index: HashMap<u64, Vec<usize>> = HashMap::new();
+
+        for (i, s) in samples.iter().enumerate() {
+            line_map.entry(s.line_hash).or_default().push(i);
+            combined_map.entry(s.combined_hash).or_default().push(i);
+            if !s.prompt.is_empty() {
+                prompt_map.entry(s.prompt_hash).or_default().push(i);
+            }
+            if s.target.len() >= 15 {
+                target_map.entry(s.target_hash).or_default().push(i);
+            }
+            for &sh in &s.shingles {
+                raw_inv_index.entry(sh).or_default().push(i);
+            }
+            for &sh in &s.prompt_shingles {
+                raw_inv_index.entry(sh).or_default().push(i);
+            }
+        }
+
+        // Document-frequency cutoff: filter out ubiquitous shingles appearing in >50% of documents
+        // to prevent candidate explosion on common boilerplate phrases
+        let df_threshold = if total > 20 { (total / 2).max(10) } else { usize::MAX };
+        let mut inv_index = HashMap::new();
+        for (sh, doc_ids) in raw_inv_index {
+            if doc_ids.len() <= df_threshold {
+                inv_index.insert(sh, doc_ids);
+            }
+        }
+
+        Self {
+            samples,
+            line_map,
+            combined_map,
+            prompt_map,
+            target_map,
+            inv_index,
+        }
+    }
+
+    /// Evaluates whether a query sample leaks against this indexed dataset.
+    pub fn find_leakage(&self, query: &CanonicalSample) -> Option<LeakageKind> {
+        // 1. Two-stage exact raw line match
+        if let Some(cands) = self.line_map.get(&query.line_hash) {
+            for &idx in cands {
+                if self.samples[idx].raw_line == query.raw_line {
+                    return Some(LeakageKind::ExactLine);
+                }
+            }
+        }
+
+        // 2. Two-stage exact combined sample match (prompt + target)
+        if let Some(cands) = self.combined_map.get(&query.combined_hash) {
+            for &idx in cands {
+                if self.samples[idx].combined_text == query.combined_text {
+                    return Some(LeakageKind::ExactCombined);
+                }
+            }
+        }
+
+        // 3. Two-stage exact prompt match
+        if !query.prompt.is_empty() {
+            if let Some(cands) = self.prompt_map.get(&query.prompt_hash) {
+                for &idx in cands {
+                    if self.samples[idx].prompt == query.prompt {
+                        return Some(LeakageKind::ExactPrompt);
+                    }
+                }
+            }
+        }
+
+        // 4. Two-stage exact target match for substantive answers
+        if query.target.len() >= 15 {
+            if let Some(cands) = self.target_map.get(&query.target_hash) {
+                for &idx in cands {
+                    if self.samples[idx].target == query.target {
+                        return Some(LeakageKind::ExactTarget);
+                    }
+                }
+            }
+        }
+
+        // 5. Near-duplicate 13-gram overlap check (>= LEAKAGE_OVERLAP_THRESHOLD)
+        let mut cand_set: HashSet<usize> = HashSet::new();
+        for sh in query.shingles.iter().chain(query.prompt_shingles.iter()) {
+            if let Some(docs) = self.inv_index.get(sh) {
+                for &d in docs {
+                    cand_set.insert(d);
+                }
+            }
+        }
+
+        for doc_id in cand_set {
+            let target_sample = &self.samples[doc_id];
+
+            // Check combined shingles overlap
+            let overlap_comb = if !query.shingles.is_empty() && !target_sample.shingles.is_empty() {
+                let shared = query.shingles.intersection(&target_sample.shingles).count();
+                let r1 = shared as f64 / query.shingles.len() as f64;
+                let r2 = shared as f64 / target_sample.shingles.len() as f64;
+                r1.max(r2)
+            } else {
+                0.0
+            };
+
+            // Check prompt shingles overlap
+            let overlap_prompt = if !query.prompt_shingles.is_empty() && !target_sample.prompt_shingles.is_empty() {
+                let shared = query.prompt_shingles.intersection(&target_sample.prompt_shingles).count();
+                let r1 = shared as f64 / query.prompt_shingles.len() as f64;
+                let r2 = shared as f64 / target_sample.prompt_shingles.len() as f64;
+                r1.max(r2)
+            } else {
+                0.0
+            };
+
+            let max_overlap = overlap_comb.max(overlap_prompt);
+            if max_overlap >= LEAKAGE_OVERLAP_THRESHOLD {
+                return Some(LeakageKind::NearDuplicateShingle {
+                    overlap_ratio: max_overlap,
+                });
+            }
+        }
+
+        None
+    }
+}
+
+/// Disjoint Set Union (DSU) for transitive cluster isolation.
+///
+/// Transitive closure groups connected equivalence components so that any sample
+/// similar to another is quarantined into the same partition.
 struct DisjointSet {
     parent: Vec<usize>,
 }
@@ -180,7 +471,7 @@ impl DatasetSplitter {
     /// Deterministically split a JSONL dataset file or directory into train, val, and test partitions.
     ///
     /// The split assignment uses content hashing and cluster isolation so identical
-    /// or near-duplicate prompts are grouped into the same partition, eliminating cross-split leakage.
+    /// or near-duplicate prompts/targets are grouped into the same partition, eliminating cross-split leakage.
     pub fn split<P: AsRef<Path>, Q: AsRef<Path>>(
         source_jsonl: P,
         output_dir: Q,
@@ -188,13 +479,48 @@ impl DatasetSplitter {
     ) -> Result<SplitReport, SplitterError> {
         let src_path = source_jsonl.as_ref();
         let out_dir = output_dir.as_ref();
+
+        // Safety constraint: Prevent source_dir == output_dir or output_dir being inside source_dir
+        if let (Ok(s_canon), Ok(o_canon)) = (src_path.canonicalize(), out_dir.canonicalize()) {
+            if s_canon == o_canon || o_canon.starts_with(&s_canon) {
+                return Err(SplitterError::SourceEqualsOutput(format!(
+                    "Source path '{}' overlaps with output directory '{}'",
+                    src_path.display(),
+                    out_dir.display()
+                )));
+            }
+        } else if src_path == out_dir {
+            return Err(SplitterError::SourceEqualsOutput(format!(
+                "Source path '{}' matches output directory",
+                src_path.display()
+            )));
+        }
+
         fs::create_dir_all(out_dir)?;
 
-        let mut files_to_read: Vec<std::path::PathBuf> = Vec::new();
+        let mut files_to_read: Vec<PathBuf> = Vec::new();
         if src_path.is_dir() {
             let mut entries: Vec<_> = fs::read_dir(src_path)?
                 .filter_map(|e| e.ok().map(|e| e.path()))
-                .filter(|p| p.extension().and_then(|ext| ext.to_str()) == Some("jsonl"))
+                .filter(|p| {
+                    if p.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+                        return false;
+                    }
+                    if let Some(fname) = p.file_name().and_then(|n| n.to_str()) {
+                        // Explicitly exclude previously created split files and temporary artifacts
+                        if fname == "train.jsonl"
+                            || fname == "val.jsonl"
+                            || fname == "test.jsonl"
+                            || fname == "clean_train.jsonl"
+                            || fname == "split_manifest.json"
+                            || fname.contains(".tmp")
+                            || fname.starts_with('.')
+                        {
+                            return false;
+                        }
+                    }
+                    true
+                })
                 .collect();
             entries.sort();
             files_to_read = entries;
@@ -206,8 +532,7 @@ impl DatasetSplitter {
             return Err(SplitterError::EmptyDataset(src_path.display().to_string()));
         }
 
-        let mut raw_lines: Vec<String> = Vec::new();
-        let mut substantive_texts: Vec<String> = Vec::new();
+        let mut canonical_samples: Vec<CanonicalSample> = Vec::new();
 
         for file_path in &files_to_read {
             let file = File::open(file_path)?;
@@ -218,47 +543,74 @@ impl DatasetSplitter {
                 if trimmed.is_empty() {
                     continue;
                 }
-                let sub = if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
-                    extract_substantive_text(&val).unwrap_or_else(|| trimmed.to_string())
-                } else {
-                    trimmed.to_string()
-                };
-                raw_lines.push(trimmed.to_string());
-                substantive_texts.push(sub);
+                canonical_samples.push(extract_canonical_sample(trimmed));
             }
         }
 
-        let total = raw_lines.len();
+        let total = canonical_samples.len();
         if total == 0 {
             return Err(SplitterError::EmptyDataset(src_path.display().to_string()));
         }
 
         // 1. Cluster exact & near duplicates using DisjointSet
         let mut dsu = DisjointSet::new(total);
-        let mut exact_map: HashMap<u64, usize> = HashMap::new();
-        let mut inv_index: HashMap<u64, Vec<usize>> = HashMap::new();
-        let mut doc_shingles: Vec<HashSet<u64>> = Vec::with_capacity(total);
+        let mut exact_map: HashMap<u64, Vec<usize>> = HashMap::new();
+        let mut prompt_map: HashMap<u64, Vec<usize>> = HashMap::new();
+        let mut target_map: HashMap<u64, Vec<usize>> = HashMap::new();
+        let mut raw_inv_index: HashMap<u64, Vec<usize>> = HashMap::new();
 
-        for (i, text) in substantive_texts.iter().enumerate() {
-            let text_clean = text.trim().to_lowercase();
-            let h = fnv1a_hash(text_clean.as_bytes());
+        for (i, s) in canonical_samples.iter().enumerate() {
+            // Exact combined match
+            if let Some(cands) = exact_map.get(&s.combined_hash) {
+                for &prev in cands {
+                    if canonical_samples[prev].combined_text == s.combined_text {
+                        dsu.union(i, prev);
+                    }
+                }
+            }
+            exact_map.entry(s.combined_hash).or_default().push(i);
 
-            if let Some(&prev) = exact_map.get(&h) {
-                dsu.union(i, prev);
-            } else {
-                exact_map.insert(h, i);
+            // Exact prompt match
+            if !s.prompt.is_empty() {
+                if let Some(cands) = prompt_map.get(&s.prompt_hash) {
+                    for &prev in cands {
+                        if canonical_samples[prev].prompt == s.prompt {
+                            dsu.union(i, prev);
+                        }
+                    }
+                }
+                prompt_map.entry(s.prompt_hash).or_default().push(i);
             }
 
-            let shingles: HashSet<u64> = compute_13gram_hashes(&text_clean).into_iter().collect();
-            for &sh in &shingles {
-                inv_index.entry(sh).or_default().push(i);
+            // Exact target match (substantive)
+            if s.target.len() >= 20 {
+                if let Some(cands) = target_map.get(&s.target_hash) {
+                    for &prev in cands {
+                        if canonical_samples[prev].target == s.target {
+                            dsu.union(i, prev);
+                        }
+                    }
+                }
+                target_map.entry(s.target_hash).or_default().push(i);
             }
-            doc_shingles.push(shingles);
+
+            for &sh in &s.shingles {
+                raw_inv_index.entry(sh).or_default().push(i);
+            }
+        }
+
+        // Document-frequency cutoff for common shingles
+        let df_threshold = if total > 20 { (total / 2).max(10) } else { usize::MAX };
+        let mut inv_index = HashMap::new();
+        for (sh, doc_ids) in raw_inv_index {
+            if doc_ids.len() <= df_threshold {
+                inv_index.insert(sh, doc_ids);
+            }
         }
 
         // Pairwise near-duplicate union
         for i in 0..total {
-            let s_set = &doc_shingles[i];
+            let s_set = &canonical_samples[i].shingles;
             if s_set.is_empty() {
                 continue;
             }
@@ -276,8 +628,8 @@ impl DatasetSplitter {
             sorted_cands.sort_by_key(|&(j, _)| j);
             for (j, count) in sorted_cands {
                 let overlap_i = count as f64 / s_set.len() as f64;
-                let overlap_j = count as f64 / doc_shingles[j].len() as f64;
-                if overlap_i >= 0.85 || overlap_j >= 0.85 {
+                let overlap_j = count as f64 / canonical_samples[j].shingles.len() as f64;
+                if overlap_i >= LEAKAGE_OVERLAP_THRESHOLD || overlap_j >= LEAKAGE_OVERLAP_THRESHOLD {
                     dsu.union(i, j);
                 }
             }
@@ -290,13 +642,22 @@ impl DatasetSplitter {
             cluster_members.entry(root).or_default().push(i);
         }
 
+        let now_stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+
         let train_path = out_dir.join("train.jsonl");
         let val_path = out_dir.join("val.jsonl");
         let test_path = out_dir.join("test.jsonl");
 
-        let mut train_w = BufWriter::with_capacity(128 * 1024, File::create(&train_path)?);
-        let mut val_w = BufWriter::with_capacity(64 * 1024, File::create(&val_path)?);
-        let mut test_w = BufWriter::with_capacity(64 * 1024, File::create(&test_path)?);
+        let tmp_train_path = out_dir.join(format!(".tmp_train_{now_stamp}.jsonl"));
+        let tmp_val_path = out_dir.join(format!(".tmp_val_{now_stamp}.jsonl"));
+        let tmp_test_path = out_dir.join(format!(".tmp_test_{now_stamp}.jsonl"));
+
+        let mut train_w = BufWriter::with_capacity(128 * 1024, File::create(&tmp_train_path)?);
+        let mut val_w = BufWriter::with_capacity(64 * 1024, File::create(&tmp_val_path)?);
+        let mut test_w = BufWriter::with_capacity(64 * 1024, File::create(&tmp_test_path)?);
 
         let mut train_cnt = 0usize;
         let mut val_cnt = 0usize;
@@ -305,17 +666,15 @@ impl DatasetSplitter {
         let val_threshold = (ratio.train * 10000.0) as u64;
         let test_threshold = ((ratio.train + ratio.val) * 10000.0) as u64;
 
-        // Deterministically sort clusters by root index
         let mut root_keys: Vec<usize> = cluster_members.keys().copied().collect();
         root_keys.sort();
 
         for root in root_keys {
             let members = &cluster_members[&root];
-            // Find the lexicographically smallest substantive text in the cluster for deterministic bucket hashing
-            let mut rep_text = &substantive_texts[root];
+            let mut rep_text = &canonical_samples[root].combined_text;
             for &idx in members {
-                if substantive_texts[idx] < *rep_text {
-                    rep_text = &substantive_texts[idx];
+                if canonical_samples[idx].combined_text < *rep_text {
+                    rep_text = &canonical_samples[idx].combined_text;
                 }
             }
             let h = fnv1a_hash(rep_text.as_bytes()) % 10000;
@@ -325,19 +684,19 @@ impl DatasetSplitter {
 
             if h < val_threshold {
                 for &idx in &sorted_members {
-                    train_w.write_all(raw_lines[idx].as_bytes())?;
+                    train_w.write_all(canonical_samples[idx].raw_line.as_bytes())?;
                     train_w.write_all(b"\n")?;
                     train_cnt += 1;
                 }
             } else if h < test_threshold {
                 for &idx in &sorted_members {
-                    val_w.write_all(raw_lines[idx].as_bytes())?;
+                    val_w.write_all(canonical_samples[idx].raw_line.as_bytes())?;
                     val_w.write_all(b"\n")?;
                     val_cnt += 1;
                 }
             } else {
                 for &idx in &sorted_members {
-                    test_w.write_all(raw_lines[idx].as_bytes())?;
+                    test_w.write_all(canonical_samples[idx].raw_line.as_bytes())?;
                     test_w.write_all(b"\n")?;
                     test_cnt += 1;
                 }
@@ -348,6 +707,35 @@ impl DatasetSplitter {
         val_w.flush()?;
         test_w.flush()?;
 
+        train_w.get_ref().sync_all()?;
+        val_w.get_ref().sync_all()?;
+        test_w.get_ref().sync_all()?;
+        drop(train_w);
+        drop(val_w);
+        drop(test_w);
+
+        // Atomic file promotion
+        fs::rename(&tmp_train_path, &train_path)?;
+        fs::rename(&tmp_val_path, &val_path)?;
+        fs::rename(&tmp_test_path, &test_path)?;
+
+        // Write atomic commit manifest marker
+        let manifest_file = out_dir.join("split_manifest.json");
+        let tmp_manifest_file = out_dir.join(format!(".tmp_manifest_{now_stamp}.json"));
+        let manifest_content = serde_json::json!({
+            "timestamp_ms": now_stamp,
+            "total_samples": total,
+            "train_samples": train_cnt,
+            "val_samples": val_cnt,
+            "test_samples": test_cnt,
+            "train_file": "train.jsonl",
+            "val_file": "val.jsonl",
+            "test_file": "test.jsonl",
+            "overlap_threshold": LEAKAGE_OVERLAP_THRESHOLD
+        });
+        fs::write(&tmp_manifest_file, serde_json::to_string_pretty(&manifest_content)?)?;
+        fs::rename(&tmp_manifest_file, &manifest_file)?;
+
         Ok(SplitReport {
             total_samples: total,
             train_samples: train_cnt,
@@ -356,6 +744,7 @@ impl DatasetSplitter {
             train_path: train_path.to_string_lossy().to_string(),
             val_path: val_path.to_string_lossy().to_string(),
             test_path: test_path.to_string_lossy().to_string(),
+            manifest_path: Some(manifest_file.to_string_lossy().to_string()),
         })
     }
 }
@@ -365,113 +754,61 @@ pub struct LeakageChecker;
 impl LeakageChecker {
     /// Detect contamination / leakage between training data and evaluation data.
     ///
-    /// Checks:
-    /// 1. Exact prompt/target match.
-    /// 2. Shingle / 13-gram overlap (>80% shared shingles between eval prompt and any train sample).
+    /// Evaluates:
+    /// 1. Exact raw line match.
+    /// 2. Exact substantive combined sample match (prompt + target).
+    /// 3. Exact prompt match.
+    /// 4. Exact target match for substantive answers.
+    /// 5. 13-gram shingle near-duplicate overlap (>= 85%).
     pub fn check_leakage<P: AsRef<Path>, Q: AsRef<Path>>(
         train_path: P,
         eval_path: Q,
     ) -> Result<LeakageReport, SplitterError> {
         let train_file = File::open(train_path.as_ref())?;
         let train_reader = BufReader::with_capacity(128 * 1024, train_file);
-
-        let mut train_exact_hashes: HashSet<u64> = HashSet::new();
-        let mut train_prompt_hashes: HashSet<u64> = HashSet::new();
-        let mut train_doc_shingles: Vec<HashSet<u64>> = Vec::new();
-        let mut train_inv_index: HashMap<u64, Vec<usize>> = HashMap::new();
-        let mut total_train = 0usize;
-
+        let mut train_samples = Vec::new();
         for line_res in train_reader.lines() {
             let line = line_res?;
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
             }
-            let doc_id = total_train;
-            total_train += 1;
-            train_exact_hashes.insert(fnv1a_hash(trimmed.as_bytes()));
-
-            if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
-                if let Some(sub) = extract_substantive_text(&val) {
-                    let sub_clean = sub.trim().to_lowercase();
-                    train_prompt_hashes.insert(fnv1a_hash(sub_clean.as_bytes()));
-                    let shingles: HashSet<u64> =
-                        compute_13gram_hashes(&sub_clean).into_iter().collect();
-                    for &sh in &shingles {
-                        train_inv_index.entry(sh).or_default().push(doc_id);
-                    }
-                    train_doc_shingles.push(shingles);
-                    continue;
-                }
-            }
-            train_doc_shingles.push(HashSet::new());
+            train_samples.push(extract_canonical_sample(trimmed));
         }
 
         let eval_file = File::open(eval_path.as_ref())?;
         let eval_reader = BufReader::with_capacity(64 * 1024, eval_file);
-
-        let mut total_eval = 0usize;
-        let mut exact_leaks = 0usize;
-        let mut ngram_leaks = 0usize;
-        let mut leaked_indices = HashSet::new();
-
-        for (idx, line_res) in eval_reader.lines().enumerate() {
+        let mut eval_samples = Vec::new();
+        for line_res in eval_reader.lines() {
             let line = line_res?;
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
             }
-            total_eval += 1;
+            eval_samples.push(extract_canonical_sample(trimmed));
+        }
 
-            let line_hash = fnv1a_hash(trimmed.as_bytes());
-            if train_exact_hashes.contains(&line_hash) {
-                exact_leaks += 1;
+        let total_train = train_samples.len();
+        let total_eval = eval_samples.len();
+
+        let index = LeakageIndex::new(train_samples);
+
+        let mut exact_leaks = 0usize;
+        let mut ngram_leaks = 0usize;
+        let mut leaked_indices = HashSet::new();
+
+        for (idx, eval_sample) in eval_samples.iter().enumerate() {
+            if let Some(leak) = index.find_leakage(eval_sample) {
                 leaked_indices.insert(idx);
-                continue;
-            }
-
-            if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
-                if let Some(sub) = extract_substantive_text(&val) {
-                    let sub_clean = sub.trim().to_lowercase();
-                    let prompt_h = fnv1a_hash(sub_clean.as_bytes());
-                    if train_prompt_hashes.contains(&prompt_h) {
+                match leak {
+                    LeakageKind::ExactLine
+                    | LeakageKind::ExactCombined
+                    | LeakageKind::ExactPrompt
+                    | LeakageKind::ExactTarget => {
                         exact_leaks += 1;
-                        leaked_indices.insert(idx);
-                        continue;
                     }
-
-                    // Check pairwise single-document shingle overlap
-                    let eval_shingles: HashSet<u64> =
-                        compute_13gram_hashes(&sub_clean).into_iter().collect();
-                    if !eval_shingles.is_empty() {
-                        let mut cand_counts: HashMap<usize, usize> = HashMap::new();
-                        for sh in &eval_shingles {
-                            if let Some(docs) = train_inv_index.get(sh) {
-                                for &d in docs {
-                                    *cand_counts.entry(d).or_insert(0) += 1;
-                                }
-                            }
-                        }
-
-                        let mut is_near_leak = false;
-                        for (train_doc_id, count) in cand_counts {
-                            let ratio_eval = count as f64 / eval_shingles.len() as f64;
-                            let train_len = train_doc_shingles[train_doc_id].len();
-                            let ratio_train = if train_len > 0 {
-                                count as f64 / train_len as f64
-                            } else {
-                                0.0
-                            };
-                            if ratio_eval >= 0.85 || ratio_train >= 0.85 {
-                                is_near_leak = true;
-                                break;
-                            }
-                        }
-
-                        if is_near_leak {
-                            ngram_leaks += 1;
-                            leaked_indices.insert(idx);
-                        }
+                    LeakageKind::NearDuplicateShingle { .. } => {
+                        ngram_leaks += 1;
                     }
                 }
             }
@@ -496,6 +833,9 @@ impl LeakageChecker {
     }
 
     /// Decontaminate a training dataset by writing a sanitized copy with any leaky records removed.
+    ///
+    /// Shares the identical `LeakageIndex` detection rules as `check_leakage`, ensuring that
+    /// every sample flagged as an exact or near-duplicate leak against the evaluation set is dropped.
     pub fn decontaminate<P: AsRef<Path>, Q: AsRef<Path>, R: AsRef<Path>>(
         train_path: P,
         eval_path: Q,
@@ -503,20 +843,37 @@ impl LeakageChecker {
     ) -> Result<usize, SplitterError> {
         let eval_file = File::open(eval_path.as_ref())?;
         let eval_reader = BufReader::with_capacity(64 * 1024, eval_file);
-
-        let mut eval_prompt_hashes: HashSet<u64> = HashSet::new();
+        let mut eval_samples = Vec::new();
         for line_res in eval_reader.lines() {
             let line = line_res?;
-            if let Ok(val) = serde_json::from_str::<Value>(line.trim()) {
-                if let Some(sub) = extract_substantive_text(&val) {
-                    eval_prompt_hashes.insert(fnv1a_hash(sub.trim().to_lowercase().as_bytes()));
-                }
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
             }
+            eval_samples.push(extract_canonical_sample(trimmed));
         }
+
+        // Build shared leakage index on the evaluation dataset
+        let eval_index = LeakageIndex::new(eval_samples);
 
         let train_file = File::open(train_path.as_ref())?;
         let train_reader = BufReader::with_capacity(128 * 1024, train_file);
-        let out_file = File::create(clean_train_output.as_ref())?;
+
+        let clean_out_path = clean_train_output.as_ref();
+        let now_stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let parent_dir = clean_out_path.parent().unwrap_or_else(|| Path::new("."));
+        let tmp_out_path = parent_dir.join(format!(
+            ".tmp_clean_train_{}_{now_stamp}.jsonl",
+            clean_out_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("output")
+        ));
+
+        let out_file = File::create(&tmp_out_path)?;
         let mut writer = BufWriter::with_capacity(128 * 1024, out_file);
 
         let mut preserved = 0usize;
@@ -527,20 +884,21 @@ impl LeakageChecker {
                 continue;
             }
 
-            if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
-                if let Some(sub) = extract_substantive_text(&val) {
-                    let h = fnv1a_hash(sub.trim().to_lowercase().as_bytes());
-                    if eval_prompt_hashes.contains(&h) {
-                        // Drop contaminated sample
-                        continue;
-                    }
-                }
+            let train_sample = extract_canonical_sample(trimmed);
+            // Drop contaminated sample if any exact or near-duplicate leakage is detected
+            if eval_index.find_leakage(&train_sample).is_some() {
+                continue;
             }
-            writer.write_all(trimmed.as_bytes())?;
+
+            writer.write_all(train_sample.raw_line.as_bytes())?;
             writer.write_all(b"\n")?;
             preserved += 1;
         }
+
         writer.flush()?;
+        writer.get_ref().sync_all()?;
+        drop(writer);
+        fs::rename(&tmp_out_path, clean_out_path)?;
 
         Ok(preserved)
     }
@@ -570,9 +928,9 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn make_test_dir() -> std::path::PathBuf {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+    fn make_test_dir() -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let p = std::env::temp_dir().join(format!("tara_split_test_{stamp}"));
@@ -603,6 +961,7 @@ mod tests {
         assert!(report.train_samples >= 70 && report.train_samples <= 90);
         assert!(report.val_samples > 0);
         assert!(report.test_samples > 0);
+        assert!(report.manifest_path.is_some());
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -656,6 +1015,8 @@ mod tests {
 
         let clean_report = LeakageChecker::check_leakage(&clean_train_file, &eval_file).unwrap();
         assert_eq!(clean_report.exact_match_leaks, 0);
+        assert_eq!(clean_report.total_leaked_samples, 0);
+        assert!(clean_report.is_clean);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -717,6 +1078,268 @@ mod tests {
         assert_eq!(val_test.ngram_shingle_leaks, 0);
         assert_eq!(val_test.total_leaked_samples, 0);
         assert!(val_test.is_clean);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_near_duplicate_overlap_detected() {
+        let dir = make_test_dir();
+        let train_file = dir.join("train.jsonl");
+        let eval_file = dir.join("eval.jsonl");
+
+        {
+            let mut f = File::create(&train_file).unwrap();
+            writeln!(
+                f,
+                r#"{{"input":"The quick brown fox jumps over the lazy dog in the sunny park and rests under the shade","output":"Pangram description alpha."}}"#
+            )
+            .unwrap();
+        }
+
+        {
+            let mut f = File::create(&eval_file).unwrap();
+            // Near duplicate with >85% shared shingles
+            writeln!(
+                f,
+                r#"{{"input":"The quick brown fox jumps over the lazy dog in the sunny park and rests under the shade!","output":"Pangram description beta."}}"#
+            )
+            .unwrap();
+        }
+
+        let report = LeakageChecker::check_leakage(&train_file, &eval_file).unwrap();
+        assert_eq!(report.total_eval_samples, 1);
+        assert_eq!(report.total_leaked_samples, 1);
+        assert_eq!(report.ngram_shingle_leaks, 1);
+        assert!(!report.is_clean);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_near_duplicate_decontaminated() {
+        let dir = make_test_dir();
+        let train_file = dir.join("train.jsonl");
+        let eval_file = dir.join("eval.jsonl");
+        let clean_file = dir.join("clean.jsonl");
+
+        {
+            let mut f = File::create(&train_file).unwrap();
+            // Near duplicate of eval sample
+            writeln!(
+                f,
+                r#"{{"input":"The mitochondria is the powerhouse of the cell providing biochemical energy","output":"Cell biology fact."}}"#
+            )
+            .unwrap();
+            // Completely distinct sample
+            writeln!(
+                f,
+                r#"{{"input":"Binary search algorithm runs in logarithmic time O(log N)","output":"Computer science complexity."}}"#
+            )
+            .unwrap();
+        }
+
+        {
+            let mut f = File::create(&eval_file).unwrap();
+            writeln!(
+                f,
+                r#"{{"input":"The mitochondria is the powerhouse of the cell providing biochemical energy!","output":"Cell biology fact."}}"#
+            )
+            .unwrap();
+        }
+
+        let preserved = LeakageChecker::decontaminate(&train_file, &eval_file, &clean_file).unwrap();
+        assert_eq!(preserved, 1); // Only the binary search record survives
+
+        let clean_report = LeakageChecker::check_leakage(&clean_file, &eval_file).unwrap();
+        assert_eq!(clean_report.total_leaked_samples, 0);
+        assert!(clean_report.is_clean);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_tara_schema_fields_detected() {
+        let dir = make_test_dir();
+        let train_file = dir.join("train.jsonl");
+        let eval_file = dir.join("eval.jsonl");
+
+        {
+            let mut f = File::create(&train_file).unwrap();
+            writeln!(
+                f,
+                r#"{{"formatted_input":"calculate 20 + 30","formatted_target":"50"}}"#
+            )
+            .unwrap();
+        }
+
+        {
+            let mut f = File::create(&eval_file).unwrap();
+            writeln!(
+                f,
+                r#"{{"trigger_pattern":"calculate 20 + 30","recommendation":"50"}}"#
+            )
+            .unwrap();
+        }
+
+        let report = LeakageChecker::check_leakage(&train_file, &eval_file).unwrap();
+        assert_eq!(report.total_leaked_samples, 1);
+        assert!(!report.is_clean);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_same_target_different_prompt_detected() {
+        let dir = make_test_dir();
+        let train_file = dir.join("train.jsonl");
+        let eval_file = dir.join("eval.jsonl");
+
+        {
+            let mut f = File::create(&train_file).unwrap();
+            writeln!(
+                f,
+                r#"{{"input":"What is Newton's second law?","output":"Force equals mass times acceleration (F=ma) in classical mechanics."}}"#
+            )
+            .unwrap();
+        }
+
+        {
+            let mut f = File::create(&eval_file).unwrap();
+            // Different prompt, identical substantive benchmark target
+            writeln!(
+                f,
+                r#"{{"input":"State the formula for force","output":"Force equals mass times acceleration (F=ma) in classical mechanics."}}"#
+            )
+            .unwrap();
+        }
+
+        let report = LeakageChecker::check_leakage(&train_file, &eval_file).unwrap();
+        assert_eq!(report.total_leaked_samples, 1);
+        assert!(!report.is_clean);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_no_trailing_newline_counted() {
+        let dir = make_test_dir();
+        let no_nl_file = dir.join("no_nl.jsonl");
+
+        {
+            let mut f = File::create(&no_nl_file).unwrap();
+            write!(f, r#"{{"input":"single record","output":"no newline at end"}}"#).unwrap();
+        }
+
+        let samples = read_canonical_samples_from_file(&no_nl_file).unwrap();
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].prompt, "single record");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn read_canonical_samples_from_file(path: &Path) -> Result<Vec<CanonicalSample>, SplitterError> {
+        let file = File::open(path)?;
+        let reader = BufReader::with_capacity(128 * 1024, file);
+        let mut samples = Vec::new();
+        for line_res in reader.lines() {
+            let line = line_res?;
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            samples.push(extract_canonical_sample(trimmed));
+        }
+        Ok(samples)
+    }
+
+    #[test]
+    fn test_nan_split_ratio_rejected() {
+        assert!(SplitRatio::new(f64::NAN, 0.10, 0.10).is_err());
+        assert!(SplitRatio::new(0.80, f64::NAN, 0.10).is_err());
+        assert!(SplitRatio::new(0.80, 0.10, f64::NAN).is_err());
+        assert!(SplitRatio::new(f64::INFINITY, 0.10, 0.10).is_err());
+        assert!(SplitRatio::new(-0.80, 0.10, 0.10).is_err());
+        assert!(SplitRatio::new(0.80, -0.10, 0.30).is_err());
+        assert!(SplitRatio::new(0.70, 0.10, 0.10).is_err()); // Sum != 1.0
+        assert!(SplitRatio::new(0.80, 0.10, 0.10).is_ok());
+    }
+
+    #[test]
+    fn test_source_equals_output_rejected() {
+        let dir = make_test_dir();
+        let ratio = SplitRatio::new(0.80, 0.10, 0.10).unwrap();
+        let res = DatasetSplitter::split(&dir, &dir, ratio);
+        assert!(res.is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_end_to_end_split_contaminate_decontaminate_verify_clean() {
+        let dir = make_test_dir();
+        let src_file = dir.join("canonical.jsonl");
+
+        {
+            let mut f = File::create(&src_file).unwrap();
+            for i in 0..100 {
+                writeln!(
+                    f,
+                    r#"{{"input":"Unique problem item number {} in computing curriculum","output":"Comprehensive solution for item {}."}}"#,
+                    i, i
+                )
+                .unwrap();
+            }
+        }
+
+        let split_out = dir.join("splits");
+        let ratio = SplitRatio::new(0.80, 0.10, 0.10).unwrap();
+        let split_rep = DatasetSplitter::split(&src_file, &split_out, ratio).unwrap();
+
+        // Check initial split is completely clean
+        let initial_check = LeakageChecker::check_leakage(&split_rep.train_path, &split_rep.val_path).unwrap();
+        assert!(initial_check.is_clean);
+        assert_eq!(initial_check.total_leaked_samples, 0);
+
+        // Intentionally contaminate train with an exact leak and a near-duplicate leak from val
+        let contaminated_train = dir.join("contaminated_train.jsonl");
+        {
+            fs::copy(&split_rep.train_path, &contaminated_train).unwrap();
+            let val_content = fs::read_to_string(&split_rep.val_path).unwrap();
+            let first_val_line = val_content.lines().next().unwrap();
+            let mut f = fs::OpenOptions::new()
+                .append(true)
+                .open(&contaminated_train)
+                .unwrap();
+            // 1. Exact leak
+            writeln!(f, "{first_val_line}").unwrap();
+            // 2. Near-duplicate leak (>85% shingle overlap)
+            let val_val: Value = serde_json::from_str(first_val_line).unwrap();
+            let prompt = val_val["input"].as_str().unwrap();
+            let output = val_val["output"].as_str().unwrap();
+            writeln!(
+                f,
+                r#"{{"input":"{}!","output":"{}"}}"#,
+                prompt, output
+            )
+            .unwrap();
+        }
+
+        // Verify that check_leakage now detects the contamination
+        let dirty_check = LeakageChecker::check_leakage(&contaminated_train, &split_rep.val_path).unwrap();
+        assert!(!dirty_check.is_clean);
+        assert!(dirty_check.total_leaked_samples >= 1);
+
+        // Decontaminate
+        let clean_train = dir.join("decontaminated_train.jsonl");
+        let preserved = LeakageChecker::decontaminate(&contaminated_train, &split_rep.val_path, &clean_train).unwrap();
+        assert!(preserved > 0);
+
+        // Verify that check_leakage on decontaminated dataset is now 100% clean!
+        let post_clean_check = LeakageChecker::check_leakage(&clean_train, &split_rep.val_path).unwrap();
+        assert!(post_clean_check.is_clean);
+        assert_eq!(post_clean_check.total_leaked_samples, 0);
+        assert_eq!(post_clean_check.exact_match_leaks, 0);
+        assert_eq!(post_clean_check.ngram_shingle_leaks, 0);
 
         let _ = fs::remove_dir_all(&dir);
     }

@@ -16350,8 +16350,8 @@
                       "name": "tara_dataset_splitter.rs",
                       "rel_path": "rust/tara_engine/src/bin/tara_dataset_splitter.rs",
                       "entry_type": "file",
-                      "size_bytes": 9688,
-                      "sha256": "f75395ec52dd880d7d7c93c8d900b6bf55a32ac4eb47a733d1a8837b4172fabf"
+                      "size_bytes": 12500,
+                      "sha256": "81bb5c921795fadfab0f83bd53d846faa9d258b762dcecc41b7df908be65270c"
                     },
                     {
                       "name": "tara_github_sync.rs",
@@ -16584,8 +16584,8 @@
                       "name": "splitter.rs",
                       "rel_path": "rust/tara_engine/src/dataset/splitter.rs",
                       "entry_type": "file",
-                      "size_bytes": 25761,
-                      "sha256": "54d1f8493f77b4473619574c725f8eb45e817b919affd0b1642b81d0236594c0"
+                      "size_bytes": 48989,
+                      "sha256": "10bab0e926d28c8ac61606b74d9eaa536d8a63715b08aefd428f7101277a84fa"
                     },
                     {
                       "name": "tokenizer_stage.rs",

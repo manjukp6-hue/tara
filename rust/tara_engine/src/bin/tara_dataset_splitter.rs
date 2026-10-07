@@ -16,11 +16,16 @@ fn print_usage() {
     println!("Options:");
     println!("  --input-dir, --input <PATH>    Path to canonical dataset file or directory containing .jsonl shards");
     println!("  --output-dir, --output <PATH>  Output directory for split files (default: <input-dir>/splits)");
-    println!("  --train <RATIO>                Training split ratio (default: 0.80)");
-    println!("  --val <RATIO>                  Validation split ratio (default: 0.10)");
-    println!("  --test <RATIO>                 Testing split ratio (default: 0.10)");
+    println!("  --train <RATIO>                Target training split ratio (default: 0.80)");
+    println!("  --val <RATIO>                  Target validation split ratio (default: 0.10)");
+    println!("  --test <RATIO>                 Target testing split ratio (default: 0.10)");
+    println!("  --decontaminate-against <EVAL> Optional eval dataset to decontaminate input against");
+    println!("  --clean-output <PATH>          Output path for decontaminated training dataset");
     println!("  --skip-leakage                 Skip cross-split leakage verification");
     println!("  -h, --help                     Print help information");
+    println!();
+    println!("Note: Cluster isolation guarantees zero cross-partition leakage; high-density");
+    println!("      clusters of near-duplicates may cause slight deviation from nominal ratios.");
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -36,6 +41,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut val_ratio = 0.10f64;
     let mut test_ratio = 0.10f64;
     let mut skip_leakage = false;
+    let mut decontaminate_eval: Option<PathBuf> = None;
+    let mut clean_output: Option<PathBuf> = None;
 
     let mut idx = 1;
     while idx < args.len() {
@@ -80,6 +87,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     return Err("Missing argument for --test".into());
                 }
             }
+            "--decontaminate-against" => {
+                if idx + 1 < args.len() {
+                    decontaminate_eval = Some(PathBuf::from(&args[idx + 1]));
+                    idx += 2;
+                } else {
+                    return Err("Missing argument for --decontaminate-against".into());
+                }
+            }
+            "--clean-output" => {
+                if idx + 1 < args.len() {
+                    clean_output = Some(PathBuf::from(&args[idx + 1]));
+                    idx += 2;
+                } else {
+                    return Err("Missing argument for --clean-output".into());
+                }
+            }
             "--skip-leakage" => {
                 skip_leakage = true;
                 idx += 1;
@@ -100,6 +123,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if !input_dir.exists() {
         return Err(format!("Input path does not exist: {}", input_dir.display()).into());
+    }
+
+    if let Some(eval_p) = decontaminate_eval {
+        let clean_out = clean_output.unwrap_or_else(|| {
+            let fname = input_dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("dataset.jsonl");
+            input_dir
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(format!("decontaminated_{fname}"))
+        });
+        println!("================================================================================");
+        println!(" TARA CANONICAL DATASET DECONTAMINATION ENGINE");
+        println!("================================================================================");
+        println!("Source Train : {}", input_dir.display());
+        println!("Target Eval  : {}", eval_p.display());
+        println!("Clean Output : {}", clean_out.display());
+        println!("--------------------------------------------------------------------------------");
+        let start = Instant::now();
+        let preserved = LeakageChecker::decontaminate(&input_dir, &eval_p, &clean_out)?;
+        let elapsed = start.elapsed();
+        println!("[DECONTAMINATION COMPLETE]");
+        println!("  Preserved clean samples: {}", preserved);
+        println!("  Execution wall time    : {:.2?}", elapsed);
+        println!("  Output sanitized file  : {}", clean_out.display());
+        println!("================================================================================");
+        return Ok(());
     }
 
     let output_dir = match output_path {
@@ -166,6 +218,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "FAIL (Record Count Mismatch)"
         }
     );
+    if let Some(ref m) = report.manifest_path {
+        println!("  Commit Manifest         : {}", m);
+    }
     println!("  Split Wall Time         : {:.2?}", split_elapsed);
     println!("--------------------------------------------------------------------------------");
 

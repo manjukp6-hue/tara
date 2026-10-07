@@ -15887,8 +15887,8 @@
           "name": "download_register.json",
           "rel_path": "downloader/download_register.json",
           "entry_type": "file",
-          "size_bytes": 3141773,
-          "sha256": "a9bedd5a1d78c7e072ff2cdc6e6200f9adfe0e4544386255da280dd054361a35"
+          "size_bytes": 3283740,
+          "sha256": "4c3cf3cef722264b1ae8a97609fd23e0d8079d4e359f4b7e1ac0705a8c78a0ea"
         },
         {
           "name": "download_register.rs",
@@ -15901,8 +15901,8 @@
           "name": "download_register.txt",
           "rel_path": "downloader/download_register.txt",
           "entry_type": "file",
-          "size_bytes": 2282676,
-          "sha256": "b6d8a006d20bf265eb97f5cbb112b3463db9f743524447c9ffa9dc7d4eb37178"
+          "size_bytes": 2382187,
+          "sha256": "cac285c8291f85cb17cc8166f4744d45c5c187b6560108a6e08199d4562f385b"
         },
         {
           "name": "downloader.rs",
@@ -15922,8 +15922,8 @@
           "name": "license_register.json",
           "rel_path": "downloader/license_register.json",
           "entry_type": "file",
-          "size_bytes": 2526773,
-          "sha256": "1dea0d60685ed46099c9ed28e41b7ef4105d91d36b548af6adb2251a60a63eb4"
+          "size_bytes": 2688427,
+          "sha256": "ccd37d291fe5ace676c4b69479ff331c94c7de05891466174edf53026a6b1fe3"
         },
         {
           "name": "license_register.rs",
@@ -15936,8 +15936,8 @@
           "name": "license_register.txt",
           "rel_path": "downloader/license_register.txt",
           "entry_type": "file",
-          "size_bytes": 1617585,
-          "sha256": "c61ca117965aa2816d867461fe73c113a1db3c2d81cbdc20b75b023f93ad7ca8"
+          "size_bytes": 1717799,
+          "sha256": "93830070045a732b018d458070ea66cd5d5e99dd80d1238ff310821e9a2bfefe"
         }
       ]
     },

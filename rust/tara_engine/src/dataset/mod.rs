@@ -15,7 +15,10 @@ pub mod tokenizer_stage;
 pub mod vocab_builder;
 
 pub use compiler::{compile_unified_dataset, DynamicDatasetCompiler};
-pub use reader::{ExpandableDatasetReader, ShardStreamingMode, TrainingSample};
+pub use reader::{
+    ExpandableDatasetReader, MalformedRecordPolicy, ReaderError, ReaderTelemetry,
+    ShardAvailability, ShardStreamingMode, TrainingSample,
+};
 pub use splitter::{compute_file_sha256, DatasetSplitter, LeakageChecker, SplitRatio, SplitReport};
 pub use tokenizer_stage::{TokenizerStage, TrainingFormat, TokenizationManifest, TokenizedRecord};
 pub use vocab_builder::VocabBuilder;

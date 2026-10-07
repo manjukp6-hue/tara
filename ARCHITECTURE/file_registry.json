@@ -17783,12 +17783,12 @@
     "rust/tara_engine/src/dataset/mod.rs": {
       "extension": "rs",
       "file_id": 7036874418100384,
-      "line_count": 21,
-      "modified_epoch": 1791216756,
+      "line_count": 24,
+      "modified_epoch": 1791397776,
       "name": "mod.rs",
       "rel_path": "rust/tara_engine/src/dataset/mod.rs",
-      "sha256": "0afbc34e8c9fe42fef171016fd568b1851924a01bf2c4a0256f869cdf5ae6fab",
-      "size_bytes": 990
+      "sha256": "d2913ab35afdb28fd070112edd5e0ffb4e35e02f3dcec166cbfe29f4732172b1",
+      "size_bytes": 1073
     },
     "rust/tara_engine/src/dataset/splitter.rs": {
       "extension": "rs",
@@ -19423,12 +19423,12 @@
     "rust/tara_training_system/shared_training_infrastructure/reader.rs": {
       "extension": "rs",
       "file_id": 1688849860869807,
-      "line_count": 568,
-      "modified_epoch": 1791270727,
+      "line_count": 1349,
+      "modified_epoch": 1791397757,
       "name": "reader.rs",
       "rel_path": "rust/tara_training_system/shared_training_infrastructure/reader.rs",
-      "sha256": "743538609ae7237e8bba80987a2c2e8d53dd5d708cf92fd65538fd5995cbdc0c",
-      "size_bytes": 19925
+      "sha256": "c9349f6532d2e99e1c3937d56ec4f95ae9bb4d80753c1a88ac87f9d5f61987d7",
+      "size_bytes": 50099
     },
     "rust/tara_training_system/shared_training_infrastructure/safetensors.rs": {
       "extension": "rs",
@@ -19531,7 +19531,7 @@
       "size_bytes": 1242
     }
   },
-  "generated_at_utc": "1791396676",
+  "generated_at_utc": "1791397779",
   "schema_version": "1.0.0",
   "total_files": 1953
 }

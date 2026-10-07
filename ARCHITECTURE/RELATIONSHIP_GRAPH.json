@@ -14410,7 +14410,7 @@
     "rust/tara_engine/src/dataset/mod.rs": {
       "call_references": [],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "0afbc34e8c9fe42fef171016fd568b1851924a01bf2c4a0256f869cdf5ae6fab",
+      "dynamic_sha256": "d2913ab35afdb28fd070112edd5e0ffb4e35e02f3dcec166cbfe29f4732172b1",
       "exports": [],
       "imports": [
         {
@@ -14423,14 +14423,10 @@
           "raw_path": "compiler::{compile_unified_dataset, DynamicDatasetCompiler}"
         },
         {
-          "imported_symbols": [
-            "ExpandableDatasetReader",
-            "ShardStreamingMode",
-            "TrainingSample"
-          ],
+          "imported_symbols": [],
           "is_public_reexport": true,
           "line_number": 18,
-          "raw_path": "reader::{ExpandableDatasetReader, ShardStreamingMode, TrainingSample}"
+          "raw_path": "reader::{"
         },
         {
           "imported_symbols": [
@@ -14441,7 +14437,7 @@
             "SplitReport"
           ],
           "is_public_reexport": true,
-          "line_number": 19,
+          "line_number": 22,
           "raw_path": "splitter::{compute_file_sha256, DatasetSplitter, LeakageChecker, SplitRatio, SplitReport}"
         },
         {
@@ -14452,7 +14448,7 @@
             "TokenizedRecord"
           ],
           "is_public_reexport": true,
-          "line_number": 20,
+          "line_number": 23,
           "raw_path": "tokenizer_stage::{TokenizerStage, TrainingFormat, TokenizationManifest, TokenizedRecord}"
         },
         {
@@ -14460,7 +14456,7 @@
             "VocabBuilder"
           ],
           "is_public_reexport": true,
-          "line_number": 21,
+          "line_number": 24,
           "raw_path": "vocab_builder::VocabBuilder"
         }
       ],
@@ -14476,7 +14472,7 @@
       ],
       "internal_symbols": [],
       "is_test": false,
-      "lines": 21,
+      "lines": 24,
       "module_path": "tara_engine::dataset",
       "modules_declared": [
         {
@@ -47138,19 +47134,36 @@
       "call_references": [
         "Io",
         "Some",
+        "acquire_shard_reader",
         "add_shard",
+        "add_shards_from_dir",
+        "add_shards_from_manifest",
         "and_then",
+        "as_array",
+        "as_mut",
         "as_nanos",
+        "as_object",
+        "as_os_str",
         "as_ref",
         "as_str",
+        "as_u64",
+        "canonicalize",
+        "capacity",
         "clear",
         "clone",
         "cloned",
+        "close_handle",
         "collect",
+        "components",
         "contains",
+        "count",
         "create",
         "create_dir_all",
         "display",
+        "ensure_open",
+        "enumerate",
+        "epoch_yielded",
+        "eq_ignore_ascii_case",
         "error",
         "exists",
         "expect",
@@ -47158,38 +47171,68 @@
         "file_name",
         "filter",
         "filter_map",
+        "flush",
         "from_str",
         "get",
         "id",
+        "infer_curriculum_order",
+        "is_absolute",
         "is_dir",
         "is_empty",
         "is_file",
+        "is_none",
+        "is_null",
+        "is_some",
+        "iter",
+        "iter_mut",
         "join",
         "keys",
         "len",
+        "lifetime_yielded",
+        "load_manifest_entries",
         "map",
         "map_err",
+        "maybe_shrink_line_buf",
+        "metadata",
+        "min_by_key",
         "new",
         "next_interleaved",
         "next_sample",
         "next_sequential",
         "now",
         "ok",
+        "ok_or_else",
         "open",
+        "open_handle_count",
         "or_else",
         "parent",
         "path",
+        "poll_interleaved_pass",
+        "poll_sequential_pass",
+        "probe_growth",
         "read_dir",
-        "read_line",
+        "refresh_dynamic_sources",
         "remove_dir_all",
+        "remove_file",
         "reset",
         "reset_all",
+        "scan_dir_entries",
         "shard_count",
         "sort",
+        "starts_with",
+        "take",
+        "telemetry",
         "temp_dir",
+        "test_auto_rewind_empty_and_all_invalid_no_infinite_recursion",
+        "test_auto_rewind_restarts_non_empty_and_resets_epoch_counter",
         "test_curriculum_knowledge_dataset_integration",
+        "test_curriculum_order_overflow_rejected_and_lenient_policy",
+        "test_duplicate_shard_registration_prevented",
         "test_expandable_reader_interleaved",
         "test_expandable_reader_tokenized_and_chatml_format",
+        "test_growing_shard_after_eof_and_dynamic_dir_expansion",
+        "test_manifest_validation_and_path_traversal_rejection",
+        "test_zero_shard_reader_returns_no_shards_error_and_bounded_fd_pool",
         "to_lowercase",
         "to_path_buf",
         "to_str",
@@ -47197,91 +47240,159 @@
         "to_string_lossy",
         "total_yielded",
         "trim",
+        "unique_test_dir",
         "unwrap",
         "unwrap_or",
         "unwrap_or_default",
         "unwrap_or_else",
+        "vec",
         "write"
       ],
       "crate_name": "tara_training_system",
-      "dynamic_sha256": "743538609ae7237e8bba80987a2c2e8d53dd5d708cf92fd65538fd5995cbdc0c",
+      "dynamic_sha256": "c9349f6532d2e99e1c3937d56ec4f95ae9bb4d80753c1a88ac87f9d5f61987d7",
       "exports": [
         {
           "kind": "Struct",
-          "line_number": 232,
+          "line_number": 411,
           "name": "ExpandableDatasetReader",
           "visibility": "Public"
         },
         {
           "kind": "Enum",
-          "line_number": 18,
-          "name": "ReaderError",
+          "line_number": 65,
+          "name": "MalformedRecordPolicy",
           "visibility": "Public"
         },
         {
           "kind": "Enum",
-          "line_number": 53,
+          "line_number": 29,
+          "name": "ReaderError",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Struct",
+          "line_number": 74,
+          "name": "ReaderTelemetry",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Enum",
+          "line_number": 54,
+          "name": "ShardAvailability",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Enum",
+          "line_number": 108,
           "name": "ShardStreamingMode",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 33,
+          "line_number": 88,
           "name": "TrainingSample",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 259,
+          "line_number": 467,
           "name": "add_shard",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 303,
+          "line_number": 474,
+          "name": "add_shard_with_policy",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 637,
           "name": "add_shards_from_dir",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 273,
+          "line_number": 502,
           "name": "add_shards_from_manifest",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 242,
+          "line_number": 731,
+          "name": "epoch_yielded",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 726,
+          "name": "lifetime_yielded",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 429,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 353,
+          "line_number": 822,
           "name": "next_sample",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 340,
+          "line_number": 736,
+          "name": "open_handle_count",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 677,
+          "name": "refresh_dynamic_sources",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 776,
           "name": "reset_all",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 330,
+          "line_number": 716,
           "name": "shard_count",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 335,
+          "line_number": 741,
+          "name": "telemetry",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 721,
           "name": "total_yielded",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 253,
+          "line_number": 448,
           "name": "with_auto_rewind",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 454,
+          "name": "with_malformed_policy",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 460,
+          "name": "with_max_open_files",
           "visibility": "Public"
         }
       ],
@@ -47292,7 +47403,7 @@
             "Serialize"
           ],
           "is_public_reexport": false,
-          "line_number": 10,
+          "line_number": 13,
           "raw_path": "serde::{Deserialize, Serialize}"
         },
         {
@@ -47300,8 +47411,24 @@
             "Value"
           ],
           "is_public_reexport": false,
-          "line_number": 11,
+          "line_number": 14,
           "raw_path": "serde_json::Value"
+        },
+        {
+          "imported_symbols": [
+            "HashSet"
+          ],
+          "is_public_reexport": false,
+          "line_number": 15,
+          "raw_path": "std::collections::HashSet"
+        },
+        {
+          "imported_symbols": [
+            "OpenOptions"
+          ],
+          "is_public_reexport": false,
+          "line_number": 950,
+          "raw_path": "std::fs::OpenOptions"
         },
         {
           "imported_symbols": [
@@ -47309,7 +47436,7 @@
             "File"
           ],
           "is_public_reexport": false,
-          "line_number": 12,
+          "line_number": 16,
           "raw_path": "std::fs::{self, File}"
         },
         {
@@ -47317,7 +47444,7 @@
             "Write"
           ],
           "is_public_reexport": false,
-          "line_number": 411,
+          "line_number": 951,
           "raw_path": "std::io::Write"
         },
         {
@@ -47328,22 +47455,23 @@
             "SeekFrom"
           ],
           "is_public_reexport": false,
-          "line_number": 13,
+          "line_number": 17,
           "raw_path": "std::io::{BufRead, BufReader, Seek, SeekFrom}"
         },
         {
           "imported_symbols": [
+            "Component",
             "Path",
             "PathBuf"
           ],
           "is_public_reexport": false,
-          "line_number": 14,
-          "raw_path": "std::path::{Path, PathBuf}"
+          "line_number": 18,
+          "raw_path": "std::path::{Component, Path, PathBuf}"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 410,
+          "line_number": 949,
           "raw_path": "super::*"
         },
         {
@@ -47351,7 +47479,7 @@
             "Error"
           ],
           "is_public_reexport": false,
-          "line_number": 15,
+          "line_number": 19,
           "raw_path": "thiserror::Error"
         }
       ],
@@ -47360,68 +47488,200 @@
       ],
       "internal_symbols": [
         {
+          "kind": "Const",
+          "line_number": 24,
+          "name": "DEFAULT_MAX_OPEN_FILES",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Const",
+          "line_number": 26,
+          "name": "MAX_RETAINED_LINE_CAPACITY",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Const",
+          "line_number": 22,
+          "name": "READER_BUF_CAPACITY",
+          "visibility": "Private"
+        },
+        {
           "kind": "Struct",
-          "line_number": 61,
+          "line_number": 115,
           "name": "ShardState",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 382,
+          "line_number": 785,
+          "name": "acquire_shard_reader",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 159,
+          "name": "close_handle",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 147,
+          "name": "ensure_open",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 380,
+          "name": "infer_curriculum_order",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 522,
+          "name": "load_manifest_entries",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 811,
+          "name": "maybe_shrink_line_buf",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 130,
+          "name": "new",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 925,
           "name": "next_interleaved",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 88,
+          "line_number": 190,
           "name": "next_sample",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 364,
+          "line_number": 868,
           "name": "next_sequential",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 70,
-          "name": "open",
+          "line_number": 889,
+          "name": "poll_interleaved_pass",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 81,
+          "line_number": 838,
+          "name": "poll_sequential_pass",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 175,
+          "name": "probe_growth",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 163,
           "name": "reset",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 473,
+          "line_number": 651,
+          "name": "scan_dir_entries",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1015,
+          "name": "test_auto_rewind_empty_and_all_invalid_no_infinite_recursion",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1043,
+          "name": "test_auto_rewind_restarts_non_empty_and_resets_epoch_counter",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1251,
           "name": "test_curriculum_knowledge_dataset_integration",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 414,
+          "line_number": 1175,
+          "name": "test_curriculum_order_overflow_rejected_and_lenient_policy",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1110,
+          "name": "test_duplicate_shard_registration_prevented",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 968,
           "name": "test_expandable_reader_interleaved",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 536,
+          "line_number": 1314,
           "name": "test_expandable_reader_tokenized_and_chatml_format",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1073,
+          "name": "test_growing_shard_after_eof_and_dynamic_dir_expansion",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1129,
+          "name": "test_manifest_validation_and_path_traversal_rejection",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1212,
+          "name": "test_zero_shard_reader_returns_no_shards_error_and_bounded_fd_pool",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 953,
+          "name": "unique_test_dir",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 394,
+          "name": "validate_relative_shard_path",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 568,
+      "lines": 1349,
       "module_path": "tara_training_system::shared_training_infrastructure::reader",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 409,
+          "line_number": 948,
           "name": "tests"
         }
       ],
@@ -50190,5 +50450,5 @@
   "schema_version": "1.0.0",
   "total_files": 240,
   "total_modules": 583,
-  "total_symbols": 2218
+  "total_symbols": 2229
 }

@@ -521,7 +521,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Max Context Length : {}", model_config.max_position_embeddings);
     println!("--------------------------------------------------------------------------------");
 
-    println!("[EXTENSIBLE PIPELINE INVENTORY ({} STAGES DEFINED)]", stages.len());
+    let target_idx = target_stage_index.unwrap_or(1);
+    println!("[TARGET EXECUTION: STAGE {:02} ONLY - OTHER STAGES ARE SKIPPED]", target_idx);
     let mut stage_metadata_list = Vec::new();
 
     for s in &stages {
@@ -536,14 +537,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "pending_execution".to_string()
         };
 
-        println!("  Stage {:02} [{}]: {}", s.stage_index, s.stage_id, s.stage_name);
-        println!("     Dataset     : {} ({} records/files, {:.2} MB)", s.dataset_path, ds_items, ds_bytes as f64 / 1_048_576.0);
-        println!("     Input CP    : {}", s.input_checkpoint);
-        println!("     Output CP   : {}", s.output_checkpoint);
-        println!("     Status      : Model={}, ContinuationCheckpoint={}",
-            if is_model { "READY" } else { "PENDING" },
-            if is_cont { "READY" } else { "PENDING" }
-        );
+        let is_targeted = s.stage_index == target_idx || run_all_stages;
+        if is_targeted {
+            println!("  --> [ACTIVE] Stage {:02} [{}]: {}", s.stage_index, s.stage_id, s.stage_name);
+            println!("      Dataset     : {} ({} records/files, {:.2} MB)", s.dataset_path, ds_items, ds_bytes as f64 / 1_048_576.0);
+            println!("      Input CP    : {}", s.input_checkpoint);
+            println!("      Output CP   : {}", s.output_checkpoint);
+        }
 
         stage_metadata_list.push(StageMetadata {
             stage_index: s.stage_index,

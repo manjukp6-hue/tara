@@ -12859,31 +12859,42 @@
     "rust/tara_engine/src/cuda/driver.rs": {
       "call_references": [
         "ApiError",
+        "KernelError",
+        "LibraryGuard",
         "LibraryNotFound",
         "allocate_f32",
         "and_then",
         "as_mut_ptr",
         "as_ptr",
+        "clone",
+        "contains",
         "copy_dtod",
+        "copy_dtod_bytes",
         "create_context",
         "device",
         "device_count",
+        "disarm",
         "dlerror",
         "download_f32",
         "download_f32_slice",
         "download_u32",
+        "driver",
         "driver_version",
         "drop",
         "error",
         "exists",
         "file_name",
         "flatten",
+        "fn_load_ex",
         "get_device_info",
+        "get_error_string",
         "get_kernel",
         "get_memory_info",
+        "get_or_init",
         "into",
         "into_owned",
         "is_empty",
+        "is_none",
         "is_null",
         "join",
         "launch",
@@ -12891,192 +12902,239 @@
         "load",
         "load_driver_lib",
         "load_ptx_module",
+        "lock",
         "macro_rules",
+        "map",
         "map_err",
-        "memcpy_dtod",
         "new",
+        "null",
         "null_mut",
+        "ok",
+        "ok_or_else",
+        "or_else",
         "path",
+        "ptr_eq",
         "read_dir",
         "split",
         "starts_with",
         "synchronize",
+        "test_driver_singleton_cached",
+        "test_error_string_fallback",
+        "test_overflow_and_zero_size_handling",
         "to_str",
         "to_string",
         "to_string_lossy",
+        "unwrap",
         "upload_f32",
         "upload_f32_slice",
         "upload_u32",
-        "var"
+        "var",
+        "vec"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "67675e59456f33aff4488621a02972e60917aecaa8ab2e47f1a5177e2ff69187",
+      "dynamic_sha256": "2c4174ef4482d1215ca6b29ba783c5c46d55654661bd78e7229308bcce6971ed",
       "exports": [
         {
           "kind": "Struct",
-          "line_number": 576,
+          "line_number": 898,
           "name": "CudaBuffer",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 374,
-          "name": "CudaContextHandle",
+          "line_number": 519,
+          "name": "CudaContextGuard",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 366,
+          "line_number": 540,
+          "name": "CudaContextInner",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Struct",
+          "line_number": 560,
           "name": "CudaDeviceInfo",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 207,
+          "line_number": 425,
           "name": "CudaDriver",
           "visibility": "Public"
         },
         {
+          "kind": "Struct",
+          "line_number": 247,
+          "name": "CudaDriverInner",
+          "visibility": "Public"
+        },
+        {
           "kind": "Enum",
-          "line_number": 12,
+          "line_number": 18,
           "name": "CudaError",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 654,
+          "line_number": 970,
           "name": "CudaKernel",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 595,
+          "line_number": 941,
           "name": "CudaModuleHandle",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 381,
+          "line_number": 920,
+          "name": "CudaModuleInner",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Struct",
+          "line_number": 568,
           "name": "CudaSession",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 414,
+          "line_number": 610,
           "name": "allocate_f32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 546,
+          "line_number": 789,
           "name": "copy_dtod",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 353,
+          "line_number": 800,
+          "name": "copy_dtod_bytes",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 504,
           "name": "create_context",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 403,
+          "line_number": 590,
           "name": "device",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 318,
+          "line_number": 452,
           "name": "device_count",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 501,
+          "line_number": 731,
           "name": "download_f32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 519,
+          "line_number": 752,
           "name": "download_f32_slice",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 485,
+          "line_number": 710,
           "name": "download_u32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 310,
+          "line_number": 594,
+          "name": "driver",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 444,
           "name": "driver_version",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 324,
+          "line_number": 458,
           "name": "get_device_info",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 618,
+          "line_number": 381,
+          "name": "get_error_string",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 949,
           "name": "get_kernel",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 407,
+          "line_number": 598,
           "name": "get_memory_info",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 388,
+          "line_number": 575,
           "name": "init",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 248,
+          "line_number": 430,
           "name": "load",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 551,
+          "line_number": 823,
           "name": "load_ptx_module",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 359,
-          "name": "memcpy_dtod",
+          "line_number": 524,
+          "name": "push",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 540,
+          "line_number": 778,
           "name": "synchronize",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 434,
+          "line_number": 646,
           "name": "upload_f32",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 452,
+          "line_number": 667,
           "name": "upload_f32_slice",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 469,
+          "line_number": 689,
           "name": "upload_u32",
           "visibility": "Public"
         }
@@ -13091,7 +13149,7 @@
             "CString"
           ],
           "is_public_reexport": false,
-          "line_number": 8,
+          "line_number": 13,
           "raw_path": "std::ffi::{c_char, c_int, c_void, CStr, CString}"
         },
         {
@@ -13099,15 +13157,31 @@
             "Path"
           ],
           "is_public_reexport": false,
-          "line_number": 87,
+          "line_number": 127,
           "raw_path": "std::path::Path"
+        },
+        {
+          "imported_symbols": [
+            "Arc",
+            "Mutex",
+            "OnceLock"
+          ],
+          "is_public_reexport": false,
+          "line_number": 14,
+          "raw_path": "std::sync::{Arc, Mutex, OnceLock}"
+        },
+        {
+          "imported_symbols": [],
+          "is_public_reexport": false,
+          "line_number": 1017,
+          "raw_path": "super::*"
         },
         {
           "imported_symbols": [
             "Error"
           ],
           "is_public_reexport": false,
-          "line_number": 9,
+          "line_number": 15,
           "raw_path": "thiserror::Error"
         }
       ],
@@ -13117,83 +13191,176 @@
       ],
       "internal_symbols": [
         {
+          "kind": "Const",
+          "line_number": 833,
+          "name": "CU_JIT_ERROR_LOG_BUFFER",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Const",
+          "line_number": 834,
+          "name": "CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Const",
+          "line_number": 831,
+          "name": "CU_JIT_INFO_LOG_BUFFER",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Const",
+          "line_number": 832,
+          "name": "CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Static",
+          "line_number": 421,
+          "name": "DRIVER_SINGLETON",
+          "visibility": "Private"
+        },
+        {
           "kind": "Function",
-          "line_number": 61,
+          "line_number": 72,
           "name": "FreeLibrary",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 60,
+          "line_number": 71,
           "name": "GetProcAddress",
           "visibility": "Private"
         },
         {
+          "kind": "Struct",
+          "line_number": 87,
+          "name": "LibraryGuard",
+          "visibility": "Private"
+        },
+        {
           "kind": "Function",
-          "line_number": 59,
+          "line_number": 70,
           "name": "LoadLibraryA",
           "visibility": "Private"
         },
         {
-          "kind": "Function",
-          "line_number": 30,
-          "name": "cuda_err_string",
+          "kind": "Const",
+          "line_number": 76,
+          "name": "RTLD_LAZY",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 68,
+          "line_number": 36,
+          "name": "cuda_err_fallback_string",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 90,
+          "name": "disarm",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 82,
           "name": "dlclose",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 69,
+          "line_number": 83,
           "name": "dlerror",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 66,
+          "line_number": 80,
           "name": "dlopen",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 67,
+          "line_number": 81,
           "name": "dlsym",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 568,
+          "line_number": 98,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 587,
+          "line_number": 406,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 630,
+          "line_number": 534,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 639,
+          "line_number": 550,
           "name": "drop",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 909,
+          "name": "drop",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 929,
+          "name": "drop",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 295,
+          "name": "load",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1038,
+          "name": "test_driver_singleton_cached",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1020,
+          "name": "test_error_string_fallback",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1029,
+          "name": "test_overflow_and_zero_size_handling",
           "visibility": "Private"
         }
       ],
-      "is_test": false,
-      "lines": 703,
+      "is_test": true,
+      "lines": 1052,
       "module_path": "tara_engine::cuda::driver",
-      "modules_declared": [],
-      "out_links": [],
+      "modules_declared": [
+        {
+          "custom_path": null,
+          "is_public": false,
+          "line_number": 1016,
+          "name": "tests"
+        }
+      ],
+      "out_links": [
+        "rust/tara_engine/src/cuda/mod.rs"
+      ],
       "rel_path": "rust/tara_engine/src/cuda/driver.rs"
     },
     "rust/tara_engine/src/cuda/gpu_trainer.rs": {
@@ -13665,6 +13832,7 @@
         "rust/tara_engine/src/bin/expand_candidate.rs",
         "rust/tara_engine/src/bin/trace_22layer_gpu_execution.rs",
         "rust/tara_engine/src/bin/verify_1b_hardware_step.rs",
+        "rust/tara_engine/src/cuda/driver.rs",
         "rust/tara_engine/src/cuda/gpu_trainer.rs",
         "rust/tara_engine/src/lib.rs"
       ],
@@ -49148,5 +49316,5 @@
   "schema_version": "1.0.0",
   "total_files": 240,
   "total_modules": 583,
-  "total_symbols": 2176
+  "total_symbols": 2182
 }

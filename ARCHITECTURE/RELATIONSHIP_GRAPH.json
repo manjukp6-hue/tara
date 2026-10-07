@@ -15811,8 +15811,10 @@
       "call_references": [
         "allocate_tensor",
         "default",
-        "get_gpu_info",
+        "device_count",
         "is_available",
+        "load",
+        "map",
         "name",
         "select_best_backend",
         "to_vec",
@@ -15821,11 +15823,11 @@
         "vec"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "168fe521cd4e7cee775a8cfa61e46c5870a3f84ba9d621bbf70456d455a0835d",
+      "dynamic_sha256": "600cbdaadb43a269941a3cb8903b85d9802f99522bc2985c35e0d10c2bf2356f",
       "exports": [
         {
           "kind": "Struct",
-          "line_number": 81,
+          "line_number": 83,
           "name": "BackendRegistry",
           "visibility": "Public"
         },
@@ -15849,7 +15851,7 @@
         },
         {
           "kind": "Const",
-          "line_number": 73,
+          "line_number": 75,
           "name": "PRIMARY_CUDA_DEVICE_ORDINAL",
           "visibility": "Public"
         },
@@ -15861,7 +15863,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 84,
+          "line_number": 86,
           "name": "select_best_backend",
           "visibility": "Public"
         }
@@ -15886,13 +15888,13 @@
         },
         {
           "kind": "Function",
-          "line_number": 59,
+          "line_number": 61,
           "name": "allocate_tensor",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 76,
+          "line_number": 78,
           "name": "default",
           "visibility": "Private"
         },
@@ -15910,7 +15912,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 55,
+          "line_number": 57,
           "name": "is_available",
           "visibility": "Private"
         },
@@ -15928,7 +15930,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 51,
+          "line_number": 53,
           "name": "name",
           "visibility": "Private"
         },
@@ -15946,7 +15948,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 63,
+          "line_number": 65,
           "name": "transfer_to_device",
           "visibility": "Private"
         },
@@ -15964,13 +15966,13 @@
         },
         {
           "kind": "Function",
-          "line_number": 67,
+          "line_number": 69,
           "name": "transfer_to_host",
           "visibility": "Private"
         }
       ],
       "is_test": false,
-      "lines": 92,
+      "lines": 94,
       "module_path": "tara_engine::inference::backend",
       "modules_declared": [],
       "out_links": [],

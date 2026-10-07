@@ -5586,8 +5586,10 @@
       "calls": [
         "allocate_tensor",
         "default",
-        "get_gpu_info",
+        "device_count",
         "is_available",
+        "load",
+        "map",
         "name",
         "select_best_backend",
         "to_vec",
@@ -5596,7 +5598,7 @@
         "vec"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "168fe521cd4e7cee775a8cfa61e46c5870a3f84ba9d621bbf70456d455a0835d",
+      "dynamic_sha256": "600cbdaadb43a269941a3cb8903b85d9802f99522bc2985c35e0d10c2bf2356f",
       "enums": [],
       "functions": [
         "allocate_tensor",
@@ -5613,7 +5615,7 @@
         "rust/tara_engine/src/inference/tiered_store.rs"
       ],
       "is_test": false,
-      "lines": 92,
+      "lines": 94,
       "module": "tara_engine::inference::backend",
       "out_links": [],
       "rel_path": "rust/tara_engine/src/inference/backend.rs",

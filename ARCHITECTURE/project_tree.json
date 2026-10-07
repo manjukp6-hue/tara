@@ -16613,8 +16613,8 @@
                       "name": "backend.rs",
                       "rel_path": "rust/tara_engine/src/inference/backend.rs",
                       "entry_type": "file",
-                      "size_bytes": 2116,
-                      "sha256": "168fe521cd4e7cee775a8cfa61e46c5870a3f84ba9d621bbf70456d455a0835d"
+                      "size_bytes": 2199,
+                      "sha256": "600cbdaadb43a269941a3cb8903b85d9802f99522bc2985c35e0d10c2bf2356f"
                     },
                     {
                       "name": "cache_policy.rs",

@@ -39,7 +39,9 @@ pub struct CUDABackend {
 
 impl CUDABackend {
     pub fn new(device_id: u32) -> Self {
-        let available = crate::device_detector::DeviceCapabilityDetector::get_gpu_info().available;
+        let available = crate::cuda::driver::CudaDriver::load()
+            .map(|d| d.device_count().map(|c| c > (device_id as i32)).unwrap_or(false))
+            .unwrap_or(false);
         Self {
             device_id,
             available,

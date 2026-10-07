@@ -9369,8 +9369,8 @@
     "rust/tara_engine/src/bin/tara_training_stages.rs": {
       "call_references": [
         "Err",
-        "Ok",
         "Some",
+        "acquire",
         "all",
         "and_then",
         "any",
@@ -9379,7 +9379,6 @@
         "as_deref",
         "as_nanos",
         "as_os_str",
-        "as_path",
         "as_ref",
         "as_str",
         "as_u64",
@@ -9389,19 +9388,22 @@
         "clone",
         "cloned",
         "collect",
+        "collect_jsonl_files_recursive",
         "components",
         "compute_causal_sequence_loss",
         "compute_file_sha256",
-        "compute_model_digest",
+        "compute_full_checkpoint_digest",
+        "compute_model_weights_digest",
         "compute_stage_config_fingerprint",
         "contains",
-        "contains_key",
         "copied",
+        "create",
         "create_dir_all",
         "current_dir",
         "default",
         "dfs",
         "display",
+        "drop",
         "encode",
         "ends_with",
         "enumerate",
@@ -9410,13 +9412,14 @@
         "exp",
         "extension",
         "file_name",
+        "file_type",
         "filter",
         "finalize",
-        "flatten",
         "from",
         "from_file",
         "from_json_file",
         "from_str",
+        "from_weights_and_config",
         "get",
         "id",
         "insert",
@@ -9430,9 +9433,12 @@
         "is_file",
         "is_finite",
         "is_none",
+        "is_ok",
         "is_some",
+        "is_symlink",
         "iter",
         "join",
+        "kind",
         "len",
         "ln",
         "load_model_weights_with_shapes",
@@ -9446,7 +9452,11 @@
         "normalize_for_comparison",
         "now",
         "now_iso",
+        "ok",
+        "ok_or_else",
+        "open",
         "or_else",
+        "parent",
         "path",
         "pop",
         "print_usage",
@@ -9454,9 +9464,12 @@
         "push",
         "read",
         "read_line",
+        "read_stage_completed_timestamp",
         "read_to_string",
         "recover_interrupted_promotion",
         "remove_dir_all",
+        "remove_file",
+        "rename",
         "require_arg_value",
         "run_controlled_training_with_options",
         "shard_count",
@@ -9465,11 +9478,13 @@
         "sort_by_key",
         "starts_with",
         "sum",
+        "symlink_metadata",
+        "sync_all",
         "temp_dir",
         "test_continuation_verification_and_fingerprint_idempotence",
-        "test_crash_recovery_after_interrupted_backup_rename",
+        "test_crash_recovery_lock_guard_and_cli_exclusivity",
         "test_dag_cycle_detection_and_topological_sort",
-        "test_validate_stage_definitions_rejects_duplicate_output_and_unsafe_paths",
+        "test_validate_stage_definitions_rejects_duplicate_nested_and_unsafe_paths",
         "to_ascii_lowercase",
         "to_bits",
         "to_le_bytes",
@@ -9486,6 +9501,7 @@
         "unwrap_or_else",
         "update",
         "validate_and_sort_stage_dag",
+        "validate_cli_mode_exclusivity",
         "validate_device_and_precision",
         "validate_stage_definitions",
         "values",
@@ -9493,16 +9509,23 @@
         "verify_continuation_ready",
         "verify_working_model",
         "write",
+        "write_json_atomically",
         "write_minimal_working_model",
         "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "08d353439e802e5de4a959f41460ff7634a0155cf5fda7fee840a028abb16e04",
+      "dynamic_sha256": "55a2920de4a4318bd4f7aa74dd0d81d53cc3f0d9f2daf47b477fb9c49f445589",
       "exports": [
         {
           "kind": "Struct",
           "line_number": 58,
           "name": "DatasetInspection",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Struct",
+          "line_number": 90,
+          "name": "OrchestratorLockGuard",
           "visibility": "Public"
         },
         {
@@ -9519,74 +9542,98 @@
         },
         {
           "kind": "Function",
-          "line_number": 927,
+          "line_number": 95,
+          "name": "acquire",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1242,
           "name": "build_default_stages",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 103,
-          "name": "compute_model_digest",
+          "line_number": 209,
+          "name": "compute_full_checkpoint_digest",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 270,
+          "line_number": 162,
+          "name": "compute_model_weights_digest",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 393,
           "name": "compute_stage_config_fingerprint",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 771,
+          "line_number": 1066,
           "name": "evaluate_checkpoint_model",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 143,
+          "line_number": 267,
           "name": "inspect_dataset",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 441,
+          "line_number": 661,
           "name": "normalize_for_comparison",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 297,
+          "line_number": 466,
+          "name": "read_stage_completed_timestamp",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 423,
           "name": "should_skip_completed_stage",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 614,
+          "line_number": 878,
           "name": "validate_and_sort_stage_dag",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 474,
+          "line_number": 694,
           "name": "validate_device_and_precision",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 498,
+          "line_number": 718,
           "name": "validate_stage_definitions",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 367,
+          "line_number": 583,
           "name": "verify_continuation_ready",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 323,
+          "line_number": 513,
           "name": "verify_working_model",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 477,
+          "name": "write_json_atomically",
           "visibility": "Public"
         }
       ],
@@ -9637,6 +9684,22 @@
         },
         {
           "imported_symbols": [
+            "Write"
+          ],
+          "is_public_reexport": false,
+          "line_number": 116,
+          "raw_path": "std::io::Write"
+        },
+        {
+          "imported_symbols": [
+            "Write"
+          ],
+          "is_public_reexport": false,
+          "line_number": 492,
+          "raw_path": "std::io::Write"
+        },
+        {
+          "imported_symbols": [
             "BufRead",
             "BufReader",
             "Read"
@@ -9658,7 +9721,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 1759,
+          "line_number": 2268,
           "raw_path": "super::*"
         },
         {
@@ -9691,7 +9754,7 @@
             "write_safetensors_with_shapes"
           ],
           "is_public_reexport": false,
-          "line_number": 1760,
+          "line_number": 2269,
           "raw_path": "tara_engine::safetensors::write_safetensors_with_shapes"
         },
         {
@@ -9722,116 +9785,133 @@
         },
         {
           "imported_symbols": [
-            "promote_directory_atomically"
-          ],
-          "is_public_reexport": false,
-          "line_number": 1761,
-          "raw_path": "tara_engine::trainer::promote_directory_atomically"
-        },
-        {
-          "imported_symbols": [
+            "promote_directory_atomically",
             "recover_interrupted_promotion"
           ],
           "is_public_reexport": false,
           "line_number": 35,
-          "raw_path": "tara_engine::trainer::recover_interrupted_promotion"
+          "raw_path": "tara_engine::trainer::{promote_directory_atomically, recover_interrupted_promotion}"
         }
       ],
       "in_links": [],
       "internal_symbols": [
         {
           "kind": "Function",
-          "line_number": 738,
+          "line_number": 236,
+          "name": "collect_jsonl_files_recursive",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1019,
           "name": "compute_causal_sequence_loss",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 88,
+          "line_number": 143,
           "name": "compute_file_sha256",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 688,
+          "line_number": 969,
           "name": "dfs",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 432,
+          "line_number": 138,
+          "name": "drop",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 655,
+          "name": "has_parent_dir_traversal",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 648,
           "name": "is_safe_stage_id",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1091,
+          "line_number": 1443,
           "name": "main",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 468,
+          "line_number": 688,
           "name": "paths_overlap",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1062,
+          "line_number": 1377,
           "name": "print_usage",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1047,
+          "line_number": 1362,
           "name": "require_arg_value",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1930,
+          "line_number": 2488,
           "name": "test_continuation_verification_and_fingerprint_idempotence",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1993,
-          "name": "test_crash_recovery_after_interrupted_backup_rename",
+          "line_number": 2563,
+          "name": "test_crash_recovery_lock_guard_and_cli_exclusivity",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1842,
+          "line_number": 2374,
           "name": "test_dag_cycle_detection_and_topological_sort",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1888,
-          "name": "test_validate_stage_definitions_rejects_duplicate_output_and_unsafe_paths",
+          "line_number": 2429,
+          "name": "test_validate_stage_definitions_rejects_duplicate_nested_and_unsafe_paths",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1763,
+          "line_number": 2271,
           "name": "unique_test_dir",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1777,
+          "line_number": 1409,
+          "name": "validate_cli_mode_exclusivity",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 2285,
           "name": "write_minimal_working_model",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 2018,
+      "lines": 2609,
       "module_path": "tara_engine::bin::tara_training_stages",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1758,
+          "line_number": 2267,
           "name": "tests"
         }
       ],
@@ -51033,5 +51113,5 @@
   "schema_version": "1.0.0",
   "total_files": 240,
   "total_modules": 583,
-  "total_symbols": 2264
+  "total_symbols": 2268
 }

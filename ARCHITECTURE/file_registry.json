@@ -17503,12 +17503,12 @@
     "rust/tara_engine/src/bin/tara_training_stages.rs": {
       "extension": "rs",
       "file_id": 3940649674300748,
-      "line_count": 2018,
-      "modified_epoch": 1791400625,
+      "line_count": 2609,
+      "modified_epoch": 1791402527,
       "name": "tara_training_stages.rs",
       "rel_path": "rust/tara_engine/src/bin/tara_training_stages.rs",
-      "sha256": "08d353439e802e5de4a959f41460ff7634a0155cf5fda7fee840a028abb16e04",
-      "size_bytes": 81185
+      "sha256": "55a2920de4a4318bd4f7aa74dd0d81d53cc3f0d9f2daf47b477fb9c49f445589",
+      "size_bytes": 105221
     },
     "rust/tara_engine/src/bin/trace_22layer_gpu_execution.rs": {
       "extension": "rs",
@@ -19531,7 +19531,7 @@
       "size_bytes": 1242
     }
   },
-  "generated_at_utc": "1791401203",
+  "generated_at_utc": "1791402529",
   "schema_version": "1.0.0",
   "total_files": 1953
 }

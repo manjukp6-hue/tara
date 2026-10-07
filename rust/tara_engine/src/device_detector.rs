@@ -159,7 +159,7 @@ impl DeviceCapabilityDetector {
 
         #[cfg(target_os = "linux")]
         {
-            if let Ok(content) = fs::read_to_string("/proc/meminfo") {
+            if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
                 let mut total = 0u64;
                 let mut avail = 0u64;
                 for line in content.lines() {

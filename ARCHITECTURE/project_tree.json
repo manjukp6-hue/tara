@@ -16786,8 +16786,8 @@
               "name": "Cargo.toml",
               "rel_path": "rust/tara_engine/Cargo.toml",
               "entry_type": "file",
-              "size_bytes": 597,
-              "sha256": "56d8bd92fead9f7af3081275ad86266853afa7bc2a99ba7e797aca359ac0aeee"
+              "size_bytes": 646,
+              "sha256": "ffabc3dddf3d36f5754673f98dd0623a3b11cf11edad915b99351471d5e61bdf"
             }
           ]
         },
@@ -18254,8 +18254,8 @@
       "name": "Cargo.lock",
       "rel_path": "Cargo.lock",
       "entry_type": "file",
-      "size_bytes": 31361,
-      "sha256": "6e878b275198324d501f31ccf8248edfb93bb7e20e8fa614e73c1ae86f802d67"
+      "size_bytes": 31370,
+      "sha256": "70b7faafb6a8d1cd8762ab18a78ba759667b089239c797cec82a1237af510ac0"
     },
     {
       "name": "Cargo.toml",

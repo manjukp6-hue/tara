@@ -1002,6 +1002,7 @@ dependencies = [
  "flate2",
  "half",
  "hex",
+ "libc",
  "log",
  "rand",
  "rayon",

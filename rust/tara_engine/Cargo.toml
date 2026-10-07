@@ -22,5 +22,9 @@ rayon = "1.10"
 # Shared workspace crate
 tara_core = { path = "../tara_core" }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [features]
 default = []
+

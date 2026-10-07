@@ -14305,9 +14305,12 @@
     "rust/tara_engine/src/cuda/gpu_trainer.rs": {
       "call_references": [
         "KernelError",
+        "Some",
         "abs",
         "accumulate_gradient",
         "add_residual",
+        "as_deref",
+        "as_object",
         "as_ref",
         "as_str",
         "as_u64",
@@ -14330,6 +14333,7 @@
         "forward_lm_head",
         "forward_rmsnorm",
         "forward_swiglu",
+        "from_slice",
         "from_str",
         "get",
         "get_kernel",
@@ -14341,9 +14345,12 @@
         "init_test_gpu",
         "insert",
         "into",
+        "is_cuda_required",
         "is_finite",
         "is_ok",
+        "is_some",
         "iter",
+        "iter_mut",
         "join",
         "launch",
         "len",
@@ -14355,6 +14362,7 @@
         "new",
         "new_with_precision",
         "null_mut",
+        "ok",
         "ok_or_else",
         "or_insert_with",
         "pack_f16_to_u32",
@@ -14377,11 +14385,16 @@
         "test_gpu_adamw_non_finite_gradient_skips_step",
         "test_gpu_checkpoint_full_disk_roundtrip_equivalence",
         "test_gpu_checkpoint_resume_numerical_equivalence",
+        "test_production_safetensors_triplet_bit_exact_roundtrip_and_precision_contract",
+        "test_require_cuda_env_parsing_semantics",
+        "to_ascii_lowercase",
         "to_bits",
         "to_lowercase",
         "to_string",
         "to_string_lossy",
         "trim",
+        "try_into",
+        "unpack_u32_to_f16",
         "unwrap",
         "unwrap_or_else",
         "upload_f32",
@@ -14389,11 +14402,12 @@
         "values",
         "var",
         "vec",
+        "verify_precision_contract",
         "write",
         "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "d99d7c426eab1b7e645bc03cbae089f761f1e5976bb8171cf1b8923caa9a4a5b",
+      "dynamic_sha256": "f19aae57f09752d9b9d6c49989677100c5ac5f3d1b4744d1f8762d5b77951f76",
       "exports": [
         {
           "kind": "Struct",
@@ -14511,6 +14525,18 @@
         },
         {
           "kind": "Function",
+          "line_number": 1312,
+          "name": "is_cuda_required",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1301,
+          "name": "is_cuda_required_value",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
           "line_number": 1160,
           "name": "load_optimizer_state",
           "visibility": "Public"
@@ -14580,6 +14606,12 @@
           "line_number": 56,
           "name": "unpack_u32_to_f16",
           "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1218,
+          "name": "verify_precision_contract",
+          "visibility": "Public"
         }
       ],
       "imports": [
@@ -14603,7 +14635,7 @@
             "DynamicAdamW"
           ],
           "is_public_reexport": false,
-          "line_number": 1213,
+          "line_number": 1320,
           "raw_path": "crate::trainer::{AdamWHyperparams, DynamicAdamW}"
         },
         {
@@ -14633,7 +14665,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 1212,
+          "line_number": 1319,
           "raw_path": "super::*"
         }
       ],
@@ -14655,43 +14687,55 @@
         },
         {
           "kind": "Function",
-          "line_number": 1215,
+          "line_number": 1322,
           "name": "init_test_gpu",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1230,
+          "line_number": 1554,
           "name": "test_cpu_gpu_adamw_numerical_equivalence",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1340,
+          "line_number": 1684,
           "name": "test_gpu_adamw_non_finite_gradient_skips_step",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1445,
+          "line_number": 1810,
           "name": "test_gpu_checkpoint_full_disk_roundtrip_equivalence",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1368,
+          "line_number": 1722,
           "name": "test_gpu_checkpoint_resume_numerical_equivalence",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1362,
+          "name": "test_production_safetensors_triplet_bit_exact_roundtrip_and_precision_contract",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1339,
+          "name": "test_require_cuda_env_parsing_semantics",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1575,
+      "lines": 1973,
       "module_path": "tara_engine::cuda::gpu_trainer",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1211,
+          "line_number": 1318,
           "name": "tests"
         }
       ],
@@ -14705,51 +14749,131 @@
     },
     "rust/tara_engine/src/cuda/kernels.rs": {
       "call_references": [
+        "Some",
         "accum_grads_f16_kernel",
         "accum_grads_kernel",
         "adamw_step_kernel",
         "adamw_step_mixed_f16_kernel",
+        "all",
+        "as_ref",
+        "bad_kernel",
+        "chars",
+        "clear",
+        "contains",
         "embedding_bwd_kernel",
         "embedding_fwd_f16_kernel",
         "embedding_fwd_kernel",
+        "enumerate",
+        "expect",
+        "find",
+        "get",
         "grad_norm_sq_kernel",
+        "is_ascii_alphabetic",
+        "is_ascii_digit",
+        "is_empty",
+        "is_some",
+        "is_whitespace",
+        "last",
         "linear_bwd_input_f16_kernel",
         "linear_fwd_f16_kernel",
+        "lines",
         "lm_head_bwd_input_f16_kernel",
         "lm_head_bwd_input_kernel",
         "lm_head_bwd_weight_f16_kernel",
         "lm_head_bwd_weight_kernel",
         "lm_head_fwd_f16_kernel",
         "lm_head_fwd_kernel",
+        "map_err",
+        "new",
+        "next",
+        "ok_or_else",
+        "oob_kernel",
+        "parse",
         "residual_add_kernel",
         "rmsnorm_fwd_f16_kernel",
         "rmsnorm_fwd_kernel",
         "scale_grads_f16_kernel",
         "scale_grads_kernel",
+        "split",
+        "split_whitespace",
+        "starts_with",
+        "strip_prefix",
         "swiglu_bwd_kernel",
-        "swiglu_fwd_kernel"
+        "swiglu_fwd_kernel",
+        "test_all_ptx_kernels_register_bounds_and_syntax",
+        "test_ptx_validator_rejects_undeclared_symbolic_and_out_of_bounds_registers",
+        "to_string",
+        "trim",
+        "trim_end_matches",
+        "trim_start_matches",
+        "unwrap_err",
+        "unwrap_or"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "77f4be244386b38d68b14f041712b0aa5dfb01c550e323b15fbd228eaed1afd6",
+      "dynamic_sha256": "db82421e9c792489e78c18451b5f5bdadb0f441f2d0880b61e414c4663edf346",
       "exports": [
         {
           "kind": "Const",
           "line_number": 7,
           "name": "PTX_TARA_KERNELS",
           "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1456,
+          "name": "validate_ptx_registers",
+          "visibility": "Public"
         }
       ],
-      "imports": [],
+      "imports": [
+        {
+          "imported_symbols": [
+            "HashMap",
+            "HashSet"
+          ],
+          "is_public_reexport": false,
+          "line_number": 1457,
+          "raw_path": "std::collections::{HashMap, HashSet}"
+        },
+        {
+          "imported_symbols": [],
+          "is_public_reexport": false,
+          "line_number": 1613,
+          "raw_path": "super::*"
+        }
+      ],
       "in_links": [
         "rust/tara_engine/src/cuda/gpu_trainer.rs",
         "rust/tara_engine/src/cuda/mod.rs"
       ],
-      "internal_symbols": [],
-      "is_test": false,
-      "lines": 1449,
+      "internal_symbols": [
+        {
+          "kind": "Function",
+          "line_number": 1616,
+          "name": "test_all_ptx_kernels_register_bounds_and_syntax",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1625,
+          "name": "test_ptx_validator_rejects_undeclared_symbolic_and_out_of_bounds_registers",
+          "visibility": "Private"
+        }
+      ],
+      "is_test": true,
+      "lines": 1654,
       "module_path": "tara_engine::cuda::kernels",
-      "modules_declared": [],
-      "out_links": [],
+      "modules_declared": [
+        {
+          "custom_path": null,
+          "is_public": false,
+          "line_number": 1612,
+          "name": "tests"
+        }
+      ],
+      "out_links": [
+        "rust/tara_engine/src/cuda/mod.rs"
+      ],
       "rel_path": "rust/tara_engine/src/cuda/kernels.rs"
     },
     "rust/tara_engine/src/cuda/mod.rs": {
@@ -14785,6 +14909,7 @@
         "rust/tara_engine/src/bin/verify_1b_hardware_step.rs",
         "rust/tara_engine/src/cuda/driver.rs",
         "rust/tara_engine/src/cuda/gpu_trainer.rs",
+        "rust/tara_engine/src/cuda/kernels.rs",
         "rust/tara_engine/src/lib.rs"
       ],
       "internal_symbols": [],
@@ -51749,5 +51874,5 @@
   "schema_version": "1.0.0",
   "total_files": 240,
   "total_modules": 583,
-  "total_symbols": 2291
+  "total_symbols": 2295
 }

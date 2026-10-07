@@ -1205,6 +1205,113 @@ impl CudaTrainer {
     pub fn module_handle(&self) -> &CudaModuleHandle {
         &self.module
     }
+
+    /// Verifies the mixed-precision and full-precision storage contract across all registered parameters:
+    /// - In `TrainingPrecision::Fp16`:
+    ///   * Model forward weights (`d_weight_f16`): packed FP16 (`len.div_ceil(2) * 4` bytes)
+    ///   * Master weights (`d_weight` or `h_weights`): FP32 (`len * 4` bytes)
+    ///   * Gradients (`d_grad`): FP32 (`len * 4` bytes)
+    ///   * AdamW moments (`d_m`/`h_m`, `d_v`/`h_v`): FP32 (`len * 4` bytes)
+    /// - In `TrainingPrecision::Fp32`:
+    ///   * `d_weight_f16` is `None`
+    ///   * Model/master weights, gradients, and AdamW moments are all FP32 (`len * 4` bytes).
+    pub fn verify_precision_contract(&self) -> Result<(), String> {
+        for (name, p) in &self.params {
+            let expected_f32_bytes = p.len * std::mem::size_of::<f32>();
+
+            // 1. Gradients are always FP32
+            if p.d_grad.bytes != expected_f32_bytes {
+                return Err(format!(
+                    "Param '{name}': gradient buffer bytes {} != expected FP32 bytes {}",
+                    p.d_grad.bytes, expected_f32_bytes
+                ));
+            }
+
+            // 2. Master weights are always FP32 (either on device or streamed on host)
+            if let Some(dw) = &p.d_weight {
+                if dw.bytes != expected_f32_bytes {
+                    return Err(format!(
+                        "Param '{name}': device master weight bytes {} != expected FP32 bytes {}",
+                        dw.bytes, expected_f32_bytes
+                    ));
+                }
+            } else if let Some(hw) = self.h_weights.get(name) {
+                if hw.len() * std::mem::size_of::<f32>() != expected_f32_bytes {
+                    return Err(format!(
+                        "Param '{name}': host master weight len {} != expected {}",
+                        hw.len(),
+                        p.len
+                    ));
+                }
+            } else {
+                return Err(format!("Param '{name}': missing FP32 master weights"));
+            }
+
+            // 3. Optimizer m/v states are always FP32
+            if let (Some(dm), Some(dv)) = (&p.d_m, &p.d_v) {
+                if dm.bytes != expected_f32_bytes || dv.bytes != expected_f32_bytes {
+                    return Err(format!(
+                        "Param '{name}': device Adam m/v bytes ({}/{}) != expected FP32 bytes {}",
+                        dm.bytes, dv.bytes, expected_f32_bytes
+                    ));
+                }
+            } else {
+                let hm_ok = self.h_m.get(name).map(|v| v.len()) == Some(p.len);
+                let hv_ok = self.h_v.get(name).map(|v| v.len()) == Some(p.len);
+                if !hm_ok || !hv_ok {
+                    return Err(format!(
+                        "Param '{name}': missing or mismatched FP32 host Adam m/v buffers"
+                    ));
+                }
+            }
+
+            // 4. Device forward weights match active precision mode
+            match self.precision {
+                TrainingPrecision::Fp16 => {
+                    let expected_f16_packed_bytes =
+                        p.len.div_ceil(2) * std::mem::size_of::<u32>();
+                    let Some(dw16) = &p.d_weight_f16 else {
+                        return Err(format!(
+                            "Param '{name}': missing FP16 weight buffer in TrainingPrecision::Fp16 mode"
+                        ));
+                    };
+                    if dw16.bytes != expected_f16_packed_bytes {
+                        return Err(format!(
+                            "Param '{name}': FP16 weight buffer bytes {} != expected packed FP16 bytes {}",
+                            dw16.bytes, expected_f16_packed_bytes
+                        ));
+                    }
+                }
+                TrainingPrecision::Fp32 | TrainingPrecision::Auto => {
+                    if p.d_weight_f16.is_some() {
+                        return Err(format!(
+                            "Param '{name}': unexpected FP16 weight buffer in FP32 mode"
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Evaluates whether an environment variable string value explicitly requires CUDA execution.
+/// Accepts `"1"`, `"true"`, `"yes"`, `"required"` (case-insensitive).
+/// Returns `false` for `"0"`, `"false"`, `"no"`, `""`, or `None`.
+pub fn is_cuda_required_value(val: Option<&str>) -> bool {
+    match val {
+        Some(v) => matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "required"
+        ),
+        None => false,
+    }
+}
+
+/// Returns `true` if `REQUIRE_CUDA=1` (or `CI_CUDA=1`) is explicitly enabled in the environment.
+pub fn is_cuda_required() -> bool {
+    is_cuda_required_value(std::env::var("REQUIRE_CUDA").ok().as_deref())
+        || is_cuda_required_value(std::env::var("CI_CUDA").ok().as_deref())
 }
 
 #[cfg(test)]
@@ -1216,8 +1323,10 @@ mod tests {
         match CudaTrainer::new_with_precision(0, TrainingPrecision::Fp32) {
             Ok(t) => Some(t),
             Err(e) => {
-                if std::env::var("REQUIRE_CUDA").is_ok() || std::env::var("CI_CUDA").is_ok() {
-                    panic!("FATAL: CUDA was explicitly required (REQUIRE_CUDA=1) but {context} failed: {e:?}");
+                if is_cuda_required() {
+                    panic!(
+                        "FATAL: CUDA was explicitly required (REQUIRE_CUDA=1) but {context} failed: {e:?}"
+                    );
                 } else {
                     eprintln!("[SKIP: CUDA UNAVAILABLE] {context}: {e:?}");
                     None
@@ -1226,6 +1335,221 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_require_cuda_env_parsing_semantics() {
+        assert!(is_cuda_required_value(Some("1")));
+        assert!(is_cuda_required_value(Some("true")));
+        assert!(is_cuda_required_value(Some("TRUE")));
+        assert!(is_cuda_required_value(Some("yes")));
+        assert!(is_cuda_required_value(Some("required")));
+
+        assert!(!is_cuda_required_value(None));
+        assert!(!is_cuda_required_value(Some("")));
+        assert!(!is_cuda_required_value(Some("0")));
+        assert!(!is_cuda_required_value(Some("false")));
+        assert!(!is_cuda_required_value(Some("FALSE")));
+        assert!(!is_cuda_required_value(Some("no")));
+    }
+
+    /// Unconditional test (executes on both CPU and GPU machines) proving:
+    /// 1. Full production SafeTensors triplet (`model.safetensors` + `optimizer.safetensors` + `checkpoint_state.json`)
+    ///    serialization and reload is 100% **bit-for-bit identical** (`assert_eq!(a.to_bits(), b.to_bits())`)
+    ///    between an uninterrupted 10-step run and a 5+5 step disk-checkpointed run.
+    /// 2. SafeTensors header dtypes for master weights and AdamW `m`/`v` moments are strictly `"F32"`.
+    /// 3. Mixed-precision FP16 weight packing (`pack_f16_to_u32` / `unpack_u32_to_f16`) and `verify_precision_contract()`
+    ///    strictly separate FP16 model weights (`2` bytes/element) from FP32 master weights, gradients, and AdamW moments (`4` bytes/element).
+    #[test]
+    fn test_production_safetensors_triplet_bit_exact_roundtrip_and_precision_contract() {
+        let n = 128usize;
+        let mut initial_weights = HashMap::new();
+        let mut w = vec![0.0f32; n];
+        for (i, val) in w.iter_mut().enumerate() {
+            *val = (i as f32 * 0.1).sin();
+        }
+        initial_weights.insert("dense.weight".to_string(), w.clone());
+
+        // Verify FP16 packing/unpacking storage contract (even & odd lengths)
+        let f16_vals: Vec<f16> = w.iter().map(|&x| f16::from_f32(x)).collect();
+        let packed_u32 = pack_f16_to_u32(&f16_vals);
+        assert_eq!(
+            packed_u32.len() * std::mem::size_of::<u32>(),
+            n.div_ceil(2) * 4,
+            "Packed FP16 storage must occupy 2 bytes per element (rounded up to u32 word)"
+        );
+        let unpacked_f16 = unpack_u32_to_f16(&packed_u32, n);
+        for i in 0..n {
+            assert_eq!(
+                f16_vals[i].to_bits(),
+                unpacked_f16[i].to_bits(),
+                "FP16 pack/unpack must be bit-for-bit lossless"
+            );
+        }
+
+        let hp = AdamWHyperparams {
+            lr: 1e-3,
+            beta1: 0.9,
+            beta2: 0.999,
+            eps: 1e-8,
+            weight_decay: 0.01,
+            max_grad_norm: 1.0,
+        };
+
+        let mut grads_history = Vec::new();
+        for step in 1..=10 {
+            let mut g = vec![0.0f32; n];
+            for (i, val) in g.iter_mut().enumerate() {
+                *val = ((step * 10 + i) as f32 * 0.05).cos() * 0.02;
+            }
+            grads_history.push(g);
+        }
+
+        // Run A: 10 uninterrupted steps
+        let mut weights_a = initial_weights.clone();
+        let mut opt_a = DynamicAdamW::new();
+        for g in &grads_history {
+            let mut g_map = HashMap::new();
+            g_map.insert("dense.weight".to_string(), g.clone());
+            assert!(opt_a.step(&mut weights_a, &g_map, &hp));
+        }
+
+        // Run B: 5 steps -> write production triplet (model.safetensors + optimizer.safetensors + checkpoint_state.json)
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tara_triplet_bit_exact_{}_{:x}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        let mut weights_b = initial_weights.clone();
+        let mut opt_b = DynamicAdamW::new();
+        for g in &grads_history[0..5] {
+            let mut g_map = HashMap::new();
+            g_map.insert("dense.weight".to_string(), g.clone());
+            assert!(opt_b.step(&mut weights_b, &g_map, &hp));
+        }
+
+        let mut disk_shapes = HashMap::new();
+        disk_shapes.insert("dense.weight".to_string(), vec![n]);
+        let sf_path = temp_dir.join("model.safetensors");
+        crate::safetensors::write_safetensors_with_shapes(
+            &weights_b,
+            &disk_shapes,
+            &sf_path.to_string_lossy(),
+        )
+        .unwrap();
+
+        let disk_opt = opt_b.export_state();
+        let mut opt_tensors: HashMap<String, Vec<f32>> = HashMap::new();
+        let mut opt_shapes: HashMap<String, Vec<usize>> = HashMap::new();
+        for (k, (m_vec, v_vec)) in &disk_opt {
+            let m_name = format!("{k}.adam_m");
+            let v_name = format!("{k}.adam_v");
+            opt_shapes.insert(m_name.clone(), vec![m_vec.len()]);
+            opt_shapes.insert(v_name.clone(), vec![v_vec.len()]);
+            opt_tensors.insert(m_name, m_vec.clone());
+            opt_tensors.insert(v_name, v_vec.clone());
+        }
+        let opt_path = temp_dir.join("optimizer.safetensors");
+        crate::safetensors::write_safetensors_with_shapes(
+            &opt_tensors,
+            &opt_shapes,
+            &opt_path.to_string_lossy(),
+        )
+        .unwrap();
+
+        let state_json = serde_json::json!({
+            "step": opt_b.get_step(),
+            "optimizer_step": opt_b.get_step(),
+        });
+        let state_path = temp_dir.join("checkpoint_state.json");
+        std::fs::write(&state_path, serde_json::to_string(&state_json).unwrap()).unwrap();
+
+        // Inspect SafeTensors headers on disk to prove FP32 ("F32") dtype contract
+        for path in [&sf_path, &opt_path] {
+            let raw = std::fs::read(path).unwrap();
+            let header_len = u64::from_le_bytes(raw[0..8].try_into().unwrap()) as usize;
+            let header: serde_json::Value =
+                serde_json::from_slice(&raw[8..8 + header_len]).unwrap();
+            for (k, v) in header.as_object().unwrap() {
+                if k == "__metadata__" {
+                    continue;
+                }
+                assert_eq!(
+                    v["dtype"].as_str(),
+                    Some("F32"),
+                    "SafeTensors tensor '{k}' must have dtype F32"
+                );
+            }
+        }
+
+        // Reload triplet into fresh optimizer & weight map
+        let mut reloaded_weights =
+            crate::safetensors::load_safetensors(&sf_path.to_string_lossy()).unwrap();
+        let reloaded_opt_tensors =
+            crate::safetensors::load_safetensors(&opt_path.to_string_lossy()).unwrap();
+        let reloaded_state: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();
+        let reloaded_step = reloaded_state["step"].as_u64().unwrap();
+
+        let mut reloaded_moments_map: HashMap<String, (Vec<f32>, Vec<f32>)> = HashMap::new();
+        for (tensor_name, tensor_data) in reloaded_opt_tensors {
+            if let Some(prefix) = tensor_name.strip_suffix(".adam_m") {
+                reloaded_moments_map
+                    .entry(prefix.to_string())
+                    .or_insert_with(|| (Vec::new(), Vec::new()))
+                    .0 = tensor_data;
+            } else if let Some(prefix) = tensor_name.strip_suffix(".adam_v") {
+                reloaded_moments_map
+                    .entry(prefix.to_string())
+                    .or_insert_with(|| (Vec::new(), Vec::new()))
+                    .1 = tensor_data;
+            }
+        }
+
+        // Assert bit-for-bit equality immediately after disk reload
+        assert_eq!(reloaded_weights, weights_b);
+        assert_eq!(reloaded_moments_map, disk_opt);
+
+        // Continue steps 6..=10
+        let mut opt_c = DynamicAdamW::new();
+        opt_c.load_state(reloaded_moments_map);
+        opt_c.set_step(reloaded_step);
+        for g in &grads_history[5..10] {
+            let mut g_map = HashMap::new();
+            g_map.insert("dense.weight".to_string(), g.clone());
+            assert!(opt_c.step(&mut reloaded_weights, &g_map, &hp));
+        }
+
+        // Assert strict BIT-FOR-BIT equality (0 ULP difference) after 10 steps
+        let wa = &weights_a["dense.weight"];
+        let wc = &reloaded_weights["dense.weight"];
+        for i in 0..n {
+            assert_eq!(
+                wa[i].to_bits(),
+                wc[i].to_bits(),
+                "Bit-for-bit mismatch at index {}: continuous={} (0x{:08x}), resumed={} (0x{:08x})",
+                i,
+                wa[i],
+                wa[i].to_bits(),
+                wc[i],
+                wc[i].to_bits()
+            );
+        }
+
+        // If GPU is available, also verify `verify_precision_contract()` on both FP16 and FP32 CudaTrainer instances
+        if let Ok(mut fp16_trainer) = CudaTrainer::new_with_precision(0, TrainingPrecision::Fp16) {
+            fp16_trainer.register_weights(&initial_weights).unwrap();
+            assert!(
+                fp16_trainer.verify_precision_contract().is_ok(),
+                "FP16 CudaTrainer must satisfy precision contract"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    /// Numerical equivalence test between CPU (`f32::sqrt` / `/`) and GPU PTX (`sqrt.approx.f32` / `div.approx.f32`)
+    /// within `1e-5` tolerance.
     #[test]
     fn test_cpu_gpu_adamw_numerical_equivalence() {
         let mut gpu_trainer = match init_test_gpu("test_cpu_gpu_adamw_numerical_equivalence") {
@@ -1245,6 +1569,7 @@ mod tests {
         initial_weights.insert("layer2.weight".to_string(), w2.clone());
 
         gpu_trainer.register_weights(&initial_weights).unwrap();
+        assert!(gpu_trainer.verify_precision_contract().is_ok());
 
         let mut cpu_weights = initial_weights.clone();
         let mut cpu_optimizer = DynamicAdamW::new();
@@ -1258,7 +1583,7 @@ mod tests {
             max_grad_norm: 1.0,
         };
 
-        // Run 5 steps with deterministic synthetic gradients
+        // Run 5 steps with deterministic gradients
         for step in 1..=5 {
             let mut g1 = vec![0.0f32; n];
             let mut g2 = vec![0.0f32; n];
@@ -1275,10 +1600,21 @@ mod tests {
             assert!(cpu_stepped);
 
             // GPU step
-            gpu_trainer.accumulate_gradient("layer1.weight", &g1).unwrap();
-            gpu_trainer.accumulate_gradient("layer2.weight", &g2).unwrap();
+            gpu_trainer
+                .accumulate_gradient("layer1.weight", &g1)
+                .unwrap();
+            gpu_trainer
+                .accumulate_gradient("layer2.weight", &g2)
+                .unwrap();
             let gpu_stepped = gpu_trainer
-                .step_adamw(hp.lr, hp.beta1, hp.beta2, hp.eps, hp.weight_decay, hp.max_grad_norm)
+                .step_adamw(
+                    hp.lr,
+                    hp.beta1,
+                    hp.beta2,
+                    hp.eps,
+                    hp.weight_decay,
+                    hp.max_grad_norm,
+                )
                 .unwrap();
             assert!(gpu_stepped);
         }
@@ -1287,8 +1623,16 @@ mod tests {
         let gpu_opt_state = gpu_trainer.export_optimizer_state().unwrap();
         let cpu_opt_state = cpu_optimizer.export_state();
 
-        assert_eq!(gpu_trainer.get_step_count(), 5, "GPU step count must match 5");
-        assert_eq!(cpu_optimizer.get_step(), 5, "CPU step count must match 5");
+        assert_eq!(
+            gpu_trainer.get_step_count(),
+            5,
+            "GPU step count must match 5"
+        );
+        assert_eq!(
+            cpu_optimizer.get_step(),
+            5,
+            "CPU step count must match 5"
+        );
 
         for name in &["layer1.weight", "layer2.weight"] {
             let cpu_w = &cpu_weights[*name];
@@ -1338,10 +1682,11 @@ mod tests {
 
     #[test]
     fn test_gpu_adamw_non_finite_gradient_skips_step() {
-        let mut gpu_trainer = match init_test_gpu("test_gpu_adamw_non_finite_gradient_skips_step") {
-            Some(t) => t,
-            None => return,
-        };
+        let mut gpu_trainer =
+            match init_test_gpu("test_gpu_adamw_non_finite_gradient_skips_step") {
+                Some(t) => t,
+                None => return,
+            };
 
         let n = 128;
         let mut initial_weights = HashMap::new();
@@ -1352,16 +1697,25 @@ mod tests {
         // Accumulate NaN gradient
         let mut bad_g = vec![0.01f32; n];
         bad_g[10] = f32::NAN;
-        gpu_trainer.accumulate_gradient("test.weight", &bad_g).unwrap();
+        gpu_trainer
+            .accumulate_gradient("test.weight", &bad_g)
+            .unwrap();
 
         let stepped = gpu_trainer
             .step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0)
             .unwrap();
         assert!(!stepped, "Step with NaN gradient must be skipped");
-        assert_eq!(gpu_trainer.get_step_count(), 0, "Step count must not advance");
+        assert_eq!(
+            gpu_trainer.get_step_count(),
+            0,
+            "Step count must not advance"
+        );
 
         let downloaded = gpu_trainer.download_weights().unwrap();
-        assert_eq!(downloaded["test.weight"], w, "Weights must be unchanged after skipped step");
+        assert_eq!(
+            downloaded["test.weight"], w,
+            "Weights must be unchanged after skipped step"
+        );
     }
 
     #[test]
@@ -1375,10 +1729,11 @@ mod tests {
         initial_weights.insert("dense.weight".to_string(), w.clone());
 
         // Run A: 10 steps continuously
-        let mut trainer_a = match init_test_gpu("test_gpu_checkpoint_resume_numerical_equivalence_A") {
-            Some(t) => t,
-            None => return,
-        };
+        let mut trainer_a =
+            match init_test_gpu("test_gpu_checkpoint_resume_numerical_equivalence_A") {
+                Some(t) => t,
+                None => return,
+            };
         trainer_a.register_weights(&initial_weights).unwrap();
 
         let mut grads_history = Vec::new();
@@ -1389,20 +1744,25 @@ mod tests {
             }
             grads_history.push(g.clone());
             trainer_a.accumulate_gradient("dense.weight", &g).unwrap();
-            trainer_a.step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0).unwrap();
+            trainer_a
+                .step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0)
+                .unwrap();
         }
         let weights_a = trainer_a.download_weights().unwrap();
 
         // Run B: 5 steps -> checkpoint -> resume -> 5 steps
-        let mut trainer_b = match init_test_gpu("test_gpu_checkpoint_resume_numerical_equivalence_B") {
-            Some(t) => t,
-            None => return,
-        };
+        let mut trainer_b =
+            match init_test_gpu("test_gpu_checkpoint_resume_numerical_equivalence_B") {
+                Some(t) => t,
+                None => return,
+            };
         trainer_b.register_weights(&initial_weights).unwrap();
 
         for g in &grads_history[0..5] {
             trainer_b.accumulate_gradient("dense.weight", g).unwrap();
-            trainer_b.step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0).unwrap();
+            trainer_b
+                .step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0)
+                .unwrap();
         }
 
         // Save in-memory checkpoint
@@ -1412,31 +1772,36 @@ mod tests {
         drop(trainer_b);
 
         // Resume in new trainer
-        let mut trainer_c = match init_test_gpu("test_gpu_checkpoint_resume_numerical_equivalence_C") {
-            Some(t) => t,
-            None => return,
-        };
+        let mut trainer_c =
+            match init_test_gpu("test_gpu_checkpoint_resume_numerical_equivalence_C") {
+                Some(t) => t,
+                None => return,
+            };
         trainer_c.register_weights(&checkpoint_weights).unwrap();
-        trainer_c.load_optimizer_state(&checkpoint_opt_state).unwrap();
+        trainer_c
+            .load_optimizer_state(&checkpoint_opt_state)
+            .unwrap();
         trainer_c.set_step_count(checkpoint_step);
 
         for g in &grads_history[5..10] {
             trainer_c.accumulate_gradient("dense.weight", g).unwrap();
-            trainer_c.step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0).unwrap();
+            trainer_c
+                .step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0)
+                .unwrap();
         }
         let weights_c = trainer_c.download_weights().unwrap();
 
+        // Same-device GPU checkpoint/resume is bit-for-bit identical
         let wa = &weights_a["dense.weight"];
         let wc = &weights_c["dense.weight"];
         for i in 0..n {
-            let diff = (wa[i] - wc[i]).abs();
-            assert!(
-                diff < 1e-6,
-                "Checkpoint resume mismatch at index {}: continuous={}, resumed={}, diff={}",
+            assert_eq!(
+                wa[i].to_bits(),
+                wc[i].to_bits(),
+                "GPU checkpoint resume bit-for-bit mismatch at index {}: continuous={}, resumed={}",
                 i,
                 wa[i],
-                wc[i],
-                diff
+                wc[i]
             );
         }
     }
@@ -1452,10 +1817,11 @@ mod tests {
         initial_weights.insert("dense.weight".to_string(), w.clone());
 
         // Run A: 10 steps continuously
-        let mut trainer_a = match init_test_gpu("test_gpu_checkpoint_full_disk_roundtrip_equivalence_A") {
-            Some(t) => t,
-            None => return,
-        };
+        let mut trainer_a =
+            match init_test_gpu("test_gpu_checkpoint_full_disk_roundtrip_equivalence_A") {
+                Some(t) => t,
+                None => return,
+            };
         trainer_a.register_weights(&initial_weights).unwrap();
 
         let mut grads_history = Vec::new();
@@ -1466,7 +1832,9 @@ mod tests {
             }
             grads_history.push(g.clone());
             trainer_a.accumulate_gradient("dense.weight", &g).unwrap();
-            trainer_a.step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0).unwrap();
+            trainer_a
+                .step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0)
+                .unwrap();
         }
         let weights_a = trainer_a.download_weights().unwrap();
 
@@ -1474,18 +1842,21 @@ mod tests {
         let temp_dir = std::env::temp_dir().join(format!("tara_gpu_disk_cp_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&temp_dir);
 
-        let mut trainer_b = match init_test_gpu("test_gpu_checkpoint_full_disk_roundtrip_equivalence_B") {
-            Some(t) => t,
-            None => {
-                let _ = std::fs::remove_dir_all(&temp_dir);
-                return;
-            }
-        };
+        let mut trainer_b =
+            match init_test_gpu("test_gpu_checkpoint_full_disk_roundtrip_equivalence_B") {
+                Some(t) => t,
+                None => {
+                    let _ = std::fs::remove_dir_all(&temp_dir);
+                    return;
+                }
+            };
         trainer_b.register_weights(&initial_weights).unwrap();
 
         for g in &grads_history[0..5] {
             trainer_b.accumulate_gradient("dense.weight", g).unwrap();
-            trainer_b.step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0).unwrap();
+            trainer_b
+                .step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0)
+                .unwrap();
         }
 
         // 1. Write weights to model.safetensors on disk
@@ -1493,22 +1864,32 @@ mod tests {
         let mut disk_shapes = HashMap::new();
         disk_shapes.insert("dense.weight".to_string(), vec![n]);
         let sf_path = temp_dir.join("model.safetensors");
-        crate::safetensors::write_safetensors_with_shapes(&disk_weights, &disk_shapes, &sf_path.to_string_lossy()).unwrap();
+        crate::safetensors::write_safetensors_with_shapes(
+            &disk_weights,
+            &disk_shapes,
+            &sf_path.to_string_lossy(),
+        )
+        .unwrap();
 
         // 2. Write production optimizer.safetensors on disk
         let disk_opt = trainer_b.export_optimizer_state().unwrap();
         let mut opt_tensors: HashMap<String, Vec<f32>> = HashMap::new();
         let mut opt_shapes: HashMap<String, Vec<usize>> = HashMap::new();
-        for (k, (m_vec, v_vec)) in disk_opt {
+        for (k, (m_vec, v_vec)) in &disk_opt {
             let m_name = format!("{k}.adam_m");
             let v_name = format!("{k}.adam_v");
             opt_shapes.insert(m_name.clone(), vec![m_vec.len()]);
             opt_shapes.insert(v_name.clone(), vec![v_vec.len()]);
-            opt_tensors.insert(m_name, m_vec);
-            opt_tensors.insert(v_name, v_vec);
+            opt_tensors.insert(m_name, m_vec.clone());
+            opt_tensors.insert(v_name, v_vec.clone());
         }
         let opt_path = temp_dir.join("optimizer.safetensors");
-        crate::safetensors::write_safetensors_with_shapes(&opt_tensors, &opt_shapes, &opt_path.to_string_lossy()).unwrap();
+        crate::safetensors::write_safetensors_with_shapes(
+            &opt_tensors,
+            &opt_shapes,
+            &opt_path.to_string_lossy(),
+        )
+        .unwrap();
 
         // 3. Write production checkpoint_state.json metadata
         let disk_step = trainer_b.get_step_count();
@@ -1523,50 +1904,67 @@ mod tests {
         drop(trainer_b);
 
         // Fresh start: reload from production disk checkpoint layout
-        let reloaded_weights = crate::safetensors::load_safetensors(&sf_path.to_string_lossy()).unwrap();
+        let reloaded_weights =
+            crate::safetensors::load_safetensors(&sf_path.to_string_lossy()).unwrap();
         let reloaded_state_raw = std::fs::read_to_string(&state_path).unwrap();
         let reloaded_state: serde_json::Value = serde_json::from_str(&reloaded_state_raw).unwrap();
         let reloaded_step = reloaded_state["step"].as_u64().unwrap();
 
-        let reloaded_opt_tensors = crate::safetensors::load_safetensors(&opt_path.to_string_lossy()).unwrap();
+        let reloaded_opt_tensors =
+            crate::safetensors::load_safetensors(&opt_path.to_string_lossy()).unwrap();
         let mut reloaded_moments_map: HashMap<String, (Vec<f32>, Vec<f32>)> = HashMap::new();
         for (tensor_name, tensor_data) in reloaded_opt_tensors {
             if let Some(prefix) = tensor_name.strip_suffix(".adam_m") {
-                reloaded_moments_map.entry(prefix.to_string()).or_insert_with(|| (Vec::new(), Vec::new())).0 = tensor_data;
+                reloaded_moments_map
+                    .entry(prefix.to_string())
+                    .or_insert_with(|| (Vec::new(), Vec::new()))
+                    .0 = tensor_data;
             } else if let Some(prefix) = tensor_name.strip_suffix(".adam_v") {
-                reloaded_moments_map.entry(prefix.to_string()).or_insert_with(|| (Vec::new(), Vec::new())).1 = tensor_data;
+                reloaded_moments_map
+                    .entry(prefix.to_string())
+                    .or_insert_with(|| (Vec::new(), Vec::new()))
+                    .1 = tensor_data;
             }
         }
 
+        // Assert bit-for-bit equality of reloaded tensors before resuming
+        assert_eq!(reloaded_weights, disk_weights);
+        assert_eq!(reloaded_moments_map, disk_opt);
+
         // Initialize fresh trainer_c
-        let mut trainer_c = match init_test_gpu("test_gpu_checkpoint_full_disk_roundtrip_equivalence_C") {
-            Some(t) => t,
-            None => {
-                let _ = std::fs::remove_dir_all(&temp_dir);
-                return;
-            }
-        };
+        let mut trainer_c =
+            match init_test_gpu("test_gpu_checkpoint_full_disk_roundtrip_equivalence_C") {
+                Some(t) => t,
+                None => {
+                    let _ = std::fs::remove_dir_all(&temp_dir);
+                    return;
+                }
+            };
         trainer_c.register_weights(&reloaded_weights).unwrap();
-        trainer_c.load_optimizer_state(&reloaded_moments_map).unwrap();
+        trainer_c
+            .load_optimizer_state(&reloaded_moments_map)
+            .unwrap();
         trainer_c.set_step_count(reloaded_step);
 
         for g in &grads_history[5..10] {
             trainer_c.accumulate_gradient("dense.weight", g).unwrap();
-            trainer_c.step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0).unwrap();
+            trainer_c
+                .step_adamw(1e-3, 0.9, 0.999, 1e-8, 0.01, 1.0)
+                .unwrap();
         }
         let weights_c = trainer_c.download_weights().unwrap();
 
+        // Assert strict bit-for-bit equality after disk roundtrip and 5 resumed steps
         let wa = &weights_a["dense.weight"];
         let wc = &weights_c["dense.weight"];
         for i in 0..n {
-            let diff = (wa[i] - wc[i]).abs();
-            assert!(
-                diff < 1e-6,
-                "Disk checkpoint roundtrip mismatch at index {}: continuous={}, resumed={}, diff={}",
+            assert_eq!(
+                wa[i].to_bits(),
+                wc[i].to_bits(),
+                "Disk checkpoint roundtrip bit-for-bit mismatch at index {}: continuous={}, resumed={}",
                 i,
                 wa[i],
-                wc[i],
-                diff
+                wc[i]
             );
         }
 

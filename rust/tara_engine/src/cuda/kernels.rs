@@ -1447,3 +1447,208 @@ $LIN_BWD_IN_F16_DONE:
     ret;
 }
 "#;
+
+/// Statically validates every `.visible .entry` kernel in a PTX module string to ensure:
+/// 1. Every register reference (`%p`, `%h`, `%r`, `%rd`, `%f`) is explicitly declared via `.reg`.
+/// 2. No undeclared symbolic register names or suffixes (such as `%rd8_w` or `%rd9_w`) exist.
+/// 3. Every parameterized register index (e.g. `%rd10` under `.reg .b64 %rd<12>`) is strictly `< N`.
+/// Returns the number of validated `.visible .entry` kernels on success.
+pub fn validate_ptx_registers(ptx: &str) -> Result<usize, String> {
+    use std::collections::{HashMap, HashSet};
+
+    let mut kernel_count = 0usize;
+    let mut current_kernel: Option<String> = None;
+    let mut in_body = false;
+    // prefix -> max_exclusive_index (for parameterized %prefix<N>)
+    let mut reg_bounds: HashMap<String, usize> = HashMap::new();
+    // exact scalar register names (e.g. "%p", "%f0", "%h0")
+    let mut exact_regs: HashSet<String> = HashSet::new();
+
+    for (line_idx, raw_line) in ptx.lines().enumerate() {
+        let line_no = line_idx + 1;
+        let line = raw_line.split("//").next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix(".visible .entry ") {
+            let name = rest
+                .split(|c: char| c == '(' || c.is_whitespace())
+                .next()
+                .unwrap_or("")
+                .trim();
+            if name.is_empty() {
+                return Err(format!("Line {line_no}: empty kernel entry name"));
+            }
+            current_kernel = Some(name.to_string());
+            in_body = line.contains('{');
+            reg_bounds.clear();
+            exact_regs.clear();
+            continue;
+        }
+
+        if current_kernel.is_some() && !in_body {
+            if line.contains('{') {
+                in_body = true;
+            }
+            continue;
+        }
+
+        let Some(k_name) = current_kernel.as_ref() else {
+            continue;
+        };
+
+        if line == "}" {
+            kernel_count += 1;
+            current_kernel = None;
+            in_body = false;
+            continue;
+        }
+
+        if line.starts_with(".reg ") {
+            // Example: ".reg .b64 %rd<12>;" or ".reg .pred %p;" or ".reg .f32 %f0;"
+            let decl = line.trim_end_matches(';').trim();
+            let reg_token = decl
+                .split_whitespace()
+                .last()
+                .ok_or_else(|| format!("Kernel '{k_name}' line {line_no}: malformed .reg"))?;
+            if !reg_token.starts_with('%') {
+                return Err(format!(
+                    "Kernel '{k_name}' line {line_no}: register declaration '{reg_token}' must start with '%'"
+                ));
+            }
+            if let Some(lt_pos) = reg_token.find('<') {
+                let gt_pos = reg_token.find('>').ok_or_else(|| {
+                    format!("Kernel '{k_name}' line {line_no}: unclosed '<' in '{reg_token}'")
+                })?;
+                let prefix = &reg_token[..lt_pos];
+                let count_str = &reg_token[lt_pos + 1..gt_pos];
+                let count: usize = count_str.parse().map_err(|_| {
+                    format!(
+                        "Kernel '{k_name}' line {line_no}: invalid register count '{count_str}' in '{reg_token}'"
+                    )
+                })?;
+                reg_bounds.insert(prefix.to_string(), count);
+            } else {
+                exact_regs.insert(reg_token.to_string());
+            }
+            continue;
+        }
+
+        // Scan instruction line for %register tokens
+        for token in line.split(|c: char| {
+            c.is_whitespace() || matches!(c, ',' | '[' | ']' | ';' | '(' | ')' | '@')
+        }) {
+            let tok = token.trim_start_matches('!');
+            if !tok.starts_with('%') {
+                continue;
+            }
+            // Built-in PTX special registers
+            if matches!(
+                tok,
+                "%ctaid.x"
+                    | "%ctaid.y"
+                    | "%ctaid.z"
+                    | "%ntid.x"
+                    | "%ntid.y"
+                    | "%ntid.z"
+                    | "%tid.x"
+                    | "%tid.y"
+                    | "%tid.z"
+            ) {
+                continue;
+            }
+
+            if exact_regs.contains(tok) {
+                continue;
+            }
+
+            // Split into prefix (alphabetic after '%') and numeric index
+            let after_pct = &tok[1..];
+            let num_start = after_pct
+                .find(|c: char| !c.is_ascii_alphabetic())
+                .ok_or_else(|| {
+                    format!(
+                        "Kernel '{k_name}' line {line_no}: undeclared scalar register '{tok}'"
+                    )
+                })?;
+            let prefix = format!("%{}", &after_pct[..num_start]);
+            let index_str = &after_pct[num_start..];
+
+            // Reject any symbolic suffix like "_w" in "%rd8_w"
+            if !index_str.chars().all(|c| c.is_ascii_digit()) {
+                return Err(format!(
+                    "Kernel '{k_name}' line {line_no}: invalid or undeclared symbolic register '{tok}'"
+                ));
+            }
+
+            let idx: usize = index_str.parse().map_err(|_| {
+                format!("Kernel '{k_name}' line {line_no}: invalid register index in '{tok}'")
+            })?;
+
+            let Some(&bound) = reg_bounds.get(&prefix) else {
+                return Err(format!(
+                    "Kernel '{k_name}' line {line_no}: register family '{prefix}' used in '{tok}' was not declared"
+                ));
+            };
+
+            if idx >= bound {
+                return Err(format!(
+                    "Kernel '{k_name}' line {line_no}: register '{tok}' out of declared bounds '{prefix}<{bound}>' (valid: 0..{})",
+                    bound.saturating_sub(1)
+                ));
+            }
+        }
+    }
+
+    if let Some(unclosed) = current_kernel {
+        return Err(format!("Kernel '{unclosed}' was not properly closed with '}}'"));
+    }
+
+    Ok(kernel_count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_all_ptx_kernels_register_bounds_and_syntax() {
+        let count = validate_ptx_registers(PTX_TARA_KERNELS)
+            .expect("All PTX_TARA_KERNELS must have valid, in-bounds register declarations");
+        assert_eq!(count, 23, "All 23 CUDA PTX kernels must be validated");
+        assert!(!PTX_TARA_KERNELS.contains("%rd8_w"));
+        assert!(!PTX_TARA_KERNELS.contains("%rd9_w"));
+    }
+
+    #[test]
+    fn test_ptx_validator_rejects_undeclared_symbolic_and_out_of_bounds_registers() {
+        let bad_symbolic = r#"
+.visible .entry bad_kernel(
+    .param .u64 p_in
+) {
+    .reg .b64 %rd<10>;
+    mul.wide.u32 %rd8_w, %r0, 2;
+    ret;
+}
+"#;
+        let err1 = validate_ptx_registers(bad_symbolic).unwrap_err();
+        assert!(err1.contains("%rd8_w"), "Must reject symbolic suffix %rd8_w: {err1}");
+
+        let bad_bounds = r#"
+.visible .entry oob_kernel(
+    .param .u64 p_in
+) {
+    .reg .b64 %rd<10>;
+    ld.param.u64 %rd10, [p_in];
+    ret;
+}
+"#;
+        let err2 = validate_ptx_registers(bad_bounds).unwrap_err();
+        assert!(
+            err2.contains("out of declared bounds"),
+            "Must reject %rd10 when %rd<10> is declared: {err2}"
+        );
+    }
+}
+

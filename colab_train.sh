@@ -55,14 +55,27 @@ cargo run --release --bin tara_training_stages -- \
 
 echo "Stage 2 Completed Successfully!"
 
-# 5. Checkpoint Preservation to Google Drive (Gmail Account Storage)
+# 5. Execute Neural & World Model Joint Co-Training (Mode: Both)
+echo "=== [WORLD MODEL & NEURAL JOINT CO-TRAINING (MODE: BOTH)] ==="
+cargo run --release --bin manual_trainer -- \
+    --mode both \
+    --steps 100 \
+    --batch-size 4 \
+    --dataset storage/datasets/tara_dataset_filtered/canonical
+
+echo "Neural & World Model Joint Training Completed Successfully!"
+
+# 6. Checkpoint Preservation to Google Drive (Gmail Account Storage)
 GDRIVE_DEST="/content/drive/MyDrive/TARA_CHECKPOINTS"
 if [ -d "/content/drive/MyDrive" ]; then
     echo "------------------------------------------------------------------------------"
-    echo "[GDRIVE BACKUP] Google Drive detected. Archiving checkpoints to your Gmail Drive..."
+    echo "[GDRIVE BACKUP] Google Drive detected. Archiving all checkpoints (Neural + World Model)..."
     mkdir -p "$GDRIVE_DEST"
     cp -r storage/models/checkpoints/* "$GDRIVE_DEST/"
-    echo "[GDRIVE BACKUP] Successfully saved all checkpoints to: $GDRIVE_DEST"
+    if [ -d "manual_training/checkpoints" ]; then
+        cp -r manual_training/checkpoints/* "$GDRIVE_DEST/"
+    fi
+    echo "[GDRIVE BACKUP] Successfully saved Neural and World Model checkpoints to: $GDRIVE_DEST"
 else
     echo "[GDRIVE NOTICE] /content/drive/MyDrive not mounted. Checkpoints saved locally in Colab."
     echo "Tip: Run 'from google.colab import drive; drive.mount(\"/content/drive\")' to enable auto-sync."

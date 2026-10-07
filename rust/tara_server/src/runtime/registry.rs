@@ -7,13 +7,17 @@
 //! - Reusable dynamic registry with 10 lifecycle states.
 //! - Canonical runtime addition & authenticated retirement flows.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 pub const CANONICAL_MODEL_IDENTITY: &str = "TARA";
-pub const CANONICAL_MODEL_SHA256: &str = "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309";
+// MODEL_SHA is intentionally NOT hardcoded. The 118,080-parameter smoke-test model has been removed.
+// When a real production model is promoted via ModelRegistry::register_active_training(),
+// the promoted SHA is stored in versions_manifest.json and read at runtime.
+// UNREGISTERED sentinel prevents any stale SHA from being treated as valid.
+pub const CANONICAL_MODEL_SHA256_UNREGISTERED: &str = "NO_MODEL_REGISTERED";
 pub const CANONICAL_CONTRACT_VERSION: &str = "1.0.0";
 pub const CANONICAL_SECURITY_VERSION: &str = "1.0.0";
 
@@ -56,7 +60,7 @@ impl RuntimeRecord {
             implementation_version: "1.0.0".to_string(),
             model_identity: CANONICAL_MODEL_IDENTITY.to_string(),
             model_version: "1.0.0".to_string(),
-            model_sha: CANONICAL_MODEL_SHA256.to_string(),
+            model_sha: CANONICAL_MODEL_SHA256_UNREGISTERED.to_string(),
             contract_version: CANONICAL_CONTRACT_VERSION.to_string(),
             security_version: CANONICAL_SECURITY_VERSION.to_string(),
             supported_capabilities: vec![
@@ -78,18 +82,17 @@ pub struct DynamicRuntimeRegistry {
     runtimes: Arc<Mutex<HashMap<String, RuntimeRecord>>>,
 }
 
+impl Default for DynamicRuntimeRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DynamicRuntimeRegistry {
     pub fn new() -> Self {
         let mut map = HashMap::new();
-        // Default baseline: both Python and Rust registered and required
-        map.insert(
-            "python".to_string(),
-            RuntimeRecord::new("python", "Python", true),
-        );
-        map.insert(
-            "rust".to_string(),
-            RuntimeRecord::new("rust", "Rust", true),
-        );
+        // The application runtime is native Rust; model weights remain SafeTensors data.
+        map.insert("rust".to_string(), RuntimeRecord::new("rust", "Rust", true));
 
         Self {
             runtimes: Arc::new(Mutex::new(map)),
@@ -150,7 +153,9 @@ impl DynamicRuntimeRegistry {
         reason: &str,
     ) -> Result<Value, String> {
         if !creator_authenticated {
-            return Err("Runtime retirement requires authenticated creator authorization.".to_string());
+            return Err(
+                "Runtime retirement requires authenticated creator authorization.".to_string(),
+            );
         }
 
         let mut lock = self.runtimes.lock().unwrap();
@@ -176,8 +181,13 @@ impl DynamicRuntimeRegistry {
             if rec.model_identity != CANONICAL_MODEL_IDENTITY {
                 return (false, "Model identity mismatch".to_string(), json!({}));
             }
-            if rec.model_sha != CANONICAL_MODEL_SHA256 {
-                return (false, "Model SHA mismatch".to_string(), json!({}));
+            // Fail-closed: if no real model has been promoted, sentinel = NO_MODEL_REGISTERED
+            if rec.model_sha == CANONICAL_MODEL_SHA256_UNREGISTERED || rec.model_sha.is_empty() {
+                return (
+                    false,
+                    "No production model registered — promote a real model first".to_string(),
+                    json!({"model_sha": "NO_MODEL_REGISTERED"}),
+                );
             }
             if rec.contract_version != CANONICAL_CONTRACT_VERSION {
                 return (false, "Contract mismatch".to_string(), json!({}));
@@ -188,10 +198,14 @@ impl DynamicRuntimeRegistry {
             (
                 true,
                 "TARA_RUNTIME_READY".to_string(),
-                json!({ "model_sha": CANONICAL_MODEL_SHA256, "status": "VERIFIED" }),
+                json!({ "model_sha": rec.model_sha, "status": "VERIFIED" }),
             )
         } else {
-            (false, format!("Runtime '{}' not registered", runtime_id), json!({}))
+            (
+                false,
+                format!("Runtime '{}' not registered", runtime_id),
+                json!({}),
+            )
         }
     }
 

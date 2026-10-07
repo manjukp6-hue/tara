@@ -1,70 +1,20 @@
 {
-  "active_version": "TARA_PROMOTED_RUN_20260916_144324",
+  "active_version": null,
+  "model_status": "NO_MODEL_REGISTERED",
+  "note": "The 118,080-parameter smoke-test model (TARA_PROMOTED_RUN_20260916_144324) has been removed. It was a Cargo integration / smoke-test model only — never intended for production, inference, or deployment. The production TARA model has not yet been trained. Register a real trained model here before production deployment.",
   "rollback_history": [
     {
-      "version_id": "TARA_BASELINE",
-      "weights_sha256": "e4d79abbfd812e4a7310d2e63c76d11e3531ebb6146b5149b68a6b9204d4ee6d",
+      "version_id": "TARA_PROMOTED_RUN_20260916_144324",
+      "parameter_count": 118080,
       "timestamp": "2026-09-17T07:13:00Z",
-      "reason": "Official 8-gate promotion of RUN_20260916_144324"
+      "removal_reason": "Smoke-test model removed 2026-10-01. Was a 118K-parameter Cargo integration test model. Not production-grade.",
+      "status": "removed"
+    },
+    {
+      "version_id": "TARA_BASELINE",
+      "timestamp": "2026-09-15T11:59:07Z",
+      "status": "archived_weights_missing"
     }
   ],
-  "versions": {
-    "TARA_BASELINE": {
-      "version_id": "TARA_BASELINE",
-      "artifact_location": "storage/models/tara_baseline_archive",
-      "weights_sha256": "e4d79abbfd812e4a7310d2e63c76d11e3531ebb6146b5149b68a6b9204d4ee6d",
-      "config": {},
-      "parameter_count": 118080,
-      "growth_type": null,
-      "parent_model_version": null,
-      "shard_count": 1,
-      "tokenizer_vocab_size": 344,
-      "compatible_capabilities": [
-        "*"
-      ],
-      "metrics": {},
-      "status": "archived_baseline",
-      "registered_at": "2026-09-15T11:59:07.902180+00:00"
-    },
-    "TARA_PROMOTED_RUN_20260916_144324": {
-      "version_id": "TARA_PROMOTED_RUN_20260916_144324",
-      "artifact_location": "storage/models/tara",
-      "weights_sha256": "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309",
-      "config": {},
-      "parameter_count": 118080,
-      "growth_type": null,
-      "parent_model_version": null,
-      "shard_count": 1,
-      "tokenizer_vocab_size": 344,
-      "compatible_capabilities": [
-        "*"
-      ],
-      "metrics": {
-        "candidate_validation_loss": 0.5642,
-        "candidate_test_loss": 0.4922,
-        "capability_score": 0.9605,
-        "source_run": "RUN_20260916_144324",
-        "epoch": 102,
-        "step": 9888,
-        "pre_promotion_baseline_sha256": "e4d79abbfd812e4a7310d2e63c76d11e3531ebb6146b5149b68a6b9204d4ee6d"
-      },
-      "status": "active",
-      "registered_at": "2026-09-17T07:13:00+00:00"
-    },
-    "TARA-TEST-v1.5": {
-      "version_id": "TARA-TEST-v1.5",
-      "artifact_location": "storage/models/test-v1.5",
-      "weights_sha256": "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-      "config": {},
-      "parameter_count": 118080,
-      "growth_type": null,
-      "parent_model_version": null,
-      "shard_count": 1,
-      "tokenizer_vocab_size": 344,
-      "compatible_capabilities": [],
-      "metrics": {},
-      "status": "registered",
-      "registered_at": "2026-09-26T08:05:40.342589+00:00"
-    }
-  }
+  "versions": {}
 }

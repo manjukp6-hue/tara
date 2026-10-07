@@ -1,0 +1,47 @@
+{
+  "id": "voice_and_interaction",
+  "name": "Voice Interaction & Barge-In Coordinator",
+  "purpose": "Multilingual wake-word spotting, acoustic energy tracking, barge-in cancellation interlock, and voice token streaming.",
+  "implementation_files": [
+    "rust/tara_server/src/voice/mod.rs",
+    "rust/tara_server/src/access/factors.rs"
+  ],
+  "primary_structs": [
+    "WakeWordSpotter",
+    "BargeInCoordinator",
+    "VoiceTokenStreamer"
+  ],
+  "registration": "WakeWordSpotter::new compiles acoustic wake templates; BargeInCoordinator::new.",
+  "discovery": "Real-time audio frame buffer inspection.",
+  "execution": "WakeWordSpotter::process_audio_frame detects wake trigger; BargeInCoordinator interrupts TTS.",
+  "storage": "In-memory circular audio buffers.",
+  "memory_link": "Voice tone and speaker metadata associated with episode.",
+  "learning_link": "Acoustic wake thresholds dynamically calibrate to background ambient noise.",
+  "self_evolution_link": "Acoustic model parameters updated from confirmed wake events.",
+  "curriculum_link": "Voice interaction examples included in multimodal dataset training.",
+  "api_endpoints": [
+    "POST /api/voice/audio_frame",
+    "POST /api/voice/barge_in"
+  ],
+  "safety_gates": [
+    "Hardware audio interlock prevents self-wake from speaker echo",
+    "Barge-in immediately halts outgoing audio generation to conserve compute"
+  ],
+  "test_suites": [
+    "rust/tara_server/src/voice/mod.rs::tests"
+  ],
+  "lifecycle": {
+    "1_listen": "Continuous audio frame stream ingested from microphone client",
+    "2_energy": "Compute spectral energy and voice activity detection (VAD)",
+    "3_spot": "WakeWordSpotter evaluates wake probability against multilingual templates",
+    "4_trigger": "On positive wake detection, activate TaraBrain conversational session",
+    "5_barge_in": "If user speaks while Tara is generating response, trigger immediate interrupt",
+    "6_stream": "Synthesized voice tokens streamed back to client audio renderer"
+  },
+  "upstream_capabilities": [
+    "access_and_security"
+  ],
+  "downstream_capabilities": [
+    "cognitive_loop"
+  ]
+}

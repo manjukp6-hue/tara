@@ -16,10 +16,10 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use rsa::{BigUint, RsaPublicKey, pkcs1v15::VerifyingKey};
+use base64::Engine;
 use rsa::signature::Verifier;
+use rsa::{pkcs1v15::VerifyingKey, BigUint, RsaPublicKey};
 use serde_json::Value;
 use sha2::Sha256;
 
@@ -28,7 +28,8 @@ pub const GOOGLE_JWKS_URL: &str = "https://www.googleapis.com/oauth2/v3/certs";
 
 fn decode_b64url(s: &str) -> Result<Vec<u8>, String> {
     let clean = s.trim().trim_end_matches('=');
-    URL_SAFE_NO_PAD.decode(clean.as_bytes())
+    URL_SAFE_NO_PAD
+        .decode(clean.as_bytes())
         .map_err(|e| format!("Base64URL decode failed: {}", e))
 }
 
@@ -76,7 +77,7 @@ impl GoogleAuthService {
     pub fn create_auth_nonce(&self, ttl_seconds: f64) -> String {
         let mut bytes = [0u8; 32];
         rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
-        let nonce = URL_SAFE_NO_PAD.encode(&bytes);
+        let nonce = URL_SAFE_NO_PAD.encode(bytes);
         let now = Self::now_seconds();
 
         let mut nonces = self.pending_nonces.lock().unwrap();
@@ -93,9 +94,7 @@ impl GoogleAuthService {
             .output();
 
         let json_str = match output {
-            Ok(out) if out.status.success() => {
-                String::from_utf8_lossy(&out.stdout).to_string()
-            }
+            Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).to_string(),
             _ => return false,
         };
 
@@ -111,7 +110,9 @@ impl GoogleAuthService {
                             k.get("n").and_then(|v| v.as_str()),
                             k.get("e").and_then(|v| v.as_str()),
                         ) {
-                            if let (Ok(n_bytes), Ok(e_bytes)) = (decode_b64url(n_b64), decode_b64url(e_b64)) {
+                            if let (Ok(n_bytes), Ok(e_bytes)) =
+                                (decode_b64url(n_b64), decode_b64url(e_b64))
+                            {
                                 let n = BigUint::from_bytes_be(&n_bytes);
                                 let e = BigUint::from_bytes_be(&e_bytes);
                                 if let Ok(rsa_key) = RsaPublicKey::new(n, e) {
@@ -156,7 +157,9 @@ impl GoogleAuthService {
             return Err(format!("Unsupported algorithm '{}', expected RS256", alg));
         }
 
-        let kid = header.get("kid").and_then(|v| v.as_str())
+        let kid = header
+            .get("kid")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| "Missing 'kid' in JWT header".to_string())?;
 
         // 2. Obtain RSA Public Key for kid
@@ -171,7 +174,9 @@ impl GoogleAuthService {
                 // Key not in cache: attempt refresh from Google JWKS
                 self.fetch_google_jwks();
                 let cache = self.key_cache.lock().unwrap();
-                cache.get(kid).cloned()
+                cache
+                    .get(kid)
+                    .cloned()
                     .ok_or_else(|| format!("Unknown kid '{}' in JWKS and local cache", kid))?
             }
         };
@@ -182,8 +187,11 @@ impl GoogleAuthService {
         let rsa_sig = rsa::pkcs1v15::Signature::try_from(signature_bytes.as_slice())
             .map_err(|e| format!("Invalid RSA signature structure: {:?}", e))?;
 
-        verifying_key.verify(signing_input.as_bytes(), &rsa_sig)
-            .map_err(|_| "Cryptographic RS256 signature verification failed against Google JWKS".to_string())?;
+        verifying_key
+            .verify(signing_input.as_bytes(), &rsa_sig)
+            .map_err(|_| {
+                "Cryptographic RS256 signature verification failed against Google JWKS".to_string()
+            })?;
 
         // 4. Verify Issuer
         let iss = payload.get("iss").and_then(|v| v.as_str()).unwrap_or("");
@@ -195,7 +203,10 @@ impl GoogleAuthService {
         if let Some(ref exp_aud) = self.expected_client_id {
             let aud = payload.get("aud").and_then(|v| v.as_str()).unwrap_or("");
             if aud != exp_aud {
-                return Err(format!("Audience mismatch: expected '{}', got '{}'", exp_aud, aud));
+                return Err(format!(
+                    "Audience mismatch: expected '{}', got '{}'",
+                    exp_aud, aud
+                ));
             }
         }
 
@@ -203,17 +214,24 @@ impl GoogleAuthService {
         let clock_skew = 10.0;
 
         // 6. Verify Expiry
-        let exp = payload.get("exp").and_then(|v| v.as_f64())
+        let exp = payload
+            .get("exp")
+            .and_then(|v| v.as_f64())
             .ok_or_else(|| "Missing 'exp' timestamp".to_string())?;
         if now > (exp + clock_skew) {
             return Err(format!("Token expired: exp={}, now={}", exp, now));
         }
 
         // 7. Verify Issued-At
-        let iat = payload.get("iat").and_then(|v| v.as_f64())
+        let iat = payload
+            .get("iat")
+            .and_then(|v| v.as_f64())
             .ok_or_else(|| "Missing 'iat' timestamp".to_string())?;
         if iat > (now + clock_skew) {
-            return Err(format!("Token issued in the future: iat={}, now={}", iat, now));
+            return Err(format!(
+                "Token issued in the future: iat={}, now={}",
+                iat, now
+            ));
         }
 
         // 8. Verify email_verified
@@ -223,7 +241,9 @@ impl GoogleAuthService {
             _ => false,
         };
         if !email_verified {
-            return Err("Google account email is not verified (email_verified != true)".to_string());
+            return Err(
+                "Google account email is not verified (email_verified != true)".to_string(),
+            );
         }
 
         // 9. Verify non-empty subject
@@ -246,16 +266,29 @@ impl GoogleAuthService {
                         *consumed = true;
                     }
                 }
-                Some(tn) => return Err(format!("Nonce mismatch: expected '{}', got '{}'", exp_n, tn)),
+                Some(tn) => {
+                    return Err(format!(
+                        "Nonce mismatch: expected '{}', got '{}'",
+                        exp_n, tn
+                    ))
+                }
                 None => return Err("Expected nonce was not provided in token".to_string()),
             }
         }
 
         // 11. Verify Email matches authorized email if set
         if let Some(ref auth_email) = self.authorized_email {
-            let email = payload.get("email").and_then(|v| v.as_str()).unwrap_or("").trim().to_lowercase();
+            let email = payload
+                .get("email")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_lowercase();
             if &email != auth_email {
-                return Err(format!("Email mismatch: token is for '{}', authorized creator is '{}'", email, auth_email));
+                return Err(format!(
+                    "Email mismatch: token is for '{}', authorized creator is '{}'",
+                    email, auth_email
+                ));
             }
         }
 

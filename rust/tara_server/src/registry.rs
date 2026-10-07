@@ -21,6 +21,8 @@ pub enum RegistryError {
     AlreadyExists(String),
     #[error("Capability '{0}' not found")]
     NotFound(String),
+    #[error("Protected core capability '{0}' cannot be removed or altered")]
+    ProtectedCoreCapability(String),
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -168,16 +170,80 @@ impl CapabilityRegistry {
 
     fn register_builtins(reg: &Arc<CapabilityRegistry>) {
         let builtins: Vec<Capability> = vec![
-            Capability::new("cognition.respond", CapabilityCategory::Cognition, "Generate a natural-language response"),
-            Capability::new("memory.recall", CapabilityCategory::Memory, "Retrieve episodic memory"),
-            Capability::new("memory.record", CapabilityCategory::Memory, "Persist an episodic memory entry"),
-            Capability::new("reasoning.chain_of_thought", CapabilityCategory::Reasoning, "Multi-step chain-of-thought reasoning"),
-            Capability::new("tools.file_inspector", CapabilityCategory::Tools, "Inspect file metadata and preview"),
-            Capability::new("tools.hash_verifier", CapabilityCategory::Tools, "Verify SHA-256 hash of a file"),
-            Capability::new("skills.execute", CapabilityCategory::Skills, "Execute a named skill"),
-            Capability::new("learning.search_and_learn", CapabilityCategory::Learning, "Search web and absorb knowledge"),
-            Capability::new("security.lockdown", CapabilityCategory::Security, "Engage security lockdown"),
-            Capability::new("engineering.code_assist", CapabilityCategory::Engineering, "Assist with code generation and review"),
+            Capability::new(
+                "cognition.respond",
+                CapabilityCategory::Cognition,
+                "Generate a natural-language response",
+            ),
+            Capability::new(
+                "memory.recall",
+                CapabilityCategory::Memory,
+                "Retrieve episodic memory",
+            ),
+            Capability::new(
+                "memory.record",
+                CapabilityCategory::Memory,
+                "Persist an episodic memory entry",
+            ),
+            Capability::new(
+                "reasoning.chain_of_thought",
+                CapabilityCategory::Reasoning,
+                "Multi-step chain-of-thought reasoning",
+            ),
+            Capability::with_handler(
+                "tools.file_inspector",
+                CapabilityCategory::Tools,
+                "Inspect file metadata and preview",
+                crate::tools_registry::tool_file_inspector,
+            ),
+            Capability::with_handler(
+                "tools.hash_verifier",
+                CapabilityCategory::Tools,
+                "Verify SHA-256 hash of a file",
+                crate::tools_registry::tool_hash_verifier,
+            ),
+            Capability::with_handler(
+                "skills.execute",
+                CapabilityCategory::Skills,
+                "Execute a named skill",
+                |params| {
+                    let skill_name = params
+                        .get("skill")
+                        .or_else(|| params.get("skill_name"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if skill_name.is_empty() {
+                        serde_json::json!({ "status": "ERROR", "error": "skill name is required" })
+                    } else {
+                        let engine =
+                            crate::skills::SkillEngine::new("storage/skills", "TARA/SKILLS");
+                        engine.execute_skill(&skill_name, params)
+                    }
+                },
+            ),
+            Capability::new(
+                "learning.search_and_learn",
+                CapabilityCategory::Learning,
+                "Search web and absorb knowledge",
+            ),
+            Capability::with_handler(
+                "security.lockdown",
+                CapabilityCategory::Security,
+                "Engage security lockdown",
+                |_params| {
+                    serde_json::json!({
+                        "status": "LOCKDOWN_ENGAGED",
+                        "policy": "STRICT_RESTRICTED",
+                        "message": "Emergency system security lockdown active"
+                    })
+                },
+            ),
+            Capability::new(
+                "engineering.code_assist",
+                CapabilityCategory::Engineering,
+                "Assist with code generation and review",
+            ),
         ];
         let mut guard = reg.inner.lock().expect("registry lock poisoned");
         for cap in builtins {
@@ -196,9 +262,38 @@ impl CapabilityRegistry {
     }
 
     /// Register or overwrite a capability (upsert semantics).
-    pub fn upsert_capability(&self, cap: Capability) {
+    /// Core security and creator authority capabilities cannot be overwritten.
+    pub fn upsert_capability(&self, cap: Capability) -> Result<(), RegistryError> {
+        if Self::is_protected_capability(&cap.id) {
+            return Err(RegistryError::ProtectedCoreCapability(cap.id.clone()));
+        }
         let mut guard = self.inner.lock().expect("registry lock poisoned");
         guard.insert(cap.id.clone(), cap);
+        Ok(())
+    }
+
+    /// Remove an unneeded capability from the registry.
+    /// Core security capabilities and creator authority CANNOT be removed.
+    pub fn remove_capability(&self, id: &str) -> Result<(), RegistryError> {
+        if Self::is_protected_capability(id) {
+            return Err(RegistryError::ProtectedCoreCapability(id.to_string()));
+        }
+        let mut guard = self.inner.lock().expect("registry lock poisoned");
+        if guard.remove(id).is_none() {
+            return Err(RegistryError::NotFound(id.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Checks if a capability is a protected core security or authority component.
+    pub fn is_protected_capability(id: &str) -> bool {
+        let id_lower = id.to_lowercase();
+        id_lower.starts_with("security.")
+            || id_lower.contains("authority")
+            || id_lower.contains("creator")
+            || id_lower.contains("safety")
+            || id_lower.contains("rules")
+            || id_lower == "cognition.respond"
     }
 
     /// Retrieve a snapshot of a capability by its ID.

@@ -1,7 +1,5 @@
-//! protocol.rs
-//! 
 //! Standard JSON-RPC & Inter-Process Protocol between TARA Core and Neural Model.
-//! Guarantees that the Python/SafeTensors Model cannot bypass Core security gates.
+//! Guarantees that the Native Rust SafeTensors Neural Model cannot bypass Core security gates.
 
 use serde::{Deserialize, Serialize};
 

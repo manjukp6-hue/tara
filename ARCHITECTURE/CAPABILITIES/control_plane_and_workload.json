@@ -1,0 +1,74 @@
+{
+  "id": "control_plane_and_workload",
+  "name": "Dynamic Compute Control Plane & Workload Routing",
+  "purpose": "Distributed worker clustering, zero-cost compute routing, device capability negotiation, and multi-node state synchronization.",
+  "implementation_files": [
+    "rust/tara_server/src/control_plane/mod.rs",
+    "rust/tara_server/src/workload/mod.rs",
+    "rust/tara_server/src/auto_connect.rs",
+    "rust/tara_server/src/engine_system.rs",
+    "rust/tara_engine/src/device_detector.rs",
+    "rust/tara_engine/src/project_link_engine.rs",
+    "rust/tara_engine/src/github_adapter.rs",
+    "rust/tara_engine/src/bin/tara_github_sync.rs"
+  ],
+  "primary_structs": [
+    "ControlPlane",
+    "WorkloadDistributor",
+    "AutoConnectSyncEngine",
+    "DynamicEngineSystem",
+    "WorkerNodeRegistry",
+    "DeviceCapabilityDetector",
+    "DeviceProfile",
+    "GpuInfo",
+    "ComputationEngine",
+    "ProjectLinkEngine",
+    "GitHubAdapter",
+    "GitHubAdapterConfig",
+    "GitHubValidationReport",
+    "GitHubExportManifest"
+  ],
+  "registration": "ControlPlane::register_worker registers cluster nodes; AutoConnectSyncEngine::connect; DeviceCapabilityDetector::detect builds live DeviceProfile on startup; ProjectLinkEngine::build_full_index maps all code relationships.",
+  "discovery": "WorkerNodeRegistry tracks heartbeat pings and GPU memory availability; DeviceCapabilityDetector::detect probes live hardware capabilities; ProjectLinkEngine resolves symbols and in/out links.",
+  "execution": "WorkloadDistributor::route_task dispatches computation to optimal available worker based on DeviceProfile; ProjectLinkEngine reconciles code deltas on file events.",
+  "storage": "storage/persistence/control_plane/, ARCHITECTURE/SOURCE_INDEX.json, ARCHITECTURE/RELATIONSHIP_GRAPH.json",
+  "memory_link": "Worker cluster state synced with centralized memory hub.",
+  "learning_link": "Heavy training tasks distributed to high-VRAM cluster workers; DeviceProfile selects CUDA or CPU backend.",
+  "self_evolution_link": "Model weights distributed across cluster shards during expansion; LoadingPolicyEngine selects optimal model loading strategy from DeviceProfile; ProjectLinkEngine tracks code evolution links.",
+  "curriculum_link": "Curriculum batches partitioned across available compute nodes.",
+  "api_endpoints": [
+    "POST /api/control_plane/register_worker",
+    "GET /api/control_plane/cluster_status",
+    "POST /api/control_plane/heartbeat"
+  ],
+  "safety_gates": [
+    "Zero user compute cost mandate: tasks executed strictly on authorized local/cluster nodes",
+    "Worker authentication tokens required before joining execution mesh",
+    "DeviceCapabilityDetector detects GPU availability at runtime — no hardcoded device assumptions",
+    "ProjectLinkEngine validates relationship graph and triggers atomic rollback on corrupted links",
+    "GitHubAdapter enforces POSIX paths, unblocked CI, zero compiler warnings, and zero secrets before GitHub push"
+  ],
+  "test_suites": [
+    "rust/tara_server/src/control_plane/mod.rs::tests",
+    "rust/tara_server/src/auto_connect.rs::tests",
+    "rust/tara_engine/src/project_link_engine.rs::tests",
+    "rust/tara_engine/src/bin/verify_project_link_engine.rs",
+    "rust/tara_engine/src/bin/tara_github_sync.rs"
+  ],
+  "lifecycle": {
+    "0_detect": "DeviceCapabilityDetector::detect probes live CPU, GPU arch, VRAM, and supported backends",
+    "1_heartbeat": "Worker nodes submit capability profile (CPU, VRAM, GPU arch) via DeviceProfile",
+    "2_register": "ControlPlane registers node in dynamic cluster topology",
+    "3_dispatch": "WorkloadDistributor receives task and evaluates compute requirements",
+    "4_route": "Route inference/training workload to optimal node with lowest latency and best DeviceProfile match",
+    "5_monitor": "Monitor task execution and re-route on worker failure",
+    "6_sync": "AutoConnectSyncEngine syncs resulting weights and logs across cluster"
+  },
+  "upstream_capabilities": [
+    "access_and_security"
+  ],
+  "downstream_capabilities": [
+    "model_and_inference",
+    "training_and_self_evolution"
+  ]
+}

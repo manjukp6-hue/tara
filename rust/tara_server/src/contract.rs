@@ -1,14 +1,16 @@
 //! Canonical Contract Layer for TARA Server.
 //!
-//! Provides canonical data structures matching TARA/CONTRACTS/v1/schemas.json
-//! and python/tara_core/contracts.py for zero-drift dual-runtime communication.
+//! Provides canonical data structures matching TARA/CONTRACTS/v1/schemas.json.
 
 use serde::{Deserialize, Serialize};
 
 pub const CANONICAL_PROTOCOL_VERSION: &str = "1.0.0";
 pub const CANONICAL_MODEL_IDENTITY: &str = "TARA";
-pub const CANONICAL_MODEL_SHA256: &str = "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309";
-pub const CANONICAL_PARAM_COUNT: usize = 118080;
+// NOTE: CANONICAL_MODEL_SHA256 and CANONICAL_PARAM_COUNT are intentionally removed.
+// The 118,080-parameter smoke-test model they referenced has been deleted.
+// The production TARA model SHA and parameter count are read at runtime from
+// ModelRegistry::get_active_version_sha() and from TaraForCausalLM::total_params().
+// Do NOT hardcode these values until a real production model is promoted.
 pub const TARA_WORKER_TOKEN_HEADER: &str = "X-Tara-Worker-Token";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -32,11 +34,21 @@ impl Default for AuthContext {
     }
 }
 
-fn default_max_tokens() -> usize { 150 }
-fn default_temperature() -> f32 { 0.7 }
-fn default_top_k() -> usize { 50 }
-fn default_top_p() -> f32 { 0.9 }
-fn default_repetition_penalty() -> f32 { 1.1 }
+fn default_max_tokens() -> usize {
+    150
+}
+fn default_temperature() -> f32 {
+    0.7
+}
+fn default_top_k() -> usize {
+    50
+}
+fn default_top_p() -> f32 {
+    0.9
+}
+fn default_repetition_penalty() -> f32 {
+    1.1
+}
 fn default_stop_tokens() -> Vec<String> {
     vec!["<|im_end|>".to_string(), "<|pad|>".to_string()]
 }
@@ -74,7 +86,7 @@ impl CanonicalInferenceRequest {
         Self {
             request_id: request_id.into(),
             prompt: prompt.into(),
-            expected_model_checksum: CANONICAL_MODEL_SHA256.to_string(),
+            expected_model_checksum: String::new(),
             job_id: None,
             max_tokens: default_max_tokens(),
             temperature: default_temperature(),
@@ -93,12 +105,6 @@ impl CanonicalInferenceRequest {
         }
         if self.prompt.trim().is_empty() {
             return Err("Missing required prompt".to_string());
-        }
-        if !self.expected_model_checksum.eq_ignore_ascii_case(CANONICAL_MODEL_SHA256) {
-            return Err(format!(
-                "Checksum mismatch: expected {}, got {}",
-                CANONICAL_MODEL_SHA256, self.expected_model_checksum
-            ));
         }
         Ok(())
     }
@@ -161,7 +167,13 @@ pub struct CanonicalErrorResponse {
 }
 
 impl CanonicalErrorResponse {
-    pub fn new(request_id: impl Into<String>, error_code: impl Into<String>, message: impl Into<String>, retryable: bool, failover_advised: bool) -> Self {
+    pub fn new(
+        request_id: impl Into<String>,
+        error_code: impl Into<String>,
+        message: impl Into<String>,
+        retryable: bool,
+        failover_advised: bool,
+    ) -> Self {
         Self {
             request_id: request_id.into(),
             status: "ERROR".to_string(),
@@ -184,7 +196,9 @@ pub struct VoiceTranscribeRequest {
     pub language: String,
 }
 
-fn default_voice_lang() -> String { "en-US".to_string() }
+fn default_voice_lang() -> String {
+    "en-US".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceTranscribeResponse {
@@ -208,7 +222,9 @@ pub struct VoiceSynthesizeRequest {
     pub volume: Option<i32>,
 }
 
-fn default_voice_lang_short() -> String { "en".to_string() }
+fn default_voice_lang_short() -> String {
+    "en".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceConverseRequest {
@@ -273,8 +289,12 @@ pub struct CreatorSetupRequest {
     pub device_public_key: Option<String>,
 }
 
-fn default_true() -> bool { true }
-fn default_primary_device_name() -> String { "Primary PC".to_string() }
+fn default_true() -> bool {
+    true
+}
+fn default_primary_device_name() -> String {
+    "Primary PC".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatorSetupResponse {
@@ -301,7 +321,9 @@ pub struct DeviceRegisterRequest {
     pub device_name: String,
 }
 
-fn default_device_name() -> String { "Secondary PC".to_string() }
+fn default_device_name() -> String {
+    "Secondary PC".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceRevokeRequest {
@@ -315,7 +337,9 @@ pub struct DeviceRevokeRequest {
     pub reason: String,
 }
 
-fn default_revoke_reason() -> String { "manual_revocation".to_string() }
+fn default_revoke_reason() -> String {
+    "manual_revocation".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceListResponse {

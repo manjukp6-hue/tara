@@ -1,39 +1,16 @@
 {
   "version": "1.0.0",
-  "updated_at": 1790240522.2477465,
+  "updated_at": 1759017600,
   "model_identity": "TARA",
+  "note": "The 118,080-parameter smoke-test model (SHA 7a50308b...) has been removed. model_sha is now NO_MODEL_REGISTERED until a real trained TARA model is promoted via ModelRegistry.",
   "runtimes": {
-    "python": {
-      "runtime_id": "python",
-      "language": "Python",
-      "implementation_version": "1.0.0",
-      "model_identity": "TARA",
-      "model_version": "1.0.0",
-      "model_sha": "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309",
-      "contract_version": "1.0.0",
-      "security_version": "1.0.0",
-      "supported_capabilities": [
-        "inference",
-        "skills",
-        "tools",
-        "voice",
-        "auth"
-      ],
-      "status": "VERIFIED",
-      "required_for_promotion": true,
-      "last_verification": {
-        "timestamp": 1790240522.2473633,
-        "verdict": "VERIFIED"
-      },
-      "compatibility_state": {}
-    },
     "rust": {
       "runtime_id": "rust",
       "language": "Rust",
       "implementation_version": "1.0.0",
       "model_identity": "TARA",
-      "model_version": "1.0.0",
-      "model_sha": "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309",
+      "model_version": "none",
+      "model_sha": "NO_MODEL_REGISTERED",
       "contract_version": "1.0.0",
       "security_version": "1.0.0",
       "supported_capabilities": [
@@ -43,13 +20,22 @@
         "voice",
         "auth"
       ],
-      "status": "VERIFIED",
+      "status": "AWAITING_MODEL",
       "required_for_promotion": true,
       "last_verification": {
-        "timestamp": 1790240522.2473726,
-        "verdict": "VERIFIED"
+        "timestamp": null,
+        "verdict": "AWAITING_MODEL"
       },
       "compatibility_state": {}
+    }
+  },
+  "retired_runtimes": {
+    "python": {
+      "runtime_id": "python",
+      "language": "Python",
+      "retired_reason": "TARA runtime is fully native Rust. The Python bridge was removed and dispatch_to_python() explicitly returns an error. Python is retained as a training data source language only, not a runtime.",
+      "retired_at": "2026-09-30T00:00:00Z",
+      "status": "RETIRED"
     }
   }
 }

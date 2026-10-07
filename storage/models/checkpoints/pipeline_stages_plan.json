@@ -1,0 +1,104 @@
+{
+  "directives_compliance": {
+    "dynamic_sha256_verification": true,
+    "pure_rust_native_engine": true,
+    "zero_external_ai": true,
+    "zero_hardcoded_shas": true,
+    "zero_python_in_workspace": true
+  },
+  "evaluation_protocol": {
+    "held_out_test": "datasets/splits/test.jsonl (15 records)",
+    "held_out_val": "datasets/splits/val.jsonl (11 records)",
+    "leakage_status": "ZERO_CONTAMINATION_PASSED"
+  },
+  "extensibility": "Arbitrary N stages supported; every checkpoint is dual-purpose (model + continuation state)",
+  "huggingface_deployment": {
+    "condition": "Can push after any stage verification or final candidate",
+    "format": "safetensors",
+    "target_repo": "manjukp6-hue/tara"
+  },
+  "pipeline_name": "TARA Extensible Multi-Stage Pipeline",
+  "stages": [
+    {
+      "completed_at_utc": "PENDING",
+      "dataset_bytes": 799684,
+      "dataset_items": 133,
+      "dataset_source": "datasets/foundational_curriculum.jsonl",
+      "description": "Foundational academic training on 133 structured pedagogical records across Domains 1-8 (Math, Science, Programming, AI/ML, Research, Culture, Creativity, Search).",
+      "dynamic_model_sha256": "pending_execution",
+      "input_checkpoint": "storage/models/tara_candidate_v1",
+      "is_continuation_ready": false,
+      "is_working_model": false,
+      "output_checkpoint": "storage/models/checkpoints\\stage1_curriculum",
+      "stage_id": "stage1_curriculum",
+      "stage_index": 1,
+      "stage_name": "Stage 1: Foundational Academic Curriculum Pretraining",
+      "status": "STAGED_READY"
+    },
+    {
+      "completed_at_utc": "PENDING",
+      "dataset_bytes": 98923,
+      "dataset_items": 16,
+      "dataset_source": "datasets/ability_acquisition/curriculum.jsonl",
+      "description": "Specialized training on Autonomous Ability Acquisition, Skill Evolution, and protocol-compliant self-training/self-update (Domain 9: 16 records).",
+      "dynamic_model_sha256": "pending_execution",
+      "input_checkpoint": "storage/models/checkpoints\\stage1_curriculum",
+      "is_continuation_ready": false,
+      "is_working_model": false,
+      "output_checkpoint": "storage/models/checkpoints\\stage2_ability_training",
+      "stage_id": "stage2_ability_training",
+      "stage_index": 2,
+      "stage_name": "Stage 2: Ability Training & Self-Evolution",
+      "status": "STAGED_READY"
+    },
+    {
+      "completed_at_utc": "PENDING",
+      "dataset_bytes": 23463679913,
+      "dataset_items": 15,
+      "dataset_source": "storage/datasets/tara_dataset_filtered/canonical",
+      "description": "Full-scale pretraining on verified canonical high-quality data shards.",
+      "dynamic_model_sha256": "pending_execution",
+      "input_checkpoint": "storage/models/checkpoints\\stage2_ability_training",
+      "is_continuation_ready": false,
+      "is_working_model": false,
+      "output_checkpoint": "storage/models/checkpoints\\stage3_canonical",
+      "stage_id": "stage3_canonical",
+      "stage_index": 3,
+      "stage_name": "Stage 3: Full Canonical Pretraining",
+      "status": "STAGED_READY"
+    },
+    {
+      "completed_at_utc": "PENDING",
+      "dataset_bytes": 58131723812,
+      "dataset_items": 38,
+      "dataset_source": "storage/datasets/tara_dataset_filtered/weak",
+      "description": "Balanced continual expansion with controlled canonical and selected weak data.",
+      "dynamic_model_sha256": "pending_execution",
+      "input_checkpoint": "storage/models/checkpoints\\stage3_canonical",
+      "is_continuation_ready": false,
+      "is_working_model": false,
+      "output_checkpoint": "storage/models/checkpoints\\stage4_weak_mix",
+      "stage_id": "stage4_weak_mix",
+      "stage_index": 4,
+      "stage_name": "Stage 4: Controlled Weak-Mix Training",
+      "status": "STAGED_READY"
+    },
+    {
+      "completed_at_utc": "PENDING",
+      "dataset_bytes": 21768,
+      "dataset_items": 60,
+      "dataset_source": "storage/persistence/experiential_lessons.jsonl",
+      "description": "Continual adaptation and specialization trained on genuine post-execution experiential lessons and validated strategies.",
+      "dynamic_model_sha256": "pending_execution",
+      "input_checkpoint": "storage/models/checkpoints\\stage4_weak_mix",
+      "is_continuation_ready": false,
+      "is_working_model": false,
+      "output_checkpoint": "storage/models/checkpoints\\stage5_continual_adaptation",
+      "stage_id": "stage5_continual_adaptation",
+      "stage_index": 5,
+      "stage_name": "Stage 5: Extensible Continual Adaptation & Specialization",
+      "status": "STAGED_READY"
+    }
+  ],
+  "total_stages": 5
+}

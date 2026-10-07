@@ -6,12 +6,15 @@
 //! - Zero plaintext keys on disk; atomic crash-safe file writes
 //! - Rejection of empty passphrases
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use aes_gcm::{Aes256Gcm, KeyInit, aead::{Aead, Payload}};
 use aes_gcm::Nonce;
+use aes_gcm::{
+    aead::{Aead, Payload},
+    Aes256Gcm, KeyInit,
+};
 use rand::RngCore;
 use serde_json::{json, Value};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
 pub mod dpapi {
@@ -151,8 +154,13 @@ impl SecureKeyStorage {
         if passphrase.trim().is_empty() {
             return Err("Passphrase cannot be empty".to_string());
         }
-        // log_n = 17 => 2^17 = 131072, r = 8, p = 1, len = 32
-        let params = scrypt::Params::new(17, 8, 1, Self::KEY_SIZE_BYTES)
+
+        // Standard OWASP-recommended Scrypt parameters for secure key derivation
+        const SCRYPT_LOG_N: u8 = 17; // N = 2^17 = 131,072 iterations
+        const SCRYPT_R: u32 = 8;
+        const SCRYPT_P: u32 = 1;
+
+        let params = scrypt::Params::new(SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P, Self::KEY_SIZE_BYTES)
             .map_err(|e| format!("Invalid Scrypt params: {:?}", e))?;
         let mut derived = [0u8; 32];
         scrypt::scrypt(passphrase.as_bytes(), salt, &params, &mut derived)
@@ -187,7 +195,8 @@ impl SecureKeyStorage {
             msg: private_bytes,
             aad: key_id.as_bytes(),
         };
-        let ciphertext = cipher.encrypt(nonce, payload)
+        let ciphertext = cipher
+            .encrypt(nonce, payload)
             .map_err(|e| format!("AES-GCM encryption failed: {:?}", e))?;
 
         let mut dpapi_protected = false;
@@ -223,10 +232,15 @@ impl SecureKeyStorage {
         });
 
         let target_path = self.storage_dir.join(format!("{}.keystore", key_id));
-        let temp_path = self.storage_dir.join(format!("{}.keystore.tmp.{}", key_id, rand::random::<u32>()));
+        let temp_path =
+            self.storage_dir
+                .join(format!("{}.keystore.tmp.{}", key_id, rand::random::<u32>()));
 
-        fs::write(&temp_path, serde_json::to_string_pretty(&keystore_json).map_err(|e| e.to_string())?)
-            .map_err(|e| format!("Failed to write temp keystore: {}", e))?;
+        fs::write(
+            &temp_path,
+            serde_json::to_string_pretty(&keystore_json).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| format!("Failed to write temp keystore: {}", e))?;
 
         fs::rename(&temp_path, &target_path)
             .map_err(|e| format!("Failed to atomically rename keystore: {}", e))?;
@@ -256,23 +270,32 @@ impl SecureKeyStorage {
             return Err(format!("Unsupported keystore version: {}", version));
         }
 
-        let nonce_hex = payload.get("nonce").and_then(|v| v.as_str())
+        let nonce_hex = payload
+            .get("nonce")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| "Missing nonce in keystore".to_string())?;
-        let ciphertext_hex = payload.get("ciphertext").and_then(|v| v.as_str())
+        let ciphertext_hex = payload
+            .get("ciphertext")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| "Missing ciphertext in keystore".to_string())?;
 
-        let nonce_bytes = hex::decode(nonce_hex)
-            .map_err(|e| format!("Invalid nonce hex: {}", e))?;
-        let ciphertext_bytes = hex::decode(ciphertext_hex)
-            .map_err(|e| format!("Invalid ciphertext hex: {}", e))?;
+        let nonce_bytes =
+            hex::decode(nonce_hex).map_err(|e| format!("Invalid nonce hex: {}", e))?;
+        let ciphertext_bytes =
+            hex::decode(ciphertext_hex).map_err(|e| format!("Invalid ciphertext hex: {}", e))?;
 
         let mut derived_key: Option<[u8; 32]> = None;
 
         // 1. Try Scrypt if passphrase provided
         if let Some(pp) = passphrase {
             if !pp.trim().is_empty() {
-                let kdf_params = payload.get("kdf_params").ok_or_else(|| "Missing kdf_params".to_string())?;
-                let salt_hex = kdf_params.get("salt").and_then(|v| v.as_str()).unwrap_or("");
+                let kdf_params = payload
+                    .get("kdf_params")
+                    .ok_or_else(|| "Missing kdf_params".to_string())?;
+                let salt_hex = kdf_params
+                    .get("salt")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let salt = hex::decode(salt_hex).map_err(|e| format!("Invalid salt: {}", e))?;
                 derived_key = Some(Self::derive_scrypt_key(pp, &salt)?);
             }
@@ -280,7 +303,10 @@ impl SecureKeyStorage {
 
         // 2. Try DPAPI OS unwrap if no valid passphrase provided but DPAPI protected
         if derived_key.is_none() {
-            let dpapi_prot = payload.get("dpapi_protected").and_then(|v| v.as_bool()).unwrap_or(false);
+            let dpapi_prot = payload
+                .get("dpapi_protected")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if dpapi_prot && cfg!(windows) {
                 if let Some(blob_hex) = payload.get("dpapi_blob").and_then(|v| v.as_str()) {
                     if let Ok(blob_bytes) = hex::decode(blob_hex) {
@@ -296,10 +322,12 @@ impl SecureKeyStorage {
             }
         }
 
-        let key = derived_key.ok_or_else(|| "Failed to unlock keystore: invalid passphrase or unprotect failure".to_string())?;
+        let key = derived_key.ok_or_else(|| {
+            "Failed to unlock keystore: invalid passphrase or unprotect failure".to_string()
+        })?;
 
-        let cipher = Aes256Gcm::new_from_slice(&key)
-            .map_err(|e| format!("AES-GCM init failed: {:?}", e))?;
+        let cipher =
+            Aes256Gcm::new_from_slice(&key).map_err(|e| format!("AES-GCM init failed: {:?}", e))?;
         let nonce = Nonce::from_slice(&nonce_bytes);
         let aad = key_id.as_bytes();
         let payload = Payload {
@@ -307,8 +335,9 @@ impl SecureKeyStorage {
             aad,
         };
 
-        let decrypted = cipher.decrypt(nonce, payload)
-            .map_err(|_| "Keystore decryption failed: authentication tag mismatch or wrong key".to_string())?;
+        let decrypted = cipher.decrypt(nonce, payload).map_err(|_| {
+            "Keystore decryption failed: authentication tag mismatch or wrong key".to_string()
+        })?;
 
         Ok(decrypted)
     }

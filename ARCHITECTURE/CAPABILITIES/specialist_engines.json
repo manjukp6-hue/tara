@@ -1,0 +1,61 @@
+{
+  "id": "specialist_engines",
+  "name": "Specialist Domain Engines",
+  "purpose": "High-precision computational and scientific reasoning for Mathematics, Natural Science, Programming, Research, and Indian Cultural Ethics.",
+  "implementation_files": [
+    "rust/tara_server/src/engines/mod.rs",
+    "rust/tara_server/src/engines/math/mod.rs",
+    "rust/tara_server/src/engines/science/mod.rs",
+    "rust/tara_server/src/engines/programming/mod.rs",
+    "rust/tara_server/src/engines/creativity.rs",
+    "rust/tara_server/src/engines/culture.rs",
+    "rust/tara_server/src/engines/search.rs",
+    "rust/tara_engine/src/computation/mod.rs"
+  ],
+  "primary_structs": [
+    "SpecialistEngines",
+    "MathEngine",
+    "ScienceEngine",
+    "ProgrammingEngine",
+    "ResearchEngine",
+    "CultureEngine"
+  ],
+  "registration": "SpecialistEngines::new instantiates and aggregates all 5 specialized domain engines.",
+  "discovery": "SpecialistEngines::dispatch inspects intent and keywords to route queries to relevant specialist.",
+  "execution": "MathEngine::evaluate_expression, ScienceEngine::derive_concept, ProgrammingEngine::analyze_syntax, CultureEngine::evaluate_etiquette.",
+  "storage": "storage/research/partitions/, storage/research/research_index.jsonl.",
+  "memory_link": "Specialist derivations stored as structured evidence in episodic turn records.",
+  "learning_link": "Novel research findings autonomously queued for continual training data synthesis.",
+  "self_evolution_link": "ProgrammingEngine inspects system source code for AST optimizations during code evolution.",
+  "curriculum_link": "Directly implements the academic domains in master_curriculum.jsonl.",
+  "api_endpoints": [
+    "POST /api/engines/math/solve",
+    "POST /api/engines/science/derive",
+    "POST /api/engines/code/analyze"
+  ],
+  "safety_gates": [
+    "CultureEngine enforces filial respect, honorifics, and ethical values",
+    "ProgrammingEngine linter verifies bracket balancing and memory safety",
+    "ResearchEngine verifies source citations and PRISMA methodology"
+  ],
+  "test_suites": [
+    "rust/tara_server/src/engines/mod.rs::tests",
+    "rust/tara_server/src/engines/culture.rs::tests"
+  ],
+  "lifecycle": {
+    "1_route": "Cognitive loop Step 7 detects domain-specific problem",
+    "2_parse": "Specialist engine parses formal notation (LaTeX, AST, formulas)",
+    "3_compute": "Deterministic algorithms compute exact derivations / solutions",
+    "4_verify": "Self-verification step proves mathematical / scientific soundness",
+    "5_explain": "Bilingual explanation (English + Kannada) synthesized",
+    "6_emit": "Structured derivation handed to neural generator for coherent presentation"
+  },
+  "upstream_capabilities": [
+    "rules_and_policy",
+    "knowledge"
+  ],
+  "downstream_capabilities": [
+    "cognitive_loop",
+    "evaluator_and_recovery"
+  ]
+}

@@ -28,6 +28,18 @@ Fetch the **latest** information before citing specific numbers, API signatures,
 
 When a reference file and the docs disagree, **trust the docs**. This is especially important for: numeric limits, pricing tiers, type signatures, and configuration options.
 
+## Authentication & Deployment (Required Before Deploy)
+
+Verify authentication before `wrangler deploy`, `wrangler pages deploy`, or `npm run deploy`:
+
+```bash
+npx wrangler whoami    # Shows account if authenticated
+```
+
+Not authenticated? → `references/wrangler/auth.md`
+- Interactive/local: `wrangler login` (one-time OAuth)
+- CI/CD: Set `CLOUDFLARE_API_TOKEN` env var
+
 ## Quick Decision Trees
 
 ### "I need to run code"

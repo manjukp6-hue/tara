@@ -1,6 +1,6 @@
 {
   "project": "TARA AI Skills Catalog",
-  "total_skills": 116,
+  "total_skills": 105,
   "categories": [
     "android",
     "automation",
@@ -21,7 +21,6 @@
       "category": "engineering",
       "path": "TARA/SKILLS/engineering/agents-sdk",
       "license": "Apache-2.0",
-      "checksum": "6da301ddad4228bd5c2b65b0ca85ce2ba96649deaf1e98c443beb8dbbc8cdd73",
       "scripts": false,
       "references": true
     },
@@ -30,7 +29,6 @@
       "category": "android",
       "path": "TARA/SKILLS/android/android-emulator-qa",
       "license": "Apache-2.0",
-      "checksum": "552ecfb7c1b510b8ba4c589b189a8c318911e292dc065a6b11e42be67e817dca",
       "scripts": true,
       "references": false
     },
@@ -39,7 +37,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/aspnet-core",
       "license": "Apache-2.0",
-      "checksum": "0638e76399acb9472b03afa89cb5a94ebf1978364b81a1b0d925fae8a2624f85",
       "scripts": false,
       "references": true
     },
@@ -48,7 +45,6 @@
       "category": "data",
       "path": "TARA/SKILLS/data/boltz-check-status",
       "license": "MIT",
-      "checksum": "eca444719952aa5492fc0110b48fb05c887277145414c349da61d2324ffe8a0d",
       "scripts": false,
       "references": true
     },
@@ -57,7 +53,6 @@
       "category": "data",
       "path": "TARA/SKILLS/data/boltz-cli-setup",
       "license": "MIT",
-      "checksum": "64819dffcd0eda7a0b0678e7c6cbdc9e0f022f97f6edf4f5ca8e1ddee4c3bc8a",
       "scripts": false,
       "references": true
     },
@@ -66,7 +61,6 @@
       "category": "data",
       "path": "TARA/SKILLS/data/boltz-protein-design",
       "license": "MIT",
-      "checksum": "0ea422e2652a25d7459cf047b02d3764f526c21b50034842266c003b45433760",
       "scripts": true,
       "references": true
     },
@@ -75,7 +69,6 @@
       "category": "data",
       "path": "TARA/SKILLS/data/boltz-protein-screen",
       "license": "MIT",
-      "checksum": "afff2c68f40e9006939b4a464bb9d42c9a4d2cdb38a662cd901b654f20f1e74f",
       "scripts": false,
       "references": true
     },
@@ -84,7 +77,6 @@
       "category": "data",
       "path": "TARA/SKILLS/data/boltz-small-molecule-adme",
       "license": "MIT",
-      "checksum": "6a718e1540a7f333ab49933bf60ddbcdd78de3dd60cef986c33ff169c4bd7f61",
       "scripts": false,
       "references": true
     },
@@ -93,7 +85,6 @@
       "category": "data",
       "path": "TARA/SKILLS/data/boltz-small-molecule-design",
       "license": "MIT",
-      "checksum": "a6ac4dcb1aeb3a8acad85495ce408f47c99f3d8d7531a9a899d02cfaf286f94e",
       "scripts": false,
       "references": true
     },
@@ -102,7 +93,6 @@
       "category": "data",
       "path": "TARA/SKILLS/data/boltz-small-molecule-screen",
       "license": "MIT",
-      "checksum": "d59d6c21338eacbbbe8601c6e050f98aa99a82d89956ccbfeb627429ffac8c44",
       "scripts": false,
       "references": true
     },
@@ -111,7 +101,6 @@
       "category": "data",
       "path": "TARA/SKILLS/data/boltz-structure-and-binding",
       "license": "MIT",
-      "checksum": "4d23f987be259ffb70d56cd64ea5bdf4456c729aaf6304754ea72abe6d94d573",
       "scripts": false,
       "references": true
     },
@@ -120,7 +109,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/brainstorming",
       "license": "MIT",
-      "checksum": "a77a9ab0739be0269a6253bf1a90bf3bda23667151d6bcd21308325d8d0580b1",
       "scripts": true,
       "references": false
     },
@@ -129,34 +117,14 @@
       "category": "engineering",
       "path": "TARA/SKILLS/engineering/build-chatgpt-app",
       "license": "Apache-2.0",
-      "checksum": "274b6d95c9b4dd4861714267daf017262be6961a7d1d92eaab952855a9243b36",
       "scripts": true,
       "references": true
-    },
-    {
-      "name": "build-zoom-bot",
-      "category": "engineering",
-      "path": "TARA/SKILLS/engineering/build-zoom-bot",
-      "license": "MIT",
-      "checksum": "692eff583078e7d528fc04c8d67a35ed7e3422bfd3d39f44fc3c8d62d1a98b30",
-      "scripts": false,
-      "references": false
-    },
-    {
-      "name": "build-zoom-meeting-app",
-      "category": "research",
-      "path": "TARA/SKILLS/research/build-zoom-meeting-app",
-      "license": "MIT",
-      "checksum": "a7dab5bde4cfa0d5c2d661be16ceb2f86acfbf82617d26244b6a53e30d0d8553",
-      "scripts": false,
-      "references": false
     },
     {
       "name": "building-native-ui",
       "category": "engineering",
       "path": "TARA/SKILLS/engineering/building-native-ui",
       "license": "MIT",
-      "checksum": "e23f67d266a9b8d2fecb9f25061cca32e34f4d91adf15079ce9ac94d81df3dd8",
       "scripts": false,
       "references": true
     },
@@ -165,7 +133,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/chatgpt-app-submission",
       "license": "Apache-2.0",
-      "checksum": "86a2af56edd8b566de9daf2d9fd7f0c99b48fee991a2a6b7ce75d9a30aaf0a10",
       "scripts": false,
       "references": false
     },
@@ -174,25 +141,14 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/chatgpt-apps",
       "license": "Apache-2.0",
-      "checksum": "308942f67d1349c1737e371dcf344ba628d0b57fb169e3a52e13998afe95d924",
       "scripts": true,
       "references": true
-    },
-    {
-      "name": "choose-zoom-approach",
-      "category": "coding",
-      "path": "TARA/SKILLS/coding/choose-zoom-approach",
-      "license": "MIT",
-      "checksum": "bef684d29acc7cda0a9730b03ee9d3d274a73260e4a1cf44ac3736295d2f23c6",
-      "scripts": false,
-      "references": false
     },
     {
       "name": "cli-builder",
       "category": "coding",
       "path": "TARA/SKILLS/coding/cli-builder",
       "license": "Apache-2.0",
-      "checksum": "20fd7345d78902688eb2fe55b15ff536ec46f82bf8a343cfc7178e930f040d0d",
       "scripts": false,
       "references": true
     },
@@ -201,16 +157,6 @@
       "category": "devops",
       "path": "TARA/SKILLS/devops/cloudflare",
       "license": "Apache-2.0",
-      "checksum": "313aa5c07daff33b4a0c70425e98e01667cc4d45b11f544470dabe957ebe6f99",
-      "scripts": false,
-      "references": true
-    },
-    {
-      "name": "cloudflare-deploy",
-      "category": "devops",
-      "path": "TARA/SKILLS/devops/cloudflare-deploy",
-      "license": "Apache-2.0",
-      "checksum": "b20a339d2bd5b7fed1b6cf567c96adf20ee76a98424801aeee924b8f9b103e1b",
       "scripts": false,
       "references": true
     },
@@ -219,7 +165,6 @@
       "category": "engineering",
       "path": "TARA/SKILLS/engineering/cobrowse-sdk",
       "license": "MIT",
-      "checksum": "70a2c5b69a1ab4ae7d93a1921f366d77c8626b83c0cc86c6aa158bc4c29ce2a2",
       "scripts": false,
       "references": true
     },
@@ -228,7 +173,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/codex-expo-run-actions",
       "license": "MIT",
-      "checksum": "33e914e76202dca3b1cc5ff94bd2fc2b6daf9f8dad8660ad6846eb48dc62b895",
       "scripts": false,
       "references": true
     },
@@ -237,7 +181,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/contact-center",
       "license": "MIT",
-      "checksum": "2637769fd7bb013a75943f047b34259b6a78d6aa2db312e15c91ad1c991d358e",
       "scripts": false,
       "references": true
     },
@@ -246,34 +189,14 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/dashboard-expert",
       "license": "MIT",
-      "checksum": "1d3c9e1604e3456d6c056acb98d134eba9f6938c5f62b811402356d22da3d1fc",
       "scripts": false,
       "references": true
-    },
-    {
-      "name": "debug-zoom",
-      "category": "testing",
-      "path": "TARA/SKILLS/testing/debug-zoom",
-      "license": "MIT",
-      "checksum": "8a1c901e60d5627fdb172a2cca6ef6979e396f3a7e3d93e4ec5bd0f8d3ddac49",
-      "scripts": false,
-      "references": false
-    },
-    {
-      "name": "debug-zoom-integration",
-      "category": "testing",
-      "path": "TARA/SKILLS/testing/debug-zoom-integration",
-      "license": "MIT",
-      "checksum": "19524ba76d8678567986f84f1ffd45bde35825c35a36922a78ca1342cf3d96c4",
-      "scripts": false,
-      "references": false
     },
     {
       "name": "define-goal",
       "category": "coding",
       "path": "TARA/SKILLS/coding/define-goal",
       "license": "Apache-2.0",
-      "checksum": "495c0857b52c55394bbcfd7ea6b5081f5a27e86917e47fb9a91d96ab53e2db6b",
       "scripts": false,
       "references": false
     },
@@ -282,7 +205,6 @@
       "category": "automation",
       "path": "TARA/SKILLS/automation/dispatching-parallel-agents",
       "license": "MIT",
-      "checksum": "44f564d2293750bf5e6069e3cc4a79003fdbaded4fda31192f1278bcda78e23e",
       "scripts": false,
       "references": false
     },
@@ -291,7 +213,6 @@
       "category": "research",
       "path": "TARA/SKILLS/research/earnings-preview",
       "license": "MIT",
-      "checksum": "8e136586b4cd172cd9acec73e922239877c0eb15c9db26f24d479a22366559b2",
       "scripts": true,
       "references": true
     },
@@ -300,7 +221,6 @@
       "category": "automation",
       "path": "TARA/SKILLS/automation/executing-plans",
       "license": "MIT",
-      "checksum": "b2accd3b6dbb30909d34b47fc6aafca9e0b829c09592930a9533c26889868d82",
       "scripts": false,
       "references": false
     },
@@ -309,7 +229,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/expo-api-routes",
       "license": "MIT",
-      "checksum": "313caa208f5117e29787956a2c9070565408d8b2701f20bd3237b697eb79d83f",
       "scripts": false,
       "references": false
     },
@@ -318,7 +237,6 @@
       "category": "devops",
       "path": "TARA/SKILLS/devops/expo-cicd-workflows",
       "license": "MIT",
-      "checksum": "9b10f3f7d99733bd801990837ed088b83e64f17d0ae2b8b8cc4d0e07dbb3ca12",
       "scripts": true,
       "references": false
     },
@@ -327,7 +245,6 @@
       "category": "devops",
       "path": "TARA/SKILLS/devops/expo-deployment",
       "license": "MIT",
-      "checksum": "965d10a1ddce6b21a9e5c20ff47d5b4c8ad4672a00dc72071b65f9d4a4fdcb7c",
       "scripts": false,
       "references": true
     },
@@ -336,7 +253,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/expo-dev-client",
       "license": "MIT",
-      "checksum": "2520e9802a61c2742df334e1a3360255bdc102c758ef2ac58f912f476df8fae9",
       "scripts": false,
       "references": false
     },
@@ -345,7 +261,6 @@
       "category": "engineering",
       "path": "TARA/SKILLS/engineering/expo-module",
       "license": "MIT",
-      "checksum": "61b83705fab5e6a563b282bdedf0dec724b1a53c6bc192d129d5dda8c7825510",
       "scripts": false,
       "references": true
     },
@@ -354,7 +269,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/expo-tailwind-setup",
       "license": "MIT",
-      "checksum": "e24b18469d4b1791b377bd18a52860d6935261298af9277509b8f8a86a4abdc9",
       "scripts": false,
       "references": false
     },
@@ -363,7 +277,6 @@
       "category": "android",
       "path": "TARA/SKILLS/android/expo-ui-jetpack-compose",
       "license": "MIT",
-      "checksum": "0606c268cc28bde80c50c2ea982b0502fa7bf927cdd44ba7d39b1aeaf0f96e05",
       "scripts": false,
       "references": false
     },
@@ -372,7 +285,6 @@
       "category": "engineering",
       "path": "TARA/SKILLS/engineering/expo-ui-swift-ui",
       "license": "MIT",
-      "checksum": "ca5b90ab47ffd122e94d1bc870a0d381ea65e679f7b5ee53e48d4bc4822ce2c2",
       "scripts": false,
       "references": false
     },
@@ -381,7 +293,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/finishing-a-development-branch",
       "license": "MIT",
-      "checksum": "a5ec9da527be6a411bf382e6005adeacf672a8fb8867bb0440e076d4f462d098",
       "scripts": false,
       "references": false
     },
@@ -390,7 +301,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/general",
       "license": "MIT",
-      "checksum": "32dd466f8c96a032440f5fff0bb14ddaab7bfc759dfb104804b42b878b36ed1c",
       "scripts": false,
       "references": true
     },
@@ -399,7 +309,6 @@
       "category": "engineering",
       "path": "TARA/SKILLS/engineering/generative-ui",
       "license": "Apache-2.0",
-      "checksum": "8944b6b86c5ac4267615a8668de007be22843c020c074530b583dda9779e032b",
       "scripts": false,
       "references": false
     },
@@ -408,7 +317,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/gh-address-comments",
       "license": "Apache-2.0",
-      "checksum": "aa49c8065918f6d90058559f0e64fd5ceb087ea57f0f9ef3d46aaf3a4a09781b",
       "scripts": true,
       "references": false
     },
@@ -417,7 +325,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/gh-fix-ci",
       "license": "Apache-2.0",
-      "checksum": "8b43080d3aead20e56d8e74d57a24e31330ef94b9c5cf2c461f6c318125bf0ee",
       "scripts": true,
       "references": false
     },
@@ -426,7 +333,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/hatch-pet",
       "license": "Apache-2.0",
-      "checksum": "9ffc7755ff80a963e6ce6bd9a5cbbd11c6b56d155bdf240772b637b9e3ffc69e",
       "scripts": true,
       "references": true
     },
@@ -435,7 +341,6 @@
       "category": "multimedia",
       "path": "TARA/SKILLS/multimedia/imagegen",
       "license": "Apache-2.0",
-      "checksum": "b8d3a18ca4765ea85e58672832ee08570bd695ed2dea2ba69e3ea1b1e0abde43",
       "scripts": true,
       "references": true
     },
@@ -444,7 +349,6 @@
       "category": "data",
       "path": "TARA/SKILLS/data/jupyter-notebook",
       "license": "Apache-2.0",
-      "checksum": "47d71cdd40c18b77c6cc1d65c0895a1eb64e1e9c55267876b3d34a61172c931e",
       "scripts": true,
       "references": true
     },
@@ -453,7 +357,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/linear",
       "license": "Apache-2.0",
-      "checksum": "c0ef46a7b70084bb038ccaf2d4f9af58cbfb073879fe384d8f047a1d4364cb3a",
       "scripts": false,
       "references": false
     },
@@ -462,7 +365,6 @@
       "category": "research",
       "path": "TARA/SKILLS/research/meeting-sdk",
       "license": "MIT",
-      "checksum": "6e1d7f9d69ff2453d893895fe35c8550c3004e744032a1a962599817f36279b9",
       "scripts": false,
       "references": true
     },
@@ -471,7 +373,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/migrate-to-codex",
       "license": "Apache-2.0",
-      "checksum": "00cba67b5f199f6c90a50901998e3f89451c499f0257f4b96eee1a1655f02840",
       "scripts": true,
       "references": true
     },
@@ -480,7 +381,6 @@
       "category": "security",
       "path": "TARA/SKILLS/security/mixpanel-auth",
       "license": "MIT",
-      "checksum": "24d16d4de12f36094ee65f7aa771572491253cd7272ee560c191d8dc3886f293",
       "scripts": false,
       "references": false
     },
@@ -489,7 +389,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/mixpanelyst",
       "license": "MIT",
-      "checksum": "56990bffb33dcae04f824e4022f6b19532565012512243811175eef687fb5d62",
       "scripts": true,
       "references": false
     },
@@ -498,7 +397,6 @@
       "category": "data",
       "path": "TARA/SKILLS/data/native-data-fetching",
       "license": "MIT",
-      "checksum": "f635bbe980be32ba274864c1ff862c4d58da5040ba7621acd69c710786a3e9cd",
       "scripts": false,
       "references": true
     },
@@ -507,7 +405,6 @@
       "category": "devops",
       "path": "TARA/SKILLS/devops/netlify-deploy",
       "license": "Apache-2.0",
-      "checksum": "a4d8ec1d57aa573e529a0db098cfc9dad4ae5c4407381177bd01ab49e54eb29a",
       "scripts": false,
       "references": true
     },
@@ -516,7 +413,6 @@
       "category": "research",
       "path": "TARA/SKILLS/research/notion-knowledge-capture",
       "license": "MIT",
-      "checksum": "ea4446832c140471207b16796ecb00132559323444019498887132ff3bfc9228",
       "scripts": false,
       "references": false
     },
@@ -525,7 +421,6 @@
       "category": "research",
       "path": "TARA/SKILLS/research/notion-meeting-intelligence",
       "license": "MIT",
-      "checksum": "16765053953bc888004dfe7cc9800d6a08a9e1c294934b7a4e438c27da8ff9fe",
       "scripts": false,
       "references": false
     },
@@ -534,7 +429,6 @@
       "category": "research",
       "path": "TARA/SKILLS/research/notion-research-documentation",
       "license": "MIT",
-      "checksum": "a7babe3cca103bd0e16691eba21ef5695973c5489cb1fcdda278c171be11d1e4",
       "scripts": false,
       "references": false
     },
@@ -543,7 +437,6 @@
       "category": "research",
       "path": "TARA/SKILLS/research/notion-spec-to-implementation",
       "license": "MIT",
-      "checksum": "d35ba59e905d7a450bc03ce05a46c2081600f167cb3dfddb6bd968246c5c8d1d",
       "scripts": false,
       "references": false
     },
@@ -552,7 +445,6 @@
       "category": "security",
       "path": "TARA/SKILLS/security/oauth",
       "license": "MIT",
-      "checksum": "4c316ab33d659add9268cf0186930626dc2a2e3680214d100eb8c8fa525cef3b",
       "scripts": false,
       "references": true
     },
@@ -561,7 +453,6 @@
       "category": "research",
       "path": "TARA/SKILLS/research/openai-docs",
       "license": "Apache-2.0",
-      "checksum": "a360d0cb717b52a0842926b74359b2186b23def4188e93796592c0ad8dc6808c",
       "scripts": true,
       "references": true
     },
@@ -570,7 +461,6 @@
       "category": "research",
       "path": "TARA/SKILLS/research/pdf",
       "license": "Apache-2.0",
-      "checksum": "f75b4fbf0a849c062bda8a613f19381d0d01384fbd884086629804beb4f7eb7c",
       "scripts": false,
       "references": false
     },
@@ -579,52 +469,22 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/phone",
       "license": "MIT",
-      "checksum": "0c6744dba41a828da1b2644f478b3cdb7b2befc71a24876080af436a27c834cf",
       "scripts": false,
       "references": true
-    },
-    {
-      "name": "plan-zoom-integration",
-      "category": "coding",
-      "path": "TARA/SKILLS/coding/plan-zoom-integration",
-      "license": "MIT",
-      "checksum": "cb75595a1b4a15a60122e1c19e8cc6278932a2896689eac07428fa07a1bce9a4",
-      "scripts": false,
-      "references": false
-    },
-    {
-      "name": "plan-zoom-product",
-      "category": "coding",
-      "path": "TARA/SKILLS/coding/plan-zoom-product",
-      "license": "MIT",
-      "checksum": "60f0d1b15ac1ce4a1c8b5f0a8cd558a5b821d819561d72cc77b0535cc2ff2c9c",
-      "scripts": false,
-      "references": false
     },
     {
       "name": "playwright",
       "category": "web",
       "path": "TARA/SKILLS/web/playwright",
       "license": "Apache-2.0",
-      "checksum": "dcc01210e96ad253e8fbdf123e82197140d2cd9bf3822e325418645ffdd6bdf0",
       "scripts": true,
       "references": true
-    },
-    {
-      "name": "playwright-interactive",
-      "category": "web",
-      "path": "TARA/SKILLS/web/playwright-interactive",
-      "license": "Apache-2.0",
-      "checksum": "409fa77794ce1dbb7e4940225ae843a63df077dc1506e3ae6756d6087fc08768",
-      "scripts": false,
-      "references": false
     },
     {
       "name": "plugin-builder",
       "category": "coding",
       "path": "TARA/SKILLS/coding/plugin-builder",
       "license": "Apache-2.0",
-      "checksum": "4c0fc66805d01bc7b89f04cee34fa057227619c9348de63c2905886b24d5b8c5",
       "scripts": true,
       "references": true
     },
@@ -633,7 +493,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/posthog",
       "license": "MIT",
-      "checksum": "4091c0fd9e55b5902a721f0c4ed566bccf4e2eb7a5867544b31bcb1dd3fb905d",
       "scripts": false,
       "references": false
     },
@@ -642,7 +501,6 @@
       "category": "engineering",
       "path": "TARA/SKILLS/engineering/probe-sdk",
       "license": "MIT",
-      "checksum": "939d4135436bba8a7a610d7654b30422bd100bcd6b1f7b91d095406727497d5a",
       "scripts": false,
       "references": true
     },
@@ -651,7 +509,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/receiving-code-review",
       "license": "MIT",
-      "checksum": "8064e5a7cbbb46058af77ac6b55ea0ce17d8bae3f6280ff2ed14478249ff0dc0",
       "scripts": false,
       "references": false
     },
@@ -660,7 +517,6 @@
       "category": "devops",
       "path": "TARA/SKILLS/devops/render-deploy",
       "license": "Apache-2.0",
-      "checksum": "9451502b9d06e7fe5cf2f44a81a6c6ed0481050f1a5c170589bbd2bc1803633e",
       "scripts": false,
       "references": true
     },
@@ -669,7 +525,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/requesting-code-review",
       "license": "MIT",
-      "checksum": "3335bcf94d27b9aaa30af4d6798b55bed2c7c7858970a5389154342a1384f284",
       "scripts": false,
       "references": false
     },
@@ -678,7 +533,6 @@
       "category": "web",
       "path": "TARA/SKILLS/web/rest-api",
       "license": "MIT",
-      "checksum": "ebaadde39d4d2b8c42d76f36a43b433bc37cd944703bcda8660afe06e9d911d8",
       "scripts": false,
       "references": true
     },
@@ -687,7 +541,6 @@
       "category": "engineering",
       "path": "TARA/SKILLS/engineering/rivet-sdk",
       "license": "MIT",
-      "checksum": "99b111aa0b889063eec1d06b70915f9f0f025ff368ece4ae9f10968c6a40f09f",
       "scripts": false,
       "references": true
     },
@@ -696,7 +549,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/rtms",
       "license": "MIT",
-      "checksum": "f76432ebeb025e80e7b672710f1984cb6156e2d121d3425886e290fd81b551a7",
       "scripts": false,
       "references": true
     },
@@ -705,7 +557,6 @@
       "category": "multimedia",
       "path": "TARA/SKILLS/multimedia/screenshot",
       "license": "Apache-2.0",
-      "checksum": "e284912012f892698191614a080a8cd251a4da69c8dd2d33418e00114dcb97f7",
       "scripts": true,
       "references": false
     },
@@ -714,7 +565,6 @@
       "category": "documentation",
       "path": "TARA/SKILLS/documentation/scribe",
       "license": "MIT",
-      "checksum": "dd294317d492a3cb5d37e6b8a36837d4b5d58371a22054d6f69f5a0a85f53173",
       "scripts": false,
       "references": true
     },
@@ -723,7 +573,6 @@
       "category": "security",
       "path": "TARA/SKILLS/security/security-best-practices",
       "license": "Apache-2.0",
-      "checksum": "d90eaa92f9412f3d87f211a9e87556a859214a93ad68e51f4c481c9b61e5cca2",
       "scripts": false,
       "references": true
     },
@@ -732,7 +581,6 @@
       "category": "security",
       "path": "TARA/SKILLS/security/security-ownership-map",
       "license": "Apache-2.0",
-      "checksum": "d2994b8aad9abe780eb8e5f979c43556a66efb5300d40c057278dac9b650efec",
       "scripts": true,
       "references": true
     },
@@ -741,7 +589,6 @@
       "category": "security",
       "path": "TARA/SKILLS/security/security-threat-model",
       "license": "Apache-2.0",
-      "checksum": "75790d979f7d79fab52ac7c3b53382a89155de42a3c3dfd72cb30baf62e8c4d5",
       "scripts": false,
       "references": true
     },
@@ -750,7 +597,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/sentry",
       "license": "Apache-2.0",
-      "checksum": "1113e7d14a0bd9ffdedf2d058e00f44fc592a9500deba419210e2cf71878ad6d",
       "scripts": true,
       "references": false
     },
@@ -759,17 +605,7 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/setup",
       "license": "MIT",
-      "checksum": "0fa0707670792a9490b1a5908bab67a8000f32e7b8ff68d6014c914bcdb746e1",
       "scripts": true,
-      "references": false
-    },
-    {
-      "name": "setup-zoom-oauth",
-      "category": "security",
-      "path": "TARA/SKILLS/security/setup-zoom-oauth",
-      "license": "MIT",
-      "checksum": "1b0b808738e2f915c81a2d3f5ac71c14a3d55dc17114233e8171acb3b3e8dd83",
-      "scripts": false,
       "references": false
     },
     {
@@ -777,7 +613,6 @@
       "category": "automation",
       "path": "TARA/SKILLS/automation/skill-builder",
       "license": "Apache-2.0",
-      "checksum": "eafef9ad99c2f2ade3124f5de0c643a395cf37d6f5b0da242123ee55de80a20a",
       "scripts": true,
       "references": true
     },
@@ -786,7 +621,6 @@
       "category": "automation",
       "path": "TARA/SKILLS/automation/skill-installer",
       "license": "Apache-2.0",
-      "checksum": "1749d605ea4507d68100c669292de6929137180a0c261a045c19b05336c7619f",
       "scripts": true,
       "references": false
     },
@@ -795,7 +629,6 @@
       "category": "multimedia",
       "path": "TARA/SKILLS/multimedia/speech",
       "license": "Apache-2.0",
-      "checksum": "bad3a44cde30e0fd530b782fb614eaac05740e9b57d4455e17ab9e6ca6fefb36",
       "scripts": true,
       "references": true
     },
@@ -804,7 +637,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/start",
       "license": "MIT",
-      "checksum": "6b6845f97159a0a678c048453abd2cea58fa7d75458da92760c928d094e5e5d6",
       "scripts": false,
       "references": false
     },
@@ -813,7 +645,6 @@
       "category": "automation",
       "path": "TARA/SKILLS/automation/subagent-driven-development",
       "license": "MIT",
-      "checksum": "e6ebcdbe7e03455095d41bd2ffc11e005a49e2687e9e2b1dcdf271cd2eaa5b85",
       "scripts": true,
       "references": false
     },
@@ -822,7 +653,6 @@
       "category": "data",
       "path": "TARA/SKILLS/data/supabase",
       "license": "MIT",
-      "checksum": "5b52eff4f00a40ad83e37918b6e7a514e10cc8d8ae58a10b6a4ba8f37b1a9241",
       "scripts": false,
       "references": true
     },
@@ -831,7 +661,6 @@
       "category": "data",
       "path": "TARA/SKILLS/data/supabase-postgres-best-practices",
       "license": "MIT",
-      "checksum": "12797869ed5aebad3416c0a2855b9f0316f5526b248ab23bab6e3c3ca9964c1f",
       "scripts": false,
       "references": true
     },
@@ -840,7 +669,6 @@
       "category": "testing",
       "path": "TARA/SKILLS/testing/systematic-debugging",
       "license": "MIT",
-      "checksum": "70463305e48c1273edf3801a8433d46454848bb5638b7dce1419db7267ef08d1",
       "scripts": false,
       "references": false
     },
@@ -849,7 +677,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/team-chat",
       "license": "MIT",
-      "checksum": "204d2a45f709bf7bdf85f580602b9fd72aa87d468c3b8d523c5c34ac563cb3a0",
       "scripts": false,
       "references": true
     },
@@ -858,7 +685,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/temporal-cloud-setup",
       "license": "MIT",
-      "checksum": "ac65b2f81438e15ad217d4ee5e037e41f2377bc87f987b85cfa5895db998aaec",
       "scripts": true,
       "references": true
     },
@@ -867,7 +693,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/temporal-developer",
       "license": "MIT",
-      "checksum": "e5117c82dd059043dad05157cf5a6223096c90ccc5069eca157bb8acb89c9cde",
       "scripts": false,
       "references": true
     },
@@ -876,7 +701,6 @@
       "category": "devops",
       "path": "TARA/SKILLS/devops/temporal-ops",
       "license": "MIT",
-      "checksum": "1f3dbf0bd1681469183e7f3022231786e5f60cd88361623bea5436887393f658",
       "scripts": false,
       "references": true
     },
@@ -885,7 +709,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/temporal-serverless",
       "license": "MIT",
-      "checksum": "af9c2db849f35b3027f15fed08a9b6f64ae6b35f11f3243bfa5497cf06110798",
       "scripts": false,
       "references": true
     },
@@ -894,7 +717,6 @@
       "category": "testing",
       "path": "TARA/SKILLS/testing/test-driven-development",
       "license": "MIT",
-      "checksum": "767b1563ceaab7d627d4dfeacf9e324c96f04b0fe451ea4121075f598aa0be5f",
       "scripts": false,
       "references": false
     },
@@ -903,7 +725,6 @@
       "category": "multimedia",
       "path": "TARA/SKILLS/multimedia/transcribe",
       "license": "Apache-2.0",
-      "checksum": "e355a2d7eb68bcd803b86fc38362e76f44f2a6827152f0ff2f3e278f7300a832",
       "scripts": true,
       "references": true
     },
@@ -912,7 +733,6 @@
       "category": "engineering",
       "path": "TARA/SKILLS/engineering/ui-toolkit",
       "license": "MIT",
-      "checksum": "6485cc0559e5d95d67787cdaf1cecb25a757c4cde439f93375409369d34ab9fc",
       "scripts": false,
       "references": true
     },
@@ -921,7 +741,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/upgrading-expo",
       "license": "MIT",
-      "checksum": "9a36fa613a0ee4e350e7ee52e4147abc98ea0007826d0bc462b9d4b885d24717",
       "scripts": false,
       "references": true
     },
@@ -930,7 +749,6 @@
       "category": "web",
       "path": "TARA/SKILLS/web/use-dom",
       "license": "MIT",
-      "checksum": "dc8387bb133e30a5efe84726e949cd5c421f561a4a747dd84e771136b1e1c061",
       "scripts": false,
       "references": false
     },
@@ -939,7 +757,6 @@
       "category": "devops",
       "path": "TARA/SKILLS/devops/using-git-worktrees",
       "license": "MIT",
-      "checksum": "04f823bb3cdb42311ecf37b1720995d8cb74916bf5d257e94f2c05ebbdc5cc21",
       "scripts": false,
       "references": false
     },
@@ -948,7 +765,6 @@
       "category": "automation",
       "path": "TARA/SKILLS/automation/using-superpowers",
       "license": "MIT",
-      "checksum": "231d6667d8f55929dc099bbab7c78fea5332fa7f80dbf059a5211e30ef74aff3",
       "scripts": false,
       "references": true
     },
@@ -957,7 +773,6 @@
       "category": "devops",
       "path": "TARA/SKILLS/devops/vercel-deploy",
       "license": "MIT",
-      "checksum": "3ac15aa9fae6f353586e75993cb6cdbafdba6f6a4f6aaa2a0bf3d54f3ebbae3d",
       "scripts": true,
       "references": false
     },
@@ -966,7 +781,6 @@
       "category": "testing",
       "path": "TARA/SKILLS/testing/verification-before-completion",
       "license": "MIT",
-      "checksum": "e26735bdc1a5413e667e47671e125289a37cc20856f5f5395b150b100cc51146",
       "scripts": false,
       "references": false
     },
@@ -975,7 +789,6 @@
       "category": "multimedia",
       "path": "TARA/SKILLS/multimedia/video-sdk",
       "license": "MIT",
-      "checksum": "86be2f61f86c818ad27688dbb424fcfde38d5b49b70f7f4b30dd0ff1535bf4fb",
       "scripts": false,
       "references": true
     },
@@ -984,7 +797,6 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/virtual-agent",
       "license": "MIT",
-      "checksum": "956c8868b1a15361190a0d19655b80c92a7f7858d78c0babf5a4c754a53c46b5",
       "scripts": false,
       "references": true
     },
@@ -993,7 +805,6 @@
       "category": "web",
       "path": "TARA/SKILLS/web/webhooks",
       "license": "MIT",
-      "checksum": "b1b513cd38a82477f7c8dd89bef17be1effacc372963a086497db8d60f88b3ca",
       "scripts": false,
       "references": true
     },
@@ -1002,7 +813,6 @@
       "category": "web",
       "path": "TARA/SKILLS/web/websockets",
       "license": "MIT",
-      "checksum": "2e57861b36d3de84da49f80e1ed8b4ae8a1b75b0b1eeb33acac534c3487d9278",
       "scripts": false,
       "references": true
     },
@@ -1011,7 +821,6 @@
       "category": "engineering",
       "path": "TARA/SKILLS/engineering/winui-app",
       "license": "Apache-2.0",
-      "checksum": "83d20b8ed7f0937a8c01f30414ab681ee7c7718d788118c3602f3644aa309497",
       "scripts": false,
       "references": true
     },
@@ -1020,7 +829,6 @@
       "category": "devops",
       "path": "TARA/SKILLS/devops/wrangler",
       "license": "Apache-2.0",
-      "checksum": "11645b42e9a83ffe08ce3646609b78f2a437adfa26a394b2dfcae9f2914cbdb4",
       "scripts": false,
       "references": false
     },
@@ -1029,7 +837,6 @@
       "category": "documentation",
       "path": "TARA/SKILLS/documentation/writing-plans",
       "license": "MIT",
-      "checksum": "052da2bc03af0f6e491e1ccfa5d618f9272a81a00a4e2103a5d9c0f155d403fb",
       "scripts": false,
       "references": false
     },
@@ -1038,7 +845,6 @@
       "category": "documentation",
       "path": "TARA/SKILLS/documentation/writing-skills",
       "license": "MIT",
-      "checksum": "9a1da1b03cc7bec98a08dd5ce799b5f818af3014d3085189a4b206392167f7f5",
       "scripts": false,
       "references": false
     },
@@ -1047,18 +853,8 @@
       "category": "coding",
       "path": "TARA/SKILLS/coding/yeet",
       "license": "Apache-2.0",
-      "checksum": "f9f1eed4f747ecd7de0436493e109a94f82f12b4ce4355140f4a4aa83fde8d14",
       "scripts": false,
       "references": false
-    },
-    {
-      "name": "zoom-apps-sdk",
-      "category": "engineering",
-      "path": "TARA/SKILLS/engineering/zoom-apps-sdk",
-      "license": "MIT",
-      "checksum": "7a2d0f5317c6acb0992cbf840ba3df16d9c16b3b6785d3cf4b41eee20bca78b1",
-      "scripts": false,
-      "references": true
     }
   ]
 }

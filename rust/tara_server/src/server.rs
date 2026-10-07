@@ -2,15 +2,15 @@
 //! Ports Python server.py fully using tiny_http.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::io::{Cursor, Read};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
-use rand::Rng;
-use sha2::{Digest, Sha256};
-use serde_json::{json, Value};
-use tiny_http::{Request, Response, Header, Server, Method};
 use constant_time_eq::constant_time_eq;
+use rand::Rng;
+use serde_json::{json, Value};
+
+use tiny_http::{Header, Request, Response, Server};
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Rate Limiter (60 req/min, burst 15/5s)
@@ -71,7 +71,9 @@ impl SlidingWindowRateLimiter {
 }
 
 impl Default for SlidingWindowRateLimiter {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -107,14 +109,26 @@ pub struct ApiRouter {
     routes: RwLock<HashMap<String, Route>>,
 }
 
+impl Default for ApiRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ApiRouter {
     pub fn new() -> Self {
-        Self { routes: RwLock::new(HashMap::new()) }
+        Self {
+            routes: RwLock::new(HashMap::new()),
+        }
     }
 
     pub fn normalize_path(path: &str) -> String {
         let p = path.trim_end_matches('/');
-        if p.is_empty() { "/".to_string() } else { p.to_string() }
+        if p.is_empty() {
+            "/".to_string()
+        } else {
+            p.to_string()
+        }
     }
 
     pub fn register<H: RouteHandler + 'static>(
@@ -127,16 +141,23 @@ impl ApiRouter {
     ) {
         let norm = Self::normalize_path(path);
         let key = format!("{}:{}", method.to_uppercase(), norm);
-        self.routes.write().unwrap().insert(key, Route {
-            method: method.to_uppercase(),
-            path: norm,
-            handler: Arc::new(handler),
-            required_auth,
-            required_role: required_role.map(|s| s.to_string()),
-        });
+        self.routes.write().unwrap().insert(
+            key,
+            Route {
+                method: method.to_uppercase(),
+                path: norm,
+                handler: Arc::new(handler),
+                required_auth,
+                required_role: required_role.map(|s| s.to_string()),
+            },
+        );
     }
 
-    pub fn match_route(&self, method: &str, path: &str) -> Option<(Arc<dyn RouteHandler>, bool, Option<String>)> {
+    pub fn match_route(
+        &self,
+        method: &str,
+        path: &str,
+    ) -> Option<(Arc<dyn RouteHandler>, bool, Option<String>)> {
         let norm = Self::normalize_path(path);
         let key = format!("{}:{}", method.to_uppercase(), norm);
         let routes = self.routes.read().unwrap();
@@ -147,13 +168,14 @@ impl ApiRouter {
         // Support parameterized routes (e.g. :job_id)
         let req_method = method.to_uppercase();
         let path_parts: Vec<&str> = norm.split('/').collect();
-        for (_, r) in routes.iter() {
+        for r in routes.values() {
             if r.method == req_method && r.path.contains(':') {
                 let r_parts: Vec<&str> = r.path.split('/').collect();
                 if r_parts.len() == path_parts.len() {
-                    let matched = r_parts.iter().zip(path_parts.iter()).all(|(rp, pp)| {
-                        rp.starts_with(':') || rp == pp
-                    });
+                    let matched = r_parts
+                        .iter()
+                        .zip(path_parts.iter())
+                        .all(|(rp, pp)| rp.starts_with(':') || rp == pp);
                     if matched {
                         return Some((r.handler.clone(), r.required_auth, r.required_role.clone()));
                     }
@@ -174,7 +196,10 @@ impl ApiRouter {
             if r.path.contains(':') {
                 let r_parts: Vec<&str> = r.path.split('/').collect();
                 if r_parts.len() == path_parts.len() {
-                    return r_parts.iter().zip(path_parts.iter()).all(|(rp, pp)| rp.starts_with(':') || rp == pp);
+                    return r_parts
+                        .iter()
+                        .zip(path_parts.iter())
+                        .all(|(rp, pp)| rp.starts_with(':') || rp == pp);
                 }
             }
             false
@@ -192,6 +217,12 @@ pub struct WebSessionStore {
     ttl: Duration,
 }
 
+impl Default for WebSessionStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebSessionStore {
     pub fn new() -> Self {
         Self {
@@ -203,7 +234,10 @@ impl WebSessionStore {
     /// Issue a new web session token for `actor_id`.
     pub fn issue(&self, actor_id: &str) -> String {
         let token = hex::encode(rand::thread_rng().gen::<[u8; 32]>());
-        self.sessions.lock().unwrap().insert(token.clone(), (actor_id.to_string(), Instant::now()));
+        self.sessions
+            .lock()
+            .unwrap()
+            .insert(token.clone(), (actor_id.to_string(), Instant::now()));
         token
     }
 
@@ -231,9 +265,15 @@ pub fn authenticate_request(
     brain: &Arc<crate::brain::TaraBrain>,
     web_sessions: &WebSessionStore,
 ) -> Result<String, String> {
-    let auth_header = headers.get("authorization").map(|s| s.as_str()).unwrap_or("");
+    let auth_header = headers
+        .get("authorization")
+        .map(|s| s.as_str())
+        .unwrap_or("");
     let x_api_key = headers.get("x-api-key").map(|s| s.as_str()).unwrap_or("");
-    let x_worker_token = headers.get("x-tara-worker-token").map(|s| s.as_str()).unwrap_or("");
+    let x_worker_token = headers
+        .get("x-tara-worker-token")
+        .map(|s| s.as_str())
+        .unwrap_or("");
 
     let token = if auth_header.to_lowercase().starts_with("bearer ") {
         auth_header[7..].trim()
@@ -247,7 +287,13 @@ pub fn authenticate_request(
 
     // Check worker token validation against dynamic control plane registry
     if !x_worker_token.is_empty() || token.starts_with("tok_") || token.starts_with("internal_") {
-        if let Some(worker_id) = brain.control_plane.workers.read().unwrap().validate_worker_token(token) {
+        if let Some(worker_id) = brain
+            .control_plane
+            .workers
+            .read()
+            .unwrap()
+            .validate_worker_token(token)
+        {
             return Ok(format!("worker:{}", worker_id));
         }
     }
@@ -259,7 +305,10 @@ pub fn authenticate_request(
 
     // Check creator session
     if let Some(sess) = brain.creator_auth_service.verify_session(token) {
-        return Ok(sess.get("creator_id").cloned().unwrap_or_else(|| "ROOT_OPERATOR".to_string()));
+        return Ok(sess
+            .get("creator_id")
+            .cloned()
+            .unwrap_or_else(|| "ROOT_OPERATOR".to_string()));
     }
 
     // Check API keys with constant-time comparison
@@ -277,20 +326,26 @@ pub fn load_api_keys() -> HashMap<String, String> {
     if let Ok(json_str) = std::env::var("TARA_API_KEYS") {
         if let Ok(v) = serde_json::from_str::<Value>(&json_str) {
             if let Some(obj) = v.as_object() {
-                return obj.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                return obj
+                    .iter()
+                    .filter_map(|(k, v)| {
+                        let actor = v.as_str()?;
+                        (!k.trim().is_empty() && !actor.trim().is_empty())
+                            .then(|| (k.clone(), actor.to_string()))
+                    })
                     .collect();
             }
         }
     }
     if let Ok(single_key) = std::env::var("TARA_API_KEY") {
+        if single_key.trim().is_empty() {
+            return HashMap::new();
+        }
         let mut m = HashMap::new();
         m.insert(single_key, "api_user".to_string());
         return m;
     }
-    let mut m = HashMap::new();
-    m.insert("tara_default_test_token".to_string(), "api_user".to_string());
-    m
+    HashMap::new()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -305,7 +360,8 @@ fn cors_headers(origin: &str) -> Vec<Header> {
         Header::from_bytes(
             "Access-Control-Allow-Headers",
             "Content-Type, Authorization, X-API-Key",
-        ).unwrap(),
+        )
+        .unwrap(),
     ]
 }
 
@@ -339,7 +395,7 @@ fn url_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(hex_str) = std::str::from_utf8(&bytes[i+1..i+3]) {
+            if let Ok(hex_str) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
                 if let Ok(byte) = u8::from_str_radix(hex_str, 16) {
                     out.push(byte as char);
                     i += 3;
@@ -357,16 +413,27 @@ fn url_decode(s: &str) -> String {
     out
 }
 
-fn read_body(req: &mut Request) -> Vec<u8> {
+fn read_body(req: &mut Request) -> Result<Vec<u8>, String> {
+    const MAX_BODY_BYTES: usize = 1_048_576;
     if let Some(len) = req.body_length() {
-        let max_len = len.min(1_048_576);
-        let mut buf = vec![0u8; max_len];
-        let _ = req.as_reader().read_exact(&mut buf);
-        buf
+        if len > MAX_BODY_BYTES {
+            return Err(format!("Request body exceeds {} bytes", MAX_BODY_BYTES));
+        }
+        let mut buf = vec![0u8; len];
+        req.as_reader()
+            .read_exact(&mut buf)
+            .map_err(|e| format!("Failed to read request body: {e}"))?;
+        Ok(buf)
     } else {
         let mut buf = Vec::new();
-        let _ = req.as_reader().take(1_048_576).read_to_end(&mut buf);
-        buf
+        req.as_reader()
+            .take((MAX_BODY_BYTES + 1) as u64)
+            .read_to_end(&mut buf)
+            .map_err(|e| format!("Failed to read request body: {e}"))?;
+        if buf.len() > MAX_BODY_BYTES {
+            return Err(format!("Request body exceeds {} bytes", MAX_BODY_BYTES));
+        }
+        Ok(buf)
     }
 }
 
@@ -383,7 +450,9 @@ fn html_response(status: u16, body: &str) -> Response<Cursor<Vec<u8>>> {
     Response::from_data(body.as_bytes().to_vec())
         .with_status_code(status)
         .with_header(Header::from_bytes("Content-Type", "text/html; charset=utf-8").unwrap())
-        .with_header(Header::from_bytes("Cache-Control", "no-cache, no-store, must-revalidate").unwrap())
+        .with_header(
+            Header::from_bytes("Cache-Control", "no-cache, no-store, must-revalidate").unwrap(),
+        )
         .with_header(Header::from_bytes("X-Frame-Options", "DENY").unwrap())
 }
 
@@ -402,7 +471,35 @@ pub fn run_server(
     web_sessions: Arc<WebSessionStore>,
 ) {
     let addr = format!("{}:{}", host, port);
-    let server = Server::http(&addr).expect("Failed to bind server");
+    let server = match Server::http(&addr) {
+        Ok(s) => s,
+        Err(e) => {
+            println!("\n[TARA Server] =========================================");
+            if std::net::TcpStream::connect(&addr).is_ok() {
+                println!(
+                    "[TARA Server] TARA server is ALREADY ACTIVE and running on http://{}",
+                    addr
+                );
+                println!(
+                    "[TARA Server] Existing instance is healthy. No duplicate process needed."
+                );
+            } else {
+                println!(
+                    "[TARA Server] ERROR: Could not bind to http://{}: {}",
+                    addr, e
+                );
+                println!("[TARA Server] Another application may be using this port.");
+            }
+            println!("[TARA Server] =========================================");
+            #[cfg(target_os = "windows")]
+            {
+                println!("\nPress Enter to exit this window...");
+                let mut buf = String::new();
+                let _ = std::io::stdin().read_line(&mut buf);
+            }
+            return;
+        }
+    };
     println!("[TARA Server] Running on http://{}", addr);
 
     for mut request in server.incoming_requests() {
@@ -413,17 +510,21 @@ pub fn run_server(
         let ws_ref = web_sessions.clone();
 
         // Rate limit
-        let client_ip = request.remote_addr()
+        let client_ip = request
+            .remote_addr()
             .map(|a| a.ip().to_string())
             .unwrap_or_else(|| "127.0.0.1".to_string());
 
         let (allowed, retry_after) = rl_ref.is_allowed(&client_ip);
         if !allowed {
-            let resp = json_response(429, &json!({
-                "status": "ERROR",
-                "error": "Too Many Requests: Rate limit exceeded.",
-                "retry_after": retry_after
-            }));
+            let resp = json_response(
+                429,
+                &json!({
+                    "status": "ERROR",
+                    "error": "Too Many Requests: Rate limit exceeded.",
+                    "retry_after": retry_after
+                }),
+            );
             let _ = request.respond(resp);
             continue;
         }
@@ -447,16 +548,75 @@ pub fn run_server(
             continue;
         }
 
-        // UI routes: issue web session cookie
+        // UI routes: issue or inherit authenticated web session cookie
         if method == "GET" && (path == "/" || path == "/chat" || path == "/index.html") {
-            let token = ws_ref.issue("user");
+            let query_token = full_url.split('?').nth(1).and_then(|q| {
+                q.split('&').find_map(|pair| {
+                    let mut parts = pair.split('=');
+                    match (parts.next(), parts.next()) {
+                        (Some("session_token"), Some(val)) | (Some("token"), Some(val)) => {
+                            Some(val.to_string())
+                        }
+                        _ => None,
+                    }
+                })
+            });
+
+            let auth_token = headers
+                .get("authorization")
+                .and_then(|h| {
+                    h.strip_prefix("Bearer ")
+                        .or_else(|| h.strip_prefix("bearer "))
+                })
+                .map(|s| s.trim().to_string());
+
+            let creator_cookie_token = headers.get("cookie").and_then(|c| {
+                c.split(';')
+                    .find(|s| {
+                        let t = s.trim();
+                        t.starts_with("tara_creator_session=") || t.starts_with("tara_session=")
+                    })
+                    .and_then(|s| s.trim().split('=').nth(1).map(|v| v.to_string()))
+            });
+
+            let candidate_creator_token = auth_token.or(query_token).or(creator_cookie_token);
+
+            let token_opt = if let Some(cand) = candidate_creator_token {
+                if let Some(sess) = brain_ref.creator_auth_service.verify_session(&cand) {
+                    let creator_id = sess
+                        .get("creator_id")
+                        .cloned()
+                        .unwrap_or_else(|| "ROOT_OPERATOR".to_string());
+                    Some(ws_ref.issue(&creator_id))
+                } else {
+                    None
+                }
+            } else {
+                headers
+                    .get("cookie")
+                    .and_then(|c| {
+                        c.split(';')
+                            .find(|s| s.trim().starts_with("tara_web_session="))
+                            .map(|s| s.trim()[17..].to_string())
+                    })
+                    .filter(|existing_cookie| ws_ref.verify(existing_cookie).is_some())
+            };
+
+            let token = token_opt.unwrap_or_default();
             let html = crate::routes::render_chat_ui(&token);
             let mut resp = html_response(200, &html);
-            resp.add_header(
-                Header::from_bytes("Set-Cookie",
-                    format!("tara_web_session={}; HttpOnly; SameSite=Strict; Max-Age=3600", token)
-                ).unwrap()
-            );
+            if !token.is_empty() {
+                resp.add_header(
+                    Header::from_bytes(
+                        "Set-Cookie",
+                        format!(
+                            "tara_web_session={}; HttpOnly; SameSite=Strict; Max-Age=3600",
+                            token
+                        ),
+                    )
+                    .unwrap(),
+                );
+            }
             for h in cors_headers(&origin) {
                 resp.add_header(h);
             }
@@ -464,10 +624,34 @@ pub fn run_server(
             continue;
         }
 
+        // Preserve the legacy public endpoint-list resource as plain text.
+        if method == "GET" && path == "/endpoints.txt" {
+            let repo_root = std::env::var("TARA_REPO_ROOT").unwrap_or_else(|_| ".".into());
+            let endpoint_path = std::path::Path::new(&repo_root).join("endpoints.txt");
+            let response = match std::fs::read(&endpoint_path) {
+                Ok(contents) => Response::from_data(contents)
+                    .with_status_code(200)
+                    .with_header(
+                        Header::from_bytes("Content-Type", "text/plain; charset=utf-8").unwrap(),
+                    )
+                    .with_header(Header::from_bytes("X-Content-Type-Options", "nosniff").unwrap()),
+                Err(_) => json_response(
+                    404,
+                    &json!({"status":"NOT_FOUND","error":"Endpoint list is unavailable"}),
+                ),
+            };
+            let _ = request.respond(response);
+            continue;
+        }
+
         // Route matching
         match router_ref.match_route(&method, path) {
             None => {
-                let status = if router_ref.has_path(path) { 405u16 } else { 404u16 };
+                let status = if router_ref.has_path(path) {
+                    405u16
+                } else {
+                    404u16
+                };
                 let err_msg = if status == 405 {
                     format!("Method {} not allowed for '{}'", method, path)
                 } else {
@@ -478,16 +662,17 @@ pub fn run_server(
             }
             Some((handler, required_auth, required_role)) => {
                 // Check web session cookie fallback
-                let cookie_token = headers.get("cookie")
-                    .and_then(|c| {
-                        c.split(';').find(|s| s.trim().starts_with("tara_web_session="))
-                            .and_then(|s| s.trim().strip_prefix("tara_web_session="))
-                            .map(|s| s.to_string())
-                    });
+                let cookie_token = headers.get("cookie").and_then(|c| {
+                    c.split(';')
+                        .find(|s| s.trim().starts_with("tara_web_session="))
+                        .and_then(|s| s.trim().strip_prefix("tara_web_session="))
+                        .map(|s| s.to_string())
+                });
 
                 let actor = if required_auth {
                     // Try normal auth first, then cookie-based web session
-                    let auth_result = authenticate_request(&headers, &api_keys_ref, &brain_ref, &ws_ref);
+                    let auth_result =
+                        authenticate_request(&headers, &api_keys_ref, &brain_ref, &ws_ref);
                     match auth_result {
                         Ok(a) => a,
                         Err(e) => {
@@ -496,7 +681,8 @@ pub fn run_server(
                                 if let Some(actor) = ws_ref.verify(cookie_tok) {
                                     actor
                                 } else {
-                                    let resp = json_response(401, &json!({"status":"ERROR","error":e}));
+                                    let resp =
+                                        json_response(401, &json!({"status":"ERROR","error":e}));
                                     let _ = request.respond(resp);
                                     continue;
                                 }
@@ -514,12 +700,16 @@ pub fn run_server(
                 // Role check
                 if let Some(ref req_role) = required_role {
                     if req_role == "admin" {
-                        let allowed_actors = ["admin", "root", "system", "ROOT_OPERATOR", "OPERATOR_ROOT"];
+                        let allowed_actors =
+                            ["admin", "root", "system", "ROOT_OPERATOR", "OPERATOR_ROOT"];
                         if !allowed_actors.contains(&actor.as_str()) {
-                            let resp = json_response(403, &json!({
-                                "status": "ERROR",
-                                "error": format!("Forbidden: actor '{}' lacks role '{}'", actor, req_role)
-                            }));
+                            let resp = json_response(
+                                403,
+                                &json!({
+                                    "status": "ERROR",
+                                    "error": format!("Forbidden: actor '{}' lacks role '{}'", actor, req_role)
+                                }),
+                            );
                             let _ = request.respond(resp);
                             continue;
                         }
@@ -529,11 +719,27 @@ pub fn run_server(
                 // Parse body for POST/PUT/PATCH
                 let query_params = parse_query(&full_url);
                 let body = if matches!(method.as_str(), "POST" | "PUT" | "PATCH") {
-                    let raw = read_body(&mut request);
+                    let raw = match read_body(&mut request) {
+                        Ok(raw) => raw,
+                        Err(e) => {
+                            let status = if e.contains("exceeds") { 413 } else { 400 };
+                            let _ = request.respond(json_response(
+                                status,
+                                &json!({"status":"ERROR","error":e}),
+                            ));
+                            continue;
+                        }
+                    };
                     if raw.is_empty() {
                         json!({})
                     } else {
-                        serde_json::from_slice(&raw).unwrap_or(json!({}))
+                        match serde_json::from_slice(&raw) {
+                            Ok(body) => body,
+                            Err(e) => {
+                                let _ = request.respond(json_response(400, &json!({"status":"ERROR","error":format!("Malformed JSON body: {e}")})));
+                                continue;
+                            }
+                        }
                     }
                 } else {
                     // For GET, convert query params to a JSON body for handlers
@@ -559,7 +765,15 @@ pub fn run_server(
                 };
 
                 let result = handler.handle(&route_req, &brain_ref);
-                let mut resp = json_response(200, &result);
+                let status = match result.get("status").and_then(Value::as_str) {
+                    Some("UNHEALTHY") => 503,
+                    Some("UNAUTHORIZED") => 401,
+                    Some("FORBIDDEN") => 403,
+                    Some("NOT_FOUND") => 404,
+                    Some("ERROR" | "REJECTED") => 400,
+                    _ => 200,
+                };
+                let mut resp = json_response(status, &result);
                 for h in cors_headers(&origin) {
                     resp.add_header(h);
                 }

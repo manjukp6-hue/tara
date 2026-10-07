@@ -1,7 +1,0 @@
-.git
-.gitattributes
-target
-tests
-scratch
-.cargo
-Cargo.*

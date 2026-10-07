@@ -1,0 +1,81 @@
+{
+  "id": "training_and_self_evolution",
+  "name": "Native Self-Training & Autonomous Evolution Engine",
+  "purpose": "Pure Rust backpropagation, AdamW optimization, continual learning degradation control (EWC), candidate evaluation, dual-track Neural and World Model updating, and isolated model promotion.",
+  "implementation_files": [
+    "rust/tara_training_system/shared_training_infrastructure/trainer.rs",
+    "rust/tara_engine/src/train_candidate.rs",
+    "rust/tara_engine/src/model_expansion.rs",
+    "rust/tara_engine/src/self_update.rs",
+    "rust/tara_training_system/shared_training_infrastructure/skills_evaluator.rs",
+    "rust/tara_engine/src/bin/manual_trainer.rs",
+    "rust/tara_server/src/learning/mod.rs",
+    "rust/tara_training_system/autonomous_training/neural/autonomous_learner.rs",
+    "rust/tara_server/src/learning/capability_synthesizer.rs",
+    "rust/tara_training_system/autonomous_training/neural/governor.rs",
+    "rust/tara_server/src/learning/self_upgrade.rs",
+    "rust/tara_training_system/autonomous_training/world_model/topic_researcher.rs",
+    "rust/tara_server/src/code_evolution.rs",
+    "rust/tara_server/src/ability.rs"
+  ],
+  "primary_structs": [
+    "AbilityEngine",
+    "NativeSelfTrainer",
+    "ContinualLearningGovernor",
+    "AutonomousOnlineLearner",
+    "CapabilitySynthesizer",
+    "SelfUpdateController",
+    "SkillsEvaluator",
+    "SelfUpgradeEngine",
+    "TopicResearcher",
+    "CandidateModelTrainer",
+    "ManualTrainingConfig",
+    "CodeEvolutionEngine",
+    "CodeEvolutionResult"
+  ],
+  "registration": "AbilityEngine coordinates self-training, self-update, practice, and rollback lifecycle; manual_trainer::main executes manual training workspace runs; NativeSelfTrainer::new initializes optimizer states; ContinualLearningGovernor::register_task; CodeEvolutionEngine::new initializes source-level evolution with creator authority gate.",
+  "discovery": "ContinualLearningGovernor::select_priority_samples discovers high-loss training records; manual_trainer discovers canonical shards via config.json.",
+  "execution": "NativeSelfTrainer::train_step computes loss and backpropagates gradients; train_candidate::main; manual_trainer::main; CodeEvolutionEngine::add_source_function adds source code under evolution gate.",
+  "storage": "manual_training/ (config, checkpoints, runs, logs), storage/models/auto_candidate/ (neural, world_model), storage/models/tara/ (production), storage/training/self_trainer_status.json.",
+  "memory_link": "High-value episodic lessons distilled directly into staged training samples.",
+  "learning_link": "Continuous evolution loop updates model capabilities without catastrophic forgetting.",
+  "self_evolution_link": "Candidate models evaluated on benchmark gates before dynamic promotion to production. CodeEvolutionEngine gates all source modifications through creator authority verification.",
+  "curriculum_link": "Samples sampled according to 15-tier educational curriculum ladder.",
+  "api_endpoints": [
+    "POST /api/training/step",
+    "GET /api/training/status",
+    "POST /api/training/promote"
+  ],
+  "safety_gates": [
+    "Gradient norm clipping prevents exploding gradients",
+    "Elastic Weight Consolidation (EWC) penalty blocks catastrophic forgetting of core knowledge",
+    "Candidate models isolated in staging dir (manual_training/checkpoints/ or storage/models/auto_candidate/) until rigorous evaluation pass succeeds",
+    "UniversalRuntimeGate must approve before any model promotion",
+    "CodeEvolutionEngine requires creator authority verification before source modification",
+    "No self-promotion without benchmark gate pass — one failed benchmark = full reject",
+    "Zero direct overwriting of production weights or world state without verified promotion"
+  ],
+  "test_suites": [
+    "rust/tara_training_system/shared_training_infrastructure/trainer.rs::tests",
+    "rust/tara_training_system/autonomous_training/neural/governor.rs::tests",
+    "rust/tara_server/src/ability.rs::tests"
+  ],
+  "lifecycle": {
+    "1_dataset": "StreamingDatasetReader streams canonical shards directly into training batches",
+    "2_train": "NativeSelfTrainer::train_step — forward + cross-entropy loss + EWC penalty + backward + AdamW",
+    "3_checkpoint": "Save candidate SafeTensors checkpoint into isolated directory (manual_training/checkpoints/neural/ or storage/models/auto_candidate/neural/)",
+    "4_world_model": "WorldStateTracker snapshots candidate world state to isolated directory (manual_training/checkpoints/world_model/ or storage/models/auto_candidate/world_model/)",
+    "5_evaluate": "SkillsEvaluator evaluates candidate on benchmark suite with regression check",
+    "6_gate": "UniversalRuntimeGate & Creator authority verification gates promotion",
+    "7_promote": "Atomic promotion to storage/models/tara/ and storage/persistence/world_model_state.json with dynamic HMAC/SHA seal",
+    "8_reload": "TaraBrain hot-reloads promoted weights with zero downtime"
+  },
+  "upstream_capabilities": [
+    "dataset_and_curriculum",
+    "model_and_inference"
+  ],
+  "downstream_capabilities": [
+    "model_and_inference",
+    "knowledge"
+  ]
+}

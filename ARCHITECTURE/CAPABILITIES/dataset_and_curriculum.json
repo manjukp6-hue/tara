@@ -1,0 +1,88 @@
+{
+  "api_endpoints": [
+    "GET /api/dataset/status",
+    "GET /api/curriculum/matrix"
+  ],
+  "curriculum_link": "Defines the 15-tier educational curriculum ladder from Primary to PhD.",
+  "discovery": "ExpandableDatasetReader opens streaming JSONL records; DatasetEngine scans manual and autonomous dataset directories; ShardedSafeTensorsManager discovers SafeTensors files.",
+  "downstream_capabilities": [
+    "training_and_self_evolution",
+    "knowledge"
+  ],
+  "execution": "tara_dataset_splitter partitions datasets with bidirectional leakage checks; DatasetEngine auto-classifies and routes records; CurriculumEngine auto-samples mini-batches; tara_tokenizer_stage executes tokenization with 100% curriculum metadata preservation; curriculum_compiler compiles academic curriculum ladder.",
+  "id": "dataset_and_curriculum",
+  "implementation_files": [
+    "rust/tara_engine/src/dataset/mod.rs",
+    "rust/tara_engine/src/dataset/compiler.rs",
+    "rust/tara_training_system/shared_training_infrastructure/reader.rs",
+    "rust/tara_engine/src/dataset/splitter.rs",
+    "rust/tara_engine/src/dataset/vocab_builder.rs",
+    "rust/tara_engine/src/dataset/tokenizer_stage.rs",
+    "rust/tara_engine/src/dataset_classifier.rs",
+    "rust/tara_engine/src/shard_manager.rs",
+    "rust/tara_engine/src/bin/tara_dataset_splitter.rs",
+    "rust/tara_engine/src/bin/tara_tokenizer_stage.rs",
+    "rust/tara_engine/src/bin/curriculum_compiler.rs",
+    "rust/tara_engine/src/bin/verify_dataset_and_curriculum_engine.rs",
+    "rust/tara_training_system/dataset_engine/dataset_engine.rs",
+    "rust/tara_training_system/curriculum_engine/curriculum_engine.rs"
+  ],
+  "learning_link": "Provides high-grade filtered training corpora for NativeSelfTrainer.",
+  "lifecycle": {
+    "1_ingest": "Stream JSONL records from canonical shards",
+    "2_split": "DatasetSplitter partitions records with leakage verification",
+    "3_vocab": "VocabBuilder mines character distributions for tokenizer expansion",
+    "4_tokenize": "TokenizerStage pre-tokenizes datasets with zero metadata loss",
+    "5_curriculum": "CurriculumCompiler organizes concepts into educational tiers",
+    "6_feed": "ExpandableDatasetReader feeds stratified batches to trainer"
+  },
+  "memory_link": "Curriculum hierarchy maps directly to cognitive developmental milestones.",
+  "name": "Dataset Quality Standard & Curriculum Compiler",
+  "primary_structs": [
+    "CurriculumCompiler",
+    "ExpandableDatasetReader",
+    "DatasetSplitter",
+    "TokenizerStage",
+    "TrainingFormat",
+    "TokenizationManifest",
+    "TokenizedRecord",
+    "LeakageChecker",
+    "SplitRatio",
+    "SplitReport",
+    "DynamicDatasetCompiler",
+    "VocabBuilder",
+    "ShardedSafeTensorsManager",
+    "DatasetEngine",
+    "DatasetEngineConfig",
+    "DatasetMetadata",
+    "RoutedDataset",
+    "CurriculumEngine",
+    "CurriculumConfig",
+    "NeuralCurriculum",
+    "WorldModelCurriculum",
+    "CurriculumStage",
+    "CurriculumBatch"
+  ],
+  "purpose": "Educational curriculum compilation, streaming shard management, deterministic splitting, dynamic vocabulary building, and benchmark decontamination.",
+  "registration": "CurriculumCompiler::compile creates master curriculum; DatasetEngine auto-registers manual/autonomous datasets; CurriculumEngine compiles model-specific tracks; ExpandableDatasetReader registers streaming shards; ShardedSafeTensorsManager indexes SafeTensors shards.",
+  "safety_gates": [
+    "Strict SPDX permissive license verification on every record",
+    "Bidirectional 13-gram shingle cross-split leakage checking guarantees zero train/val/test data leakage",
+    "Zero tag deletion policy: preserves 100% of curriculum, pedagogical, and provenance metadata in tokenized records",
+    "Strict separation of manual and autonomous dataset registries with zero leakage",
+    "Zero unnecessary physical dataset folders: logical internal routing only"
+  ],
+  "self_evolution_link": "Dynamic vocabulary builder expands tokenizer from dataset character frequencies.",
+  "storage": "rust/tara_training_system/tara_dataset/ (manual, autonomous), storage/datasets/tara_dataset_filtered/ (canonical, weak), storage/datasets/tara_dataset_pool_v2/ (canonical, raw).",
+  "test_suites": [
+    "rust/tara_engine/src/dataset_classifier.rs::tests",
+    "rust/tara_engine/src/dataset/splitter.rs::tests",
+    "rust/tara_engine/src/dataset/tokenizer_stage.rs::tests",
+    "rust/tara_training_system/shared_training_infrastructure/reader.rs::tests",
+    "rust/tara_engine/src/dataset/compiler.rs::tests",
+    "rust/tara_engine/src/bin/verify_dataset_and_curriculum_engine.rs"
+  ],
+  "upstream_capabilities": [
+    "access_and_security"
+  ]
+}

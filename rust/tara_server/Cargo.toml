@@ -33,13 +33,16 @@ rsa = "0.9"
 
 # Utilities
 uuid = { version = "=1.10.0", features = ["v4"] }
-regex = "1.11"
+
 thiserror = "1.0"
-url = "2.5"
+url = { version = "2.5", default-features = false }
 memmap2 = "0.9"
 half = { version = "2.3", features = ["std"] }
 byteorder = "1.5"
+regex = "1.10"
 
 # Internal crates
 tara_core = { path = "../tara_core" }
 tara_engine = { path = "../tara_engine" }
+
+

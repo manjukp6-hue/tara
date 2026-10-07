@@ -1,0 +1,495 @@
+{
+  "metadata": {
+    "title": "TARA Master Academic Knowledge Coverage Matrix",
+    "version": "1.0.0",
+    "engine": "tara_engine (Rust native)",
+    "license": "Apache-2.0 / CC-BY-4.0 / CC-BY-SA-4.0 / Public-Domain compatible",
+    "educational_tiers": [
+      "primary",
+      "middle_school",
+      "high_school",
+      "college",
+      "degree",
+      "engineering",
+      "phd",
+      "research"
+    ],
+    "domains": [
+      "mathematics",
+      "science",
+      "programming",
+      "ai_ml",
+      "research_methodology",
+      "indian_family_culture",
+      "autonomous_creativity",
+      "online_search",
+      "autonomous_ability_acquisition"
+    ]
+  },
+  "concepts": [
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "ability_identification",
+      "topic": "capability_registry",
+      "subtopic": "intent_matching",
+      "concept": "Foundational Ability Recognition & Capability Matching",
+      "level": "primary",
+      "stage": "primary_ability_learning",
+      "prerequisites": [
+        "Pattern Recognition and Rule-Based Decision Rules"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_prm_recognition_matching"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_server/src/registry.rs: CapabilityRegistry & CapabilityCategory",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "skill_execution",
+      "topic": "execution_lifecycle",
+      "subtopic": "outcome_verification",
+      "concept": "Basic Skill Execution & Outcome Verification",
+      "level": "primary",
+      "stage": "primary_ability_learning",
+      "prerequisites": [
+        "Foundational Ability Recognition & Capability Matching"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_prm_invocation_observation"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_server/src/skills/mod.rs: SkillEngine::execute_skill",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "ability_engineering",
+      "topic": "gap_detection",
+      "subtopic": "unmet_dependencies",
+      "concept": "Missing Ability Detection & Execution Gap Logging",
+      "level": "middle_school",
+      "stage": "middle_school_ability_learning",
+      "prerequisites": [
+        "Basic Skill Execution & Outcome Verification"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_mid_missing_ability_gap"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_server/src/brain.rs & rust/tara_server/src/knowledge/mod.rs",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "skill_evolution",
+      "topic": "parameter_adaptation",
+      "subtopic": "adaptive_parameters",
+      "concept": "Skill Parameter Tuning & Adaptive Skill Update",
+      "level": "middle_school",
+      "stage": "middle_school_ability_learning",
+      "prerequisites": [
+        "Basic Skill Execution & Outcome Verification"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_mid_skill_parameter_update"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_server/src/skills/mod.rs & rust/tara_server/src/resilience.rs",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "safety_governance",
+      "topic": "sandbox_isolation",
+      "subtopic": "boundary_containment",
+      "concept": "Sandboxed Ability Practice & Boundary Verification",
+      "level": "high_school",
+      "stage": "high_school_ability_learning",
+      "prerequisites": [
+        "Missing Ability Detection & Execution Gap Logging"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_hs_sandboxed_practice"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_server/src/guard.rs & rust/tara_server/src/skills/certification.rs",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "continual_learning",
+      "topic": "experiential_learning",
+      "subtopic": "failure_analysis",
+      "concept": "Experiential Failure Learning & Success Reinforcement",
+      "level": "high_school",
+      "stage": "high_school_ability_learning",
+      "prerequisites": [
+        "Sandboxed Ability Practice & Boundary Verification"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_hs_failure_learning"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_server/src/memory/mod.rs & rust/tara_training_system/autonomous_training/neural/governor.rs",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "code_synthesis",
+      "topic": "capability_synthesis",
+      "subtopic": "syntax_validation",
+      "concept": "Autonomous Ability Formation & Syntax Validation via Rustfmt",
+      "level": "college",
+      "stage": "college_ability_learning",
+      "prerequisites": [
+        "Experiential Failure Learning & Success Reinforcement"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_col_synthesis_rustfmt"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_server/src/learning/capability_synthesizer.rs: check_rustfmt_syntax",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "code_synthesis",
+      "topic": "compilation_verification",
+      "subtopic": "borrow_checker_gating",
+      "concept": "Rigorous Type Verification & Borrow Checking via Cargo Check",
+      "level": "college",
+      "stage": "college_ability_learning",
+      "prerequisites": [
+        "Autonomous Ability Formation & Syntax Validation via Rustfmt"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_col_cargo_check_gate"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_server/src/learning/capability_synthesizer.rs: cargo_check_workspace",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "self_training",
+      "topic": "neural_optimization",
+      "subtopic": "adamw_backpropagation",
+      "concept": "Supervised Self-Training Decision & Cross-Entropy Optimization",
+      "level": "degree",
+      "stage": "degree_ability_learning",
+      "prerequisites": [
+        "Rigorous Type Verification & Borrow Checking via Cargo Check"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_deg_self_training_cycle"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_training_system/shared_training_infrastructure/trainer.rs: NativeSelfTrainer::train_step",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "continual_learning",
+      "topic": "catastrophic_forgetting",
+      "subtopic": "elastic_weight_consolidation",
+      "concept": "Catastrophic Forgetting Control via Elastic Weight Consolidation (EWC)",
+      "level": "degree",
+      "stage": "degree_ability_learning",
+      "prerequisites": [
+        "Supervised Self-Training Decision & Cross-Entropy Optimization"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_deg_ewc_forgetting_control"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_training_system/shared_training_infrastructure/trainer.rs & rust/tara_training_system/autonomous_training/neural/governor.rs",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "model_evolution",
+      "topic": "tokenization",
+      "subtopic": "expansion_decision",
+      "concept": "Autonomous Vocabulary Expansion Decision & Tokenizer Evolution",
+      "level": "engineering",
+      "stage": "engineering_ability_learning",
+      "prerequisites": [
+        "Catastrophic Forgetting Control via Elastic Weight Consolidation (EWC)"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_eng_vocabulary_expansion"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_engine/src/self_update.rs: analyze_vocabulary & VocabBuilder",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "training_pipeline",
+      "topic": "checkpoint_management",
+      "subtopic": "dual_purpose_checkpoints",
+      "concept": "Dual-Purpose Checkpointing & Resumable Pipeline Orchestration",
+      "level": "engineering",
+      "stage": "engineering_ability_learning",
+      "prerequisites": [
+        "Autonomous Vocabulary Expansion Decision & Tokenizer Evolution"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_eng_resumable_dual_checkpoints"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_engine/src/bin/tara_training_stages.rs: verify_working_model & verify_continuation_ready",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "model_validation",
+      "topic": "evaluation_gating",
+      "subtopic": "regression_prevention",
+      "concept": "Rigorous Candidate Model Benchmarking & Statistical Evaluation Gating",
+      "level": "phd",
+      "stage": "phd_ability_learning",
+      "prerequisites": [
+        "Dual-Purpose Checkpointing & Resumable Pipeline Orchestration"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_phd_candidate_evaluation_gate"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_engine/src/self_update.rs & rust/tara_training_system/shared_training_infrastructure/skills_evaluator.rs",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "governance",
+      "topic": "certification_authority",
+      "subtopic": "zero_trust_certification",
+      "concept": "Multi-Dimensional Skill Certification & Zero-Trust Governance",
+      "level": "phd",
+      "stage": "phd_ability_learning",
+      "prerequisites": [
+        "Rigorous Candidate Model Benchmarking & Statistical Evaluation Gating"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_phd_skill_certification"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_server/src/skills/certification.rs: SkillCertificationAuthority",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "production_deployment",
+      "topic": "atomic_promotion",
+      "subtopic": "zero_downtime_swap",
+      "concept": "Atomic Model Promotion & Zero-Downtime Production Swapping",
+      "level": "research",
+      "stage": "research_ability_learning",
+      "prerequisites": [
+        "Multi-Dimensional Skill Certification & Zero-Trust Governance"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_res_atomic_model_promotion"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_engine/src/self_update.rs: promote_candidate & TaraBrain::reload_weights",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    {
+      "domain": "autonomous_ability_acquisition",
+      "subject": "ability_engineering",
+      "branch": "resilience",
+      "topic": "rollback_recovery",
+      "subtopic": "state_restoration",
+      "concept": "Automated Regression Detection, Rollback Triggering & State Recovery",
+      "level": "research",
+      "stage": "research_ability_learning",
+      "prerequisites": [
+        "Atomic Model Promotion & Zero-Downtime Production Swapping"
+      ],
+      "status": "COVERED",
+      "record_ids": [
+        "ability_res_automated_rollback"
+      ],
+      "out_of_scope_reason": null,
+      "is_conjecture": false,
+      "conjecture_status": "",
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "rust/tara_server/src/learning/self_upgrade.rs: rollback_subsystem & inspect_subsystem",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "synthetic_origin": false,
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    }
+  ]
+}

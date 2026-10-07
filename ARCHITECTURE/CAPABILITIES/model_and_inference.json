@@ -1,0 +1,94 @@
+{
+  "id": "model_and_inference",
+  "name": "Native Neural Engine & SafeTensors Inference",
+  "purpose": "100% native Rust neural transformer inference, grouped query attention, SwiGLU activations, RoPE embeddings, RMSNorm, and byte-level BPE tokenization.",
+  "implementation_files": [
+    "rust/tara_training_system/neural_model/model/mod.rs",
+    "rust/tara_training_system/neural_model/model/attention.rs",
+    "rust/tara_training_system/neural_model/model/causal_lm.rs",
+    "rust/tara_training_system/neural_model/model/decoder_layer.rs",
+    "rust/tara_training_system/neural_model/model/mlp.rs",
+    "rust/tara_training_system/neural_model/model/rms_norm.rs",
+    "rust/tara_training_system/neural_model/model/rope.rs",
+    "rust/tara_engine/src/generate.rs",
+    "rust/tara_engine/src/tokenizer.rs",
+    "rust/tara_training_system/shared_training_infrastructure/safetensors.rs",
+    "rust/tara_engine/src/config.rs",
+    "rust/tara_engine/src/control_tokens.rs",
+    "rust/tara_engine/src/inference/mod.rs",
+    "rust/tara_engine/src/inference/backend.rs",
+    "rust/tara_engine/src/inference/cache_policy.rs",
+    "rust/tara_engine/src/inference/lookahead.rs",
+    "rust/tara_engine/src/inference/router.rs",
+    "rust/tara_engine/src/inference/telemetry.rs",
+    "rust/tara_engine/src/inference/tiered_store.rs",
+    "rust/tara_engine/src/cuda/mod.rs",
+    "rust/tara_engine/src/loading_policy.rs",
+    "rust/tara_server/src/model_registry.rs"
+  ],
+  "primary_structs": [
+    "TaraForCausalLM",
+    "TaraDecoderLayer",
+    "GroupedQueryAttention",
+    "SwiGLUMlp",
+    "RotaryEmbedding",
+    "RMSNorm",
+    "TaraTokenizer",
+    "ModelRegistry",
+    "DeviceBackend",
+    "CPUBackend",
+    "CUDABackend",
+    "BackendRegistry",
+    "LFRUCachePolicy",
+    "LRUCachePolicy",
+    "LFUCachePolicy",
+    "LookaheadPrefetcher",
+    "RoutingTracker",
+    "TelemetryMonitor",
+    "TieredTensorStore",
+    "LoadingPolicyEngine",
+    "ModelLoadingStrategy",
+    "DeviceTarget",
+    "LoadingPlan"
+  ],
+  "registration": "ModelRegistry::register_active_training registers trained weights; ModelRegistry::new loads versions manifest.",
+  "discovery": "ModelRegistry::get_active_version_location discovers model path; TaraBrain::try_load_model attempts load.",
+  "execution": "generate_stream and generate_response stream tokens via auto-regressive forward passes.",
+  "storage": "storage/models/tara/model.safetensors, storage/models/tara/config.json, storage/models/versions_manifest.json.",
+  "memory_link": "KV-cache preserves multi-turn context during active streaming turn.",
+  "learning_link": "Direct forward/backward loss backpropagation during self-training.",
+  "self_evolution_link": "ModelExpansion scales layer dimensions and heads dynamically.",
+  "curriculum_link": "Inference outputs aligned with educational curriculum standards.",
+  "api_endpoints": [
+    "POST /api/generate",
+    "POST /api/generate/stream",
+    "GET /api/model/version"
+  ],
+  "safety_gates": [
+    "Zero Python AI connection: 100% native compiled Rust runtime",
+    "Dynamic SHA-256 validation of SafeTensors weights on startup",
+    "Temperature clamping [0.0, 2.0] and top-p sampling boundaries prevent degenerated loops"
+  ],
+  "test_suites": [
+    "rust/tara_engine/src/generate.rs::tests",
+    "rust/tara_training_system/shared_training_infrastructure/safetensors.rs::tests",
+    "rust/tara_server/src/model_registry.rs::tests"
+  ],
+  "lifecycle": {
+    "1_discover": "ModelRegistry locates active model weights directory",
+    "2_validate": "Compute dynamic SHA-256 of model.safetensors and check integrity",
+    "3_load": "Read config.json and stream tensor buffers into memory via SafeTensors reader",
+    "4_tokenize": "TaraTokenizer encodes input string into subword token IDs",
+    "5_forward": "Execute 22 decoder layers: RoPE + GQA attention + SwiGLU MLP + RMSNorm",
+    "6_sample": "Apply temperature, top-k, and top-p filtering to logits to select next token",
+    "7_stream": "Yield token text immediately to user response stream",
+    "8_control": "Parse control tokens for automated skill/action dispatch"
+  },
+  "upstream_capabilities": [
+    "access_and_security"
+  ],
+  "downstream_capabilities": [
+    "cognitive_loop",
+    "training_and_self_evolution"
+  ]
+}

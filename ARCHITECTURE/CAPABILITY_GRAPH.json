@@ -1,0 +1,872 @@
+{
+  "description": "Comprehensive capability dependency and interaction graph for TARA Core",
+  "edges": [
+    {
+      "relationship": "feeds_into",
+      "source": "skills",
+      "target": "memory"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "skills",
+      "target": "training_and_self_evolution"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "skills",
+      "target": "cognitive_loop"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "memory",
+      "target": "cognitive_loop"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "memory",
+      "target": "training_and_self_evolution"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "memory",
+      "target": "training_and_self_evolution"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "knowledge",
+      "target": "cognitive_loop"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "knowledge",
+      "target": "specialist_engines"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "knowledge",
+      "target": "training_and_self_evolution"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "cognitive_loop",
+      "target": "memory"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "cognitive_loop",
+      "target": "skills"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "cognitive_loop",
+      "target": "evaluator_and_recovery"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "cognitive_loop",
+      "target": "training_and_self_evolution"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "specialist_engines",
+      "target": "cognitive_loop"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "specialist_engines",
+      "target": "evaluator_and_recovery"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "language",
+      "target": "cognitive_loop"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "language",
+      "target": "specialist_engines"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "rules_and_policy",
+      "target": "cognitive_loop"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "rules_and_policy",
+      "target": "skills"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "rules_and_policy",
+      "target": "specialist_engines"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "access_and_security",
+      "target": "cognitive_loop"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "access_and_security",
+      "target": "rules_and_policy"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "access_and_security",
+      "target": "control_plane_and_workload"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "model_and_inference",
+      "target": "cognitive_loop"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "model_and_inference",
+      "target": "training_and_self_evolution"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "training_and_self_evolution",
+      "target": "model_and_inference"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "training_and_self_evolution",
+      "target": "knowledge"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "dataset_and_curriculum",
+      "target": "training_and_self_evolution"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "dataset_and_curriculum",
+      "target": "knowledge"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "voice_and_interaction",
+      "target": "cognitive_loop"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "control_plane_and_workload",
+      "target": "model_and_inference"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "control_plane_and_workload",
+      "target": "training_and_self_evolution"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "evaluator_and_recovery",
+      "target": "memory"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "evaluator_and_recovery",
+      "target": "training_and_self_evolution"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "cryptographic_reward_and_goals",
+      "target": "cognitive_loop"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "cryptographic_reward_and_goals",
+      "target": "training_and_self_evolution"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "robotics_and_hardware",
+      "target": "cognitive_loop"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "skills",
+      "target": "training_and_self_evolution"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "training_and_self_evolution",
+      "target": "evaluator_and_recovery"
+    },
+    {
+      "relationship": "feeds_into",
+      "source": "evaluator_and_recovery",
+      "target": "training_and_self_evolution"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "skills",
+      "implementation_files": [
+        "rust/tara_server/src/skills/mod.rs",
+        "rust/tara_server/src/skills/automation.rs",
+        "rust/tara_server/src/skills/certification.rs",
+        "rust/tara_server/src/skills/coding.rs",
+        "rust/tara_server/src/skills/data.rs",
+        "rust/tara_server/src/skills/android.rs",
+        "rust/tara_server/src/skills/multimedia.rs",
+        "rust/tara_server/src/skills/research.rs",
+        "rust/tara_server/src/skills/security.rs",
+        "rust/tara_server/src/tools_registry.rs",
+        "rust/tara_server/src/ability.rs",
+        "rust/tara_server/src/registry.rs",
+        "TARA/SKILLS/CATALOG.json",
+        "TARA/SKILLS/IMPORT_MANIFEST.json"
+      ],
+      "name": "Dynamic Skills & Automation Engine",
+      "primary_structs": [
+        "AbilityEngine",
+        "SkillEngine",
+        "SkillCertificationAuthority",
+        "SkillSpec",
+        "ToolRegistry",
+        "ToolMetadata",
+        "CapabilityRegistry",
+        "Capability"
+      ],
+      "purpose": "Dynamic skill catalog discovery, parsing, certification, zero-trust authorization, sandboxed execution, and learning integration.",
+      "safety_gates": [
+        "ExecutionGuard::check_skill validates permissions",
+        "SkillCertificationAuthority checks SPDX license and authority",
+        "Category sandbox isolation blocks host destruction"
+      ],
+      "storage": "storage/skills/skills_registry.json, TARA/SKILLS/ directory tree.",
+      "test_suites": [
+        "rust/tara_server/src/ability.rs::tests",
+        "rust/tara_server/src/skills/certification.rs::tests",
+        "rust/tara_server/src/tools_registry.rs::tests"
+      ]
+    },
+    {
+      "id": "memory",
+      "implementation_files": [
+        "rust/tara_server/src/memory/mod.rs",
+        "rust/tara_server/src/memory_hub.rs",
+        "rust/tara_server/src/storage_retention.rs",
+        "rust/tara_core/src/memory.rs"
+      ],
+      "name": "Episodic & Semantic Memory Hub",
+      "primary_structs": [
+        "MemoryEngine",
+        "DynamicMemoryHub",
+        "EpisodeRecord",
+        "MemoryVectorIndex",
+        "ConsolidatedMemory",
+        "StorageRetentionManager"
+      ],
+      "purpose": "Multi-tier episodic memory recording, vector-based semantic retrieval, deduplication, consolidation, and multi-user isolation.",
+      "safety_gates": [
+        "Multi-user tenant isolation: user A cannot read user B episodes",
+        "Zero plaintext secret leakage: credential redaction prior to disk write",
+        "Storage retention bounds: automatic quota enforcement via storage_retention.rs"
+      ],
+      "storage": "storage/memory/episodes/<user_id>/, storage/memory/episode_index.json, storage/memory/consolidated/.",
+      "test_suites": [
+        "rust/tara_server/src/memory/mod.rs::tests",
+        "rust/tara_server/src/memory_hub.rs::tests"
+      ]
+    },
+    {
+      "id": "knowledge",
+      "implementation_files": [
+        "rust/tara_server/src/knowledge/mod.rs",
+        "rust/tara_training_system/world_model/graph.rs",
+        "rust/tara_server/src/knowledge/index.rs",
+        "rust/tara_server/src/knowledge/partition.rs",
+        "rust/tara_server/src/knowledge/corpus.rs",
+        "rust/tara_server/src/knowledge/license.rs",
+        "rust/tara_server/src/knowledge/pipeline.rs",
+        "rust/tara_server/src/knowledge/dedup.rs",
+        "rust/tara_server/src/knowledge/schema.rs",
+        "rust/tara_server/src/knowledge/validation.rs"
+      ],
+      "name": "Global Knowledge Base & Relationship Graph",
+      "primary_structs": [
+        "GlobalKnowledgeBase",
+        "FoundationalKnowledgeGraph",
+        "ScalableKnowledgeIndex",
+        "DomainPartitionRegistry",
+        "KnowledgePipeline",
+        "LicenseProvenanceEngine",
+        "KnowledgeDuplicateEngine",
+        "KnowledgeValidationEngine",
+        "KnowledgeProvenance",
+        "MathFormulaEntry",
+        "ScientificConceptEntry"
+      ],
+      "purpose": "Axiomatic domain knowledge graph, inverted index ranking, license provenance auditing, and zero-fabrication partition management.",
+      "safety_gates": [
+        "LicenseProvenanceEngine strictly enforces SPDX permissive/educational licenses",
+        "QuarantineEngine isolates unverified external documents",
+        "Zero fabrication: only verified real source literature admitted"
+      ],
+      "storage": "storage/knowledge/partitions/, storage/knowledge/index.json, storage/knowledge/relationship_graph.json.",
+      "test_suites": [
+        "rust/tara_training_system/world_model/graph.rs::tests",
+        "rust/tara_server/src/knowledge/index.rs::tests"
+      ]
+    },
+    {
+      "id": "cognitive_loop",
+      "implementation_files": [
+        "rust/tara_server/src/brain.rs",
+        "rust/tara_server/src/cognitive/mod.rs",
+        "rust/tara_server/src/cognitive/affect.rs",
+        "rust/tara_server/src/cognitive/connection.rs",
+        "rust/tara_server/src/cognitive/creativity.rs",
+        "rust/tara_server/src/cognitive/curiosity.rs",
+        "rust/tara_training_system/world_model/deliberative_search.rs",
+        "rust/tara_server/src/cognitive/existential.rs",
+        "rust/tara_training_system/autonomous_training/world_model/experiential.rs",
+        "rust/tara_server/src/cognitive/fast_weights.rs",
+        "rust/tara_training_system/world_model/ontology.rs",
+        "rust/tara_training_system/world_model/reasoning.rs",
+        "rust/tara_server/src/cognitive/self_model.rs",
+        "rust/tara_training_system/world_model/world_state.rs",
+        "rust/tara_server/src/bridge.rs",
+        "rust/tara_server/src/context.rs",
+        "rust/tara_server/src/nlu.rs",
+        "rust/tara_server/src/contract.rs"
+      ],
+      "name": "TaraBrain 14-Step Cognitive Loop & 15 Cognitive Pillars",
+      "primary_structs": [
+        "TaraBrain",
+        "CognitiveCapabilitiesHub",
+        "DeliberativeSearchEngine",
+        "FastWeightsAssociativeMemory",
+        "AffectiveHomeostasisEngine",
+        "SelfModelIntrospector",
+        "CuriosityGoalGenerator",
+        "UnifiedBridge",
+        "SessionContextManager",
+        "SemanticIntentParser",
+        "Session",
+        "AuthContext",
+        "CanonicalInferenceRequest",
+        "CanonicalInferenceResponse",
+        "WorldStateTracker",
+        "EventBus",
+        "WorkingMemoryGovernor"
+      ],
+      "purpose": "Unified cognitive architecture executing 14 sequential stages per turn with 15 specialized cognitive capability modules.",
+      "safety_gates": [
+        "ExecutionGuard interlock before any external action or tool execution",
+        "Existential reasoning rejects false claims of external consciousness / biological agency",
+        "Constraint solver bounds action space"
+      ],
+      "storage": "storage/persistence/self_model.json, storage/persistence/experiential_lessons.jsonl.",
+      "test_suites": [
+        "rust/tara_server/tests/cognitive_15_runtime_e2e.rs",
+        "rust/tara_training_system/world_model/deliberative_search.rs::tests"
+      ]
+    },
+    {
+      "id": "specialist_engines",
+      "implementation_files": [
+        "rust/tara_server/src/engines/mod.rs",
+        "rust/tara_server/src/engines/math/mod.rs",
+        "rust/tara_server/src/engines/science/mod.rs",
+        "rust/tara_server/src/engines/programming/mod.rs",
+        "rust/tara_server/src/engines/creativity.rs",
+        "rust/tara_server/src/engines/culture.rs",
+        "rust/tara_server/src/engines/search.rs",
+        "rust/tara_engine/src/computation/mod.rs"
+      ],
+      "name": "Specialist Domain Engines",
+      "primary_structs": [
+        "SpecialistEngines",
+        "MathEngine",
+        "ScienceEngine",
+        "ProgrammingEngine",
+        "ResearchEngine",
+        "CultureEngine"
+      ],
+      "purpose": "High-precision computational and scientific reasoning for Mathematics, Natural Science, Programming, Research, and Indian Cultural Ethics.",
+      "safety_gates": [
+        "CultureEngine enforces filial respect, honorifics, and ethical values",
+        "ProgrammingEngine linter verifies bracket balancing and memory safety",
+        "ResearchEngine verifies source citations and PRISMA methodology"
+      ],
+      "storage": "storage/research/partitions/, storage/research/research_index.jsonl.",
+      "test_suites": [
+        "rust/tara_server/src/engines/mod.rs::tests",
+        "rust/tara_server/src/engines/culture.rs::tests"
+      ]
+    },
+    {
+      "id": "language",
+      "implementation_files": [
+        "rust/tara_server/src/language/mod.rs",
+        "rust/tara_server/src/nlu.rs",
+        "rust/tara_server/src/subsystems.rs"
+      ],
+      "name": "Native Multilingual & Indic Language Engine",
+      "primary_structs": [
+        "LanguageEngine",
+        "LanguageRegistry",
+        "ScriptDetector",
+        "KanglishNormalizer",
+        "TechnicalTerminologyMap",
+        "IntentResult",
+        "SlotExtractor"
+      ],
+      "purpose": "Deep multilingual processing, Devanagari/Kannada script detection, Kanglish phonetic translation, and technical terminology standardization.",
+      "safety_gates": [
+        "Unicode normalization blocks homoglyph attacks and bidirectional override exploits",
+        "Language-appropriate respect honorifics verified"
+      ],
+      "storage": "In-memory phonetic maps and vocabulary dictionaries.",
+      "test_suites": [
+        "rust/tara_server/src/language/mod.rs::tests"
+      ]
+    },
+    {
+      "id": "rules_and_policy",
+      "implementation_files": [
+        "rust/tara_server/src/rules/mod.rs",
+        "rust/tara_server/src/rules/conflict_resolver.rs",
+        "rust/tara_server/src/rules/policy_compiler.rs",
+        "rust/tara_server/src/rules/policy_schema.rs",
+        "rust/tara_server/src/rules/rulebook_manager.rs",
+        "rust/tara_server/src/rules/rule_parser.rs",
+        "rust/tara_server/src/rules/semantic_normalizer.rs",
+        "rust/tara_server/src/rules/validator.rs",
+        "rust/tara_server/src/rules/language_detector.rs",
+        "rust/tara_server/src/runtime/mod.rs",
+        "rust/tara_server/src/runtime/gate.rs",
+        "rust/tara_server/src/runtime/registry.rs",
+        "rust/tara_core/src/rule_engine.rs",
+        "rust/tara_core/src/governance.rs"
+      ],
+      "name": "Execution Guard & Policy Compiler",
+      "primary_structs": [
+        "ExecutionGuard",
+        "PolicyCompiler",
+        "RulebookManager",
+        "ConflictResolver",
+        "SemanticNormalizer",
+        "PolicyValidator",
+        "LanguageDetector",
+        "UniversalRuntimeGate",
+        "DynamicRuntimeRegistry",
+        "RuntimeRecord",
+        "Role",
+        "Identity",
+        "CreatorAuthority"
+      ],
+      "purpose": "Strict zero-tolerance policy enforcement, AST conflict resolution, policy rulebook compilation, and fail-closed execution gating.",
+      "safety_gates": [
+        "Fail-closed architecture: unknown or ambiguous actions are REJECTED by default",
+        "Core Directives (D1 to D19) are immutable and cannot be overridden by user prompts",
+        "No hardcoded numbers or limits: all capacities, vocabularies, stages, skills, and datasets are dynamically extensible",
+        "Mandatory architecture synchronization: any added, wired, or deleted component must be updated in ARCHITECTURE/ maps",
+        "Mandatory test file & folder lifecycle: test artifacts must be preserved across test runs for repeated verification cycles, and deleted entirely only after complete test suite validation with verified clean filesystem scan",
+        "ConflictResolver prioritizes safety over user instruction"
+      ],
+      "storage": "TARA/RULES/ policy definitions, in-memory compiled policy graph.",
+      "test_suites": [
+        "rust/tara_server/src/rules/conflict_resolver.rs::tests",
+        "rust/tara_server/src/rules/validator.rs::tests"
+      ]
+    },
+    {
+      "id": "access_and_security",
+      "implementation_files": [
+        "rust/tara_server/src/access/mod.rs",
+        "rust/tara_server/src/access/crypto.rs",
+        "rust/tara_server/src/access/devices.rs",
+        "rust/tara_server/src/access/durable.rs",
+        "rust/tara_server/src/access/factors.rs",
+        "rust/tara_server/src/access/google.rs",
+        "rust/tara_server/src/access/lifecycle.rs",
+        "rust/tara_server/src/access/lockdown.rs",
+        "rust/tara_server/src/access/model_integrity.rs",
+        "rust/tara_server/src/access/profile.rs",
+        "rust/tara_server/src/access/protected.rs",
+        "rust/tara_server/src/access/qr.rs",
+        "rust/tara_server/src/access/restore.rs",
+        "rust/tara_server/src/access/services.rs",
+        "rust/tara_server/src/access/setup.rs",
+        "rust/tara_server/src/access/wizard.rs",
+        "rust/tara_server/src/security/mod.rs",
+        "rust/tara_server/src/security/jailbreak.rs",
+        "rust/tara_server/src/security/provenance.rs",
+        "rust/tara_server/src/security/quarantine.rs",
+        "rust/tara_server/src/security/dependency_verifier.rs",
+        "rust/tara_server/src/security/gated_goals.rs",
+        "rust/tara_server/src/security/release_manifest.rs",
+        "rust/tara_server/src/security/source_protector.rs",
+        "rust/tara_server/src/security/tamper_detector.rs",
+        "rust/tara_server/src/security/token_scanner.rs",
+        "rust/tara_server/src/contract.rs",
+        "rust/tara_core/src/protocol.rs"
+      ],
+      "name": "Zero-Trust Identity, Authentication & Model Integrity",
+      "primary_structs": [
+        "IdentityManager",
+        "CreatorAuthService",
+        "ModelIntegrityEngine",
+        "BiometricFactorProvider",
+        "DevicePairingWizard",
+        "DurableLockdownManager",
+        "JailbreakDetector",
+        "QuarantineEngine",
+        "DependencyVerifier",
+        "GatedTask",
+        "ReleaseManifestManager",
+        "ReleaseManifest",
+        "SourceProtector",
+        "SourceTamperDetector",
+        "TokenScanner",
+        "CoreRequest",
+        "CoreResponse",
+        "CoreProtocolHandler"
+      ],
+      "purpose": "Cryptographic Creator authority, biometric security factors, QR device pairing, durable lockdown, and HMAC model weight integrity.",
+      "safety_gates": [
+        "Constant-time token and HMAC comparison prevents timing side-channels",
+        "Durable lockdown locks system on repeated authentication failures",
+        "ModelIntegrityEngine refuses to start if model or manifest is tampered",
+        "JailbreakDetector strips homoglyphs, invisible zero-width chars, and injection delimiters"
+      ],
+      "storage": "TARA/ACCESS/operator/operators_registry.json, storage/vault/access/.",
+      "test_suites": [
+        "rust/tara_server/src/access/model_integrity.rs::tests",
+        "rust/tara_server/src/access/setup.rs::tests",
+        "rust/tara_server/src/security/jailbreak.rs::tests"
+      ]
+    },
+    {
+      "id": "model_and_inference",
+      "implementation_files": [
+        "rust/tara_training_system/neural_model/model/mod.rs",
+        "rust/tara_training_system/neural_model/model/attention.rs",
+        "rust/tara_training_system/neural_model/model/causal_lm.rs",
+        "rust/tara_training_system/neural_model/model/decoder_layer.rs",
+        "rust/tara_training_system/neural_model/model/mlp.rs",
+        "rust/tara_training_system/neural_model/model/rms_norm.rs",
+        "rust/tara_training_system/neural_model/model/rope.rs",
+        "rust/tara_engine/src/generate.rs",
+        "rust/tara_engine/src/tokenizer.rs",
+        "rust/tara_training_system/shared_training_infrastructure/safetensors.rs",
+        "rust/tara_engine/src/config.rs",
+        "rust/tara_engine/src/control_tokens.rs",
+        "rust/tara_engine/src/inference/mod.rs",
+        "rust/tara_engine/src/inference/backend.rs",
+        "rust/tara_engine/src/inference/cache_policy.rs",
+        "rust/tara_engine/src/inference/lookahead.rs",
+        "rust/tara_engine/src/inference/router.rs",
+        "rust/tara_engine/src/inference/telemetry.rs",
+        "rust/tara_engine/src/inference/tiered_store.rs",
+        "rust/tara_engine/src/cuda/mod.rs",
+        "rust/tara_engine/src/loading_policy.rs",
+        "rust/tara_server/src/model_registry.rs"
+      ],
+      "name": "Native Neural Engine & SafeTensors Inference",
+      "primary_structs": [
+        "TaraForCausalLM",
+        "TaraDecoderLayer",
+        "GroupedQueryAttention",
+        "SwiGLUMlp",
+        "RotaryEmbedding",
+        "RMSNorm",
+        "TaraTokenizer",
+        "ModelRegistry",
+        "DeviceBackend",
+        "CPUBackend",
+        "CUDABackend",
+        "BackendRegistry",
+        "LFRUCachePolicy",
+        "LRUCachePolicy",
+        "LFUCachePolicy",
+        "LookaheadPrefetcher",
+        "RoutingTracker",
+        "TelemetryMonitor",
+        "TieredTensorStore",
+        "LoadingPolicyEngine",
+        "ModelLoadingStrategy",
+        "DeviceTarget",
+        "LoadingPlan"
+      ],
+      "purpose": "100% native Rust neural transformer inference, grouped query attention, SwiGLU activations, RoPE embeddings, RMSNorm, and byte-level BPE tokenization.",
+      "safety_gates": [
+        "Zero Python AI connection: 100% native compiled Rust runtime",
+        "Dynamic SHA-256 validation of SafeTensors weights on startup",
+        "Temperature clamping [0.0, 2.0] and top-p sampling boundaries prevent degenerated loops"
+      ],
+      "storage": "storage/models/tara/model.safetensors, storage/models/tara/config.json, storage/models/versions_manifest.json.",
+      "test_suites": [
+        "rust/tara_engine/src/generate.rs::tests",
+        "rust/tara_training_system/shared_training_infrastructure/safetensors.rs::tests",
+        "rust/tara_server/src/model_registry.rs::tests"
+      ]
+    },
+    {
+      "id": "training_and_self_evolution",
+      "implementation_files": [
+        "rust/tara_training_system/shared_training_infrastructure/trainer.rs",
+        "rust/tara_engine/src/train_candidate.rs",
+        "rust/tara_engine/src/model_expansion.rs",
+        "rust/tara_engine/src/self_update.rs",
+        "rust/tara_training_system/shared_training_infrastructure/skills_evaluator.rs",
+        "rust/tara_engine/src/bin/manual_trainer.rs",
+        "rust/tara_server/src/learning/mod.rs",
+        "rust/tara_training_system/autonomous_training/neural/autonomous_learner.rs",
+        "rust/tara_server/src/learning/capability_synthesizer.rs",
+        "rust/tara_training_system/autonomous_training/neural/governor.rs",
+        "rust/tara_server/src/learning/self_upgrade.rs",
+        "rust/tara_training_system/autonomous_training/world_model/topic_researcher.rs",
+        "rust/tara_server/src/code_evolution.rs",
+        "rust/tara_server/src/ability.rs"
+      ],
+      "name": "Native Self-Training & Autonomous Evolution Engine",
+      "primary_structs": [
+        "AbilityEngine",
+        "NativeSelfTrainer",
+        "ContinualLearningGovernor",
+        "AutonomousOnlineLearner",
+        "CapabilitySynthesizer",
+        "TopicResearcher",
+        "CandidateModelTrainer",
+        "CodeEvolutionEngine"
+      ],
+      "purpose": "Pure Rust backpropagation, AdamW optimization, continual learning degradation control (EWC), candidate evaluation, and isolated model promotion.",
+      "safety_gates": [
+        "Gradient norm clipping prevents exploding gradients",
+        "Elastic Weight Consolidation (EWC) penalty blocks catastrophic forgetting of core knowledge",
+        "Candidate models isolated in staging dir until rigorous evaluation pass succeeds"
+      ],
+      "storage": "storage/training/self_trainer_status.json, storage/models/tara_candidate_v1/.",
+      "test_suites": [
+        "rust/tara_training_system/shared_training_infrastructure/trainer.rs::tests",
+        "rust/tara_training_system/autonomous_training/neural/governor.rs::tests",
+        "rust/tara_server/src/ability.rs::tests"
+      ]
+    },
+    {
+      "id": "dataset_and_curriculum",
+      "implementation_files": [
+        "rust/tara_engine/src/dataset/mod.rs",
+        "rust/tara_engine/src/dataset/compiler.rs",
+        "rust/tara_training_system/shared_training_infrastructure/reader.rs",
+        "rust/tara_engine/src/dataset/splitter.rs",
+        "rust/tara_engine/src/dataset/vocab_builder.rs",
+        "rust/tara_engine/src/dataset/tokenizer_stage.rs",
+        "rust/tara_engine/src/dataset_classifier.rs",
+        "rust/tara_engine/src/shard_manager.rs",
+        "rust/tara_engine/src/bin/tara_dataset_splitter.rs",
+        "rust/tara_engine/src/bin/tara_tokenizer_stage.rs",
+        "rust/tara_engine/src/bin/curriculum_compiler.rs",
+        "rust/tara_engine/src/bin/verify_dataset_and_curriculum_engine.rs",
+        "rust/tara_training_system/dataset_engine/dataset_engine.rs",
+        "rust/tara_training_system/curriculum_engine/curriculum_engine.rs"
+      ],
+      "name": "Dataset Quality Standard & Curriculum Compiler",
+      "primary_structs": [
+        "CurriculumCompiler",
+        "ExpandableDatasetReader",
+        "DatasetSplitter",
+        "TokenizerStage",
+        "TrainingFormat",
+        "TokenizationManifest",
+        "TokenizedRecord",
+        "TaggingAuditReport",
+        "LeakageChecker",
+        "SplitRatio",
+        "BandedLshRegistry",
+        "BenchmarkDecontaminationRegistry",
+        "ShardManager",
+        "DualCheckpointManager",
+        "FilterConfig",
+        "DatasetPoolManifest",
+        "DynamicBlacklistChecker",
+        "PoolSourceDefinition",
+        "AuthoritativeDatasetRegistry",
+        "ReconciliationReport",
+        "SourceOverlapReport",
+        "DatasetEngine",
+        "DatasetEngineConfig",
+        "DatasetMetadata",
+        "RoutedDataset",
+        "CurriculumEngine",
+        "CurriculumConfig",
+        "NeuralCurriculum",
+        "WorldModelCurriculum",
+        "CurriculumStage",
+        "CurriculumBatch"
+      ],
+      "purpose": "35-point intelligence filtering, educational curriculum compilation, streaming shard management, LSH deduplication, and benchmark decontamination.",
+      "safety_gates": [
+        "Strict SPDX permissive license verification on every record",
+        "Token-boundary benchmark decontamination rejects contamination against evaluation test sets",
+        "Banded LSH rejects exact and near-duplicates (Hamming distance <= 3)",
+        "Bidirectional 13-gram shingle cross-split leakage checking guarantees zero train/val/test data leakage",
+        "Zero tag deletion policy: preserves 100% of curriculum, pedagogical, and provenance metadata in tokenized records",
+        "Strict separation of manual and autonomous dataset registries with zero leakage",
+        "Zero unnecessary physical dataset folders: logical internal routing only"
+      ],
+      "storage": "storage/datasets/tara_dataset_filtered/ (canonical, weak, blacklist), storage/datasets/tara_dataset_pool_v2/ (canonical, raw), storage/datasets/authoritative_dataset_registry.json.",
+      "test_suites": [
+        "rust/tara_training_system/shared_training_infrastructure/reader.rs::tests",
+        "rust/tara_engine/src/dataset_classifier.rs::tests",
+        "rust/tara_engine/src/dataset/splitter.rs::tests",
+        "rust/tara_engine/src/dataset/tokenizer_stage.rs::tests",
+        "rust/tara_engine/src/bin/verify_dataset_and_curriculum_engine.rs"
+      ]
+    },
+    {
+      "id": "voice_and_interaction",
+      "implementation_files": [
+        "rust/tara_server/src/voice/mod.rs",
+        "rust/tara_server/src/access/factors.rs"
+      ],
+      "name": "Voice Interaction & Barge-In Coordinator",
+      "primary_structs": [
+        "WakeWordSpotter",
+        "BargeInCoordinator",
+        "VoiceTokenStreamer"
+      ],
+      "purpose": "Multilingual wake-word spotting, acoustic energy tracking, barge-in cancellation interlock, and voice token streaming.",
+      "safety_gates": [
+        "Hardware audio interlock prevents self-wake from speaker echo",
+        "Barge-in immediately halts outgoing audio generation to conserve compute"
+      ],
+      "storage": "In-memory circular audio buffers.",
+      "test_suites": [
+        "rust/tara_server/src/voice/mod.rs::tests"
+      ]
+    },
+    {
+      "id": "control_plane_and_workload",
+      "implementation_files": [
+        "rust/tara_server/src/control_plane/mod.rs",
+        "rust/tara_server/src/workload/mod.rs",
+        "rust/tara_server/src/auto_connect.rs",
+        "rust/tara_server/src/engine_system.rs",
+        "rust/tara_engine/src/device_detector.rs",
+        "rust/tara_engine/src/project_link_engine.rs",
+        "rust/tara_engine/src/github_adapter.rs",
+        "rust/tara_engine/src/bin/tara_github_sync.rs"
+      ],
+      "name": "Dynamic Compute Control Plane & Workload Routing",
+      "primary_structs": [
+        "ControlPlane",
+        "WorkloadDistributor",
+        "AutoConnectSyncEngine",
+        "DynamicEngineSystem",
+        "WorkerNodeRegistry",
+        "DeviceCapabilityDetector",
+        "DeviceProfile",
+        "GpuInfo",
+        "ComputationEngine",
+        "ProjectLinkEngine",
+        "GitHubAdapter",
+        "GitHubAdapterConfig",
+        "GitHubValidationReport",
+        "GitHubExportManifest"
+      ],
+      "purpose": "Distributed worker clustering, zero-cost compute routing, device capability negotiation, and multi-node state synchronization.",
+      "safety_gates": [
+        "Zero user compute cost mandate: tasks executed strictly on authorized local/cluster nodes",
+        "Worker authentication tokens required before joining execution mesh",
+        "ProjectLinkEngine validates relationship graph and triggers atomic rollback on corrupted links",
+        "GitHubAdapter enforces POSIX paths, unblocked CI, zero compiler warnings, and zero secrets before GitHub push"
+      ],
+      "storage": "storage/persistence/control_plane/",
+      "test_suites": [
+        "rust/tara_server/src/control_plane/mod.rs::tests",
+        "rust/tara_server/src/auto_connect.rs::tests",
+        "rust/tara_engine/src/project_link_engine.rs::tests",
+        "rust/tara_engine/src/bin/verify_project_link_engine.rs",
+        "rust/tara_engine/src/bin/tara_github_sync.rs"
+      ]
+    },
+    {
+      "id": "evaluator_and_recovery",
+      "implementation_files": [
+        "rust/tara_server/src/evaluator.rs",
+        "rust/tara_server/src/subsystems.rs"
+      ],
+      "name": "Self-Evaluation, Task Verification & Recovery Engine",
+      "primary_structs": [
+        "SelfEvaluator",
+        "TaskVerifier",
+        "UncertaintyDetector",
+        "RecoveryEngine",
+        "ResilienceEngine"
+      ],
+      "purpose": "Self-evaluating reasoning quality, verifying task completion, detecting uncertainty, and executing automated recovery fallbacks.",
+      "safety_gates": [
+        "Refusal to claim success when TaskVerifier detects derivation mismatch",
+        "Uncertainty threshold forces explicit disclosure of low confidence to user"
+      ],
+      "storage": "Evaluation scores appended to turn metadata in memory episodes.",
+      "test_suites": [
+        "rust/tara_server/src/evaluator.rs::tests"
+      ]
+    },
+    {
+      "id": "cryptographic_reward_and_goals",
+      "implementation_files": [
+        "rust/tara_server/src/reward/mod.rs",
+        "rust/tara_server/src/planner.rs",
+        "rust/tara_server/tests/security_gated_goals_tests.rs"
+      ],
+      "name": "Cryptographic Reward System & Security-Gated Goals",
+      "primary_structs": [
+        "RewardSystem",
+        "RewardLedger",
+        "GoalTracker",
+        "TaskVerificationProof",
+        "MilestoneGate"
+      ],
+      "purpose": "Creator roadmap goal tracking, cryptographic hash-chained reward ledger, milestone progression, and anti-tamper task completion verification.",
+      "safety_gates": [
+        "Cryptographic hash chaining: altering past transactions invalidates entire ledger",
+        "Anti-tamper: Tara CANNOT self-award points or self-unlock future tasks",
+        "Creator authority signature required to initialize or modify goal hierarchies"
+      ],
+      "storage": "storage/ledger/reward_ledger.enc/, storage/persistence/goals/.",
+      "test_suites": [
+        "rust/tara_server/tests/security_gated_goals_tests.rs"
+      ]
+    },
+    {
+      "id": "robotics_and_hardware",
+      "implementation_files": [
+        "rust/tara_core/src/robotics.rs",
+        "rust/tara_core/src/destruction.rs",
+        "rust/tara_core/src/sandbox.rs",
+        "rust/tara_core/src/permissions.rs"
+      ],
+      "name": "Robotics HAL & Actuator Destruction Guard",
+      "primary_structs": [
+        "RoboticsHal",
+        "DestructionGuard",
+        "KinematicBoundary",
+        "ActuatorController",
+        "SensorFusionBuffer"
+      ],
+      "purpose": "Hardware Abstraction Layer (HAL) for robotic actuators, sensor fusion, motor kinematic limits, and physical destruction boundary enforcement.",
+      "safety_gates": [
+        "Physical Destruction Guard: Hard velocity, torque, and positional bounds cannot be breached",
+        "Hardware emergency stop interlock immediately terminates power on anomaly detection"
+      ],
+      "storage": "In-memory telemetry logs and kinematic calibration profiles.",
+      "test_suites": [
+        "rust/tara_core/src/robotics.rs::tests",
+        "rust/tara_core/src/destruction.rs::tests"
+      ]
+    }
+  ],
+  "total_capabilities": 16,
+  "version": "1.0.0"
+}

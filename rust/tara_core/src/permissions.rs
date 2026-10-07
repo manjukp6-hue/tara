@@ -1,11 +1,11 @@
 //! permissions.rs
-//! 
+//!
 //! Centralized Capability & Permission Engine for TARA Core.
 //! Enforces that permissions are capability-driven and non-escalatable by AI.
 
+use crate::governance::Role;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use crate::governance::Role;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Capability {
@@ -24,6 +24,12 @@ pub enum Capability {
 #[derive(Debug, Clone)]
 pub struct PermissionEngine {
     role_capabilities: std::collections::HashMap<Role, HashSet<Capability>>,
+}
+
+impl Default for PermissionEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PermissionEngine {
@@ -70,7 +76,64 @@ impl PermissionEngine {
     }
 
     /// AI cannot grant capabilities to itself or modify security permissions
-    pub fn can_grant_permission(&self, granter_role: Role, _target_role: Role, _cap: &Capability) -> bool {
+    pub fn can_grant_permission(
+        &self,
+        granter_role: Role,
+        _target_role: Role,
+        _cap: &Capability,
+    ) -> bool {
         granter_role == Role::CREATOR
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_creator_has_all_capabilities() {
+        let engine = PermissionEngine::default();
+        let all_caps = [
+            Capability::ExecuteCode,
+            Capability::AccessFilesystem,
+            Capability::NetworkAccess,
+            Capability::DeviceControl,
+            Capability::ManageSkills,
+            Capability::ReadMemory,
+            Capability::WriteMemory,
+            Capability::ModelInference,
+            Capability::AuditLogRead,
+            Capability::CoreUpdate,
+        ];
+        for cap in &all_caps {
+            assert!(engine.has_capability(Role::CREATOR, cap));
+        }
+    }
+
+    #[test]
+    fn test_ai_capabilities_restricted() {
+        let engine = PermissionEngine::default();
+        // Allowed for AI
+        assert!(engine.has_capability(Role::AI, &Capability::ModelInference));
+        assert!(engine.has_capability(Role::AI, &Capability::ReadMemory));
+        assert!(engine.has_capability(Role::AI, &Capability::WriteMemory));
+        assert!(engine.has_capability(Role::AI, &Capability::ExecuteCode));
+
+        // Forbidden for AI (critical security boundary)
+        assert!(!engine.has_capability(Role::AI, &Capability::CoreUpdate));
+        assert!(!engine.has_capability(Role::AI, &Capability::AccessFilesystem));
+        assert!(!engine.has_capability(Role::AI, &Capability::NetworkAccess));
+        assert!(!engine.has_capability(Role::AI, &Capability::DeviceControl));
+        assert!(!engine.has_capability(Role::AI, &Capability::ManageSkills));
+    }
+
+    #[test]
+    fn test_ai_cannot_grant_permissions() {
+        let engine = PermissionEngine::default();
+        // AI attempting to grant permission to itself or others is rejected
+        assert!(!engine.can_grant_permission(Role::AI, Role::AI, &Capability::CoreUpdate));
+        assert!(!engine.can_grant_permission(Role::ADMIN, Role::AI, &Capability::CoreUpdate));
+        // Only CREATOR can grant permission
+        assert!(engine.can_grant_permission(Role::CREATOR, Role::AI, &Capability::ExecuteCode));
     }
 }

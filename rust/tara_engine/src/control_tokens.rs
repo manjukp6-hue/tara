@@ -82,11 +82,7 @@ impl ControlTokenActionParser {
     }
 
     fn strip_prefix<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
-        if s.starts_with(prefix) {
-            Some(&s[prefix.len()..])
-        } else {
-            None
-        }
+        s.strip_prefix(prefix)
     }
 
     fn split_target_payload(rest: &str) -> (String, Value) {

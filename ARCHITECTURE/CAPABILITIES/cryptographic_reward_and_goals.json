@@ -1,0 +1,54 @@
+{
+  "id": "cryptographic_reward_and_goals",
+  "name": "Cryptographic Reward System & Security-Gated Goals",
+  "purpose": "Creator roadmap goal tracking, cryptographic hash-chained reward ledger, milestone progression, and anti-tamper task completion verification.",
+  "implementation_files": [
+    "rust/tara_server/src/reward/mod.rs",
+    "rust/tara_server/src/planner.rs",
+    "rust/tara_server/tests/security_gated_goals_tests.rs"
+  ],
+  "primary_structs": [
+    "RewardSystem",
+    "RewardLedger",
+    "GoalTracker",
+    "TaskVerificationProof",
+    "MilestoneGate"
+  ],
+  "registration": "RewardSystem::new initializes encrypted ledger; GoalTracker::init_creator_goals.",
+  "discovery": "GoalTracker::get_active_task discovers current uncompleted roadmap milestone.",
+  "execution": "RewardSystem::award_points appends hash-chained transaction; GoalTracker::complete_active_task.",
+  "storage": "storage/ledger/reward_ledger.enc/, storage/persistence/goals/.",
+  "memory_link": "Completed milestones logged as permanent historical achievements in memory.",
+  "learning_link": "Reward incentives guide curriculum sample prioritization.",
+  "self_evolution_link": "Successful milestone completion unlocks advanced autonomous upgrade stages.",
+  "curriculum_link": "Roadmap stages mirror educational developmental ladder.",
+  "api_endpoints": [
+    "GET /api/goals/active_task",
+    "POST /api/goals/complete_task",
+    "GET /api/reward/balance"
+  ],
+  "safety_gates": [
+    "Cryptographic hash chaining: altering past transactions invalidates entire ledger",
+    "Anti-tamper: Tara CANNOT self-award points or self-unlock future tasks",
+    "Creator authority signature required to initialize or modify goal hierarchies"
+  ],
+  "test_suites": [
+    "rust/tara_server/tests/security_gated_goals_tests.rs"
+  ],
+  "lifecycle": {
+    "1_init": "Creator initializes signed roadmap milestones and task tree",
+    "2_lock": "Future tasks encrypted and locked until prerequisites are met",
+    "3_surface": "GoalTracker surfaces current single active task to TaraBrain",
+    "4_verify": "On task completion, TaskVerificationProof audits evidence against goal criteria",
+    "5_credit": "RewardSystem verifies proof and appends exact-once reward transaction to hash chain",
+    "6_unlock": "Next task in linear dependency order unlocks automatically",
+    "7_milestone": "Stage transition validates all tasks in stage before advancing roadmap"
+  },
+  "upstream_capabilities": [
+    "access_and_security"
+  ],
+  "downstream_capabilities": [
+    "cognitive_loop",
+    "training_and_self_evolution"
+  ]
+}

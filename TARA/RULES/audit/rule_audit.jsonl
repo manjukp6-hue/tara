@@ -1,1 +1,0 @@
-{"timestamp": "2026-09-13T04:43:17Z", "event": "RULE_POLICY_INITIALIZED", "severity": "INFO", "details": {"version": 1, "digest": "847452e5add8ed2fe32f909f32734241105a70d5de394b8b6bb840b1e1535eed", "mandatory_count": 10, "creator_count": 5}}

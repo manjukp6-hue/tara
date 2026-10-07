@@ -6,12 +6,12 @@
 //! - Atomic promotion and multi-runtime aware rollback.
 //! - Anti-self-bypass: model cannot approve itself.
 
-use std::collections::HashMap;
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::Arc;
 
-use super::registry::{DynamicRuntimeRegistry, RuntimeRecord, RuntimeState};
+use super::registry::DynamicRuntimeRegistry;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GateVerdict {
@@ -118,7 +118,9 @@ impl UniversalRuntimeGate {
                 runtime_results: results,
                 eligible_for_promotion: true,
                 gate_verdict: GateVerdict::Approved,
-                reason: "All required runtimes verified successfully. Eligible for atomic promotion.".to_string(),
+                reason:
+                    "All required runtimes verified successfully. Eligible for atomic promotion."
+                        .to_string(),
                 quarantined: false,
             }
         }

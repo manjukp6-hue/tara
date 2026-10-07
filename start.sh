@@ -3,9 +3,29 @@
 set -e
 
 echo "=============================================================================="
-echo "  Starting TARA AI Core Production Engine"
+echo "  Building and starting TARA AI Core (native Rust) & Architecture Watcher"
 echo "=============================================================================="
 
-python3 -m pip install -r requirements.txt
-echo "Starting TARA Web Server on http://127.0.0.1:7860 ..."
-python3 app.py
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "Rust toolchain (cargo) is required. Install Rust before starting TARA." >&2
+    exit 1
+fi
+
+# Check and auto-start live watcher daemon if not already running
+if pgrep -f "architecture_sync.*--watch" >/dev/null 2>&1; then
+    echo "[Architecture Watcher] Daemon is already running in background."
+else
+    echo "[Architecture Watcher] Auto-starting Persistent Background Daemon..."
+    if [ -f "./target/release/architecture_sync" ]; then
+        ./target/release/architecture_sync --watch &
+    elif [ -f "./target/debug/architecture_sync" ]; then
+        ./target/debug/architecture_sync --watch &
+    else
+        cargo run --release --bin architecture_sync -- --watch &
+    fi
+    echo "[Architecture Watcher] Persistent Daemon launched."
+fi
+
+echo "Starting TARA AI Core Engine on http://127.0.0.1:${PORT:-8765} ..."
+cargo run --release --bin tara_server
+

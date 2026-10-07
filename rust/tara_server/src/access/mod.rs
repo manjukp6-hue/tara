@@ -8,8 +8,36 @@
 //!    Fail-closed on tampering, missing seal, or uninitialized state.
 
 pub mod crypto;
+pub mod devices;
+pub mod durable;
+pub mod factors;
 pub mod google;
 pub mod lifecycle;
+pub mod lockdown;
+pub mod model_integrity;
+pub mod profile;
+pub mod protected;
+pub mod qr;
+pub mod restore;
+pub mod services;
+pub mod setup;
+pub mod wizard;
+
+pub use model_integrity::{IntegrityError, ModelIntegrityEngine, SealResult, VerifyResult};
+
+pub use devices::{DeviceCrypto, EnrollmentService};
+pub use durable::{DurableStorageManager, DurableStorageProvider, LocalFileStorageProvider};
+pub use factors::{BiometricCapability, BiometricFactorProvider, PlatformBiometricReport};
+pub use lockdown::{LockdownCoordinator, SecurityState};
+pub use profile::{CreatorIdentity, CreatorIdentityRecord};
+pub use protected::{ActionBroker, PolicyRecordStore};
+pub use qr::QrCodeMatrix;
+pub use restore::{RecoveryAuthorizationProof, RecoveryManager};
+pub use services::{
+    FirebaseSyncService, OwnershipTag, StorageObject, StorageRegistry, StorageType,
+};
+pub use setup::{CreatorSetupEngine, CreatorSetupRequest, CreatorSetupResult};
+pub use wizard::{BootstrapWizard, QrPrompt};
 
 use std::collections::HashMap;
 use std::fs;
@@ -17,16 +45,18 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ed25519_dalek::{SigningKey, Signature, VerifyingKey};
+use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
+use hex;
 use hmac::{Hmac, Mac};
 use rand::Rng;
 use serde_json::{json, Value};
 use sha2::Sha256;
-use hex;
 
 use self::crypto::SecureKeyStorage;
 use self::google::GoogleAuthService;
-use self::lifecycle::{AuthorityLifecycleManager, AuthorityState, CANONICAL_CREATOR_ID, DEFAULT_DISPLAY_NAME};
+use self::lifecycle::{
+    AuthorityLifecycleManager, AuthorityState, CANONICAL_CREATOR_ID, DEFAULT_DISPLAY_NAME,
+};
 
 /// Device record in the authorized device registry.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -40,20 +70,28 @@ pub struct DeviceRecord {
 
 struct DeviceRegistry {
     devices: HashMap<String, DeviceRecord>,
-    counter: usize,
 }
 
 impl DeviceRegistry {
     fn new() -> Self {
         Self {
             devices: HashMap::new(),
-            counter: 0,
         }
     }
 
-    fn register_device(&mut self, public_key_hex: &str, device_name: &str, status: &str) -> DeviceRecord {
-        self.counter += 1;
-        let device_id = format!("TARA-DEVICE-{:03}", self.counter);
+    fn register_device(
+        &mut self,
+        public_key_hex: &str,
+        device_name: &str,
+        status: &str,
+    ) -> DeviceRecord {
+        // Derive a stable, collision-resistant device ID from the public key.
+        // SHA-256(public_key_hex) → first 12 hex chars → "TARA-DEV-<12hex>"
+        // This is deterministic across restarts and unique per key pair.
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(public_key_hex.as_bytes());
+        let device_id = format!("TARA-DEV-{}", hex::encode(&hash[..6]));
+
         let rec = DeviceRecord {
             device_id: device_id.clone(),
             device_name: device_name.to_string(),
@@ -102,8 +140,16 @@ impl IdentityManager {
         }
     }
 
-    pub fn register_device(&self, public_key_hex: &str, device_name: &str, status: &str) -> DeviceRecord {
-        self.devices.lock().unwrap().register_device(public_key_hex, device_name, status)
+    pub fn register_device(
+        &self,
+        public_key_hex: &str,
+        device_name: &str,
+        status: &str,
+    ) -> DeviceRecord {
+        self.devices
+            .lock()
+            .unwrap()
+            .register_device(public_key_hex, device_name, status)
     }
 
     pub fn revoke_device(&self, device_id: &str) -> bool {
@@ -118,6 +164,10 @@ impl IdentityManager {
         self.devices.lock().unwrap().list_devices()
     }
 
+    pub fn get_device(&self, device_id: &str) -> Option<DeviceRecord> {
+        self.devices.lock().unwrap().devices.get(device_id).cloned()
+    }
+
     pub fn authorize_device(&self, device_id: &str) -> bool {
         let mut reg = self.devices.lock().unwrap();
         if let Some(d) = reg.devices.get_mut(device_id) {
@@ -130,7 +180,11 @@ impl IdentityManager {
 
     pub fn get_security_summary(&self) -> Value {
         let devices = self.devices.lock().unwrap();
-        let authorized_count = devices.devices.values().filter(|d| d.status == "AUTHORIZED").count();
+        let authorized_count = devices
+            .devices
+            .values()
+            .filter(|d| d.status == "AUTHORIZED")
+            .count();
         json!({
             "creator_id": self.creator_id,
             "authorized_devices": authorized_count,
@@ -189,7 +243,9 @@ struct RateLimiter {
 
 impl RateLimiter {
     fn new() -> Self {
-        Self { attempts: HashMap::new() }
+        Self {
+            attempts: HashMap::new(),
+        }
     }
 
     fn check(&mut self, key: &str) -> (bool, u64) {
@@ -213,7 +269,10 @@ impl RateLimiter {
 
     fn record_failure(&mut self, key: &str) {
         let now = Instant::now();
-        let entry = self.attempts.entry(key.to_string()).or_insert((0, now, None));
+        let entry = self
+            .attempts
+            .entry(key.to_string())
+            .or_insert((0, now, None));
         entry.0 += 1;
         entry.1 = now;
         if entry.0 >= 5 {
@@ -279,12 +338,15 @@ impl CreatorAuthService {
         let mut token_bytes = [0u8; 32];
         rand::thread_rng().fill(&mut token_bytes);
         let token = hex::encode(token_bytes);
-        self.sessions.lock().unwrap().insert(token.clone(), SessionRecord {
-            actor_id: actor_id.to_string(),
-            role: role.to_string(),
-            created_at: Instant::now(),
-            client_ip: client_ip.to_string(),
-        });
+        self.sessions.lock().unwrap().insert(
+            token.clone(),
+            SessionRecord {
+                actor_id: actor_id.to_string(),
+                role: role.to_string(),
+                created_at: Instant::now(),
+                client_ip: client_ip.to_string(),
+            },
+        );
         token
     }
 
@@ -333,12 +395,27 @@ impl CreatorAuthService {
             }
         };
 
-        let token_email = verified_claims.get("email").and_then(|v| v.as_str()).unwrap_or("").trim().to_lowercase();
-        let token_sub = verified_claims.get("sub").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let token_email = verified_claims
+            .get("email")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_lowercase();
+        let token_sub = verified_claims
+            .get("sub")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
 
         // Verify against enrolled creator in operators_registry.json or operator_record.json
-        let registry_path = format!("{}/TARA/ACCESS/operator/operators_registry.json", self.repo_root);
-        let record_path = format!("{}/TARA/ACCESS/operator/operator_record.json", self.repo_root);
+        let registry_path = format!(
+            "{}/TARA/ACCESS/operator/operators_registry.json",
+            self.repo_root
+        );
+        let record_path = format!(
+            "{}/TARA/ACCESS/operator/operator_record.json",
+            self.repo_root
+        );
 
         let mut matched_creator_id: Option<String> = None;
         let mut matched_role: String = "CREATOR".to_string();
@@ -347,7 +424,8 @@ impl CreatorAuthService {
             if let Ok(reg) = serde_json::from_str::<Value>(&raw) {
                 if let Some(obj) = reg.as_object() {
                     for (cid, cval) in obj {
-                        let auth_email = cval.get("authorized_google_email")
+                        let auth_email = cval
+                            .get("authorized_google_email")
                             .or_else(|| cval.get("google_email"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
@@ -356,10 +434,17 @@ impl CreatorAuthService {
 
                         if !auth_email.is_empty() && auth_email == token_email {
                             // Check subject ID if already bound
-                            let bound_sub = cval.get("google_subject_id").and_then(|v| v.as_str()).unwrap_or("");
+                            let bound_sub = cval
+                                .get("google_subject_id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
                             if bound_sub.is_empty() || bound_sub == token_sub {
                                 matched_creator_id = Some(cid.clone());
-                                matched_role = cval.get("role").and_then(|v| v.as_str()).unwrap_or("CREATOR").to_string();
+                                matched_role = cval
+                                    .get("role")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("CREATOR")
+                                    .to_string();
                                 break;
                             }
                         }
@@ -372,7 +457,8 @@ impl CreatorAuthService {
         if matched_creator_id.is_none() {
             if let Ok(raw) = fs::read_to_string(&record_path) {
                 if let Ok(rec) = serde_json::from_str::<Value>(&raw) {
-                    let auth_email = rec.get("authorized_google_email")
+                    let auth_email = rec
+                        .get("authorized_google_email")
                         .or_else(|| rec.get("google_email"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
@@ -380,7 +466,10 @@ impl CreatorAuthService {
                         .to_lowercase();
 
                     if !auth_email.is_empty() && auth_email == token_email {
-                        let cid = rec.get("creator_id").and_then(|v| v.as_str()).unwrap_or(CANONICAL_CREATOR_ID);
+                        let cid = rec
+                            .get("creator_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(CANONICAL_CREATOR_ID);
                         matched_creator_id = Some(cid.to_string());
                         matched_role = "ROOT_CREATOR".to_string();
                     }
@@ -449,18 +538,25 @@ impl CreatorAuthService {
         }
 
         // Load active root public key
-        let record_path = format!("{}/TARA/ACCESS/operator/operator_record.json", self.repo_root);
+        let record_path = format!(
+            "{}/TARA/ACCESS/operator/operator_record.json",
+            self.repo_root
+        );
         let root_pubkey_hex = match fs::read_to_string(&record_path) {
-            Ok(raw) => serde_json::from_str::<Value>(&raw)
-                .ok()
-                .and_then(|v| v.get("root_public_key").and_then(|k| k.as_str()).map(|s| s.to_string())),
+            Ok(raw) => serde_json::from_str::<Value>(&raw).ok().and_then(|v| {
+                v.get("root_public_key")
+                    .and_then(|k| k.as_str())
+                    .map(|s| s.to_string())
+            }),
             Err(_) => None,
         };
 
         let mut auth_ok = false;
 
         // Path 1: Cryptographic Ed25519 signature proof over challenge nonce
-        if let (Some(sig), Some(nonce), Some(ref root_pub)) = (proof_signature_hex, challenge_nonce, &root_pubkey_hex) {
+        if let (Some(sig), Some(nonce), Some(ref root_pub)) =
+            (proof_signature_hex, challenge_nonce, &root_pubkey_hex)
+        {
             if !sig.is_empty() && !nonce.is_empty() {
                 auth_ok = self.verify_ed25519_proof(root_pub, nonce.as_bytes(), sig);
             }
@@ -472,7 +568,10 @@ impl CreatorAuthService {
             if let Some(pp) = passphrase {
                 let pp_clean = pp.trim();
                 if !pp_clean.is_empty() {
-                    match self.key_storage.load_private_key("operator_key", Some(pp_clean)) {
+                    match self
+                        .key_storage
+                        .load_private_key("operator_key", Some(pp_clean))
+                    {
                         Ok(decrypted_priv) if decrypted_priv.len() == 32 => {
                             auth_ok = true;
                         }
@@ -527,7 +626,12 @@ impl CreatorAuthService {
     }
 
     /// Authenticate via recovery code using PBKDF2-HMAC-SHA256 (100,000 iterations).
-    pub fn authenticate_recovery(&self, recovery_code: &str, claimed_creator_id: &str, client_ip: &str) -> Value {
+    pub fn authenticate_recovery(
+        &self,
+        recovery_code: &str,
+        claimed_creator_id: &str,
+        client_ip: &str,
+    ) -> Value {
         let (state, _) = self.lifecycle.verify_integrity();
         if state == AuthorityState::CreatorSetupRequired {
             return json!({
@@ -551,9 +655,18 @@ impl CreatorAuthService {
         }
 
         let app_recovery = if cfg!(target_os = "windows") {
-            std::env::var("APPDATA").map(|a| format!("{}/TARA/recovery/recovery_config.json", a.replace('\\', "/"))).ok()
+            std::env::var("APPDATA")
+                .map(|a| {
+                    format!(
+                        "{}/TARA/recovery/recovery_config.json",
+                        a.replace('\\', "/")
+                    )
+                })
+                .ok()
         } else {
-            std::env::var("HOME").map(|h| format!("{}/.tara/recovery/recovery_config.json", h)).ok()
+            std::env::var("HOME")
+                .map(|h| format!("{}/.tara/recovery/recovery_config.json", h))
+                .ok()
         };
         let recovery_path = match app_recovery {
             Some(ref p) if std::path::Path::new(p).exists() => p.clone(),
@@ -561,18 +674,36 @@ impl CreatorAuthService {
         };
         if let Ok(raw) = fs::read_to_string(&recovery_path) {
             if let Ok(rec) = serde_json::from_str::<Value>(&raw) {
-                let expected_hash = rec.get("recovery_code_hash").and_then(|v| v.as_str()).unwrap_or("");
-                let salt_hex = rec.get("recovery_salt").and_then(|v| v.as_str()).unwrap_or("");
-                let iterations = rec.get("iterations").and_then(|v| v.as_u64()).unwrap_or(100_000) as u32;
+                let expected_hash = rec
+                    .get("recovery_code_hash")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let salt_hex = rec
+                    .get("recovery_salt")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let iterations = rec
+                    .get("iterations")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(100_000) as u32;
 
                 if let Ok(salt_bytes) = hex::decode(salt_hex) {
                     let mut derived = [0u8; 32];
-                    pbkdf2_hmac_sha256(clean_code.as_bytes(), &salt_bytes, iterations, &mut derived);
+                    pbkdf2_hmac_sha256(
+                        clean_code.as_bytes(),
+                        &salt_bytes,
+                        iterations,
+                        &mut derived,
+                    );
                     let computed_hash = hex::encode(derived);
 
-                    if constant_time_eq::constant_time_eq(computed_hash.as_bytes(), expected_hash.as_bytes()) {
+                    if constant_time_eq::constant_time_eq(
+                        computed_hash.as_bytes(),
+                        expected_hash.as_bytes(),
+                    ) {
                         self.rate_limiter.lock().unwrap().record_success(client_ip);
-                        let session_token = self.issue_session(claimed_creator_id, "ROOT_CREATOR", client_ip);
+                        let session_token =
+                            self.issue_session(claimed_creator_id, "ROOT_CREATOR", client_ip);
                         return json!({
                             "status": "SUCCESS",
                             "session_token": session_token,
@@ -598,10 +729,10 @@ impl CreatorAuthService {
         let challenge_id = hex::encode(ch_bytes);
         let nonce = hex::encode(nonce_bytes);
 
-        self.qr_challenges.lock().unwrap().insert(
-            challenge_id.clone(),
-            (nonce.clone(), Instant::now()),
-        );
+        self.qr_challenges
+            .lock()
+            .unwrap()
+            .insert(challenge_id.clone(), (nonce.clone(), Instant::now()));
         json!({ "challenge_id": challenge_id, "nonce": nonce, "expires_in": 300 })
     }
 
@@ -616,31 +747,99 @@ impl CreatorAuthService {
         json!({ "status": "EXPIRED", "challenge_id": challenge_id })
     }
 
-    /// Verify QR code device approval.
-    pub fn verify_qr_approval(&self, challenge_id: &str, device_id: &str, _device_signature_hex: &str, client_ip: &str) -> Value {
-        let challenges = self.qr_challenges.lock().unwrap();
-        if let Some((_, created_at)) = challenges.get(challenge_id) {
-            if created_at.elapsed() < Duration::from_secs(300) {
-                drop(challenges);
-                let session_token = self.issue_session(CANONICAL_CREATOR_ID, "ROOT_CREATOR", client_ip);
+    /// Verify QR code device approval with mandatory Ed25519 signature verification against registered device key.
+    pub fn verify_qr_approval(
+        &self,
+        challenge_id: &str,
+        device_id: &str,
+        device_signature_hex: &str,
+        identity_mgr: &IdentityManager,
+        client_ip: &str,
+    ) -> Value {
+        // 1. Consume challenge (prevent reuse)
+        let mut challenges = self.qr_challenges.lock().unwrap();
+        let (nonce, created_at) = match challenges.remove(challenge_id) {
+            Some(c) => c,
+            None => {
+                return json!({ "status": "ERROR", "error": "Challenge expired or not found." });
+            }
+        };
+        drop(challenges);
+
+        // 2. Verify challenge freshness (5 minutes TTL)
+        if created_at.elapsed() >= Duration::from_secs(300) {
+            return json!({ "status": "ERROR", "error": "Challenge expired." });
+        }
+
+        // 3. Verify non-empty device identity and cryptographic signature
+        if device_id.trim().is_empty() || device_signature_hex.trim().is_empty() {
+            return json!({
+                "status": "ERROR",
+                "error": "Device ID and cryptographic signature are required."
+            });
+        }
+
+        // 4. Retrieve enrolled device from registry
+        let device = match identity_mgr.get_device(device_id) {
+            Some(d) => d,
+            None => {
                 return json!({
-                    "status": "SUCCESS",
-                    "session_token": session_token,
-                    "creator_id": CANONICAL_CREATOR_ID,
-                    "role": "ROOT_CREATOR",
-                    "auth_method": "qr",
-                    "device_id": device_id
+                    "status": "ERROR",
+                    "error": "Device not found in authorized device registry."
                 });
             }
+        };
+
+        // 5. Verify device status is AUTHORIZED
+        if device.status != "AUTHORIZED" {
+            return json!({
+                "status": "ERROR",
+                "error": "Device is revoked or not authorized."
+            });
         }
-        json!({ "status": "ERROR", "error": "Challenge expired or not found." })
+
+        // 6. Cryptographically verify signature over the challenge payload: challenge_id:nonce
+        let payload = format!("{}:{}", challenge_id, nonce);
+        let sig_valid = self.verify_ed25519_proof(
+            &device.device_public_key,
+            payload.as_bytes(),
+            device_signature_hex,
+        ) || self.verify_ed25519_proof(
+            &device.device_public_key,
+            nonce.as_bytes(),
+            device_signature_hex,
+        );
+
+        if !sig_valid {
+            return json!({
+                "status": "ERROR",
+                "error": "Invalid cryptographic device signature."
+            });
+        }
+
+        // 7. Issue authenticated session
+        let session_token = self.issue_session(CANONICAL_CREATOR_ID, "ROOT_CREATOR", client_ip);
+        json!({
+            "status": "SUCCESS",
+            "session_token": session_token,
+            "creator_id": CANONICAL_CREATOR_ID,
+            "role": "ROOT_CREATOR",
+            "auth_method": "qr",
+            "device_id": device_id
+        })
     }
 
     /// Check if text triggers creator auth conversational flow.
     pub fn check_conversational_trigger(&self, text: &str) -> Value {
         let text_lc = text.to_lowercase();
-        let triggers = ["i am the creator", "creator mode", "authenticate as creator",
-            "creator authentication", "i am operator", "i am the operator"];
+        let triggers = [
+            "i am the creator",
+            "creator mode",
+            "authenticate as creator",
+            "creator authentication",
+            "i am operator",
+            "i am the operator",
+        ];
         let triggered = triggers.iter().any(|t| text_lc.contains(t));
         json!({
             "triggered": triggered,
@@ -651,15 +850,26 @@ impl CreatorAuthService {
     /// Detect auth method selection from text.
     pub fn detect_method_selection(&self, text: &str) -> Option<String> {
         let text_lc = text.to_lowercase();
-        if text_lc.contains("google") { Some("google".to_string()) }
-        else if text_lc.contains("key") || text_lc.contains("signature") { Some("creator_key".to_string()) }
-        else if text_lc.contains("qr") { Some("qr".to_string()) }
-        else if text_lc.contains("recovery") { Some("recovery".to_string()) }
-        else { None }
+        if text_lc.contains("google") {
+            Some("google".to_string())
+        } else if text_lc.contains("key") || text_lc.contains("signature") {
+            Some("creator_key".to_string())
+        } else if text_lc.contains("qr") {
+            Some("qr".to_string())
+        } else if text_lc.contains("recovery") {
+            Some("recovery".to_string())
+        } else {
+            None
+        }
     }
 
     /// Handle auth method selection.
-    pub fn handle_method_selection(&self, method: &str, _creator_id: &str, _client_ip: &str) -> Value {
+    pub fn handle_method_selection(
+        &self,
+        method: &str,
+        _creator_id: &str,
+        _client_ip: &str,
+    ) -> Value {
         let instructions = match method {
             "google" => "Please provide your Google ID token via POST /api/v1/auth/google",
             "creator_key" => "Please provide proof_signature and challenge_nonce via POST /api/v1/auth/creator_key",
@@ -686,27 +896,37 @@ impl CreatorAuthService {
     ) -> Value {
         let sess = match self.verify_session(session_token) {
             Some(s) => s,
-            None => return json!({ "status": "ERROR", "error": "Invalid or expired session token." }),
+            None => {
+                return json!({ "status": "ERROR", "error": "Invalid or expired session token." })
+            }
         };
 
         if sess.get("role").map(|r| r.as_str()) != Some("ROOT_CREATOR") {
             return json!({ "status": "ERROR", "error": "ROOT_CREATOR authority required to enroll Google identities." });
         }
 
-        let reg_path = format!("{}/TARA/ACCESS/operator/operators_registry.json", self.repo_root);
+        let reg_path = format!(
+            "{}/TARA/ACCESS/operator/operators_registry.json",
+            self.repo_root
+        );
         let mut reg_val = fs::read_to_string(&reg_path)
             .ok()
             .and_then(|r| serde_json::from_str::<Value>(&r).ok())
             .unwrap_or(json!({}));
 
         if let Some(obj) = reg_val.as_object_mut() {
-            let entry = obj.entry(creator_id.to_string()).or_insert_with(|| json!({
-                "creator_id": creator_id,
-                "role": "CREATOR",
-                "status": "active"
-            }));
+            let entry = obj.entry(creator_id.to_string()).or_insert_with(|| {
+                json!({
+                    "creator_id": creator_id,
+                    "role": "CREATOR",
+                    "status": "active"
+                })
+            });
             if let Some(entry_obj) = entry.as_object_mut() {
-                entry_obj.insert("authorized_google_email".to_string(), json!(google_email.to_lowercase()));
+                entry_obj.insert(
+                    "authorized_google_email".to_string(),
+                    json!(google_email.to_lowercase()),
+                );
                 if let Some(sub) = google_subject_id {
                     entry_obj.insert("google_subject_id".to_string(), json!(sub));
                 }
@@ -714,7 +934,10 @@ impl CreatorAuthService {
         }
 
         let _ = fs::create_dir_all(format!("{}/TARA/ACCESS/operator", self.repo_root));
-        let _ = fs::write(&reg_path, serde_json::to_string_pretty(&reg_val).unwrap_or_default());
+        let _ = fs::write(
+            &reg_path,
+            serde_json::to_string_pretty(&reg_val).unwrap_or_default(),
+        );
 
         json!({ "status": "SUCCESS", "google_email": google_email, "creator_id": creator_id })
     }
@@ -784,7 +1007,12 @@ impl CreatorAuthService {
         let mut salt_bytes = [0u8; 16];
         rng.fill(&mut salt_bytes);
         let mut rec_hash_bytes = [0u8; 32];
-        pbkdf2_hmac_sha256(recovery_code.as_bytes(), &salt_bytes, 100_000, &mut rec_hash_bytes);
+        pbkdf2_hmac_sha256(
+            recovery_code.as_bytes(),
+            &salt_bytes,
+            100_000,
+            &mut rec_hash_bytes,
+        );
 
         let recovery_json = json!({
             "creator_id": CANONICAL_CREATOR_ID,
@@ -797,7 +1025,10 @@ impl CreatorAuthService {
 
         let rec_dir = format!("{}/TARA/ACCESS/restore", self.repo_root);
         let _ = fs::create_dir_all(&rec_dir);
-        let _ = fs::write(format!("{}/restore_config.json", rec_dir), serde_json::to_string_pretty(&recovery_json).unwrap_or_default());
+        let _ = fs::write(
+            format!("{}/restore_config.json", rec_dir),
+            serde_json::to_string_pretty(&recovery_json).unwrap_or_default(),
+        );
 
         // Write operator_record.json
         let record_json = json!({
@@ -811,7 +1042,10 @@ impl CreatorAuthService {
 
         let op_dir = format!("{}/TARA/ACCESS/operator", self.repo_root);
         let _ = fs::create_dir_all(&op_dir);
-        let _ = fs::write(format!("{}/operator_record.json", op_dir), serde_json::to_string_pretty(&record_json).unwrap_or_default());
+        let _ = fs::write(
+            format!("{}/operator_record.json", op_dir),
+            serde_json::to_string_pretty(&record_json).unwrap_or_default(),
+        );
 
         // Write operators_registry.json
         let registry_json = json!({
@@ -823,14 +1057,15 @@ impl CreatorAuthService {
                 "registered_at": crate::now_iso()
             }
         });
-        let _ = fs::write(format!("{}/operators_registry.json", op_dir), serde_json::to_string_pretty(&registry_json).unwrap_or_default());
+        let _ = fs::write(
+            format!("{}/operators_registry.json", op_dir),
+            serde_json::to_string_pretty(&registry_json).unwrap_or_default(),
+        );
 
         // Cryptographically seal authority state with Ed25519 signature + DPAPI
-        let _ = self.lifecycle.seal_initial_authority(
-            &priv_bytes,
-            &pub_bytes,
-            DEFAULT_DISPLAY_NAME,
-        );
+        let _ =
+            self.lifecycle
+                .seal_initial_authority(&priv_bytes, &pub_bytes, DEFAULT_DISPLAY_NAME);
 
         let session_token = self.issue_session(CANONICAL_CREATOR_ID, "ROOT_CREATOR", "127.0.0.1");
 

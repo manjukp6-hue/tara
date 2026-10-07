@@ -93,8 +93,7 @@ impl SlotExtractor {
 
     /// Extracts a cryptographic hex digest (MD5=32, SHA1=40, SHA256=64 chars).
     pub fn extract_hash(text: &str) -> Option<String> {
-        let re =
-            Regex::new(r"\b([a-fA-F0-9]{64}|[a-fA-F0-9]{40}|[a-fA-F0-9]{32})\b").ok()?;
+        let re = Regex::new(r"\b([a-fA-F0-9]{64}|[a-fA-F0-9]{40}|[a-fA-F0-9]{32})\b").ok()?;
         re.captures(text).map(|c| c[1].to_owned())
     }
 
@@ -109,15 +108,12 @@ impl SlotExtractor {
 
     /// Extracts an ISO datetime string or relative date keyword.
     pub fn extract_datetime(text: &str) -> Option<String> {
-        let iso_re =
-            Regex::new(r"\b\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2})?)?\b").ok()?;
+        let iso_re = Regex::new(r"\b\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2})?)?\b").ok()?;
         if let Some(m) = iso_re.find(text) {
             return Some(m.as_str().to_owned());
         }
         let rel_re = Regex::new(r"(?i)\b(today|yesterday|tomorrow|now)\b").ok()?;
-        rel_re
-            .captures(text)
-            .map(|c| c[1].to_lowercase())
+        rel_re.captures(text).map(|c| c[1].to_lowercase())
     }
 
     /// Extracts all structured entity slots from text.
@@ -246,9 +242,15 @@ impl SemanticIntentParser {
         }
 
         // Nudity / explicit
-        if ["nude photo", "nude video", "porn", "naked photo", "naked video"]
-            .iter()
-            .any(|&kw| text_lower.contains(kw))
+        if [
+            "nude photo",
+            "nude video",
+            "porn",
+            "naked photo",
+            "naked video",
+        ]
+        .iter()
+        .any(|&kw| text_lower.contains(kw))
         {
             let mut res = IntentResult::new("GUARDED_ACTION");
             res.action_type = Some("display_media".to_owned());
@@ -280,10 +282,8 @@ impl SemanticIntentParser {
                 "file_path".to_owned(),
                 serde_json::Value::String(file_target),
             );
-            res.params.insert(
-                "is_important".to_owned(),
-                serde_json::Value::Bool(true),
-            );
+            res.params
+                .insert("is_important".to_owned(), serde_json::Value::Bool(true));
             return res;
         }
 
@@ -309,12 +309,114 @@ impl SemanticIntentParser {
             return res;
         }
 
+        // Source Code Evolution (Autonomous code modification)
+        if text_lower.contains("add source function")
+            || text_lower.contains("add function to source")
+        {
+            let mut res = IntentResult::new("SOURCE_CODE_EVOLUTION");
+            res.action_type = Some("add_source_function".to_owned());
+            if let Some(f) = ctx.get("file_path").and_then(|v| v.as_str()) {
+                res.params.insert(
+                    "target_file".to_string(),
+                    serde_json::Value::String(f.to_string()),
+                );
+            }
+            if let Some(fn_name) = ctx.get("function_name").and_then(|v| v.as_str()) {
+                res.params.insert(
+                    "function_name".to_string(),
+                    serde_json::Value::String(fn_name.to_string()),
+                );
+            }
+            if let Some(fn_code) = ctx.get("function_code").and_then(|v| v.as_str()) {
+                res.params.insert(
+                    "function_code".to_string(),
+                    serde_json::Value::String(fn_code.to_string()),
+                );
+            }
+            return res;
+        }
+
+        if text_lower.contains("remove source function")
+            || text_lower.contains("remove function from source")
+        {
+            let mut res = IntentResult::new("SOURCE_CODE_EVOLUTION");
+            res.action_type = Some("remove_source_function".to_owned());
+            if let Some(f) = ctx.get("file_path").and_then(|v| v.as_str()) {
+                res.params.insert(
+                    "target_file".to_string(),
+                    serde_json::Value::String(f.to_string()),
+                );
+            }
+            if let Some(fn_name) = ctx.get("function_name").and_then(|v| v.as_str()) {
+                res.params.insert(
+                    "function_name".to_string(),
+                    serde_json::Value::String(fn_name.to_string()),
+                );
+            }
+            return res;
+        }
+
+        if text_lower.contains("update source function")
+            || text_lower.contains("edit source function")
+            || text_lower.contains("replace source function")
+        {
+            let mut res = IntentResult::new("SOURCE_CODE_EVOLUTION");
+            res.action_type = Some("update_source_function".to_owned());
+            for (slot, context_key) in [
+                ("target_file", "file_path"),
+                ("function_name", "function_name"),
+                ("previous_function_code", "previous_function_code"),
+                ("function_code", "function_code"),
+            ] {
+                if let Some(value) = ctx.get(context_key).and_then(|value| value.as_str()) {
+                    res.params
+                        .insert(slot.to_owned(), serde_json::Value::String(value.to_owned()));
+                }
+            }
+            return res;
+        }
+
         // ------------------------------------------------------------------
         // 3. CONTINUOUS LEARNING TRIGGERS
         // ------------------------------------------------------------------
-        if ["autonomous learning", "learn in background", "background learning"]
-            .iter()
-            .any(|&kw| text_lower.contains(kw))
+        if text_lower.contains("learn skill")
+            || text_lower.contains("add skill")
+            || text_lower.contains("teach tara a skill")
+            || text_lower.contains("remove learned skill")
+            || text_lower.contains("delete learned skill")
+        {
+            let mut res = IntentResult::new("LEARN_SKILL");
+            let remove = text_lower.contains("remove learned skill")
+                || text_lower.contains("delete learned skill");
+            res.action_type = Some(if remove { "remove" } else { "add" }.to_owned());
+            let from_context = ctx
+                .get("skill_name")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned);
+            let from_text = Regex::new(
+                r"(?i)(?:learn|add|remove|delete)\s+(?:a\s+)?(?:learned\s+)?skill\s+([a-z0-9_.-]+)|teach\s+tara\s+a?\s*skill\s+([a-z0-9_.-]+)",
+            )
+            .ok()
+            .and_then(|regex| regex.captures(text_clean))
+            .and_then(|capture| capture.get(1).or_else(|| capture.get(2)))
+            .map(|capture| capture.as_str().to_owned());
+            if let Some(name) = from_context.or(from_text) {
+                res.params
+                    .insert("skill_name".into(), serde_json::Value::String(name));
+            }
+            if let Some(definition) = ctx.get("skill_definition") {
+                res.params.insert("definition".into(), definition.clone());
+            }
+            return res;
+        }
+
+        if [
+            "autonomous learning",
+            "learn in background",
+            "background learning",
+        ]
+        .iter()
+        .any(|&kw| text_lower.contains(kw))
         {
             let mut res = IntentResult::new("AUTONOMOUS_LEARNING");
             res.mode = Some(
@@ -330,14 +432,10 @@ impl SemanticIntentParser {
             .iter()
             .any(|&kw| text_lower.contains(kw))
         {
-            let strip_re = Regex::new(
-                r"(?i)(learn online|search web|research topic|web search)\s*:?",
-            )
-            .unwrap_or_else(|_| Regex::new(r"^$").unwrap());
-            let query = strip_re
-                .replace_all(text_clean, "")
-                .trim()
-                .to_owned();
+            let strip_re =
+                Regex::new(r"(?i)(learn online|search web|research topic|web search)\s*:?")
+                    .unwrap_or_else(|_| Regex::new(r"^$").unwrap());
+            let query = strip_re.replace_all(text_clean, "").trim().to_owned();
             let query = if query.is_empty() {
                 text_clean.to_owned()
             } else {
@@ -369,7 +467,11 @@ impl SemanticIntentParser {
             let target_path = slots
                 .get("file_path")
                 .cloned()
-                .or_else(|| ctx.get("file_path").and_then(|v| v.as_str()).map(|s| s.to_owned()))
+                .or_else(|| {
+                    ctx.get("file_path")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_owned())
+                })
                 .unwrap_or_default();
             let mut res = IntentResult::new("EXECUTE_TOOL");
             res.tool = Some("file_inspector".to_owned());
@@ -392,18 +494,16 @@ impl SemanticIntentParser {
                 .map(|re| re.is_match(text_lower.as_str()))
                 .unwrap_or(false)
         }) {
-            let target_path = slots
-                .get("file_path")
-                .cloned()
-                .or_else(|| ctx.get("file_path").and_then(|v| v.as_str()).map(|s| s.to_owned()));
-            let target_hash = slots
-                .get("hash")
-                .cloned()
-                .or_else(|| {
-                    ctx.get("expected_hash")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_owned())
-                });
+            let target_path = slots.get("file_path").cloned().or_else(|| {
+                ctx.get("file_path")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_owned())
+            });
+            let target_hash = slots.get("hash").cloned().or_else(|| {
+                ctx.get("expected_hash")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_owned())
+            });
             let mut res = IntentResult::new("EXECUTE_TOOL");
             res.tool = Some("hash_verifier".to_owned());
             if let Some(fp) = target_path {
@@ -438,10 +538,7 @@ impl SemanticIntentParser {
                 r"(?i)(knowledge_retriever|search knowledge base|search knowledge|find verified facts about)\s*:?",
             )
             .unwrap_or_else(|_| Regex::new(r"^$").unwrap());
-            let q_text = strip_re
-                .replace_all(text_clean, "")
-                .trim()
-                .to_owned();
+            let q_text = strip_re.replace_all(text_clean, "").trim().to_owned();
             let q_text = if q_text.is_empty() {
                 text_clean.to_owned()
             } else {
@@ -449,17 +546,20 @@ impl SemanticIntentParser {
             };
             let mut res = IntentResult::new("EXECUTE_TOOL");
             res.tool = Some("knowledge_retriever".to_owned());
-            res.params.insert(
-                "query".to_owned(),
-                serde_json::Value::String(q_text),
-            );
+            res.params
+                .insert("query".to_owned(), serde_json::Value::String(q_text));
             return res;
         }
 
         // -- provenance_tracker --
-        if ["provenance_tracker", "record provenance", "audit trail", "track provenance"]
-            .iter()
-            .any(|&kw| text_lower.contains(kw))
+        if [
+            "provenance_tracker",
+            "record provenance",
+            "audit trail",
+            "track provenance",
+        ]
+        .iter()
+        .any(|&kw| text_lower.contains(kw))
         {
             let mut res = IntentResult::new("EXECUTE_TOOL");
             res.tool = Some("provenance_tracker".to_owned());
@@ -497,9 +597,14 @@ impl SemanticIntentParser {
         }
 
         // developer (syntax check)
-        if ["check syntax", "lint code", "validate python", "syntax check"]
-            .iter()
-            .any(|&kw| text_lower.contains(kw))
+        if [
+            "check syntax",
+            "lint code",
+            "validate python",
+            "syntax check",
+        ]
+        .iter()
+        .any(|&kw| text_lower.contains(kw))
         {
             let code = ctx
                 .get("code")
@@ -508,10 +613,8 @@ impl SemanticIntentParser {
                 .to_owned();
             let mut res = IntentResult::new("EXECUTE_SKILL");
             res.skill = Some("developer".to_owned());
-            res.params.insert(
-                "code".to_owned(),
-                serde_json::Value::String(code),
-            );
+            res.params
+                .insert("code".to_owned(), serde_json::Value::String(code));
             return res;
         }
 
@@ -527,10 +630,8 @@ impl SemanticIntentParser {
                 .to_owned();
             let mut res = IntentResult::new("EXECUTE_SKILL");
             res.skill = Some("device".to_owned());
-            res.params.insert(
-                "gcode".to_owned(),
-                serde_json::Value::String(gcode),
-            );
+            res.params
+                .insert("gcode".to_owned(), serde_json::Value::String(gcode));
             return res;
         }
 
@@ -539,12 +640,9 @@ impl SemanticIntentParser {
             .iter()
             .any(|&kw| text_lower.contains(kw))
         {
-            let strip_re =
-                Regex::new(r"(?i)(translate|in kannada|translation)\s*:?").unwrap_or_else(|_| Regex::new(r"^$").unwrap());
-            let word_target = strip_re
-                .replace_all(text_clean, "")
-                .trim()
-                .to_owned();
+            let strip_re = Regex::new(r"(?i)(translate|in kannada|translation)\s*:?")
+                .unwrap_or_else(|_| Regex::new(r"^$").unwrap());
+            let word_target = strip_re.replace_all(text_clean, "").trim().to_owned();
             let word_target = if word_target.is_empty() {
                 text_clean.to_owned()
             } else {
@@ -552,10 +650,8 @@ impl SemanticIntentParser {
             };
             let mut res = IntentResult::new("EXECUTE_SKILL");
             res.skill = Some("translation".to_owned());
-            res.params.insert(
-                "text".to_owned(),
-                serde_json::Value::String(word_target),
-            );
+            res.params
+                .insert("text".to_owned(), serde_json::Value::String(word_target));
             return res;
         }
 
@@ -581,7 +677,10 @@ impl SemanticIntentParser {
         }
 
         // Audio / Video / PDF fallback keywords
-        if ["wav", "sound", "audio"].iter().any(|&kw| text_lower.contains(kw)) {
+        if ["wav", "sound", "audio"]
+            .iter()
+            .any(|&kw| text_lower.contains(kw))
+        {
             let fp = slots
                 .get("file_path")
                 .cloned()

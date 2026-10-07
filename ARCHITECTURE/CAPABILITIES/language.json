@@ -1,0 +1,49 @@
+{
+  "id": "language",
+  "name": "Native Multilingual & Indic Language Engine",
+  "purpose": "Deep multilingual processing, Devanagari/Kannada script detection, Kanglish phonetic translation, and technical terminology standardization.",
+  "implementation_files": [
+    "rust/tara_server/src/language/mod.rs",
+    "rust/tara_server/src/subsystems.rs"
+  ],
+  "primary_structs": [
+    "LanguageEngine",
+    "LanguageRegistry",
+    "ScriptDetector",
+    "KanglishNormalizer",
+    "TechnicalTerminologyMap"
+  ],
+  "registration": "LanguageRegistry::register_language adds language definitions; LanguageEngine::new compiles terminology dictionaries.",
+  "discovery": "LanguageEngine::detect_script inspects Unicode codepoints; LanguageEngine::detect_kanglish identifies romanized Kannada.",
+  "execution": "LanguageEngine::process_input normalizes text, extracts script metadata, and translates terminology.",
+  "storage": "In-memory phonetic maps and vocabulary dictionaries.",
+  "memory_link": "Language preferences and bilingual proficiency tracked in user profile.",
+  "learning_link": "Kanglish conversational pairs feed into language alignment curriculum.",
+  "self_evolution_link": "Vocabulary growth tracks novel Indic compound words.",
+  "curriculum_link": "Curriculum records in master_curriculum.jsonl require mandatory Kannada translations.",
+  "api_endpoints": [
+    "POST /api/language/detect",
+    "POST /api/language/translate_terms"
+  ],
+  "safety_gates": [
+    "Unicode normalization blocks homoglyph attacks and bidirectional override exploits",
+    "Language-appropriate respect honorifics verified"
+  ],
+  "test_suites": [
+    "rust/tara_server/src/language/mod.rs::tests"
+  ],
+  "lifecycle": {
+    "1_detect": "Examine raw Unicode characters to detect Kannada, Devanagari, or Latin",
+    "2_phonetic": "If Latin script with Kannada phonemes, classify as Kanglish",
+    "3_normalize": "Normalize NFKC Unicode codepoints and remove deceptive invisible characters",
+    "4_enrich": "Map technical concepts to standardized Kannada educational terminology",
+    "5_present": "Provide bilingual output ensuring respectful and culturally authentic interaction"
+  },
+  "upstream_capabilities": [
+    "rules_and_policy"
+  ],
+  "downstream_capabilities": [
+    "cognitive_loop",
+    "specialist_engines"
+  ]
+}

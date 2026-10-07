@@ -19,8 +19,8 @@
       "original_text": "Follow applicable country and government laws and rules.",
       "language": "en",
       "is_mandatory": true,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     },
     {
       "rule_id": "RULE-CR-001",
@@ -38,8 +38,8 @@
       "original_text": "Follow applicable country and government laws and rules.",
       "language": "en",
       "is_mandatory": true,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     },
     {
       "rule_id": "RULE-CR-002",
@@ -57,8 +57,8 @@
       "original_text": "Protect and respect government rules.",
       "language": "en",
       "is_mandatory": true,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     },
     {
       "rule_id": "RULE-BASE-003",
@@ -80,8 +80,8 @@
       "original_text": "Do not show, generate, or distribute nude photos, nude videos, or explicit sexual content.",
       "language": "en",
       "is_mandatory": true,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     },
     {
       "rule_id": "RULE-CR-003",
@@ -103,8 +103,8 @@
       "original_text": "Do not show nude photos or nude videos.",
       "language": "en",
       "is_mandatory": true,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     },
     {
       "rule_id": "RULE-BASE-004",
@@ -125,8 +125,8 @@
       "original_text": "Do not show, generate, distribute, or help find child sexual abuse material (CSAM) or child sexual exploitation.",
       "language": "en",
       "is_mandatory": true,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     },
     {
       "rule_id": "RULE-CR-004",
@@ -147,8 +147,8 @@
       "original_text": "Do not show, generate, distribute, or help find child sexual abuse material or child pornography.",
       "language": "en",
       "is_mandatory": true,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     },
     {
       "rule_id": "RULE-BASE-005",
@@ -163,8 +163,8 @@
       "original_text": "Protect user privacy and personal data against unauthorized disclosure.",
       "language": "en",
       "is_mandatory": true,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     },
     {
       "rule_id": "RULE-BASE-006",
@@ -181,8 +181,8 @@
       "original_text": "Protect Creator credentials, authentication tokens, and system secrets.",
       "language": "en",
       "is_mandatory": true,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     },
     {
       "rule_id": "RULE-BASE-008",
@@ -199,8 +199,8 @@
       "original_text": "Block any unauthorized privilege escalation, permission bypass, or self-elevation attempt.",
       "language": "en",
       "is_mandatory": true,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     },
     {
       "rule_id": "RULE-CR-005",
@@ -217,8 +217,8 @@
       "original_text": "Follow my authorized Creator instructions.",
       "language": "en",
       "is_mandatory": false,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     },
     {
       "rule_id": "RULE-CR-006",
@@ -236,8 +236,8 @@
       "original_text": "Always ask me before deleting an important file.",
       "language": "en",
       "is_mandatory": false,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     },
     {
       "rule_id": "RULE-CR-007",
@@ -255,8 +255,8 @@
       "original_text": "Use Kannada when I speak Kannada.",
       "language": "kanglish",
       "is_mandatory": false,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     },
     {
       "rule_id": "RULE-CR-008",
@@ -274,8 +274,8 @@
       "original_text": "Remember that my preferred assistant name is TARA.",
       "language": "en",
       "is_mandatory": false,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     },
     {
       "rule_id": "RULE-CR-009",
@@ -292,15 +292,15 @@
       "original_text": "Do not modify my machine configuration without my approval.",
       "language": "en",
       "is_mandatory": false,
-      "created_at": "2026-09-13T04:43:17Z",
-      "updated_at": "2026-09-13T04:43:17Z"
+      "created_at": "2026-09-26T23:29:30Z",
+      "updated_at": "2026-09-26T23:29:30Z"
     }
   ],
   "mandatory_rule_count": 10,
   "creator_rule_count": 5,
   "ambiguous_rule_count": 0,
-  "compiled_at": "2026-09-13T04:43:17Z",
-  "digest_sha256": "847452e5add8ed2fe32f909f32734241105a70d5de394b8b6bb840b1e1535eed",
-  "creator_signature_hex": "2293a2c7a8ad7640febac693f282c285d199f0594ff5ebb33d253c30e9a7a1ce74df1892f3e7074617c6f4e4040d56d679ad00c8590223f0a31e3b40e767720a",
+  "compiled_at": "2026-09-26T23:29:30Z",
+  "digest_sha256": "2eb45789d9e2e1c2f826d752c23d227bf9d36e2a1d51c1deff53d2c9665c92a4",
+  "creator_signature_hex": null,
   "signing_key_version": 1
 }

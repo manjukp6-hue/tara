@@ -161,26 +161,127 @@ impl StateMachine {
         }
 
         match from {
-            EntityState::Created => matches!(to, EntityState::Initializing | EntityState::Ready | EntityState::Active | EntityState::Degraded | EntityState::Failed | EntityState::Quarantined | EntityState::Retired),
-            EntityState::Initializing => matches!(to, EntityState::Ready | EntityState::Active | EntityState::Degraded | EntityState::Failed | EntityState::Quarantined | EntityState::Retired),
-            EntityState::Ready => matches!(to, EntityState::Active | EntityState::Busy | EntityState::Idle | EntityState::Paused | EntityState::Draining | EntityState::Degraded | EntityState::Stopped | EntityState::Retired),
-            EntityState::Active => matches!(to, EntityState::Busy | EntityState::Idle | EntityState::Paused | EntityState::Draining | EntityState::Degraded | EntityState::Failed | EntityState::Quarantined | EntityState::Stopped | EntityState::Retired),
-            EntityState::Busy => matches!(to, EntityState::Active | EntityState::Idle | EntityState::Draining | EntityState::Degraded | EntityState::Failed | EntityState::Quarantined | EntityState::Stopped),
-            EntityState::Idle => matches!(to, EntityState::Active | EntityState::Busy | EntityState::Paused | EntityState::Draining | EntityState::Stopped | EntityState::Retired),
-            EntityState::Paused => matches!(to, EntityState::Ready | EntityState::Active | EntityState::Idle | EntityState::Stopped | EntityState::Quarantined | EntityState::Retired),
-            EntityState::Draining => matches!(to, EntityState::Stopped | EntityState::Failed | EntityState::Quarantined | EntityState::Retired),
-            EntityState::Degraded => matches!(to, EntityState::Active | EntityState::Recovering | EntityState::Quarantined | EntityState::Failed | EntityState::Stopped | EntityState::Retired),
-            EntityState::Failed => matches!(to, EntityState::Recovering | EntityState::Quarantined | EntityState::Stopped | EntityState::Retired),
-            EntityState::Quarantined => matches!(to, EntityState::Recovering | EntityState::Revoked | EntityState::Retired),
-            EntityState::Recovering => matches!(to, EntityState::Ready | EntityState::Active | EntityState::Failed | EntityState::Quarantined | EntityState::Stopped),
-            EntityState::Stopped => matches!(to, EntityState::Initializing | EntityState::Ready | EntityState::Retired),
+            EntityState::Created => matches!(
+                to,
+                EntityState::Initializing
+                    | EntityState::Ready
+                    | EntityState::Active
+                    | EntityState::Degraded
+                    | EntityState::Failed
+                    | EntityState::Quarantined
+                    | EntityState::Retired
+            ),
+            EntityState::Initializing => matches!(
+                to,
+                EntityState::Ready
+                    | EntityState::Active
+                    | EntityState::Degraded
+                    | EntityState::Failed
+                    | EntityState::Quarantined
+                    | EntityState::Retired
+            ),
+            EntityState::Ready => matches!(
+                to,
+                EntityState::Active
+                    | EntityState::Busy
+                    | EntityState::Idle
+                    | EntityState::Paused
+                    | EntityState::Draining
+                    | EntityState::Degraded
+                    | EntityState::Stopped
+                    | EntityState::Retired
+            ),
+            EntityState::Active => matches!(
+                to,
+                EntityState::Busy
+                    | EntityState::Idle
+                    | EntityState::Paused
+                    | EntityState::Draining
+                    | EntityState::Degraded
+                    | EntityState::Failed
+                    | EntityState::Quarantined
+                    | EntityState::Stopped
+                    | EntityState::Retired
+            ),
+            EntityState::Busy => matches!(
+                to,
+                EntityState::Active
+                    | EntityState::Idle
+                    | EntityState::Draining
+                    | EntityState::Degraded
+                    | EntityState::Failed
+                    | EntityState::Quarantined
+                    | EntityState::Stopped
+            ),
+            EntityState::Idle => matches!(
+                to,
+                EntityState::Active
+                    | EntityState::Busy
+                    | EntityState::Paused
+                    | EntityState::Draining
+                    | EntityState::Stopped
+                    | EntityState::Retired
+            ),
+            EntityState::Paused => matches!(
+                to,
+                EntityState::Ready
+                    | EntityState::Active
+                    | EntityState::Idle
+                    | EntityState::Stopped
+                    | EntityState::Quarantined
+                    | EntityState::Retired
+            ),
+            EntityState::Draining => matches!(
+                to,
+                EntityState::Stopped
+                    | EntityState::Failed
+                    | EntityState::Quarantined
+                    | EntityState::Retired
+            ),
+            EntityState::Degraded => matches!(
+                to,
+                EntityState::Active
+                    | EntityState::Recovering
+                    | EntityState::Quarantined
+                    | EntityState::Failed
+                    | EntityState::Stopped
+                    | EntityState::Retired
+            ),
+            EntityState::Failed => matches!(
+                to,
+                EntityState::Recovering
+                    | EntityState::Quarantined
+                    | EntityState::Stopped
+                    | EntityState::Retired
+            ),
+            EntityState::Quarantined => matches!(
+                to,
+                EntityState::Recovering | EntityState::Revoked | EntityState::Retired
+            ),
+            EntityState::Recovering => matches!(
+                to,
+                EntityState::Ready
+                    | EntityState::Active
+                    | EntityState::Failed
+                    | EntityState::Quarantined
+                    | EntityState::Stopped
+            ),
+            EntityState::Stopped => matches!(
+                to,
+                EntityState::Initializing | EntityState::Ready | EntityState::Retired
+            ),
             EntityState::Revoked => false, // Terminal security revocation
             EntityState::Retired => false, // Terminal archival state
         }
     }
 
     /// Atomically transitions the state machine to `target_state` if valid, appending to transition log.
-    pub fn transition_to(&mut self, target_state: EntityState, reason: &str, actor_id: &str) -> Result<EntityState, String> {
+    pub fn transition_to(
+        &mut self,
+        target_state: EntityState,
+        reason: &str,
+        actor_id: &str,
+    ) -> Result<EntityState, String> {
         if !Self::is_valid_transition(self.current_state, target_state) {
             return Err(format!(
                 "Illegal lifecycle transition for {} ({}): cannot transition from {} to {}",
@@ -211,10 +312,16 @@ impl StateMachine {
     }
 
     pub fn is_operational(&self) -> bool {
-        matches!(self.current_state, EntityState::Ready | EntityState::Active | EntityState::Busy | EntityState::Idle)
+        matches!(
+            self.current_state,
+            EntityState::Ready | EntityState::Active | EntityState::Busy | EntityState::Idle
+        )
     }
 
     pub fn is_terminated(&self) -> bool {
-        matches!(self.current_state, EntityState::Stopped | EntityState::Retired | EntityState::Revoked)
+        matches!(
+            self.current_state,
+            EntityState::Stopped | EntityState::Retired | EntityState::Revoked
+        )
     }
 }

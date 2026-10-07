@@ -1,1 +1,30 @@
-{}
+{
+  "researcher_alice": {
+    "user_id": "researcher_alice",
+    "display_name": "Alice Researcher",
+    "role": "USER",
+    "permissions": [
+      "tools:file_inspector",
+      "knowledge:read"
+    ],
+    "preferences": {
+      "theme": "dark",
+      "locale": "en"
+    },
+    "memory_scope": "user_researcher_alice",
+    "device_bindings": [],
+    "created_at": "2026-09-27T05:19:02.690169+00:00",
+    "status": "active"
+  },
+  "web_visitor": {
+    "user_id": "web_visitor",
+    "display_name": "Visitor",
+    "role": "USER",
+    "permissions": [],
+    "preferences": {},
+    "memory_scope": "user_web_visitor",
+    "device_bindings": [],
+    "created_at": "2026-09-28T05:46:39.068694+00:00",
+    "status": "active"
+  }
+}

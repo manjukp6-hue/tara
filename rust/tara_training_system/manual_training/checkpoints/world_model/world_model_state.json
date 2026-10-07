@@ -1,0 +1,8 @@
+{
+  "consistency_check": "PASS",
+  "entity_count": 0,
+  "notes": "Manual World Model candidate snapshot staged for review.",
+  "schema_version": "1.0.0",
+  "snapshot_timestamp_epoch": 1791218819,
+  "status": "candidate_verified"
+}

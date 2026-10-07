@@ -1,0 +1,55 @@
+{
+  "id": "robotics_and_hardware",
+  "name": "Robotics HAL & Actuator Destruction Guard",
+  "purpose": "Hardware Abstraction Layer (HAL) for robotic actuators, sensor fusion, motor kinematic limits, and physical destruction boundary enforcement.",
+  "implementation_files": [
+    "rust/tara_core/src/robotics.rs",
+    "rust/tara_core/src/destruction.rs",
+    "rust/tara_core/src/sandbox.rs",
+    "rust/tara_core/src/permissions.rs"
+  ],
+  "primary_structs": [
+    "RoboticsHal",
+    "DestructionGuard",
+    "KinematicBoundary",
+    "ActuatorController",
+    "SensorFusionBuffer"
+  ],
+  "registration": "RoboticsHal::new enumerates connected hardware; DestructionGuard::new compiles physical bounds.",
+  "discovery": "Hardware bus scan for serial, I2C, and USB motor controllers.",
+  "execution": "RoboticsHal::execute_motion_command executes motion; DestructionGuard::verify_kinematic_safety.",
+  "storage": "In-memory telemetry logs and kinematic calibration profiles.",
+  "memory_link": "Physical interaction outcomes logged in episodic memory.",
+  "learning_link": "Actuator trajectory accuracy calibrated over operation cycles.",
+  "self_evolution_link": "Hardware profile adaptively adjusts torque limits based on mechanical wear.",
+  "curriculum_link": "Robotics kinematics and physics records in master_curriculum.jsonl.",
+  "api_endpoints": [
+    "POST /api/robotics/move",
+    "GET /api/robotics/status",
+    "POST /api/robotics/emergency_stop"
+  ],
+  "safety_gates": [
+    "Physical Destruction Guard: Hard velocity, torque, and positional bounds cannot be breached",
+    "Hardware emergency stop interlock immediately terminates power on anomaly detection"
+  ],
+  "test_suites": [
+    "rust/tara_core/src/robotics.rs::tests",
+    "rust/tara_core/src/destruction.rs::tests"
+  ],
+  "lifecycle": {
+    "1_scan": "Enumerate available robotic joints, sensors, and actuators",
+    "2_calibrate": "Load kinematic boundary limits and emergency stop pin mappings",
+    "3_plan": "Cognitive loop proposes motion trajectory for physical task",
+    "4_guard": "DestructionGuard simulates trajectory to ensure zero boundary violation",
+    "5_execute": "RoboticsHal issues step pulses / PWM commands to motor controllers",
+    "6_feedback": "Sensor fusion verifies actual encoder position matches target trajectory",
+    "7_interlock": "If unexpected resistance or collision detected, trigger emergency stop"
+  },
+  "upstream_capabilities": [
+    "rules_and_policy",
+    "access_and_security"
+  ],
+  "downstream_capabilities": [
+    "cognitive_loop"
+  ]
+}

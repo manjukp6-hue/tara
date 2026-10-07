@@ -3,40 +3,29 @@
   "manifest_name": "TARA Canonical Artifact Manifest",
   "manifest_version": "1.0.0",
   "model_identity": "TARA",
-  "model_version": "2.0",
+  "model_version": "none",
   "protocol_version": "1.0.0",
-  "canonical_model_sha256": "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309",
-  "canonical_param_count": 118080,
+  "canonical_model_sha256": "NO_MODEL_REGISTERED",
+  "canonical_param_count": 0,
+  "note": "The 118,080-parameter smoke-test model has been cleanly removed. No active production model is currently registered. All artifact hashes are computed dynamically at runtime from authentic filesystem state.",
   "artifacts": {
-    "model_weights": {
-      "path": "storage/models/tara/model.safetensors",
-      "sha256": "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309",
-      "required": true,
-      "format": "safetensors_f32"
-    },
-    "model_config": {
-      "path": "storage/models/tara/config.json",
-      "sha256": "fdaab362cc34b67c7b0bcc2254275a889826250a9b518e851303e59036d52020",
-      "required": true,
-      "format": "json"
-    },
     "tokenizer": {
       "path": "storage/models/tara/tokenizer.json",
-      "sha256": "bae3f444e29d6ae0c7b77a461bb6ea690dbf6476488b5f3db62ccd363ca63c71",
+      "sha256": "DYNAMIC_RUNTIME_VERIFIED",
       "required": true,
       "format": "json"
     },
     "contract_schemas": {
       "path": "TARA/CONTRACTS/v1/schemas.json",
-      "sha256": "44e05855454038e88d5b29cd350c8d625f3c62c083b8ec041bda09af7a663966",
+      "sha256": "DYNAMIC_RUNTIME_VERIFIED",
       "required": true,
       "format": "json_schema"
     },
-    "python_contracts": {
-      "path": "python/tara_core/contracts.py",
-      "sha256": "ba2c09e6d13959d5187081eb3e6c5417a8079fbbba87bcdb5722887eecfb80d3",
+    "rust_contracts": {
+      "path": "rust/tara_server/src/contract.rs",
+      "sha256": "DYNAMIC_RUNTIME_VERIFIED",
       "required": true,
-      "format": "python"
+      "format": "rust"
     }
   },
   "runtime_invariants": {

@@ -1,0 +1,81 @@
+{
+  "id": "rules_and_policy",
+  "name": "Execution Guard, Policy Compiler & Runtime Gate",
+  "purpose": "Strict zero-tolerance policy enforcement, AST conflict resolution, policy rulebook compilation, fail-closed execution gating, universal runtime lifecycle registry, and language detection.",
+  "implementation_files": [
+    "rust/tara_server/src/rules/mod.rs",
+    "rust/tara_server/src/rules/conflict_resolver.rs",
+    "rust/tara_server/src/rules/policy_compiler.rs",
+    "rust/tara_server/src/rules/policy_schema.rs",
+    "rust/tara_server/src/rules/rulebook_manager.rs",
+    "rust/tara_server/src/rules/rule_parser.rs",
+    "rust/tara_server/src/rules/semantic_normalizer.rs",
+    "rust/tara_server/src/rules/validator.rs",
+    "rust/tara_server/src/rules/language_detector.rs",
+    "rust/tara_server/src/runtime/mod.rs",
+    "rust/tara_server/src/runtime/gate.rs",
+    "rust/tara_server/src/runtime/registry.rs",
+    "rust/tara_core/src/rule_engine.rs",
+    "rust/tara_core/src/governance.rs"
+  ],
+  "primary_structs": [
+    "ExecutionGuard",
+    "PolicyCompiler",
+    "RulebookManager",
+    "ConflictResolver",
+    "SemanticNormalizer",
+    "PolicyValidator",
+    "LanguageDetector",
+    "LanguageDetectionResult",
+    "UniversalRuntimeGate",
+    "DynamicRuntimeRegistry",
+    "RuntimeRecord",
+    "RuntimeEvaluationResult",
+    "GateEvaluationResponse",
+    "Role",
+    "Identity",
+    "CreatorAuthority"
+  ],
+  "registration": "RulebookManager::load_rules parses rules; PolicyCompiler::compile produces bytecode AST policies; DynamicRuntimeRegistry::register_runtime records active runtime dependencies.",
+  "discovery": "ExecutionGuard::evaluate_action matches requested actions against compiled policies; DynamicRuntimeRegistry::get_runtime resolves runtime by ID.",
+  "execution": "ExecutionGuard::check_permission returns Ok(()) only if all active rules permit the operation; UniversalRuntimeGate::evaluate_evolution_candidate gates self-evolution steps.",
+  "storage": "TARA/RULES/ policy definitions, in-memory compiled policy graph.",
+  "memory_link": "Policy violations are logged as safety audit events in episodic memory.",
+  "learning_link": "Rule boundaries provide hard constraints for curriculum training loss.",
+  "self_evolution_link": "Code evolution engine is constrained by immutable core rules in AGENTS.md; UniversalRuntimeGate gates all evolution candidates.",
+  "curriculum_link": "Indian family culture and research ethics modules teach rulebook alignment.",
+  "api_endpoints": [
+    "POST /api/rules/check",
+    "GET /api/rules/status"
+  ],
+  "safety_gates": [
+    "Fail-closed architecture: unknown or ambiguous actions are REJECTED by default",
+    "Core Directives (D1 to D19) are immutable and cannot be overridden by user prompts",
+    "No hardcoded numbers or limits: all capacities, vocabularies, stages, skills, and datasets are dynamically extensible",
+    "Mandatory architecture synchronization: any added, wired, or deleted component must be updated in ARCHITECTURE/ maps",
+    "Mandatory test file & folder lifecycle: test artifacts must be preserved across test runs for repeated verification cycles, and deleted entirely only after complete test suite validation with verified clean filesystem scan",
+    "ConflictResolver prioritizes safety over user instruction",
+    "DynamicRuntimeRegistry::verify_runtime_ready blocks execution if required runtimes are unhealthy"
+  ],
+  "test_suites": [
+    "rust/tara_server/src/rules/conflict_resolver.rs::tests",
+    "rust/tara_server/src/rules/validator.rs::tests"
+  ],
+  "lifecycle": {
+    "1_load": "RulebookManager loads declarative rules from markdown and JSON manifests",
+    "2_compile": "PolicyCompiler compiles rules into strongly-typed validation graphs",
+    "3_intercept": "ExecutionGuard intercepts all actions before tool/engine execution",
+    "4_evaluate": "ConflictResolver evaluates precedence and detects policy contradictions",
+    "5_gate": "Allow action or fail closed with detailed violation explanation",
+    "6_runtime_check": "DynamicRuntimeRegistry::verify_runtime_ready confirms all required runtimes are live",
+    "7_audit": "Record compliance proof to system audit ledger"
+  },
+  "upstream_capabilities": [
+    "access_and_security"
+  ],
+  "downstream_capabilities": [
+    "cognitive_loop",
+    "skills",
+    "specialist_engines"
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "id": "knowledge",
+  "name": "Global Knowledge Base & Relationship Graph",
+  "purpose": "Axiomatic domain knowledge graph, inverted index ranking, license provenance auditing, and zero-fabrication partition management.",
+  "implementation_files": [
+    "rust/tara_server/src/knowledge/mod.rs",
+    "rust/tara_training_system/world_model/graph.rs",
+    "rust/tara_server/src/knowledge/index.rs",
+    "rust/tara_server/src/knowledge/partition.rs",
+    "rust/tara_server/src/knowledge/corpus.rs",
+    "rust/tara_server/src/knowledge/license.rs",
+    "rust/tara_server/src/knowledge/pipeline.rs",
+    "rust/tara_server/src/knowledge/dedup.rs",
+    "rust/tara_server/src/knowledge/schema.rs",
+    "rust/tara_server/src/knowledge/validation.rs"
+  ],
+  "primary_structs": [
+    "GlobalKnowledgeBase",
+    "FoundationalKnowledgeGraph",
+    "ScalableKnowledgeIndex",
+    "DomainPartitionRegistry",
+    "KnowledgePipeline",
+    "LicenseProvenanceEngine",
+    "KnowledgeDuplicateEngine",
+    "DuplicateCheckResult",
+    "KnowledgeValidationEngine",
+    "ValidationResult",
+    "KnowledgeProvenance",
+    "KnowledgeSourceType",
+    "MathFormulaEntry",
+    "IndianMathEntry",
+    "ScientificConceptEntry",
+    "ProgrammingLanguageRef"
+  ],
+  "registration": "DomainPartitionRegistry::register_partition; FoundationalKnowledgeGraph::populate_foundational_axiomatic_graph; KnowledgeDuplicateEngine::register_entry records content hash for deduplication.",
+  "discovery": "GlobalKnowledgeBase::query_knowledge performs inverted index query; FoundationalKnowledgeGraph::get_relationship_chain walks graph.",
+  "execution": "KnowledgePipeline ingests, verifies license, validates schema, deduplicates, computes dynamic content SHA, and indexes entries.",
+  "storage": "storage/knowledge/partitions/, storage/knowledge/index.json, storage/knowledge/relationship_graph.json.",
+  "memory_link": "Retrieved knowledge concepts link directly to episodic query tags.",
+  "learning_link": "TopicResearcher autonomously fetches, verifies, and proposes new knowledge candidates.",
+  "self_evolution_link": "Dynamic graph expansion: newly discovered axioms connect to existing foundational nodes.",
+  "world_model_link": "Knowledge ≠ World Model. Knowledge graph provides factual axioms; WorldStateTracker provides dynamic entity states. Knowledge feeds WorldStateTracker for entity inference but they are separate subsystems.",
+  "curriculum_link": "Directly maps to cognitive knowledge ontology and educational curriculum concepts.",
+  "api_endpoints": [
+    "POST /api/knowledge/query",
+    "POST /api/knowledge/graph/chain",
+    "GET /api/knowledge/partitions"
+  ],
+  "safety_gates": [
+    "LicenseProvenanceEngine strictly enforces SPDX permissive/educational licenses",
+    "KnowledgeValidationEngine rejects entries that fail schema or content validation",
+    "KnowledgeDuplicateEngine uses dynamic runtime SHA registry to prevent duplicate ingestion — no static hash tables",
+    "QuarantineEngine isolates unverified external documents",
+    "Zero fabrication: only verified real source literature admitted"
+  ],
+  "test_suites": [
+    "rust/tara_training_system/world_model/graph.rs::tests",
+    "rust/tara_server/src/knowledge/index.rs::tests"
+  ],
+  "lifecycle": {
+    "1_ingest": "Raw document ingested from verified download pool or curriculum compiler",
+    "2_audit": "LicenseProvenanceEngine verifies permissive SPDX license and origin proof",
+    "3_validate": "KnowledgeValidationEngine validates schema, content quality, and provenance fields",
+    "4_dedup": "KnowledgeDuplicateEngine checks dynamic runtime SHA registry — rejects if duplicate",
+    "5_hash": "Dynamic SHA-256 computed from content bytes (no hardcodes, no static tables)",
+    "6_index": "ScalableKnowledgeIndex inserts BM25 inverted index tokens",
+    "7_link": "FoundationalKnowledgeGraph connects concept to parent, child, and axiomatic relations",
+    "8_serve": "Real-time query retrieval enriches cognitive prompt context",
+    "9_audit_sync": "Graph and inverted index synced transactionally to storage"
+  },
+  "upstream_capabilities": [
+    "access_and_security",
+    "dataset_and_curriculum"
+  ],
+  "downstream_capabilities": [
+    "cognitive_loop",
+    "specialist_engines",
+    "training_and_self_evolution"
+  ]
+}

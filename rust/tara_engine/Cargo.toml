@@ -16,7 +16,8 @@ rand = "0.8"
 half = { version = "2.3", features = ["std"] }
 byteorder = "1.5"
 log = "0.4"
-regex = "1"
+flate2 = "1.0"
+rayon = "1.10"
 
 # Shared workspace crate
 tara_core = { path = "../tara_core" }

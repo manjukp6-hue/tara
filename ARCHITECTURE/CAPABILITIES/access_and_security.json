@@ -1,0 +1,124 @@
+{
+  "id": "access_and_security",
+  "name": "Zero-Trust Identity, Authentication, Model Integrity & Security Extensions",
+  "purpose": "Cryptographic Creator authority, biometric security factors, QR device pairing, durable lockdown, HMAC model weight integrity, dependency verification, source tamper detection, token scanning, and release manifest management.",
+  "implementation_files": [
+    "rust/tara_server/src/access/mod.rs",
+    "rust/tara_server/src/access/crypto.rs",
+    "rust/tara_server/src/access/devices.rs",
+    "rust/tara_server/src/access/durable.rs",
+    "rust/tara_server/src/access/factors.rs",
+    "rust/tara_server/src/access/google.rs",
+    "rust/tara_server/src/access/lifecycle.rs",
+    "rust/tara_server/src/access/lockdown.rs",
+    "rust/tara_server/src/access/model_integrity.rs",
+    "rust/tara_server/src/access/profile.rs",
+    "rust/tara_server/src/access/protected.rs",
+    "rust/tara_server/src/access/qr.rs",
+    "rust/tara_server/src/access/restore.rs",
+    "rust/tara_server/src/access/services.rs",
+    "rust/tara_server/src/access/setup.rs",
+    "rust/tara_server/src/access/wizard.rs",
+    "rust/tara_server/src/security/mod.rs",
+    "rust/tara_server/src/security/jailbreak.rs",
+    "rust/tara_server/src/security/provenance.rs",
+    "rust/tara_server/src/security/quarantine.rs",
+    "rust/tara_server/src/security/dependency_verifier.rs",
+    "rust/tara_server/src/security/gated_goals.rs",
+    "rust/tara_server/src/security/release_manifest.rs",
+    "rust/tara_server/src/security/source_protector.rs",
+    "rust/tara_server/src/security/tamper_detector.rs",
+    "rust/tara_server/src/security/token_scanner.rs",
+    "rust/tara_server/src/contract.rs",
+    "rust/tara_core/src/protocol.rs"
+  ],
+  "primary_structs": [
+    "IdentityManager",
+    "CreatorAuthService",
+    "ModelIntegrityEngine",
+    "BiometricFactorProvider",
+    "DevicePairingWizard",
+    "DurableLockdownManager",
+    "JailbreakDetector",
+    "QuarantineEngine",
+    "DependencyVerifier",
+    "GatedTask",
+    "TaskSpec",
+    "MilestoneSpec",
+    "ReleaseManifest",
+    "ReleaseManifestManager",
+    "SourceProtector",
+    "SourceTamperDetector",
+    "TokenScanner",
+    "CoreRequest",
+    "CoreResponse",
+    "CoreProtocolHandler"
+  ],
+  "registration": "IdentityManager::register_operator in operators_registry.json; CreatorAuthService setup; DependencyVerifier::verify_all on startup.",
+  "discovery": "Token bearer extraction, device fingerprint matching, biometric challenge; TokenScanner::scan_all on incoming payloads.",
+  "execution": "CreatorAuthService::verify_authority, ModelIntegrityEngine::verify, JailbreakDetector::scan, SourceTamperDetector::detect.",
+  "storage": "TARA/ACCESS/operator/operators_registry.json, storage/vault/access/.",
+  "memory_link": "Authenticated operator identity associated with all generated memories.",
+  "learning_link": "Jailbreak attempts quarantined and analyzed for adversarial defense.",
+  "self_evolution_link": "Only authenticated Creator authority can trigger source code evolution or model promotion; SourceProtector guards protected symbols from unauthorized modification.",
+  "curriculum_link": "Cybersecurity CVE and safety ethics datasets enforce defensive behavior.",
+  "api_endpoints": [
+    "POST /api/auth/login",
+    "POST /api/auth/verify",
+    "POST /api/access/pair_device",
+    "GET /api/access/status"
+  ],
+  "safety_gates": [
+    "Constant-time token and HMAC comparison prevents timing side-channels",
+    "Durable lockdown locks system on repeated authentication failures",
+    "ModelIntegrityEngine refuses to start if model or manifest is tampered",
+    "JailbreakDetector strips homoglyphs, invisible zero-width chars, and injection delimiters",
+    "SourceTamperDetector rejects any modification to protected source symbols",
+    "DependencyVerifier blocks startup if critical runtime dependency is missing or tampered",
+    "TokenScanner rejects prompts containing embedded credential or injection tokens"
+  ],
+  "test_suites": [
+    "rust/tara_server/src/access/model_integrity.rs::tests",
+    "rust/tara_server/src/access/setup.rs::tests",
+    "rust/tara_server/src/security/jailbreak.rs::tests"
+  ],
+  "model_integrity_chain": {
+    "description": "Every model load and every model promotion event passes through this chain — no exceptions",
+    "chain": [
+      "Model file discovered via ModelRegistry::get_active_version_location",
+      "ModelIntegrityEngine::verify — compute dynamic SHA-256 over model.safetensors bytes",
+      "HMAC seal validated against storage/vault/access/ manifest",
+      "versions_manifest.json cross-checked for hash match",
+      "CANONICAL_MODEL_SHA256_UNREGISTERED sentinel checked — fail if no real model promoted",
+      "Model loaded into inference engine ONLY on full chain pass"
+    ]
+  },
+  "governance_authority_chain": {
+    "description": "Priority order for conflicting authority claims — strictly enforced",
+    "chain": [
+      "Safety (non-negotiable hard limits — physical destruction guard, anti-self-harm)",
+      "Policy (compiled rulebook — TARA/RULES/compiled_policy.json)",
+      "Creator authority (authenticated CreatorAuthService session)",
+      "System constraints (resource limits, kinematic bounds, quota enforcement)",
+      "Task objective (user request — lowest priority)"
+    ]
+  },
+  "lifecycle": {
+    "1_challenge": "Incoming connection challenged for Creator or User authentication token",
+    "2_verify_token": "Constant-time cryptographic check against registered public keys",
+    "3_multi_factor": "Optional biometric or secondary device factor challenge",
+    "4_jailbreak_scan": "JailbreakDetector scans payload for adversarial injection patterns",
+    "5_token_scan": "TokenScanner scans for embedded credentials and injection tokens",
+    "6_model_integrity": "ModelIntegrityEngine verifies HMAC seal over SafeTensors weights and manifest",
+    "7_dependency_verify": "DependencyVerifier confirms all required runtime dependencies are present and unmodified",
+    "8_grant": "Issue time-bounded session context with explicit capability permissions",
+    "9_lockdown": "Trigger durable lockdown if brute-force or malicious tampering detected"
+  },
+  "upstream_capabilities": [],
+  "downstream_capabilities": [
+    "cognitive_loop",
+    "rules_and_policy",
+    "control_plane_and_workload"
+  ]
+}
+

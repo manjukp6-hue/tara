@@ -50,7 +50,11 @@ pub struct Session {
 
 impl Session {
     /// Creates a new empty session.
-    pub fn new(session_id: impl Into<String>, actor_id: impl Into<String>, max_turns: usize) -> Self {
+    pub fn new(
+        session_id: impl Into<String>,
+        actor_id: impl Into<String>,
+        max_turns: usize,
+    ) -> Self {
         let now = Instant::now();
         Self {
             session_id: session_id.into(),
@@ -93,16 +97,16 @@ impl Session {
 
         if let Some(ref tr) = tool_result {
             // Extract file_path and hash from tool result for slot memory
-            if let Some(serde_json::Value::String(fp)) = tr.get("file_path").map(|v| v.clone()) {
+            if let Some(serde_json::Value::String(fp)) = tr.get("file_path").cloned() {
                 if !fp.is_empty() {
                     self.last_slots.insert("file_path".to_owned(), fp);
                 }
             }
-            if let Some(serde_json::Value::String(sha)) = tr.get("sha256").map(|v| v.clone()) {
+            if let Some(serde_json::Value::String(sha)) = tr.get("sha256").cloned() {
                 if !sha.is_empty() {
                     self.last_slots.insert("hash".to_owned(), sha);
                 }
-            } else if let Some(serde_json::Value::String(h)) = tr.get("hash").map(|v| v.clone()) {
+            } else if let Some(serde_json::Value::String(h)) = tr.get("hash").cloned() {
                 if !h.is_empty() {
                     self.last_slots.insert("hash".to_owned(), h);
                 }
@@ -162,6 +166,27 @@ pub struct SessionContextManager {
     last_cleanup: Mutex<Instant>,
 }
 
+/// Default maximum turns retained in session working memory.
+pub const DEFAULT_MAX_TURNS_PER_SESSION: usize = 50;
+/// Default session TTL in seconds (1 hour).
+pub const DEFAULT_SESSION_TTL_SECONDS: u64 = 3600;
+
+impl Default for SessionContextManager {
+    /// Constructs manager using dynamic runtime configuration (`TARA_MAX_TURNS_PER_SESSION`, `TARA_SESSION_TTL_SECONDS`),
+    /// falling back to the baseline defaults if unspecified.
+    fn default() -> Self {
+        let max_turns = std::env::var("TARA_MAX_TURNS_PER_SESSION")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_MAX_TURNS_PER_SESSION);
+        let ttl_secs = std::env::var("TARA_SESSION_TTL_SECONDS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_SESSION_TTL_SECONDS);
+        Self::new(max_turns, ttl_secs)
+    }
+}
+
 impl SessionContextManager {
     /// Creates a new manager with bounded turn history and session TTL.
     pub fn new(max_turns_per_session: usize, ttl_seconds: u64) -> Self {
@@ -174,11 +199,7 @@ impl SessionContextManager {
     }
 
     /// Retrieves an existing non-expired session or creates a new one.
-    pub fn get_or_create(
-        &self,
-        session_id: &str,
-        actor_id: &str,
-    ) -> Arc<Mutex<Session>> {
+    pub fn get_or_create(&self, session_id: &str, actor_id: &str) -> Arc<Mutex<Session>> {
         let key = if !session_id.is_empty() {
             format!("{}::{}", actor_id, session_id)
         } else {
@@ -200,7 +221,11 @@ impl SessionContextManager {
         }
 
         let sess = Arc::new(Mutex::new(Session::new(
-            if session_id.is_empty() { "default" } else { session_id },
+            if session_id.is_empty() {
+                "default"
+            } else {
+                session_id
+            },
             actor_id,
             self.max_turns,
         )));
@@ -218,11 +243,7 @@ impl SessionContextManager {
         let ttl = self.ttl;
         let mut sessions = self.sessions.lock().expect("session lock poisoned");
         let before = sessions.len();
-        sessions.retain(|_, v| {
-            v.lock()
-                .map(|s| s.idle_duration() <= ttl)
-                .unwrap_or(false)
-        });
+        sessions.retain(|_, v| v.lock().map(|s| s.idle_duration() <= ttl).unwrap_or(false));
         let removed = before - sessions.len();
         if let Ok(mut last) = self.last_cleanup.lock() {
             *last = Instant::now();
@@ -250,20 +271,15 @@ impl SessionContextManager {
 pub struct CoreferenceResolver;
 
 impl CoreferenceResolver {
-    const ANAPHORIC_FILE_PATTERNS: &'static [&'static str] = &[
-        r"(?i)\b(it|that file|this file|the file|the same file|its hash|the log file)\b",
-    ];
-    const ANAPHORIC_RESULT_PATTERNS: &'static [&'static str] = &[
-        r"(?i)\b(previous result|last result|the result|prior output)\b",
-    ];
+    const ANAPHORIC_FILE_PATTERNS: &'static [&'static str] =
+        &[r"(?i)\b(it|that file|this file|the file|the same file|its hash|the log file)\b"];
+    const ANAPHORIC_RESULT_PATTERNS: &'static [&'static str] =
+        &[r"(?i)\b(previous result|last result|the result|prior output)\b"];
 
     /// Resolves anaphora against the session's prior slots and results.
     ///
     /// Returns `(resolved_text, resolved_slots)`.
-    pub fn resolve(
-        text: &str,
-        session: Option<&Session>,
-    ) -> (String, HashMap<String, String>) {
+    pub fn resolve(text: &str, session: Option<&Session>) -> (String, HashMap<String, String>) {
         let mut resolved_slots: HashMap<String, String> = HashMap::new();
 
         let sess = match session {
@@ -272,11 +288,9 @@ impl CoreferenceResolver {
         };
 
         // File anaphora
-        let has_file_ref = Self::ANAPHORIC_FILE_PATTERNS.iter().any(|pat| {
-            Regex::new(pat)
-                .map(|re| re.is_match(text))
-                .unwrap_or(false)
-        });
+        let has_file_ref = Self::ANAPHORIC_FILE_PATTERNS
+            .iter()
+            .any(|pat| Regex::new(pat).map(|re| re.is_match(text)).unwrap_or(false));
         if has_file_ref {
             if let Some(fp) = sess.last_slots.get("file_path") {
                 resolved_slots.insert("file_path".to_owned(), fp.clone());
@@ -284,11 +298,9 @@ impl CoreferenceResolver {
         }
 
         // Previous result anaphora
-        let has_res_ref = Self::ANAPHORIC_RESULT_PATTERNS.iter().any(|pat| {
-            Regex::new(pat)
-                .map(|re| re.is_match(text))
-                .unwrap_or(false)
-        });
+        let has_res_ref = Self::ANAPHORIC_RESULT_PATTERNS
+            .iter()
+            .any(|pat| Regex::new(pat).map(|re| re.is_match(text)).unwrap_or(false));
         if has_res_ref {
             if let Some(tr) = &sess.last_tool_result {
                 // Store serialised result as JSON string in slots
@@ -417,4 +429,63 @@ fn unix_timestamp_f64() -> f64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs_f64()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_turns_bounded_by_max_turns() {
+        let mut session = Session::new("sess_1", "user_1", 3);
+        assert_eq!(session.history.len(), 0);
+
+        session.record_turn("turn 1", "reply 1", None, None, "ok");
+        session.record_turn("turn 2", "reply 2", None, None, "ok");
+        session.record_turn("turn 3", "reply 3", None, None, "ok");
+        assert_eq!(session.history.len(), 3);
+        assert_eq!(session.history[0].user_input, "turn 1");
+
+        // 4th turn pushes out the oldest (turn 1)
+        session.record_turn("turn 4", "reply 4", None, None, "ok");
+        assert_eq!(session.history.len(), 3);
+        assert_eq!(session.history[0].user_input, "turn 2");
+        assert_eq!(session.history[2].user_input, "turn 4");
+    }
+
+    #[test]
+    fn test_session_context_manager_isolation() {
+        let mgr = SessionContextManager::new(10, 3600);
+        let s1 = mgr.get_or_create("session_a", "alice");
+        let s2 = mgr.get_or_create("session_b", "bob");
+
+        s1.lock().unwrap().record_turn("hello from alice", "hi alice", None, None, "ok");
+        s2.lock().unwrap().record_turn("hello from bob", "hi bob", None, None, "ok");
+
+        assert_eq!(s1.lock().unwrap().history.len(), 1);
+        assert_eq!(s1.lock().unwrap().history[0].user_input, "hello from alice");
+
+        assert_eq!(s2.lock().unwrap().history.len(), 1);
+        assert_eq!(s2.lock().unwrap().history[0].user_input, "hello from bob");
+
+        assert_eq!(mgr.active_count(), 2);
+    }
+
+    #[test]
+    fn test_clarification_manager_missing_parameter() {
+        let mut params = HashMap::new();
+        params.insert("target_file".to_string(), serde_json::Value::String("src/main.rs".into()));
+
+        // "file_inspector" requires "file_path"
+        let result = ClarificationManager::evaluate("EXECUTE_TOOL", Some("file_inspector"), None, &params);
+        assert!(result.is_some());
+        let clarification = result.unwrap();
+        assert!(clarification.needs_clarification);
+        assert_eq!(clarification.missing_slot, "file_path");
+
+        // When file_path is provided, no clarification needed
+        params.insert("file_path".to_string(), serde_json::Value::String("src/main.rs".into()));
+        let result_ok = ClarificationManager::evaluate("EXECUTE_TOOL", Some("file_inspector"), None, &params);
+        assert!(result_ok.is_none());
+    }
 }

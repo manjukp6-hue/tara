@@ -43,15 +43,16 @@ impl DynamicMemoryHub {
     /// The directory is created if it does not exist.
     pub fn new(storage_dir: impl Into<String>) -> Result<Self, MemoryHubError> {
         let dir = storage_dir.into();
-        fs::create_dir_all(&dir)
-            .map_err(|e| MemoryHubError::StorageInit(e.to_string()))?;
+        fs::create_dir_all(&dir).map_err(|e| MemoryHubError::StorageInit(e.to_string()))?;
         Ok(Self { storage_dir: dir })
     }
 
     /// Validate that a key contains only safe filesystem characters.
     fn validate_key(&self, key: &str) -> Result<(), MemoryHubError> {
         if key.is_empty()
-            || !key.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
+            || !key
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
         {
             return Err(MemoryHubError::InvalidKey(key.to_string()));
         }
@@ -134,11 +135,7 @@ impl DynamicMemoryHub {
         let keys = self.list_keys()?;
         let total_size: u64 = keys
             .iter()
-            .map(|k| {
-                fs::metadata(self.key_path(k))
-                    .map(|m| m.len())
-                    .unwrap_or(0)
-            })
+            .map(|k| fs::metadata(self.key_path(k)).map(|m| m.len()).unwrap_or(0))
             .sum();
         Ok(serde_json::json!({
             "storage_dir": self.storage_dir,

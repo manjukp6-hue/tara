@@ -1,35 +1,9 @@
 {
   "ROOT_OPERATOR": {
     "creator_id": "ROOT_OPERATOR",
-    "display_name": "OPERATOR_ROOT",
+    "public_key": "168190d2c7673e7dd9e5501707b32cecbf06536834405827ba75de8cf73034bb",
+    "registered_at": "2026-09-28T16:50:13Z",
     "role": "ROOT_CREATOR",
-    "authorized_google_email": "manjukp6@gmail.com",
-    "google_subject_id": null,
-    "public_key": null,
-    "key_id": null,
-    "status": "CREATOR_SETUP_REQUIRED",
-    "created_at": null
-  },
-  "CREATOR_2": {
-    "creator_id": "CREATOR_2",
-    "display_name": "Creator Two",
-    "role": "CREATOR",
-    "authorized_google_email": null,
-    "google_subject_id": null,
-    "public_key": null,
-    "key_id": null,
-    "status": "CREATOR_SETUP_REQUIRED",
-    "created_at": null
-  },
-  "CREATOR_3": {
-    "creator_id": "CREATOR_3",
-    "display_name": "Creator Three",
-    "role": "CREATOR",
-    "authorized_google_email": null,
-    "google_subject_id": null,
-    "public_key": null,
-    "key_id": null,
-    "status": "CREATOR_SETUP_REQUIRED",
-    "created_at": null
+    "status": "active"
   }
 }

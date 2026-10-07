@@ -1,0 +1,71 @@
+{
+  "id": "skills",
+  "name": "Dynamic Skills & Automation Engine",
+  "purpose": "Dynamic skill catalog discovery, parsing, certification, zero-trust authorization, sandboxed execution, and learning integration.",
+  "implementation_files": [
+    "rust/tara_server/src/skills/mod.rs",
+    "rust/tara_server/src/skills/automation.rs",
+    "rust/tara_server/src/skills/certification.rs",
+    "rust/tara_server/src/skills/coding.rs",
+    "rust/tara_server/src/skills/data.rs",
+    "rust/tara_server/src/skills/android.rs",
+    "rust/tara_server/src/skills/multimedia.rs",
+    "rust/tara_server/src/skills/research.rs",
+    "rust/tara_server/src/skills/security.rs",
+    "rust/tara_server/src/tools_registry.rs",
+    "rust/tara_server/src/ability.rs",
+    "TARA/SKILLS/CATALOG.json",
+    "TARA/SKILLS/IMPORT_MANIFEST.json"
+  ],
+  "primary_structs": [
+    "AbilityEngine",
+    "SkillEngine",
+    "SkillCertificationAuthority",
+    "SkillSpec",
+    "ToolRegistry",
+    "ToolMetadata"
+  ],
+  "registration": "AbilityEngine coordinates discovery, practice, acquisition, and skill evolution across SkillEngine and ToolRegistry; SkillEngine::load_catalog reads CATALOG.json; SkillCertificationAuthority::register_skill registers verified skill specs.",
+  "discovery": "AbilityEngine::discover queries all registries; SkillEngine::discover_skills queries catalog; ToolRegistry matches tool signatures requested by NLU or control tokens.",
+  "execution": "SkillEngine::execute_skill passes audited arguments to category dispatchers (coding, android, data, research, multimedia).",
+  "storage": "storage/skills/skills_registry.json, TARA/SKILLS/ directory tree.",
+  "memory_link": "Skill execution inputs, outputs, and latency are recorded in episodic memory via MemoryEngine::record_episode.",
+  "learning_link": "Successful tool use patterns feed into UserSearchLearner and CapabilitySynthesizer for skill enhancement.",
+  "self_evolution_link": "ContinualLearningGovernor identifies skill usage gaps; CapabilitySynthesizer proposes composite skills.",
+  "curriculum_link": "Academic coding and tool-use records in master_curriculum.jsonl teach control-token skill invocations.",
+  "api_endpoints": [
+    "POST /api/skills/execute",
+    "GET /api/skills/list",
+    "POST /api/skills/certify"
+  ],
+  "safety_gates": [
+    "ExecutionGuard::check_skill validates permissions",
+    "SkillCertificationAuthority checks SPDX license and authority",
+    "Category sandbox isolation blocks host destruction"
+  ],
+  "test_suites": [
+    "rust/tara_server/src/ability.rs::tests",
+    "rust/tara_server/src/skills/certification.rs::tests",
+    "rust/tara_server/src/tools_registry.rs::tests"
+  ],
+  "lifecycle": {
+    "1_define": "Skill manifest defined in TARA/SKILLS/<category>/<name>/ with README and spec",
+    "2_register": "SkillEngine::load_catalog indexes skill into SkillCatalog and ToolRegistry",
+    "3_discover": "Brain NLU or control-token parser matches user intent to registered skill",
+    "4_authorize": "ExecutionGuard and SkillCertificationAuthority verify caller authority and safety rules",
+    "5_execute": "Category dispatcher executes logic in isolated sandbox environment",
+    "6_store": "Result persisted in execution trace and session context",
+    "7_learn": "Memory episode created; patterns analyzed by CapabilitySynthesizer",
+    "8_evolve": "Composite skill synthesis and adaptive parameter refinement",
+    "9_test": "Automated unit tests in skills/certification.rs verify certification lifecycle"
+  },
+  "upstream_capabilities": [
+    "rules_and_policy",
+    "access_and_security"
+  ],
+  "downstream_capabilities": [
+    "memory",
+    "training_and_self_evolution",
+    "cognitive_loop"
+  ]
+}

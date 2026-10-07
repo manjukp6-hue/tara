@@ -1,0 +1,162 @@
+{
+  "description": "Complete data lifecycle and state transition map across TARA subsystems",
+  "data_stages": [
+    {
+      "stage": "1_Input_Perception",
+      "description": "Raw user query, audio frame, or sensory telemetric input",
+      "subsystems": [
+        "language",
+        "voice_and_interaction",
+        "robotics_and_hardware"
+      ],
+      "output_format": "Normalized Unicode string, audio features, sensor frame",
+      "transient_storage": "Memory / Circular buffer"
+    },
+    {
+      "stage": "2_Context_Assembly",
+      "description": "Assembly of multi-turn conversational context, user profile, and memory recall",
+      "subsystems": [
+        "memory",
+        "access_and_security"
+      ],
+      "output_format": "SessionContext with top-k retrieved semantic episodes",
+      "persistent_storage": "storage/memory/episodes/, storage/memory/episode_index.json"
+    },
+    {
+      "stage": "3_Epistemic_Enrichment",
+      "description": "Retrieval of verified axioms, domain knowledge, and specialist computations",
+      "subsystems": [
+        "knowledge",
+        "specialist_engines",
+        "dataset_and_curriculum"
+      ],
+      "output_format": "Verified knowledge excerpts, mathematical derivations, scientific concepts",
+      "persistent_storage": "storage/knowledge/partitions/, storage/datasets/tara_dataset_filtered/"
+    },
+    {
+      "stage": "4_Policy_Gating",
+      "description": "Evaluation of candidate actions against immutable safety rules and operator permissions",
+      "subsystems": [
+        "rules_and_policy",
+        "access_and_security"
+      ],
+      "output_format": "Gated action permissions, audit proof record",
+      "persistent_storage": "TARA/RULES/, audit ledger"
+    },
+    {
+      "stage": "5_Neural_Inference",
+      "description": "Auto-regressive token generation across 22 transformer layers",
+      "subsystems": [
+        "model_and_inference",
+        "cognitive_loop"
+      ],
+      "output_format": "Streamed text tokens + control action tokens",
+      "persistent_storage": "storage/models/tara/model.safetensors, storage/models/versions_manifest.json"
+    },
+    {
+      "stage": "6_Actuation_Execution",
+      "description": "Execution of skills, tools, and robotic motor movements",
+      "subsystems": [
+        "skills",
+        "robotics_and_hardware"
+      ],
+      "output_format": "Execution output payload, error traces, telemetry logs",
+      "persistent_storage": "TARA/SKILLS/, storage/skills/skills_registry.json"
+    },
+    {
+      "stage": "7_Verification_Evaluation",
+      "description": "Post-action verification against derivations and reasoning quality scoring",
+      "subsystems": [
+        "evaluator_and_recovery",
+        "cryptographic_reward_and_goals"
+      ],
+      "output_format": "Task verification verdict, reward credit event",
+      "persistent_storage": "storage/ledger/reward_ledger.enc/, storage/persistence/goals/"
+    },
+    {
+      "stage": "8_Memory_Consolidation_Learning",
+      "description": "Recording turn episode, extracting lessons, and queuing training candidates",
+      "subsystems": [
+        "memory",
+        "training_and_self_evolution"
+      ],
+      "output_format": "EpisodeRecord, experiential lesson, staged training batch",
+      "persistent_storage": "storage/persistence/experiential_lessons.jsonl, storage/training/self_trainer_status.json"
+    },
+    {
+      "stage": "9_World_Model_Update",
+      "description": "Updating world state: entity tracking, relationship delta, causal inference, state change propagation, and uncertainty bounds from observation results",
+      "subsystems": [
+        "knowledge",
+        "cognitive_loop",
+        "evaluator_and_recovery"
+      ],
+      "output_format": "WorldStateSnapshot: entities, relationships, causal_chains, time_delta, confidence_bounds",
+      "persistent_storage": "storage/persistence/world_model_state.json"
+    },
+    {
+      "stage": "10_Goal_Planning",
+      "description": "Goal decomposition, priority assignment, dependency resolution, plan construction, and reward linkage",
+      "subsystems": [
+        "cryptographic_reward_and_goals",
+        "cognitive_loop",
+        "rules_and_policy"
+      ],
+      "output_format": "GoalPlan: priority-ordered task decomposition with dependency graph and safety authority chain",
+      "persistent_storage": "storage/persistence/goals/, storage/ledger/reward_ledger.enc/"
+    },
+    {
+      "stage": "11_Unified_Multimodal_Perception",
+      "description": "Unified perception layer ingests Text, Audio, Vision (future), Documents, and Sensor streams and maps them to a canonical cognitive representation before entering TaraBrain",
+      "subsystems": [
+        "language",
+        "voice_and_interaction",
+        "robotics_and_hardware",
+        "cognitive_loop"
+      ],
+      "modalities": {
+        "text": "Normalized UTF-8 string — language engine handles script detection and multi-language routing",
+        "audio": "Voice transcription via TTS/ASR engine → normalized text + prosodic metadata",
+        "vision": "PLANNED — image/video frame → perceptual feature vector → cognitive_loop",
+        "documents": "PDF/markdown ingestion → structured text → knowledge pipeline",
+        "sensors": "Hardware telemetry (RoboticsHal sensor fusion) → state vector → world model update"
+      },
+      "output_format": "CanonicalPerceptionUnit: modality, content, confidence, timestamp, actor_id",
+      "transient_storage": "Memory / Circular buffer"
+    },
+    {
+      "stage": "12_Robotics_Sense_Plan_Act",
+      "description": "Full robotics control chain: sensor observation → state estimation → world model → plan → safety check → actuator → feedback loop",
+      "subsystems": [
+        "robotics_and_hardware",
+        "cognitive_loop",
+        "rules_and_policy"
+      ],
+      "chain": [
+        "SensorFusionBuffer::update — aggregate live sensor telemetry",
+        "RoboticsHal::estimate_state — compute joint angles and end-effector pose",
+        "WorldStateTracker::update_entity — sync estimated state into world model",
+        "cognitive_loop plan — TaraBrain generates motion trajectory",
+        "DestructionGuard::verify_kinematic_safety — hard physical boundary check",
+        "RoboticsHal::execute_motion_command — issue PWM/step pulse commands",
+        "SensorFusionBuffer::verify_position — confirm encoder feedback matches target",
+        "RecoveryEngine::emergency_stop — arm kill-switch on anomaly detection"
+      ],
+      "output_format": "ActuatorCommandResult: joint_positions, torque_applied, status, safety_checks_passed",
+      "persistent_storage": "In-memory kinematic telemetry ring buffer"
+    }
+  ],
+  "storage_mounts": {
+    "storage/models/": "Neural model weights, tokenizer configs, and versions manifest",
+    "storage/memory/": "User episodic memory files and vector indices",
+    "storage/knowledge/": "Domain partitions, inverted index, and axiomatic relationship graph",
+    "storage/datasets/": "Filtered canonical/weak shards and provenance metadata",
+    "storage/persistence/": "Self-model, experiential lessons, world model state, and goal hierarchy states",
+    "storage/ledger/": "Encrypted hash-chained reward ledger",
+    "storage/vault/": "HMAC manifest seals and cryptographic access keys",
+    "storage/datasets/curriculum/": "Academic curriculum datasets and coverage matrix",
+    "TARA/SKILLS/": "Native declarative skill specifications and catalogs",
+    "TARA/RULES/": "Declarative policy rulebooks and schemas",
+    "TARA/ACCESS/": "Operator access registries and trust roots"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0.0",
+  "exported_at_utc": "1791272000",
+  "repository_ready_for_push": true,
+  "total_files_indexed": 1949,
+  "registries_digest_sha256": "d5c3f0cd8faa272e50d02f43f7d661daabf7b12a59720993650d923fb16d8f00",
+  "supported_platforms": [
+    "windows-latest",
+    "ubuntu-latest",
+    "macos-latest"
+  ],
+  "ci_workflow_path": ".github/workflows/tara_ci.yml"
+}

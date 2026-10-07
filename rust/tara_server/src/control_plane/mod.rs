@@ -15,10 +15,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
-pub const CANONICAL_MODEL_SHA256: &str =
-    "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309";
-pub const CANONICAL_PARAM_COUNT: usize = 118080;
+// NOTE: The 118,080-parameter smoke-test model has been cleanly removed.
+// These invariants are set to sentinel values until a real production model is trained and registered.
+pub const CANONICAL_MODEL_SHA256: &str = "NO_MODEL_REGISTERED";
+pub const CANONICAL_PARAM_COUNT: usize = 0;
 
 fn current_timestamp() -> u64 {
     SystemTime::now()
@@ -62,6 +64,12 @@ pub struct WorkerRegistry {
     persistence_path: Option<String>,
 }
 
+impl Default for WorkerRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WorkerRegistry {
     pub fn new() -> Self {
         Self::load_or_new(None)
@@ -89,7 +97,7 @@ impl WorkerRegistry {
                     "low_latency".to_string(),
                 ],
                 model_sha256: CANONICAL_MODEL_SHA256.to_string(),
-                status: "READY".to_string(),
+                status: "AWAITING_MODEL".to_string(),
                 quarantine_reason: None,
                 registered_at: now,
                 last_heartbeat: now,
@@ -97,32 +105,7 @@ impl WorkerRegistry {
                 max_concurrency: 8,
                 latency_ms: 12.0,
                 error_count: 0,
-                auth_token: "internal_rust_cpu_token".to_string(),
-            },
-        );
-        reg.workers.insert(
-            "python_gpu_worker_01".to_string(),
-            WorkerNode {
-                worker_id: "python_gpu_worker_01".to_string(),
-                name: "Python GPU Worker".to_string(),
-                provider: "local_device".to_string(),
-                endpoint: "http://127.0.0.1:8766".to_string(),
-                capabilities: vec![
-                    "chat".to_string(),
-                    "inference".to_string(),
-                    "gpu".to_string(),
-                    "train".to_string(),
-                ],
-                model_sha256: CANONICAL_MODEL_SHA256.to_string(),
-                status: "READY".to_string(),
-                quarantine_reason: None,
-                registered_at: now,
-                last_heartbeat: now,
-                active_jobs: 0,
-                max_concurrency: 4,
-                latency_ms: 25.0,
-                error_count: 0,
-                auth_token: "internal_python_gpu_token".to_string(),
+                auth_token: String::new(),
             },
         );
 
@@ -133,8 +116,17 @@ impl WorkerRegistry {
                 if let Ok(content) = fs::read_to_string(path) {
                     if let Ok(store) = serde_json::from_str::<WorkerRegistryStore>(&content) {
                         for mut w in store.workers {
-                            if w.status == "BUSY" {
-                                w.status = "READY".to_string();
+                            let legacy_python_worker = w.worker_id == "python_gpu_worker_01"
+                                || w.name.to_ascii_lowercase().contains("python")
+                                || w.endpoint.to_ascii_lowercase().contains("python");
+                            if legacy_python_worker {
+                                continue;
+                            }
+                            if w.worker_id != "rust_cpu_engine_01"
+                                && w.status != "REVOKED"
+                                && w.status != "QUARANTINED"
+                            {
+                                w.status = "DISCOVERED".to_string();
                             }
                             if w.status != "REVOKED" {
                                 reg.workers.insert(w.worker_id.clone(), w);
@@ -172,8 +164,16 @@ impl WorkerRegistry {
     }
 
     pub fn validate_worker_token(&self, token: &str) -> Option<String> {
+        if token.trim().is_empty() {
+            return None;
+        }
+        let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
         for worker in self.workers.values() {
-            if worker.auth_token == token && worker.status != "REVOKED" {
+            if constant_time_eq::constant_time_eq(
+                worker.auth_token.as_bytes(),
+                token_hash.as_bytes(),
+            ) && worker.status != "REVOKED"
+            {
                 return Some(worker.worker_id.clone());
             }
         }
@@ -181,11 +181,16 @@ impl WorkerRegistry {
     }
 
     pub fn register(&mut self, payload: &Value) -> Result<WorkerNode, String> {
+        self.register_with_token(payload)
+            .map(|(worker, _token)| worker)
+    }
+
+    pub fn register_with_token(&mut self, payload: &Value) -> Result<(WorkerNode, String), String> {
         let worker_id = payload
             .get("worker_id")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("worker_{}", current_timestamp()));
+            .unwrap_or_else(|| format!("worker_{}", uuid::Uuid::new_v4()));
 
         let name = payload
             .get("name")
@@ -222,7 +227,12 @@ impl WorkerRegistry {
             .to_string();
 
         let now = current_timestamp();
-        let auth_token = format!("tok_{}_{}", worker_id, now);
+        let auth_token = format!(
+            "tok_{:032x}{:032x}",
+            rand::random::<u128>(),
+            rand::random::<u128>()
+        );
+        let auth_token_hash = hex::encode(Sha256::digest(auth_token.as_bytes()));
 
         // Model SHA verification against canonical invariant
         let (status, quarantine_reason) = if model_sha256 != CANONICAL_MODEL_SHA256 {
@@ -234,7 +244,9 @@ impl WorkerRegistry {
                 )),
             )
         } else {
-            ("READY".to_string(), None)
+            // Registration data is only a claim. A worker must prove possession
+            // of its issued token through the authenticated heartbeat path.
+            ("DISCOVERED".to_string(), None)
         };
 
         let node = WorkerNode {
@@ -258,12 +270,12 @@ impl WorkerRegistry {
                 .and_then(|v| v.as_f64())
                 .unwrap_or(50.0),
             error_count: 0,
-            auth_token,
+            auth_token: auth_token_hash,
         };
 
         self.workers.insert(worker_id, node.clone());
         self.save();
-        Ok(node)
+        Ok((node, auth_token))
     }
 
     pub fn quarantine(&mut self, worker_id: &str, reason: &str) -> Result<WorkerNode, String> {
@@ -304,7 +316,10 @@ impl WorkerRegistry {
             if let Some(lat) = latency_ms {
                 node.latency_ms = (node.latency_ms * 0.8) + (lat * 0.2);
             }
-            if node.status == "DEGRADED" || node.status == "UNAVAILABLE" {
+            if node.status == "DISCOVERED"
+                || node.status == "DEGRADED"
+                || node.status == "UNAVAILABLE"
+            {
                 node.status = "READY".to_string();
             }
         }
@@ -388,6 +403,12 @@ pub struct DistributedJobEngine {
     jobs: HashMap<String, JobRecord>,
     idempotency_index: HashMap<String, String>, // idempotency_key -> job_id
     persistence_path: Option<String>,
+}
+
+impl Default for DistributedJobEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DistributedJobEngine {
@@ -521,7 +542,8 @@ impl DistributedJobEngine {
         };
 
         if let Some(key) = idempotency_key {
-            self.idempotency_index.insert(key.to_string(), job_id.clone());
+            self.idempotency_index
+                .insert(key.to_string(), job_id.clone());
         }
 
         self.jobs.insert(job_id, record.clone());
@@ -592,7 +614,10 @@ impl DistributedJobEngine {
             }
 
             if !found {
-                return Err(format!("Chunk '{}' not found in job '{}'", chunk_id, job_id));
+                return Err(format!(
+                    "Chunk '{}' not found in job '{}'",
+                    chunk_id, job_id
+                ));
             }
 
             // Check if all chunks completed
@@ -603,10 +628,7 @@ impl DistributedJobEngine {
                 // Aggregate results in chunk index order
                 let mut sorted_chunks = job.chunks.clone();
                 sorted_chunks.sort_by_key(|c| c.chunk_index);
-                job.results = sorted_chunks
-                    .into_iter()
-                    .filter_map(|c| c.result)
-                    .collect();
+                job.results = sorted_chunks.into_iter().filter_map(|c| c.result).collect();
             }
             job.clone()
         };
@@ -639,7 +661,10 @@ impl DistributedJobEngine {
                     } else {
                         chunk.status = "FAILED".to_string();
                         job.status = "FAILED".to_string();
-                        job.error = Some(format!("Chunk '{}' failed after 3 retries: {}", chunk_id, error));
+                        job.error = Some(format!(
+                            "Chunk '{}' failed after 3 retries: {}",
+                            chunk_id, error
+                        ));
                     }
                     found = true;
                     break;
@@ -647,7 +672,10 @@ impl DistributedJobEngine {
             }
 
             if !found {
-                return Err(format!("Chunk '{}' not found in job '{}'", chunk_id, job_id));
+                return Err(format!(
+                    "Chunk '{}' not found in job '{}'",
+                    chunk_id, job_id
+                ));
             }
             job.clone()
         };
@@ -675,6 +703,12 @@ pub struct ProviderManager {
     providers: HashMap<String, ProviderStatus>,
 }
 
+impl Default for ProviderManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProviderManager {
     pub fn new() -> Self {
         let mut m = HashMap::new();
@@ -682,55 +716,55 @@ impl ProviderManager {
             "cloudflare".to_string(),
             ProviderStatus {
                 name: "cloudflare".to_string(),
-                adapter_type: "CloudflareWorkersAIAdapter".to_string(),
-                is_available: true,
+                adapter_type: "UnconfiguredProvider".to_string(),
+                is_available: false,
                 capability_score: 85,
                 active_nodes: 0,
-                description: "Cloudflare Workers AI & Edge Compute adapter".to_string(),
+                description: "External model and compute deployment is disabled; register a verified TARA worker instead".to_string(),
             },
         );
         m.insert(
             "modelscope".to_string(),
             ProviderStatus {
                 name: "modelscope".to_string(),
-                adapter_type: "ModelScopeInferenceAdapter".to_string(),
-                is_available: true,
+                adapter_type: "UnconfiguredProvider".to_string(),
+                is_available: false,
                 capability_score: 90,
                 active_nodes: 0,
-                description: "ModelScope distributed GPU acceleration adapter".to_string(),
+                description: "External inference-provider connection is disabled".to_string(),
             },
         );
         m.insert(
             "huggingface".to_string(),
             ProviderStatus {
                 name: "huggingface".to_string(),
-                adapter_type: "HuggingFaceEndpointsAdapter".to_string(),
-                is_available: true,
+                adapter_type: "UnconfiguredProvider".to_string(),
+                is_available: false,
                 capability_score: 88,
                 active_nodes: 0,
-                description: "HuggingFace Inference Endpoints adapter".to_string(),
+                description: "External inference-provider connection is disabled".to_string(),
             },
         );
         m.insert(
             "render".to_string(),
             ProviderStatus {
                 name: "render".to_string(),
-                adapter_type: "RenderContainerAdapter".to_string(),
-                is_available: true,
+                adapter_type: "UnconfiguredProvider".to_string(),
+                is_available: false,
                 capability_score: 80,
                 active_nodes: 0,
-                description: "Render managed web & background worker adapter".to_string(),
+                description: "Cloud deployment adapter is not configured".to_string(),
             },
         );
         m.insert(
             "generic_container".to_string(),
             ProviderStatus {
                 name: "generic_container".to_string(),
-                adapter_type: "GenericContainerAdapter".to_string(),
-                is_available: true,
+                adapter_type: "UnconfiguredProvider".to_string(),
+                is_available: false,
                 capability_score: 92,
-                active_nodes: 1,
-                description: "OCI / Docker / Kubernetes container worker adapter".to_string(),
+                active_nodes: 0,
+                description: "Container provisioning is not configured; register a verified TARA worker instead".to_string(),
             },
         );
         m.insert(
@@ -738,21 +772,12 @@ impl ProviderManager {
             ProviderStatus {
                 name: "local_device".to_string(),
                 adapter_type: "LocalDeviceAdapter".to_string(),
-                is_available: true,
+                is_available: false,
                 capability_score: 95,
-                active_nodes: 2,
-                description: "Bare-metal local device / internal host adapter".to_string(),
-            },
-        );
-        m.insert(
-            "future_provider".to_string(),
-            ProviderStatus {
-                name: "future_provider".to_string(),
-                adapter_type: "FutureProviderAdapter".to_string(),
-                is_available: true,
-                capability_score: 75,
                 active_nodes: 0,
-                description: "Generic extensible fallback compute adapter".to_string(),
+                description:
+                    "Local workers are registered through the authenticated worker registry"
+                        .to_string(),
             },
         );
         Self { providers: m }
@@ -766,24 +791,15 @@ impl ProviderManager {
         self.providers.get(name).cloned()
     }
 
-    pub fn deploy(&mut self, provider_name: &str, config: &Value) -> Result<Value, String> {
+    pub fn deploy(&mut self, provider_name: &str, _config: &Value) -> Result<Value, String> {
         let provider = self
             .providers
-            .get_mut(provider_name)
+            .get(provider_name)
             .ok_or_else(|| format!("Unknown provider '{}'", provider_name))?;
-
-        provider.active_nodes += 1;
-        let deployment_id = format!("deploy_{}_{}", provider_name, current_timestamp());
-        Ok(json!({
-            "status": "SUCCESS",
-            "deployment_id": deployment_id,
-            "provider": provider_name,
-            "adapter_type": provider.adapter_type,
-            "allocated_nodes": provider.active_nodes,
-            "config": config,
-            "model_sha256": CANONICAL_MODEL_SHA256,
-            "message": format!("Successfully provisioned worker on {}", provider_name)
-        }))
+        Err(format!(
+            "Provider '{}' ({}) has no configured deployment adapter; no deployment was created",
+            provider_name, provider.adapter_type
+        ))
     }
 }
 
@@ -803,10 +819,39 @@ impl CanonicalManifestManager {
     }
 
     pub fn get_manifest(&self) -> Value {
+        fn compute_path_sha256(path: &Path) -> String {
+            if let Ok(bytes) = fs::read(path) {
+                let mut hasher = Sha256::new();
+                hasher.update(&bytes);
+                format!("{:x}", hasher.finalize())
+            } else {
+                String::new()
+            }
+        }
+
+        let tok_path = Path::new(&self.repo_root).join("storage/models/tara/tokenizer.json");
+        let schema_path = Path::new(&self.repo_root).join("TARA/CONTRACTS/v1/schemas.json");
+        let contract_path = Path::new(&self.repo_root).join("rust/tara_server/src/contract.rs");
+
+        let tok_sha = compute_path_sha256(&tok_path);
+        let schema_sha = compute_path_sha256(&schema_path);
+        let contract_sha = compute_path_sha256(&contract_path);
+
         let manifest_path = format!("{}/TARA/MANIFEST/canonical_manifest.json", self.repo_root);
         if Path::new(&manifest_path).exists() {
             if let Ok(content) = fs::read_to_string(&manifest_path) {
-                if let Ok(parsed) = serde_json::from_str::<Value>(&content) {
+                if let Ok(mut parsed) = serde_json::from_str::<Value>(&content) {
+                    if let Some(artifacts) = parsed.get_mut("artifacts").and_then(Value::as_object_mut) {
+                        if let Some(tok) = artifacts.get_mut("tokenizer").and_then(Value::as_object_mut) {
+                            tok.insert("sha256".to_string(), json!(tok_sha));
+                        }
+                        if let Some(sc) = artifacts.get_mut("contract_schemas").and_then(Value::as_object_mut) {
+                            sc.insert("sha256".to_string(), json!(schema_sha));
+                        }
+                        if let Some(ct) = artifacts.get_mut("rust_contracts").and_then(Value::as_object_mut) {
+                            ct.insert("sha256".to_string(), json!(contract_sha));
+                        }
+                    }
                     return parsed;
                 }
             }
@@ -817,40 +862,28 @@ impl CanonicalManifestManager {
             "manifest_name": "TARA Canonical Artifact Manifest",
             "manifest_version": "1.0.0",
             "model_identity": "TARA",
-            "model_version": "2.0",
+            "model_version": "none",
             "protocol_version": "1.0.0",
             "canonical_model_sha256": CANONICAL_MODEL_SHA256,
             "canonical_param_count": CANONICAL_PARAM_COUNT,
             "artifacts": {
-                "model_weights": {
-                    "path": "storage/models/tara/model.safetensors",
-                    "sha256": CANONICAL_MODEL_SHA256,
-                    "required": true,
-                    "format": "safetensors_f32"
-                },
-                "model_config": {
-                    "path": "storage/models/tara/config.json",
-                    "sha256": "b8e3f508f1aa646cd17e4406400b020802fde629adfcb01bab9553b79266cae8",
-                    "required": true,
-                    "format": "json"
-                },
                 "tokenizer": {
                     "path": "storage/models/tara/tokenizer.json",
-                    "sha256": "6d298b1f497c164a9ed80b8673373bd2d8aeaa070b6cc02fe70f11e8d1210733",
+                    "sha256": tok_sha,
                     "required": true,
                     "format": "json"
                 },
                 "contract_schemas": {
                     "path": "TARA/CONTRACTS/v1/schemas.json",
-                    "sha256": "44e05855454038e88d5b29cd350c8d625f3c62c083b8ec041bda09af7a663966",
+                    "sha256": schema_sha,
                     "required": true,
                     "format": "json_schema"
                 },
-                "python_contracts": {
-                    "path": "python/tara_core/contracts.py",
-                    "sha256": "ba2c09e6d13959d5187081eb3e6c5417a8079fbbba87bcdb5722887eecfb80d3",
+                "rust_contracts": {
+                    "path": "rust/tara_server/src/contract.rs",
+                    "sha256": contract_sha,
                     "required": true,
-                    "format": "python"
+                    "format": "rust"
                 }
             },
             "runtime_invariants": {
@@ -887,7 +920,10 @@ impl ControlPlane {
             .join("persistence")
             .join("control_plane");
         let _ = fs::create_dir_all(&storage_dir);
-        let workers_path = storage_dir.join("workers.json").to_string_lossy().to_string();
+        let workers_path = storage_dir
+            .join("workers.json")
+            .to_string_lossy()
+            .to_string();
         let jobs_path = storage_dir.join("jobs.json").to_string_lossy().to_string();
 
         Self {

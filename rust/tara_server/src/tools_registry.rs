@@ -86,12 +86,39 @@ impl ToolRegistry {
             (
                 "knowledge_retriever",
                 "Return a knowledge lookup result for a query",
-                Arc::new(|_tool, params, actor, repo| tool_knowledge_retriever(params, actor, repo)),
+                Arc::new(|_tool, params, actor, repo| {
+                    tool_knowledge_retriever(params, actor, repo)
+                }),
             ),
             (
                 "provenance_tracker",
                 "Create a provenance record JSON for a source + content hash",
                 Arc::new(|_tool, params, actor, _repo| tool_provenance_tracker(params, actor)),
+            ),
+            (
+                "math_engine",
+                "Execute exact mathematics and computation (arithmetic, algebra, geometry, trig, calculus, etc.)",
+                Arc::new(|_tool, params, _actor, _repo| tool_math_engine(params)),
+            ),
+            (
+                "science_engine",
+                "Execute physics, chemistry, biology, and astronomy calculations",
+                Arc::new(|_tool, params, _actor, _repo| tool_science_engine(params)),
+            ),
+            (
+                "programming_engine",
+                "Execute static code analysis, delimiter check, complexity lookup, and project verification",
+                Arc::new(|_tool, params, _actor, repo| tool_programming_engine(params, repo)),
+            ),
+            (
+                "unit_converter",
+                "Convert physical units across 10 dimensions",
+                Arc::new(|_tool, params, _actor, _repo| tool_unit_converter(params)),
+            ),
+            (
+                "multilingual_terminology",
+                "Bilingual Kannada-English math and science technical terminology dictionary",
+                Arc::new(|_tool, params, _actor, _repo| tool_multilingual_terminology(params)),
             ),
         ];
 
@@ -113,7 +140,10 @@ impl ToolRegistry {
         &self,
         name: impl Into<String>,
         description: impl Into<String>,
-        handler: impl Fn(&str, serde_json::Value, &str, &str) -> serde_json::Value + Send + Sync + 'static,
+        handler: impl Fn(&str, serde_json::Value, &str, &str) -> serde_json::Value
+            + Send
+            + Sync
+            + 'static,
     ) -> Result<(), ToolError> {
         let name = name.into();
         let mut guard = self.tools.lock().expect("tool registry lock poisoned");
@@ -180,7 +210,7 @@ impl ToolRegistry {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// `file_inspector` — reads file metadata and first 512 bytes.
-fn tool_file_inspector(params: serde_json::Value) -> serde_json::Value {
+pub fn tool_file_inspector(params: serde_json::Value) -> serde_json::Value {
     let path_str = match params.get("path").and_then(|v| v.as_str()) {
         Some(p) => p.to_string(),
         None => {
@@ -235,7 +265,7 @@ fn tool_file_inspector(params: serde_json::Value) -> serde_json::Value {
 }
 
 /// `hash_verifier` — computes SHA-256 of a file and optionally checks against expected hash.
-fn tool_hash_verifier(params: serde_json::Value) -> serde_json::Value {
+pub fn tool_hash_verifier(params: serde_json::Value) -> serde_json::Value {
     let path_str = match params.get("path").and_then(|v| v.as_str()) {
         Some(p) => p.to_string(),
         None => {
@@ -262,10 +292,7 @@ fn tool_hash_verifier(params: serde_json::Value) -> serde_json::Value {
             hasher.update(&data);
             let hash = hex::encode(hasher.finalize());
 
-            let verified = expected
-                .as_ref()
-                .map(|exp| exp == &hash)
-                .unwrap_or(false);
+            let verified = expected.as_ref().map(|exp| exp == &hash).unwrap_or(false);
 
             serde_json::json!({
                 "path": path_str,
@@ -278,39 +305,55 @@ fn tool_hash_verifier(params: serde_json::Value) -> serde_json::Value {
     }
 }
 
-/// `knowledge_retriever` — returns a placeholder knowledge lookup result.
-fn tool_knowledge_retriever(params: serde_json::Value, actor_id: &str, repo_root: &str) -> serde_json::Value {
+/// `knowledge_retriever` — searches persisted global knowledge entries.
+fn tool_knowledge_retriever(
+    params: serde_json::Value,
+    actor_id: &str,
+    repo_root: &str,
+) -> serde_json::Value {
     let query = params
         .get("query")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-
-    // Attempt to read from knowledge index if present
-    let index_path = Path::new(repo_root)
-        .join("TARA")
-        .join("KNOWLEDGE")
-        .join("knowledge_index.json");
-
-    let index_data: serde_json::Value = if index_path.exists() {
-        fs::read_to_string(&index_path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or(serde_json::Value::Null)
-    } else {
-        serde_json::Value::Null
+    if query.trim().is_empty() {
+        return serde_json::json!({"status":"ERROR","error":"A non-empty query is required"});
+    }
+    let knowledge_dir = Path::new(repo_root).join("storage").join("knowledge");
+    let entries = match fs::read_dir(&knowledge_dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            return serde_json::json!({"status":"ERROR","error":format!("Could not read knowledge store: {error}")})
+        }
     };
+    let needle = query.to_lowercase();
+    let mut matches = Vec::new();
+    for entry in entries.flatten() {
+        if entry.path().extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(raw) = fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        if value.to_string().to_lowercase().contains(&needle) {
+            matches.push(value);
+            if matches.len() >= 20 {
+                break;
+            }
+        }
+    }
 
     serde_json::json!({
         "query": query,
         "actor_id": actor_id,
         "source": "knowledge_retriever",
-        "status": "lookup_complete",
-        "index_available": !index_data.is_null(),
+        "status": "SUCCESS",
+        "entries_found": matches.len(),
         "result": {
-            "summary": format!("Knowledge lookup for '{}' — consult GlobalKnowledgeBase for full results.", query),
-            "entries_found": 0,
-            "index_snapshot": index_data
+            "entries": matches
         }
     })
 }
@@ -352,4 +395,66 @@ fn tool_provenance_tracker(params: serde_json::Value, actor_id: &str) -> serde_j
         "timestamp_unix": timestamp,
         "schema": "provenance_v1"
     })
+}
+
+/// `math_engine` — executes exact mathematical computations.
+pub fn tool_math_engine(params: serde_json::Value) -> serde_json::Value {
+    let engine = crate::engines::MathEngine::new();
+    let op = params
+        .get("operation")
+        .or_else(|| params.get("op"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("add");
+    match engine.evaluate(op, &params) {
+        Ok(res) => serde_json::to_value(res).unwrap_or_default(),
+        Err(e) => serde_json::json!({ "error": "math_engine_error", "detail": e }),
+    }
+}
+
+/// `science_engine` — executes physics, chemistry, biology, and astronomy calculations.
+pub fn tool_science_engine(params: serde_json::Value) -> serde_json::Value {
+    let engine = crate::engines::ScienceEngine::new();
+    let discipline = params
+        .get("discipline")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("physics");
+    let op = params
+        .get("operation")
+        .or_else(|| params.get("op"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("force");
+    match engine.evaluate(discipline, op, &params) {
+        Ok(res) => serde_json::to_value(res).unwrap_or_default(),
+        Err(e) => serde_json::json!({ "error": "science_engine_error", "detail": e }),
+    }
+}
+
+/// `programming_engine` — executes static code analysis, delimiter check, complexity lookup, and project verification.
+pub fn tool_programming_engine(params: serde_json::Value, repo_root: &str) -> serde_json::Value {
+    let engine = crate::engines::ProgrammingEngine::new(repo_root);
+    let op = params
+        .get("operation")
+        .or_else(|| params.get("op"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("analyze_code");
+    match engine.evaluate(op, &params) {
+        Ok(res) => serde_json::to_value(res).unwrap_or_default(),
+        Err(e) => serde_json::json!({ "error": "programming_engine_error", "detail": e }),
+    }
+}
+
+/// `unit_converter` — converts physical units across 10 dimensions.
+pub fn tool_unit_converter(params: serde_json::Value) -> serde_json::Value {
+    match tara_engine::computation::ComputationEngine::execute("unit_convert", &params) {
+        Ok(res) => res,
+        Err(e) => serde_json::json!({ "error": "unit_converter_error", "detail": e }),
+    }
+}
+
+/// `multilingual_terminology` — bilingual Kannada-English math and science technical terminology dictionary.
+pub fn tool_multilingual_terminology(params: serde_json::Value) -> serde_json::Value {
+    match tara_engine::computation::ComputationEngine::execute("multilingual_lookup", &params) {
+        Ok(res) => res,
+        Err(e) => serde_json::json!({ "error": "multilingual_lookup_error", "detail": e }),
+    }
 }

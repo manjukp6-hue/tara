@@ -1,6 +1,0 @@
-interface:
-  display_name: "Temporal Cloud Setup"
-  short_description: "Set up Temporal Cloud and run a sample Workflow"
-
-policy:
-  allow_implicit_invocation: false

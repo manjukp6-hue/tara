@@ -4,12 +4,12 @@
 //! Enforces INTERNAL ID + HUMAN-READABLE NAME separation.
 //! Dynamic name generation, domain-context matching, collision prevention, renaming, and retired name tracking.
 
+use crate::runtime::lifecycle::EntityType;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use rand::RngCore;
-use crate::runtime::lifecycle::EntityType;
 
 /// Mapping record for an entity's display identity and internal ID.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +48,12 @@ struct NamingStore {
     retired_names: Vec<RetiredNameEntry>,
 }
 
+impl Default for DynamicNamingManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DynamicNamingManager {
     pub fn new() -> Self {
         Self {
@@ -75,7 +81,11 @@ impl DynamicNamingManager {
                 if cleaned.is_empty() {
                     "ent"
                 } else {
-                    return format!("{}_{:016x}", cleaned.to_lowercase(), rand::thread_rng().next_u64());
+                    return format!(
+                        "{}_{:016x}",
+                        cleaned.to_lowercase(),
+                        rand::thread_rng().next_u64()
+                    );
                 }
             }
         };
@@ -83,7 +93,12 @@ impl DynamicNamingManager {
         let mut rng = rand::thread_rng();
         let part1 = rng.next_u64();
         let part2 = rng.next_u64();
-        format!("{}_{:08x}{:08x}", prefix, (part1 & 0xFFFFFFFF) as u32, (part2 & 0xFFFFFFFF) as u32)
+        format!(
+            "{}_{:08x}{:08x}",
+            prefix,
+            (part1 & 0xFFFFFFFF) as u32,
+            (part2 & 0xFFFFFFFF) as u32
+        )
     }
 
     /// Contextually and dynamically selects a suitable human-readable name for an entity
@@ -139,7 +154,11 @@ impl DynamicNamingManager {
 
         // 3. Query dynamic knowledge base on disk if present
         let mut knowledge_concept: Option<String> = None;
-        let knowledge_paths = ["storage/knowledge", "TARA/KNOWLEDGE", "TARA/KNOWLEDGE/entries"];
+        let knowledge_paths = [
+            "storage/knowledge",
+            "TARA/KNOWLEDGE",
+            "TARA/KNOWLEDGE/entries",
+        ];
         for dir in &knowledge_paths {
             if let Ok(entries) = std::fs::read_dir(dir) {
                 for entry in entries.flatten() {
@@ -147,7 +166,11 @@ impl DynamicNamingManager {
                     if path.extension().and_then(|e| e.to_str()) == Some("json") {
                         if let Ok(content) = std::fs::read_to_string(&path) {
                             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                                if let Some(topic) = val.get("topic").or_else(|| val.get("title")).and_then(|t| t.as_str()) {
+                                if let Some(topic) = val
+                                    .get("topic")
+                                    .or_else(|| val.get("title"))
+                                    .and_then(|t| t.as_str())
+                                {
                                     let topic_lower = topic.to_lowercase();
                                     for dt in &domain_tokens {
                                         if topic_lower.contains(&dt.to_lowercase()) {
@@ -249,7 +272,9 @@ impl DynamicNamingManager {
             last_renamed_at_ms: None,
         };
 
-        store.active_names.insert(display_name.to_lowercase(), internal_id.clone());
+        store
+            .active_names
+            .insert(display_name.to_lowercase(), internal_id.clone());
         store.entities.insert(internal_id.clone(), identity.clone());
 
         Ok(identity)
@@ -257,18 +282,27 @@ impl DynamicNamingManager {
 
     /// Renames an entity, releasing the previous display name and updating indexes.
     /// Invariant: Internal ID never changes during rename.
-    pub fn rename_entity(&self, internal_id: &str, new_display_name: &str) -> Result<EntityIdentity, String> {
+    pub fn rename_entity(
+        &self,
+        internal_id: &str,
+        new_display_name: &str,
+    ) -> Result<EntityIdentity, String> {
         let mut store = self.inner.lock().unwrap();
         let new_key = new_display_name.trim().to_lowercase();
 
         if let Some(existing_id) = store.active_names.get(&new_key) {
             if existing_id != internal_id {
-                return Err(format!("Cannot rename: '{}' is already assigned to another entity", new_display_name));
+                return Err(format!(
+                    "Cannot rename: '{}' is already assigned to another entity",
+                    new_display_name
+                ));
             }
         }
 
         let (old_name, entity_type) = {
-            let entity = store.entities.get(internal_id)
+            let entity = store
+                .entities
+                .get(internal_id)
                 .ok_or_else(|| format!("Entity with ID '{}' not found", internal_id))?;
             (entity.display_name.clone(), entity.entity_type.clone())
         };
@@ -304,10 +338,14 @@ impl DynamicNamingManager {
     /// Retires an entity name upon entity retirement or termination.
     pub fn retire_entity(&self, internal_id: &str, reason: &str) -> Result<(), String> {
         let mut store = self.inner.lock().unwrap();
-        let entity = store.entities.remove(internal_id)
+        let entity = store
+            .entities
+            .remove(internal_id)
             .ok_or_else(|| format!("Entity '{}' not found", internal_id))?;
 
-        store.active_names.remove(&entity.display_name.to_lowercase());
+        store
+            .active_names
+            .remove(&entity.display_name.to_lowercase());
 
         let now_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -328,13 +366,19 @@ impl DynamicNamingManager {
     /// Looks up display name for a given internal ID.
     pub fn get_display_name(&self, internal_id: &str) -> Option<String> {
         let store = self.inner.lock().unwrap();
-        store.entities.get(internal_id).map(|e| e.display_name.clone())
+        store
+            .entities
+            .get(internal_id)
+            .map(|e| e.display_name.clone())
     }
 
     /// Looks up internal ID for a given display name.
     pub fn get_internal_id(&self, display_name: &str) -> Option<String> {
         let store = self.inner.lock().unwrap();
-        store.active_names.get(&display_name.trim().to_lowercase()).cloned()
+        store
+            .active_names
+            .get(&display_name.trim().to_lowercase())
+            .cloned()
     }
 
     pub fn list_active_entities(&self) -> Vec<EntityIdentity> {
@@ -347,3 +391,65 @@ impl DynamicNamingManager {
         store.retired_names.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_internal_id_generation() {
+        let id_sbx = DynamicNamingManager::generate_internal_id(&EntityType::Sandbox);
+        assert!(id_sbx.starts_with("sbx_"));
+
+        let id_agt = DynamicNamingManager::generate_internal_id(&EntityType::Agent);
+        assert!(id_agt.starts_with("agt_"));
+
+        let id_wrk = DynamicNamingManager::generate_internal_id(&EntityType::Worker);
+        assert!(id_wrk.starts_with("wrk_"));
+    }
+
+    #[test]
+    fn test_register_and_collision_prevention() {
+        let mgr = DynamicNamingManager::new();
+
+        let e1 = mgr
+            .register_entity(EntityType::Agent, "NLP", Some("BERT-Assistant"))
+            .unwrap();
+        assert_eq!(e1.display_name, "BERT-Assistant");
+
+        // Duplicate preferred name must be rejected
+        let dup_res = mgr.register_entity(EntityType::Agent, "NLP", Some("BERT-Assistant"));
+        assert!(dup_res.is_err());
+        assert!(dup_res.unwrap_err().contains("already in active use"));
+
+        // Auto-chosen name handles collisions automatically
+        let chosen1 = mgr.choose_name(&EntityType::Worker, "Compiler", None);
+        let e2 = mgr
+            .register_entity(EntityType::Worker, "Compiler", Some(&chosen1))
+            .unwrap();
+
+        let chosen2 = mgr.choose_name(&EntityType::Worker, "Compiler", None);
+        assert_ne!(e2.display_name, chosen2);
+    }
+
+    #[test]
+    fn test_rename_and_retire() {
+        let mgr = DynamicNamingManager::new();
+
+        let e = mgr
+            .register_entity(EntityType::Agent, "Vision", Some("VisionBuddy"))
+            .unwrap();
+        assert_eq!(mgr.get_display_name(&e.internal_id).unwrap(), "VisionBuddy");
+
+        // Rename
+        assert!(mgr.rename_entity(&e.internal_id, "VisionHero").is_ok());
+        assert_eq!(mgr.get_display_name(&e.internal_id).unwrap(), "VisionHero");
+        assert_eq!(mgr.list_retired_names().len(), 1);
+
+        // Retire
+        assert!(mgr.retire_entity(&e.internal_id, "Replaced by v2").is_ok());
+        assert!(mgr.get_display_name(&e.internal_id).is_none());
+        assert_eq!(mgr.list_retired_names().len(), 2);
+    }
+}
+

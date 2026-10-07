@@ -39,7 +39,7 @@ storage/persistence/distributed_jobs/
 storage/persistence/goals/*.json
 rust/tara_server/storage/
 storage/skills/*
-!storage/skills/currency.py
+!storage/skills/currency.json
 !storage/skills/skills_registry.json
 storage/models/**/*.bin
 *.bin
@@ -67,5 +67,5 @@ target/
 # OS generated
 .DS_Store
 Thumbs.db
-.github/
 scratch/
+.github/

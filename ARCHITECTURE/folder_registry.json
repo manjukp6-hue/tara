@@ -1,0 +1,4695 @@
+{
+  "folders": {
+    ".cargo": {
+      "depth": 1,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": ".cargo",
+      "rel_path": ".cargo",
+      "total_descendant_files_count": 1
+    },
+    ".github": {
+      "depth": 1,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 1,
+      "name": ".github",
+      "rel_path": ".github",
+      "total_descendant_files_count": 1
+    },
+    ".github/workflows": {
+      "depth": 2,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "workflows",
+      "rel_path": ".github/workflows",
+      "total_descendant_files_count": 1
+    },
+    "ARCHITECTURE": {
+      "depth": 1,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 1,
+      "name": "ARCHITECTURE",
+      "rel_path": "ARCHITECTURE",
+      "total_descendant_files_count": 20
+    },
+    "ARCHITECTURE/CAPABILITIES": {
+      "depth": 2,
+      "direct_files_count": 16,
+      "direct_subdirs_count": 0,
+      "name": "CAPABILITIES",
+      "rel_path": "ARCHITECTURE/CAPABILITIES",
+      "total_descendant_files_count": 16
+    },
+    "TARA": {
+      "depth": 1,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 13,
+      "name": "TARA",
+      "rel_path": "TARA",
+      "total_descendant_files_count": 1668
+    },
+    "TARA/ACCESS": {
+      "depth": 2,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 13,
+      "name": "ACCESS",
+      "rel_path": "TARA/ACCESS",
+      "total_descendant_files_count": 12
+    },
+    "TARA/ACCESS/activation": {
+      "depth": 3,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "activation",
+      "rel_path": "TARA/ACCESS/activation",
+      "total_descendant_files_count": 1
+    },
+    "TARA/ACCESS/crypto": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "crypto",
+      "rel_path": "TARA/ACCESS/crypto",
+      "total_descendant_files_count": 0
+    },
+    "TARA/ACCESS/destruction": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "destruction",
+      "rel_path": "TARA/ACCESS/destruction",
+      "total_descendant_files_count": 0
+    },
+    "TARA/ACCESS/devices": {
+      "depth": 3,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "devices",
+      "rel_path": "TARA/ACCESS/devices",
+      "total_descendant_files_count": 1
+    },
+    "TARA/ACCESS/factors": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "factors",
+      "rel_path": "TARA/ACCESS/factors",
+      "total_descendant_files_count": 0
+    },
+    "TARA/ACCESS/lockdown": {
+      "depth": 3,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "lockdown",
+      "rel_path": "TARA/ACCESS/lockdown",
+      "total_descendant_files_count": 1
+    },
+    "TARA/ACCESS/operator": {
+      "depth": 3,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "operator",
+      "rel_path": "TARA/ACCESS/operator",
+      "total_descendant_files_count": 4
+    },
+    "TARA/ACCESS/policy": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "policy",
+      "rel_path": "TARA/ACCESS/policy",
+      "total_descendant_files_count": 0
+    },
+    "TARA/ACCESS/protected_v1": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "protected_v1",
+      "rel_path": "TARA/ACCESS/protected_v1",
+      "total_descendant_files_count": 0
+    },
+    "TARA/ACCESS/restore": {
+      "depth": 3,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "restore",
+      "rel_path": "TARA/ACCESS/restore",
+      "total_descendant_files_count": 1
+    },
+    "TARA/ACCESS/services": {
+      "depth": 3,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "services",
+      "rel_path": "TARA/ACCESS/services",
+      "total_descendant_files_count": 1
+    },
+    "TARA/ACCESS/vault": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "vault",
+      "rel_path": "TARA/ACCESS/vault",
+      "total_descendant_files_count": 0
+    },
+    "TARA/ACCESS/wizard": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "wizard",
+      "rel_path": "TARA/ACCESS/wizard",
+      "total_descendant_files_count": 0
+    },
+    "TARA/CONTRACTS": {
+      "depth": 2,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 1,
+      "name": "CONTRACTS",
+      "rel_path": "TARA/CONTRACTS",
+      "total_descendant_files_count": 1
+    },
+    "TARA/CONTRACTS/v1": {
+      "depth": 3,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "v1",
+      "rel_path": "TARA/CONTRACTS/v1",
+      "total_descendant_files_count": 1
+    },
+    "TARA/ENGINES": {
+      "depth": 2,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 1,
+      "name": "ENGINES",
+      "rel_path": "TARA/ENGINES",
+      "total_descendant_files_count": 0
+    },
+    "TARA/ENGINES/quarantine": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "quarantine",
+      "rel_path": "TARA/ENGINES/quarantine",
+      "total_descendant_files_count": 0
+    },
+    "TARA/IDENTITY": {
+      "depth": 2,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "IDENTITY",
+      "rel_path": "TARA/IDENTITY",
+      "total_descendant_files_count": 0
+    },
+    "TARA/KNOWLEDGE": {
+      "depth": 2,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 4,
+      "name": "KNOWLEDGE",
+      "rel_path": "TARA/KNOWLEDGE",
+      "total_descendant_files_count": 2
+    },
+    "TARA/KNOWLEDGE/candidates": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "candidates",
+      "rel_path": "TARA/KNOWLEDGE/candidates",
+      "total_descendant_files_count": 0
+    },
+    "TARA/KNOWLEDGE/entries": {
+      "depth": 3,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "entries",
+      "rel_path": "TARA/KNOWLEDGE/entries",
+      "total_descendant_files_count": 1
+    },
+    "TARA/KNOWLEDGE/provenance": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "provenance",
+      "rel_path": "TARA/KNOWLEDGE/provenance",
+      "total_descendant_files_count": 0
+    },
+    "TARA/KNOWLEDGE/topics": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "topics",
+      "rel_path": "TARA/KNOWLEDGE/topics",
+      "total_descendant_files_count": 0
+    },
+    "TARA/LEARNING": {
+      "depth": 2,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "LEARNING",
+      "rel_path": "TARA/LEARNING",
+      "total_descendant_files_count": 0
+    },
+    "TARA/MANIFEST": {
+      "depth": 2,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "MANIFEST",
+      "rel_path": "TARA/MANIFEST",
+      "total_descendant_files_count": 1
+    },
+    "TARA/MEMORY": {
+      "depth": 2,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "MEMORY",
+      "rel_path": "TARA/MEMORY",
+      "total_descendant_files_count": 1
+    },
+    "TARA/MODEL": {
+      "depth": 2,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 3,
+      "name": "MODEL",
+      "rel_path": "TARA/MODEL",
+      "total_descendant_files_count": 3
+    },
+    "TARA/MODEL/checkpoints": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "checkpoints",
+      "rel_path": "TARA/MODEL/checkpoints",
+      "total_descendant_files_count": 0
+    },
+    "TARA/MODEL/inference": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 1,
+      "name": "inference",
+      "rel_path": "TARA/MODEL/inference",
+      "total_descendant_files_count": 1
+    },
+    "TARA/MODEL/inference/config": {
+      "depth": 4,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "config",
+      "rel_path": "TARA/MODEL/inference/config",
+      "total_descendant_files_count": 1
+    },
+    "TARA/MODEL/promotion": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 1,
+      "name": "promotion",
+      "rel_path": "TARA/MODEL/promotion",
+      "total_descendant_files_count": 1
+    },
+    "TARA/MODEL/promotion/export": {
+      "depth": 4,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "export",
+      "rel_path": "TARA/MODEL/promotion/export",
+      "total_descendant_files_count": 1
+    },
+    "TARA/RULES": {
+      "depth": 2,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 4,
+      "name": "RULES",
+      "rel_path": "TARA/RULES",
+      "total_descendant_files_count": 5
+    },
+    "TARA/RULES/compiler": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "compiler",
+      "rel_path": "TARA/RULES/compiler",
+      "total_descendant_files_count": 0
+    },
+    "TARA/RULES/engine": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "engine",
+      "rel_path": "TARA/RULES/engine",
+      "total_descendant_files_count": 0
+    },
+    "TARA/RULES/nlu": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "nlu",
+      "rel_path": "TARA/RULES/nlu",
+      "total_descendant_files_count": 0
+    },
+    "TARA/RULES/versions": {
+      "depth": 3,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "versions",
+      "rel_path": "TARA/RULES/versions",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SECURITY": {
+      "depth": 2,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "SECURITY",
+      "rel_path": "TARA/SECURITY",
+      "total_descendant_files_count": 0
+    },
+    "TARA/SKILLS": {
+      "depth": 2,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 12,
+      "name": "SKILLS",
+      "rel_path": "TARA/SKILLS",
+      "total_descendant_files_count": 1643
+    },
+    "TARA/SKILLS/android": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 2,
+      "name": "android",
+      "rel_path": "TARA/SKILLS/android",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/android/android-emulator-qa": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "android-emulator-qa",
+      "rel_path": "TARA/SKILLS/android/android-emulator-qa",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/android/expo-ui-jetpack-compose": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "expo-ui-jetpack-compose",
+      "rel_path": "TARA/SKILLS/android/expo-ui-jetpack-compose",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/automation": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 6,
+      "name": "automation",
+      "rel_path": "TARA/SKILLS/automation",
+      "total_descendant_files_count": 21
+    },
+    "TARA/SKILLS/automation/dispatching-parallel-agents": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "dispatching-parallel-agents",
+      "rel_path": "TARA/SKILLS/automation/dispatching-parallel-agents",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/automation/executing-plans": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "executing-plans",
+      "rel_path": "TARA/SKILLS/automation/executing-plans",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/automation/skill-builder": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "skill-builder",
+      "rel_path": "TARA/SKILLS/automation/skill-builder",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/automation/skill-builder/references": {
+      "depth": 5,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/automation/skill-builder/references",
+      "total_descendant_files_count": 0
+    },
+    "TARA/SKILLS/automation/skill-installer": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "skill-installer",
+      "rel_path": "TARA/SKILLS/automation/skill-installer",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/automation/skill-installer/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/automation/skill-installer/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/automation/subagent-driven-development": {
+      "depth": 4,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "subagent-driven-development",
+      "rel_path": "TARA/SKILLS/automation/subagent-driven-development",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/automation/using-superpowers": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "using-superpowers",
+      "rel_path": "TARA/SKILLS/automation/using-superpowers",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/automation/using-superpowers/references": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/automation/using-superpowers/references",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/coding": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 34,
+      "name": "coding",
+      "rel_path": "TARA/SKILLS/coding",
+      "total_descendant_files_count": 415
+    },
+    "TARA/SKILLS/coding/aspnet-core": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 2,
+      "name": "aspnet-core",
+      "rel_path": "TARA/SKILLS/coding/aspnet-core",
+      "total_descendant_files_count": 16
+    },
+    "TARA/SKILLS/coding/aspnet-core/assets": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/coding/aspnet-core/assets",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/aspnet-core/references": {
+      "depth": 5,
+      "direct_files_count": 13,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/aspnet-core/references",
+      "total_descendant_files_count": 13
+    },
+    "TARA/SKILLS/coding/brainstorming": {
+      "depth": 4,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "brainstorming",
+      "rel_path": "TARA/SKILLS/coding/brainstorming",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/coding/cli-builder": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "cli-builder",
+      "rel_path": "TARA/SKILLS/coding/cli-builder",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/coding/cli-builder/references": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/cli-builder/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/codex-expo-run-actions": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "codex-expo-run-actions",
+      "rel_path": "TARA/SKILLS/coding/codex-expo-run-actions",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/coding/codex-expo-run-actions/references": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/codex-expo-run-actions/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 7,
+      "name": "contact-center",
+      "rel_path": "TARA/SKILLS/coding/contact-center",
+      "total_descendant_files_count": 29
+    },
+    "TARA/SKILLS/coding/contact-center/android": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 4,
+      "name": "android",
+      "rel_path": "TARA/SKILLS/coding/contact-center/android",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/coding/contact-center/android/concepts": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/coding/contact-center/android/concepts",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center/android/examples": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/coding/contact-center/android/examples",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center/android/references": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/contact-center/android/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center/android/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/coding/contact-center/android/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center/concepts": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/coding/contact-center/concepts",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center/ios": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 4,
+      "name": "ios",
+      "rel_path": "TARA/SKILLS/coding/contact-center/ios",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/coding/contact-center/ios/concepts": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/coding/contact-center/ios/concepts",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center/ios/examples": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/coding/contact-center/ios/examples",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center/ios/references": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/contact-center/ios/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center/ios/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/coding/contact-center/ios/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center/references": {
+      "depth": 5,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/contact-center/references",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/coding/contact-center/scenarios": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "scenarios",
+      "rel_path": "TARA/SKILLS/coding/contact-center/scenarios",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center/troubleshooting": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/coding/contact-center/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center/web": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 4,
+      "name": "web",
+      "rel_path": "TARA/SKILLS/coding/contact-center/web",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/coding/contact-center/web/concepts": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/coding/contact-center/web/concepts",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center/web/examples": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/coding/contact-center/web/examples",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center/web/references": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/contact-center/web/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/contact-center/web/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/coding/contact-center/web/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/dashboard-expert": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "dashboard-expert",
+      "rel_path": "TARA/SKILLS/coding/dashboard-expert",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/coding/dashboard-expert/references": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/dashboard-expert/references",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/coding/define-goal": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "define-goal",
+      "rel_path": "TARA/SKILLS/coding/define-goal",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/expo-api-routes": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "expo-api-routes",
+      "rel_path": "TARA/SKILLS/coding/expo-api-routes",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/expo-dev-client": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "expo-dev-client",
+      "rel_path": "TARA/SKILLS/coding/expo-dev-client",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/expo-tailwind-setup": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "expo-tailwind-setup",
+      "rel_path": "TARA/SKILLS/coding/expo-tailwind-setup",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/finishing-a-development-branch": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "finishing-a-development-branch",
+      "rel_path": "TARA/SKILLS/coding/finishing-a-development-branch",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/general": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 2,
+      "name": "general",
+      "rel_path": "TARA/SKILLS/coding/general",
+      "total_descendant_files_count": 73
+    },
+    "TARA/SKILLS/coding/general/references": {
+      "depth": 5,
+      "direct_files_count": 18,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/general/references",
+      "total_descendant_files_count": 18
+    },
+    "TARA/SKILLS/coding/general/use-cases": {
+      "depth": 5,
+      "direct_files_count": 52,
+      "direct_subdirs_count": 0,
+      "name": "use-cases",
+      "rel_path": "TARA/SKILLS/coding/general/use-cases",
+      "total_descendant_files_count": 52
+    },
+    "TARA/SKILLS/coding/gh-address-comments": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "gh-address-comments",
+      "rel_path": "TARA/SKILLS/coding/gh-address-comments",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/coding/gh-address-comments/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/coding/gh-address-comments/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/gh-fix-ci": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "gh-fix-ci",
+      "rel_path": "TARA/SKILLS/coding/gh-fix-ci",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/coding/gh-fix-ci/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/coding/gh-fix-ci/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/hatch-pet": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "hatch-pet",
+      "rel_path": "TARA/SKILLS/coding/hatch-pet",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/coding/hatch-pet/references": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/hatch-pet/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/coding/linear": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "linear",
+      "rel_path": "TARA/SKILLS/coding/linear",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/coding/linear/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/coding/linear/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/migrate-to-codex": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "migrate-to-codex",
+      "rel_path": "TARA/SKILLS/coding/migrate-to-codex",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/coding/migrate-to-codex/references": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/migrate-to-codex/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/mixpanelyst": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "mixpanelyst",
+      "rel_path": "TARA/SKILLS/coding/mixpanelyst",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/phone": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 5,
+      "name": "phone",
+      "rel_path": "TARA/SKILLS/coding/phone",
+      "total_descendant_files_count": 16
+    },
+    "TARA/SKILLS/coding/phone/concepts": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/coding/phone/concepts",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/phone/examples": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/coding/phone/examples",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/phone/references": {
+      "depth": 5,
+      "direct_files_count": 8,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/phone/references",
+      "total_descendant_files_count": 8
+    },
+    "TARA/SKILLS/coding/phone/scenarios": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "scenarios",
+      "rel_path": "TARA/SKILLS/coding/phone/scenarios",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/phone/troubleshooting": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/coding/phone/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/plugin-builder": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "plugin-builder",
+      "rel_path": "TARA/SKILLS/coding/plugin-builder",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/coding/plugin-builder/references": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/plugin-builder/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/posthog": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "posthog",
+      "rel_path": "TARA/SKILLS/coding/posthog",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/receiving-code-review": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "receiving-code-review",
+      "rel_path": "TARA/SKILLS/coding/receiving-code-review",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/requesting-code-review": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "requesting-code-review",
+      "rel_path": "TARA/SKILLS/coding/requesting-code-review",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/coding/rtms": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 4,
+      "name": "rtms",
+      "rel_path": "TARA/SKILLS/coding/rtms",
+      "total_descendant_files_count": 17
+    },
+    "TARA/SKILLS/coding/rtms/concepts": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/coding/rtms/concepts",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/rtms/examples": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/coding/rtms/examples",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/coding/rtms/references": {
+      "depth": 5,
+      "direct_files_count": 7,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/rtms/references",
+      "total_descendant_files_count": 7
+    },
+    "TARA/SKILLS/coding/rtms/troubleshooting": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/coding/rtms/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/sentry": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "sentry",
+      "rel_path": "TARA/SKILLS/coding/sentry",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/coding/sentry/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/coding/sentry/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/setup": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "setup",
+      "rel_path": "TARA/SKILLS/coding/setup",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/start": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "start",
+      "rel_path": "TARA/SKILLS/coding/start",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/team-chat": {
+      "depth": 4,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 4,
+      "name": "team-chat",
+      "rel_path": "TARA/SKILLS/coding/team-chat",
+      "total_descendant_files_count": 40
+    },
+    "TARA/SKILLS/coding/team-chat/concepts": {
+      "depth": 5,
+      "direct_files_count": 7,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/coding/team-chat/concepts",
+      "total_descendant_files_count": 7
+    },
+    "TARA/SKILLS/coding/team-chat/examples": {
+      "depth": 5,
+      "direct_files_count": 13,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/coding/team-chat/examples",
+      "total_descendant_files_count": 13
+    },
+    "TARA/SKILLS/coding/team-chat/references": {
+      "depth": 5,
+      "direct_files_count": 11,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/team-chat/references",
+      "total_descendant_files_count": 11
+    },
+    "TARA/SKILLS/coding/team-chat/troubleshooting": {
+      "depth": 5,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/coding/team-chat/troubleshooting",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/coding/temporal-cloud-setup": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "temporal-cloud-setup",
+      "rel_path": "TARA/SKILLS/coding/temporal-cloud-setup",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/coding/temporal-cloud-setup/references": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/temporal-cloud-setup/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/coding/temporal-developer": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "temporal-developer",
+      "rel_path": "TARA/SKILLS/coding/temporal-developer",
+      "total_descendant_files_count": 104
+    },
+    "TARA/SKILLS/coding/temporal-developer/references": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 8,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/temporal-developer/references",
+      "total_descendant_files_count": 102
+    },
+    "TARA/SKILLS/coding/temporal-developer/references/core": {
+      "depth": 6,
+      "direct_files_count": 13,
+      "direct_subdirs_count": 0,
+      "name": "core",
+      "rel_path": "TARA/SKILLS/coding/temporal-developer/references/core",
+      "total_descendant_files_count": 13
+    },
+    "TARA/SKILLS/coding/temporal-developer/references/dotnet": {
+      "depth": 6,
+      "direct_files_count": 12,
+      "direct_subdirs_count": 0,
+      "name": "dotnet",
+      "rel_path": "TARA/SKILLS/coding/temporal-developer/references/dotnet",
+      "total_descendant_files_count": 12
+    },
+    "TARA/SKILLS/coding/temporal-developer/references/go": {
+      "depth": 6,
+      "direct_files_count": 12,
+      "direct_subdirs_count": 0,
+      "name": "go",
+      "rel_path": "TARA/SKILLS/coding/temporal-developer/references/go",
+      "total_descendant_files_count": 12
+    },
+    "TARA/SKILLS/coding/temporal-developer/references/java": {
+      "depth": 6,
+      "direct_files_count": 12,
+      "direct_subdirs_count": 1,
+      "name": "java",
+      "rel_path": "TARA/SKILLS/coding/temporal-developer/references/java",
+      "total_descendant_files_count": 14
+    },
+    "TARA/SKILLS/coding/temporal-developer/references/java/integrations": {
+      "depth": 7,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "integrations",
+      "rel_path": "TARA/SKILLS/coding/temporal-developer/references/java/integrations",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/temporal-developer/references/python": {
+      "depth": 6,
+      "direct_files_count": 15,
+      "direct_subdirs_count": 1,
+      "name": "python",
+      "rel_path": "TARA/SKILLS/coding/temporal-developer/references/python",
+      "total_descendant_files_count": 22
+    },
+    "TARA/SKILLS/coding/temporal-developer/references/python/integrations": {
+      "depth": 7,
+      "direct_files_count": 7,
+      "direct_subdirs_count": 0,
+      "name": "integrations",
+      "rel_path": "TARA/SKILLS/coding/temporal-developer/references/python/integrations",
+      "total_descendant_files_count": 7
+    },
+    "TARA/SKILLS/coding/temporal-developer/references/ruby": {
+      "depth": 6,
+      "direct_files_count": 11,
+      "direct_subdirs_count": 0,
+      "name": "ruby",
+      "rel_path": "TARA/SKILLS/coding/temporal-developer/references/ruby",
+      "total_descendant_files_count": 11
+    },
+    "TARA/SKILLS/coding/temporal-developer/references/rust": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "rust",
+      "rel_path": "TARA/SKILLS/coding/temporal-developer/references/rust",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/temporal-developer/references/typescript": {
+      "depth": 6,
+      "direct_files_count": 12,
+      "direct_subdirs_count": 1,
+      "name": "typescript",
+      "rel_path": "TARA/SKILLS/coding/temporal-developer/references/typescript",
+      "total_descendant_files_count": 16
+    },
+    "TARA/SKILLS/coding/temporal-developer/references/typescript/integrations": {
+      "depth": 7,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "integrations",
+      "rel_path": "TARA/SKILLS/coding/temporal-developer/references/typescript/integrations",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/coding/temporal-serverless": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 2,
+      "name": "temporal-serverless",
+      "rel_path": "TARA/SKILLS/coding/temporal-serverless",
+      "total_descendant_files_count": 12
+    },
+    "TARA/SKILLS/coding/temporal-serverless/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/coding/temporal-serverless/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/coding/temporal-serverless/references": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/temporal-serverless/references",
+      "total_descendant_files_count": 8
+    },
+    "TARA/SKILLS/coding/temporal-serverless/references/aws-lambda": {
+      "depth": 6,
+      "direct_files_count": 6,
+      "direct_subdirs_count": 0,
+      "name": "aws-lambda",
+      "rel_path": "TARA/SKILLS/coding/temporal-serverless/references/aws-lambda",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/coding/upgrading-expo": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "upgrading-expo",
+      "rel_path": "TARA/SKILLS/coding/upgrading-expo",
+      "total_descendant_files_count": 8
+    },
+    "TARA/SKILLS/coding/upgrading-expo/references": {
+      "depth": 5,
+      "direct_files_count": 6,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/upgrading-expo/references",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/coding/virtual-agent": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 7,
+      "name": "virtual-agent",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent",
+      "total_descendant_files_count": 25
+    },
+    "TARA/SKILLS/coding/virtual-agent/android": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 4,
+      "name": "android",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/android",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/coding/virtual-agent/android/concepts": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/android/concepts",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/virtual-agent/android/examples": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/android/examples",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/virtual-agent/android/references": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/android/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/virtual-agent/android/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/android/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/virtual-agent/concepts": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/concepts",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/virtual-agent/ios": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 4,
+      "name": "ios",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/ios",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/coding/virtual-agent/ios/concepts": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/ios/concepts",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/virtual-agent/ios/examples": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/ios/examples",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/virtual-agent/ios/references": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/ios/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/virtual-agent/ios/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/ios/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/virtual-agent/references": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/references",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/coding/virtual-agent/scenarios": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "scenarios",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/scenarios",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/virtual-agent/troubleshooting": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/virtual-agent/web": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 4,
+      "name": "web",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/web",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/coding/virtual-agent/web/concepts": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/web/concepts",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/virtual-agent/web/examples": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/web/examples",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/virtual-agent/web/references": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/web/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/virtual-agent/web/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/coding/virtual-agent/web/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/coding/yeet": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "yeet",
+      "rel_path": "TARA/SKILLS/coding/yeet",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/coding/yeet/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/coding/yeet/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/data": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 12,
+      "name": "data",
+      "rel_path": "TARA/SKILLS/data",
+      "total_descendant_files_count": 87
+    },
+    "TARA/SKILLS/data/boltz-check-status": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "boltz-check-status",
+      "rel_path": "TARA/SKILLS/data/boltz-check-status",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/data/boltz-check-status/references": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/data/boltz-check-status/references",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/data/boltz-cli-setup": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "boltz-cli-setup",
+      "rel_path": "TARA/SKILLS/data/boltz-cli-setup",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/data/boltz-cli-setup/references": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/data/boltz-cli-setup/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/data/boltz-protein-design": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "boltz-protein-design",
+      "rel_path": "TARA/SKILLS/data/boltz-protein-design",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/data/boltz-protein-design/references": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/data/boltz-protein-design/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/data/boltz-protein-screen": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "boltz-protein-screen",
+      "rel_path": "TARA/SKILLS/data/boltz-protein-screen",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/data/boltz-protein-screen/references": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/data/boltz-protein-screen/references",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/data/boltz-small-molecule-adme": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "boltz-small-molecule-adme",
+      "rel_path": "TARA/SKILLS/data/boltz-small-molecule-adme",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/data/boltz-small-molecule-adme/references": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/data/boltz-small-molecule-adme/references",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/data/boltz-small-molecule-design": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "boltz-small-molecule-design",
+      "rel_path": "TARA/SKILLS/data/boltz-small-molecule-design",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/data/boltz-small-molecule-design/references": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/data/boltz-small-molecule-design/references",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/data/boltz-small-molecule-screen": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "boltz-small-molecule-screen",
+      "rel_path": "TARA/SKILLS/data/boltz-small-molecule-screen",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/data/boltz-small-molecule-screen/references": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/data/boltz-small-molecule-screen/references",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/data/boltz-structure-and-binding": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "boltz-structure-and-binding",
+      "rel_path": "TARA/SKILLS/data/boltz-structure-and-binding",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/data/boltz-structure-and-binding/references": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/data/boltz-structure-and-binding/references",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/data/jupyter-notebook": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 2,
+      "name": "jupyter-notebook",
+      "rel_path": "TARA/SKILLS/data/jupyter-notebook",
+      "total_descendant_files_count": 10
+    },
+    "TARA/SKILLS/data/jupyter-notebook/assets": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/data/jupyter-notebook/assets",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/data/jupyter-notebook/references": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/data/jupyter-notebook/references",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/data/native-data-fetching": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "native-data-fetching",
+      "rel_path": "TARA/SKILLS/data/native-data-fetching",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/data/native-data-fetching/references": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/data/native-data-fetching/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/data/supabase": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 2,
+      "name": "supabase",
+      "rel_path": "TARA/SKILLS/data/supabase",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/data/supabase-postgres-best-practices": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 1,
+      "name": "supabase-postgres-best-practices",
+      "rel_path": "TARA/SKILLS/data/supabase-postgres-best-practices",
+      "total_descendant_files_count": 37
+    },
+    "TARA/SKILLS/data/supabase-postgres-best-practices/references": {
+      "depth": 5,
+      "direct_files_count": 34,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/data/supabase-postgres-best-practices/references",
+      "total_descendant_files_count": 34
+    },
+    "TARA/SKILLS/data/supabase/assets": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/data/supabase/assets",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/data/supabase/references": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/data/supabase/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/devops": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 9,
+      "name": "devops",
+      "rel_path": "TARA/SKILLS/devops",
+      "total_descendant_files_count": 396
+    },
+    "TARA/SKILLS/devops/cloudflare": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 2,
+      "name": "cloudflare",
+      "rel_path": "TARA/SKILLS/devops/cloudflare",
+      "total_descendant_files_count": 316
+    },
+    "TARA/SKILLS/devops/cloudflare/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/devops/cloudflare/references": {
+      "depth": 5,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 61,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references",
+      "total_descendant_files_count": 312
+    },
+    "TARA/SKILLS/devops/cloudflare/references/agents-sdk": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "agents-sdk",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/agents-sdk",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/ai-gateway": {
+      "depth": 6,
+      "direct_files_count": 6,
+      "direct_subdirs_count": 0,
+      "name": "ai-gateway",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/ai-gateway",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/devops/cloudflare/references/ai-search": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "ai-search",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/ai-search",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/analytics-engine": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "analytics-engine",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/analytics-engine",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/api": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "api",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/api",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/api-shield": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "api-shield",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/api-shield",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/argo-smart-routing": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "argo-smart-routing",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/argo-smart-routing",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/bindings": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "bindings",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/bindings",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/bot-management": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "bot-management",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/bot-management",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/browser-rendering": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "browser-rendering",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/browser-rendering",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/c3": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "c3",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/c3",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/cache-reserve": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "cache-reserve",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/cache-reserve",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/containers": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "containers",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/containers",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/credentials-store": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "credentials-store",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/credentials-store",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/cron-schedules": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "cron-schedules",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/cron-schedules",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/d1": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "d1",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/d1",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/ddos": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "ddos",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/ddos",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/do-storage": {
+      "depth": 6,
+      "direct_files_count": 6,
+      "direct_subdirs_count": 0,
+      "name": "do-storage",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/do-storage",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/devops/cloudflare/references/durable-objects": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "durable-objects",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/durable-objects",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/email-routing": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "email-routing",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/email-routing",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/email-workers": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "email-workers",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/email-workers",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/graphql-api": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "graphql-api",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/graphql-api",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/hyperdrive": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "hyperdrive",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/hyperdrive",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/images": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "images",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/images",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/kv": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "kv",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/kv",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/miniflare": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "miniflare",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/miniflare",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/network-interconnect": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "network-interconnect",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/network-interconnect",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/observability": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "observability",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/observability",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/pages": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "pages",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/pages",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/pages-functions": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "pages-functions",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/pages-functions",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/pipelines": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "pipelines",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/pipelines",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/pulumi": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "pulumi",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/pulumi",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/queues": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "queues",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/queues",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/r2": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "r2",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/r2",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/r2-data-catalog": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "r2-data-catalog",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/r2-data-catalog",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/r2-sql": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "r2-sql",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/r2-sql",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/realtime-sfu": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "realtime-sfu",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/realtime-sfu",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/realtimekit": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "realtimekit",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/realtimekit",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/sandbox": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "sandbox",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/sandbox",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/smart-placement": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "smart-placement",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/smart-placement",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/snippets": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "snippets",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/snippets",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/spectrum": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "spectrum",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/spectrum",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/static-assets": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "static-assets",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/static-assets",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/stream": {
+      "depth": 6,
+      "direct_files_count": 6,
+      "direct_subdirs_count": 0,
+      "name": "stream",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/stream",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/devops/cloudflare/references/tail-workers": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "tail-workers",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/tail-workers",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/terraform": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "terraform",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/terraform",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/tunnel": {
+      "depth": 6,
+      "direct_files_count": 6,
+      "direct_subdirs_count": 0,
+      "name": "tunnel",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/tunnel",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/devops/cloudflare/references/turn": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "turn",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/turn",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/turnstile": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "turnstile",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/turnstile",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/vectorize": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "vectorize",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/vectorize",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/waf": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "waf",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/waf",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/web-analytics": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "web-analytics",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/web-analytics",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/workerd": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "workerd",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/workerd",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/workers": {
+      "depth": 6,
+      "direct_files_count": 6,
+      "direct_subdirs_count": 0,
+      "name": "workers",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/workers",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/devops/cloudflare/references/workers-ai": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "workers-ai",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/workers-ai",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/workers-for-platforms": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "workers-for-platforms",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/workers-for-platforms",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/workers-playground": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "workers-playground",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/workers-playground",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/workers-vpc": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "workers-vpc",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/workers-vpc",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/workflows": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "workflows",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/workflows",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/cloudflare/references/wrangler": {
+      "depth": 6,
+      "direct_files_count": 6,
+      "direct_subdirs_count": 0,
+      "name": "wrangler",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/wrangler",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/devops/cloudflare/references/zaraz": {
+      "depth": 6,
+      "direct_files_count": 6,
+      "direct_subdirs_count": 0,
+      "name": "zaraz",
+      "rel_path": "TARA/SKILLS/devops/cloudflare/references/zaraz",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/devops/expo-cicd-workflows": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "expo-cicd-workflows",
+      "rel_path": "TARA/SKILLS/devops/expo-cicd-workflows",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/devops/expo-deployment": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "expo-deployment",
+      "rel_path": "TARA/SKILLS/devops/expo-deployment",
+      "total_descendant_files_count": 7
+    },
+    "TARA/SKILLS/devops/expo-deployment/references": {
+      "depth": 5,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/devops/expo-deployment/references",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/devops/netlify-deploy": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 2,
+      "name": "netlify-deploy",
+      "rel_path": "TARA/SKILLS/devops/netlify-deploy",
+      "total_descendant_files_count": 7
+    },
+    "TARA/SKILLS/devops/netlify-deploy/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/devops/netlify-deploy/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/devops/netlify-deploy/references": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/devops/netlify-deploy/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/devops/render-deploy": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 2,
+      "name": "render-deploy",
+      "rel_path": "TARA/SKILLS/devops/render-deploy",
+      "total_descendant_files_count": 20
+    },
+    "TARA/SKILLS/devops/render-deploy/assets": {
+      "depth": 5,
+      "direct_files_count": 8,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/devops/render-deploy/assets",
+      "total_descendant_files_count": 8
+    },
+    "TARA/SKILLS/devops/render-deploy/references": {
+      "depth": 5,
+      "direct_files_count": 10,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/devops/render-deploy/references",
+      "total_descendant_files_count": 10
+    },
+    "TARA/SKILLS/devops/temporal-ops": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "temporal-ops",
+      "rel_path": "TARA/SKILLS/devops/temporal-ops",
+      "total_descendant_files_count": 34
+    },
+    "TARA/SKILLS/devops/temporal-ops/references": {
+      "depth": 5,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 2,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/devops/temporal-ops/references",
+      "total_descendant_files_count": 32
+    },
+    "TARA/SKILLS/devops/temporal-ops/references/ops": {
+      "depth": 6,
+      "direct_files_count": 16,
+      "direct_subdirs_count": 0,
+      "name": "ops",
+      "rel_path": "TARA/SKILLS/devops/temporal-ops/references/ops",
+      "total_descendant_files_count": 16
+    },
+    "TARA/SKILLS/devops/temporal-ops/references/triage": {
+      "depth": 6,
+      "direct_files_count": 16,
+      "direct_subdirs_count": 0,
+      "name": "triage",
+      "rel_path": "TARA/SKILLS/devops/temporal-ops/references/triage",
+      "total_descendant_files_count": 16
+    },
+    "TARA/SKILLS/devops/using-git-worktrees": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "using-git-worktrees",
+      "rel_path": "TARA/SKILLS/devops/using-git-worktrees",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/devops/vercel-deploy": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "vercel-deploy",
+      "rel_path": "TARA/SKILLS/devops/vercel-deploy",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/devops/vercel-deploy/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/devops/vercel-deploy/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/devops/wrangler": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "wrangler",
+      "rel_path": "TARA/SKILLS/devops/wrangler",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/devops/wrangler/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/devops/wrangler/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/documentation": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 3,
+      "name": "documentation",
+      "rel_path": "TARA/SKILLS/documentation",
+      "total_descendant_files_count": 22
+    },
+    "TARA/SKILLS/documentation/scribe": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 5,
+      "name": "scribe",
+      "rel_path": "TARA/SKILLS/documentation/scribe",
+      "total_descendant_files_count": 13
+    },
+    "TARA/SKILLS/documentation/scribe/concepts": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/documentation/scribe/concepts",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/documentation/scribe/examples": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/documentation/scribe/examples",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/documentation/scribe/references": {
+      "depth": 5,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/documentation/scribe/references",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/documentation/scribe/scenarios": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "scenarios",
+      "rel_path": "TARA/SKILLS/documentation/scribe/scenarios",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/documentation/scribe/troubleshooting": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/documentation/scribe/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/documentation/writing-plans": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "writing-plans",
+      "rel_path": "TARA/SKILLS/documentation/writing-plans",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/documentation/writing-skills": {
+      "depth": 4,
+      "direct_files_count": 6,
+      "direct_subdirs_count": 1,
+      "name": "writing-skills",
+      "rel_path": "TARA/SKILLS/documentation/writing-skills",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/documentation/writing-skills/examples": {
+      "depth": 5,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/documentation/writing-skills/examples",
+      "total_descendant_files_count": 0
+    },
+    "TARA/SKILLS/engineering": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 10,
+      "name": "engineering",
+      "rel_path": "TARA/SKILLS/engineering",
+      "total_descendant_files_count": 129
+    },
+    "TARA/SKILLS/engineering/agents-sdk": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 2,
+      "name": "agents-sdk",
+      "rel_path": "TARA/SKILLS/engineering/agents-sdk",
+      "total_descendant_files_count": 11
+    },
+    "TARA/SKILLS/engineering/agents-sdk/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/engineering/agents-sdk/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/engineering/agents-sdk/references": {
+      "depth": 5,
+      "direct_files_count": 7,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/engineering/agents-sdk/references",
+      "total_descendant_files_count": 7
+    },
+    "TARA/SKILLS/engineering/building-native-ui": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "building-native-ui",
+      "rel_path": "TARA/SKILLS/engineering/building-native-ui",
+      "total_descendant_files_count": 16
+    },
+    "TARA/SKILLS/engineering/building-native-ui/references": {
+      "depth": 5,
+      "direct_files_count": 14,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/engineering/building-native-ui/references",
+      "total_descendant_files_count": 14
+    },
+    "TARA/SKILLS/engineering/cobrowse-sdk": {
+      "depth": 4,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 4,
+      "name": "cobrowse-sdk",
+      "rel_path": "TARA/SKILLS/engineering/cobrowse-sdk",
+      "total_descendant_files_count": 35
+    },
+    "TARA/SKILLS/engineering/cobrowse-sdk/concepts": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/engineering/cobrowse-sdk/concepts",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/engineering/cobrowse-sdk/examples": {
+      "depth": 5,
+      "direct_files_count": 9,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/engineering/cobrowse-sdk/examples",
+      "total_descendant_files_count": 9
+    },
+    "TARA/SKILLS/engineering/cobrowse-sdk/references": {
+      "depth": 5,
+      "direct_files_count": 14,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/engineering/cobrowse-sdk/references",
+      "total_descendant_files_count": 14
+    },
+    "TARA/SKILLS/engineering/cobrowse-sdk/troubleshooting": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/engineering/cobrowse-sdk/troubleshooting",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/engineering/expo-module": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "expo-module",
+      "rel_path": "TARA/SKILLS/engineering/expo-module",
+      "total_descendant_files_count": 7
+    },
+    "TARA/SKILLS/engineering/expo-module/references": {
+      "depth": 5,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/engineering/expo-module/references",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/engineering/expo-ui-swift-ui": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "expo-ui-swift-ui",
+      "rel_path": "TARA/SKILLS/engineering/expo-ui-swift-ui",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/engineering/generative-ui": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "generative-ui",
+      "rel_path": "TARA/SKILLS/engineering/generative-ui",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/engineering/probe-sdk": {
+      "depth": 4,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 5,
+      "name": "probe-sdk",
+      "rel_path": "TARA/SKILLS/engineering/probe-sdk",
+      "total_descendant_files_count": 15
+    },
+    "TARA/SKILLS/engineering/probe-sdk/concepts": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/engineering/probe-sdk/concepts",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/engineering/probe-sdk/examples": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/engineering/probe-sdk/examples",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/engineering/probe-sdk/references": {
+      "depth": 5,
+      "direct_files_count": 6,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/engineering/probe-sdk/references",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/engineering/probe-sdk/scenarios": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "scenarios",
+      "rel_path": "TARA/SKILLS/engineering/probe-sdk/scenarios",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/engineering/probe-sdk/troubleshooting": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/engineering/probe-sdk/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/engineering/rivet-sdk": {
+      "depth": 4,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 5,
+      "name": "rivet-sdk",
+      "rel_path": "TARA/SKILLS/engineering/rivet-sdk",
+      "total_descendant_files_count": 15
+    },
+    "TARA/SKILLS/engineering/rivet-sdk/concepts": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/engineering/rivet-sdk/concepts",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/engineering/rivet-sdk/examples": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/engineering/rivet-sdk/examples",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/engineering/rivet-sdk/references": {
+      "depth": 5,
+      "direct_files_count": 6,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/engineering/rivet-sdk/references",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/engineering/rivet-sdk/scenarios": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "scenarios",
+      "rel_path": "TARA/SKILLS/engineering/rivet-sdk/scenarios",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/engineering/rivet-sdk/troubleshooting": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/engineering/rivet-sdk/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/engineering/ui-toolkit": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 2,
+      "name": "ui-toolkit",
+      "rel_path": "TARA/SKILLS/engineering/ui-toolkit",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/engineering/ui-toolkit/references": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/engineering/ui-toolkit/references",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/engineering/ui-toolkit/troubleshooting": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/engineering/ui-toolkit/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/engineering/winui-app": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 2,
+      "name": "winui-app",
+      "rel_path": "TARA/SKILLS/engineering/winui-app",
+      "total_descendant_files_count": 20
+    },
+    "TARA/SKILLS/engineering/winui-app/assets": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/engineering/winui-app/assets",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/engineering/winui-app/references": {
+      "depth": 5,
+      "direct_files_count": 16,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/engineering/winui-app/references",
+      "total_descendant_files_count": 16
+    },
+    "TARA/SKILLS/multimedia": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 5,
+      "name": "multimedia",
+      "rel_path": "TARA/SKILLS/multimedia",
+      "total_descendant_files_count": 179
+    },
+    "TARA/SKILLS/multimedia/imagegen": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 2,
+      "name": "imagegen",
+      "rel_path": "TARA/SKILLS/multimedia/imagegen",
+      "total_descendant_files_count": 9
+    },
+    "TARA/SKILLS/multimedia/imagegen/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/multimedia/imagegen/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/multimedia/imagegen/references": {
+      "depth": 5,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/multimedia/imagegen/references",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/multimedia/screenshot": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "screenshot",
+      "rel_path": "TARA/SKILLS/multimedia/screenshot",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/multimedia/screenshot/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/multimedia/screenshot/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/multimedia/speech": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 2,
+      "name": "speech",
+      "rel_path": "TARA/SKILLS/multimedia/speech",
+      "total_descendant_files_count": 14
+    },
+    "TARA/SKILLS/multimedia/speech/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/multimedia/speech/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/multimedia/speech/references": {
+      "depth": 5,
+      "direct_files_count": 10,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/multimedia/speech/references",
+      "total_descendant_files_count": 10
+    },
+    "TARA/SKILLS/multimedia/transcribe": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 2,
+      "name": "transcribe",
+      "rel_path": "TARA/SKILLS/multimedia/transcribe",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/multimedia/transcribe/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/multimedia/transcribe/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/multimedia/transcribe/references": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/multimedia/transcribe/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 10,
+      "name": "video-sdk",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk",
+      "total_descendant_files_count": 147
+    },
+    "TARA/SKILLS/multimedia/video-sdk/android": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 5,
+      "name": "android",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/android",
+      "total_descendant_files_count": 11
+    },
+    "TARA/SKILLS/multimedia/video-sdk/android/concepts": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/android/concepts",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/multimedia/video-sdk/android/examples": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/android/examples",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/android/references": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/android/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/android/scenarios": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "scenarios",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/android/scenarios",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/android/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/android/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/flutter": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 4,
+      "name": "flutter",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/flutter",
+      "total_descendant_files_count": 14
+    },
+    "TARA/SKILLS/multimedia/video-sdk/flutter/concepts": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/flutter/concepts",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/flutter/examples": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/flutter/examples",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/flutter/references": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/flutter/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/flutter/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/flutter/troubleshooting",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/ios": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 5,
+      "name": "ios",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/ios",
+      "total_descendant_files_count": 11
+    },
+    "TARA/SKILLS/multimedia/video-sdk/ios/concepts": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/ios/concepts",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/multimedia/video-sdk/ios/examples": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/ios/examples",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/ios/references": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/ios/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/ios/scenarios": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "scenarios",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/ios/scenarios",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/ios/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/ios/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/linux": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 4,
+      "name": "linux",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/linux",
+      "total_descendant_files_count": 21
+    },
+    "TARA/SKILLS/multimedia/video-sdk/linux/concepts": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/linux/concepts",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/linux/examples": {
+      "depth": 6,
+      "direct_files_count": 10,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/linux/examples",
+      "total_descendant_files_count": 10
+    },
+    "TARA/SKILLS/multimedia/video-sdk/linux/references": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/linux/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/linux/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/linux/troubleshooting",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/multimedia/video-sdk/macos": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 5,
+      "name": "macos",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/macos",
+      "total_descendant_files_count": 11
+    },
+    "TARA/SKILLS/multimedia/video-sdk/macos/concepts": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/macos/concepts",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/multimedia/video-sdk/macos/examples": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/macos/examples",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/macos/references": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/macos/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/macos/scenarios": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "scenarios",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/macos/scenarios",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/macos/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/macos/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/react-native": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 4,
+      "name": "react-native",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/react-native",
+      "total_descendant_files_count": 14
+    },
+    "TARA/SKILLS/multimedia/video-sdk/react-native/concepts": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/react-native/concepts",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/react-native/examples": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/react-native/examples",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/react-native/references": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/react-native/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/react-native/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/react-native/troubleshooting",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/references": {
+      "depth": 5,
+      "direct_files_count": 10,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/references",
+      "total_descendant_files_count": 10
+    },
+    "TARA/SKILLS/multimedia/video-sdk/unity": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 5,
+      "name": "unity",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/unity",
+      "total_descendant_files_count": 11
+    },
+    "TARA/SKILLS/multimedia/video-sdk/unity/concepts": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/unity/concepts",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/multimedia/video-sdk/unity/examples": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/unity/examples",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/unity/references": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/unity/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/unity/scenarios": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "scenarios",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/unity/scenarios",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/unity/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/unity/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/web": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 4,
+      "name": "web",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/web",
+      "total_descendant_files_count": 18
+    },
+    "TARA/SKILLS/multimedia/video-sdk/web/concepts": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/web/concepts",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/multimedia/video-sdk/web/examples": {
+      "depth": 6,
+      "direct_files_count": 10,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/web/examples",
+      "total_descendant_files_count": 10
+    },
+    "TARA/SKILLS/multimedia/video-sdk/web/references": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/web/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/web/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/web/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/windows": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 4,
+      "name": "windows",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/windows",
+      "total_descendant_files_count": 23
+    },
+    "TARA/SKILLS/multimedia/video-sdk/windows/concepts": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/windows/concepts",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/windows/examples": {
+      "depth": 6,
+      "direct_files_count": 10,
+      "direct_subdirs_count": 1,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/windows/examples",
+      "total_descendant_files_count": 11
+    },
+    "TARA/SKILLS/multimedia/video-sdk/windows/examples/dotnet-winforms": {
+      "depth": 7,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "dotnet-winforms",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/windows/examples/dotnet-winforms",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/multimedia/video-sdk/windows/references": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/windows/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/multimedia/video-sdk/windows/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/multimedia/video-sdk/windows/troubleshooting",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 7,
+      "name": "research",
+      "rel_path": "TARA/SKILLS/research",
+      "total_descendant_files_count": 242
+    },
+    "TARA/SKILLS/research/earnings-preview": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 2,
+      "name": "earnings-preview",
+      "rel_path": "TARA/SKILLS/research/earnings-preview",
+      "total_descendant_files_count": 18
+    },
+    "TARA/SKILLS/research/earnings-preview/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/research/earnings-preview/assets",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/research/earnings-preview/assets/templates": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "templates",
+      "rel_path": "TARA/SKILLS/research/earnings-preview/assets/templates",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/earnings-preview/references": {
+      "depth": 5,
+      "direct_files_count": 10,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/research/earnings-preview/references",
+      "total_descendant_files_count": 10
+    },
+    "TARA/SKILLS/research/meeting-sdk": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 10,
+      "name": "meeting-sdk",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk",
+      "total_descendant_files_count": 146
+    },
+    "TARA/SKILLS/research/meeting-sdk/android": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 5,
+      "name": "android",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/android",
+      "total_descendant_files_count": 11
+    },
+    "TARA/SKILLS/research/meeting-sdk/android/concepts": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/android/concepts",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/research/meeting-sdk/android/examples": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/android/examples",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/android/references": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/android/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/meeting-sdk/android/scenarios": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "scenarios",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/android/scenarios",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/android/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/android/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/electron": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 4,
+      "name": "electron",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/electron",
+      "total_descendant_files_count": 14
+    },
+    "TARA/SKILLS/research/meeting-sdk/electron/concepts": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/electron/concepts",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/meeting-sdk/electron/examples": {
+      "depth": 6,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/electron/examples",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/research/meeting-sdk/electron/references": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/electron/references",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/research/meeting-sdk/electron/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/electron/troubleshooting",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/meeting-sdk/ios": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 5,
+      "name": "ios",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/ios",
+      "total_descendant_files_count": 11
+    },
+    "TARA/SKILLS/research/meeting-sdk/ios/concepts": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/ios/concepts",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/research/meeting-sdk/ios/examples": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/ios/examples",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/ios/references": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/ios/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/meeting-sdk/ios/scenarios": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "scenarios",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/ios/scenarios",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/ios/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/ios/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/linux": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 2,
+      "name": "linux",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/linux",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/research/meeting-sdk/linux/concepts": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/linux/concepts",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/linux/references": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/linux/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/macos": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 5,
+      "name": "macos",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/macos",
+      "total_descendant_files_count": 11
+    },
+    "TARA/SKILLS/research/meeting-sdk/macos/concepts": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/macos/concepts",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/research/meeting-sdk/macos/examples": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/macos/examples",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/macos/references": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/macos/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/meeting-sdk/macos/scenarios": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "scenarios",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/macos/scenarios",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/macos/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/macos/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/react-native": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 4,
+      "name": "react-native",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/react-native",
+      "total_descendant_files_count": 18
+    },
+    "TARA/SKILLS/research/meeting-sdk/react-native/concepts": {
+      "depth": 6,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/react-native/concepts",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/research/meeting-sdk/react-native/examples": {
+      "depth": 6,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/react-native/examples",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/research/meeting-sdk/react-native/references": {
+      "depth": 6,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/react-native/references",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/research/meeting-sdk/react-native/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/react-native/troubleshooting",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/meeting-sdk/references": {
+      "depth": 5,
+      "direct_files_count": 16,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/references",
+      "total_descendant_files_count": 16
+    },
+    "TARA/SKILLS/research/meeting-sdk/unreal": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 5,
+      "name": "unreal",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/unreal",
+      "total_descendant_files_count": 11
+    },
+    "TARA/SKILLS/research/meeting-sdk/unreal/concepts": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/unreal/concepts",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/research/meeting-sdk/unreal/examples": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/unreal/examples",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/unreal/references": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/unreal/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/meeting-sdk/unreal/scenarios": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "scenarios",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/unreal/scenarios",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/unreal/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/unreal/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/web": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 6,
+      "name": "web",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/web",
+      "total_descendant_files_count": 21
+    },
+    "TARA/SKILLS/research/meeting-sdk/web/client-view": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "client-view",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/web/client-view",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/meeting-sdk/web/client-view/references": {
+      "depth": 7,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/web/client-view/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/web/component-view": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "component-view",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/web/component-view",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/meeting-sdk/web/component-view/references": {
+      "depth": 7,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/web/component-view/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/research/meeting-sdk/web/concepts": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/web/concepts",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/research/meeting-sdk/web/examples": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/web/examples",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/research/meeting-sdk/web/references": {
+      "depth": 6,
+      "direct_files_count": 7,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/web/references",
+      "total_descendant_files_count": 7
+    },
+    "TARA/SKILLS/research/meeting-sdk/web/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/web/troubleshooting",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/research/meeting-sdk/windows": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 4,
+      "name": "windows",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/windows",
+      "total_descendant_files_count": 24
+    },
+    "TARA/SKILLS/research/meeting-sdk/windows/concepts": {
+      "depth": 6,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/windows/concepts",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/research/meeting-sdk/windows/examples": {
+      "depth": 6,
+      "direct_files_count": 12,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/windows/examples",
+      "total_descendant_files_count": 12
+    },
+    "TARA/SKILLS/research/meeting-sdk/windows/references": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/windows/references",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/meeting-sdk/windows/troubleshooting": {
+      "depth": 6,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/research/meeting-sdk/windows/troubleshooting",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/notion-knowledge-capture": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 4,
+      "name": "notion-knowledge-capture",
+      "rel_path": "TARA/SKILLS/research/notion-knowledge-capture",
+      "total_descendant_files_count": 17
+    },
+    "TARA/SKILLS/research/notion-knowledge-capture/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/research/notion-knowledge-capture/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/research/notion-knowledge-capture/evaluations": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "evaluations",
+      "rel_path": "TARA/SKILLS/research/notion-knowledge-capture/evaluations",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/notion-knowledge-capture/examples": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/research/notion-knowledge-capture/examples",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/notion-knowledge-capture/reference": {
+      "depth": 5,
+      "direct_files_count": 7,
+      "direct_subdirs_count": 0,
+      "name": "reference",
+      "rel_path": "TARA/SKILLS/research/notion-knowledge-capture/reference",
+      "total_descendant_files_count": 7
+    },
+    "TARA/SKILLS/research/notion-meeting-intelligence": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 4,
+      "name": "notion-meeting-intelligence",
+      "rel_path": "TARA/SKILLS/research/notion-meeting-intelligence",
+      "total_descendant_files_count": 18
+    },
+    "TARA/SKILLS/research/notion-meeting-intelligence/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/research/notion-meeting-intelligence/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/research/notion-meeting-intelligence/evaluations": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "evaluations",
+      "rel_path": "TARA/SKILLS/research/notion-meeting-intelligence/evaluations",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/notion-meeting-intelligence/examples": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/research/notion-meeting-intelligence/examples",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/research/notion-meeting-intelligence/reference": {
+      "depth": 5,
+      "direct_files_count": 7,
+      "direct_subdirs_count": 0,
+      "name": "reference",
+      "rel_path": "TARA/SKILLS/research/notion-meeting-intelligence/reference",
+      "total_descendant_files_count": 7
+    },
+    "TARA/SKILLS/research/notion-research-documentation": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 4,
+      "name": "notion-research-documentation",
+      "rel_path": "TARA/SKILLS/research/notion-research-documentation",
+      "total_descendant_files_count": 22
+    },
+    "TARA/SKILLS/research/notion-research-documentation/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/research/notion-research-documentation/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/research/notion-research-documentation/evaluations": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "evaluations",
+      "rel_path": "TARA/SKILLS/research/notion-research-documentation/evaluations",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/notion-research-documentation/examples": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/research/notion-research-documentation/examples",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/research/notion-research-documentation/reference": {
+      "depth": 5,
+      "direct_files_count": 11,
+      "direct_subdirs_count": 0,
+      "name": "reference",
+      "rel_path": "TARA/SKILLS/research/notion-research-documentation/reference",
+      "total_descendant_files_count": 11
+    },
+    "TARA/SKILLS/research/notion-spec-to-implementation": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 4,
+      "name": "notion-spec-to-implementation",
+      "rel_path": "TARA/SKILLS/research/notion-spec-to-implementation",
+      "total_descendant_files_count": 18
+    },
+    "TARA/SKILLS/research/notion-spec-to-implementation/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/research/notion-spec-to-implementation/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/research/notion-spec-to-implementation/evaluations": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "evaluations",
+      "rel_path": "TARA/SKILLS/research/notion-spec-to-implementation/evaluations",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/notion-spec-to-implementation/examples": {
+      "depth": 5,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/research/notion-spec-to-implementation/examples",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/notion-spec-to-implementation/reference": {
+      "depth": 5,
+      "direct_files_count": 8,
+      "direct_subdirs_count": 0,
+      "name": "reference",
+      "rel_path": "TARA/SKILLS/research/notion-spec-to-implementation/reference",
+      "total_descendant_files_count": 8
+    },
+    "TARA/SKILLS/research/pdf": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "pdf",
+      "rel_path": "TARA/SKILLS/research/pdf",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/research/pdf/assets": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/research/pdf/assets",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/security": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 5,
+      "name": "security",
+      "rel_path": "TARA/SKILLS/security",
+      "total_descendant_files_count": 45
+    },
+    "TARA/SKILLS/security/mixpanel-auth": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "mixpanel-auth",
+      "rel_path": "TARA/SKILLS/security/mixpanel-auth",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/security/oauth": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 4,
+      "name": "oauth",
+      "rel_path": "TARA/SKILLS/security/oauth",
+      "total_descendant_files_count": 24
+    },
+    "TARA/SKILLS/security/oauth/concepts": {
+      "depth": 5,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/security/oauth/concepts",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/security/oauth/examples": {
+      "depth": 5,
+      "direct_files_count": 7,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/security/oauth/examples",
+      "total_descendant_files_count": 7
+    },
+    "TARA/SKILLS/security/oauth/references": {
+      "depth": 5,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/security/oauth/references",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/security/oauth/troubleshooting": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/security/oauth/troubleshooting",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/security/security-best-practices": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "security-best-practices",
+      "rel_path": "TARA/SKILLS/security/security-best-practices",
+      "total_descendant_files_count": 12
+    },
+    "TARA/SKILLS/security/security-best-practices/references": {
+      "depth": 5,
+      "direct_files_count": 10,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/security/security-best-practices/references",
+      "total_descendant_files_count": 10
+    },
+    "TARA/SKILLS/security/security-ownership-map": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "security-ownership-map",
+      "rel_path": "TARA/SKILLS/security/security-ownership-map",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/security/security-ownership-map/references": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/security/security-ownership-map/references",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/security/security-threat-model": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "security-threat-model",
+      "rel_path": "TARA/SKILLS/security/security-threat-model",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/security/security-threat-model/references": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/security/security-threat-model/references",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/testing": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 3,
+      "name": "testing",
+      "rel_path": "TARA/SKILLS/testing",
+      "total_descendant_files_count": 17
+    },
+    "TARA/SKILLS/testing/systematic-debugging": {
+      "depth": 4,
+      "direct_files_count": 12,
+      "direct_subdirs_count": 0,
+      "name": "systematic-debugging",
+      "rel_path": "TARA/SKILLS/testing/systematic-debugging",
+      "total_descendant_files_count": 12
+    },
+    "TARA/SKILLS/testing/test-driven-development": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "test-driven-development",
+      "rel_path": "TARA/SKILLS/testing/test-driven-development",
+      "total_descendant_files_count": 3
+    },
+    "TARA/SKILLS/testing/verification-before-completion": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "verification-before-completion",
+      "rel_path": "TARA/SKILLS/testing/verification-before-completion",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/web": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 5,
+      "name": "web",
+      "rel_path": "TARA/SKILLS/web",
+      "total_descendant_files_count": 84
+    },
+    "TARA/SKILLS/web/playwright": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 2,
+      "name": "playwright",
+      "rel_path": "TARA/SKILLS/web/playwright",
+      "total_descendant_files_count": 7
+    },
+    "TARA/SKILLS/web/playwright/assets": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "assets",
+      "rel_path": "TARA/SKILLS/web/playwright/assets",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/web/playwright/references": {
+      "depth": 5,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/web/playwright/references",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/web/rest-api": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 4,
+      "name": "rest-api",
+      "rel_path": "TARA/SKILLS/web/rest-api",
+      "total_descendant_files_count": 57
+    },
+    "TARA/SKILLS/web/rest-api/concepts": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "concepts",
+      "rel_path": "TARA/SKILLS/web/rest-api/concepts",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/web/rest-api/examples": {
+      "depth": 5,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "examples",
+      "rel_path": "TARA/SKILLS/web/rest-api/examples",
+      "total_descendant_files_count": 5
+    },
+    "TARA/SKILLS/web/rest-api/references": {
+      "depth": 5,
+      "direct_files_count": 41,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/web/rest-api/references",
+      "total_descendant_files_count": 41
+    },
+    "TARA/SKILLS/web/rest-api/troubleshooting": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/web/rest-api/troubleshooting",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/web/use-dom": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 0,
+      "name": "use-dom",
+      "rel_path": "TARA/SKILLS/web/use-dom",
+      "total_descendant_files_count": 2
+    },
+    "TARA/SKILLS/web/webhooks": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 2,
+      "name": "webhooks",
+      "rel_path": "TARA/SKILLS/web/webhooks",
+      "total_descendant_files_count": 10
+    },
+    "TARA/SKILLS/web/webhooks/references": {
+      "depth": 5,
+      "direct_files_count": 6,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/web/webhooks/references",
+      "total_descendant_files_count": 6
+    },
+    "TARA/SKILLS/web/webhooks/troubleshooting": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/web/webhooks/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/SKILLS/web/websockets": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 2,
+      "name": "websockets",
+      "rel_path": "TARA/SKILLS/web/websockets",
+      "total_descendant_files_count": 8
+    },
+    "TARA/SKILLS/web/websockets/references": {
+      "depth": 5,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "references",
+      "rel_path": "TARA/SKILLS/web/websockets/references",
+      "total_descendant_files_count": 4
+    },
+    "TARA/SKILLS/web/websockets/troubleshooting": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "troubleshooting",
+      "rel_path": "TARA/SKILLS/web/websockets/troubleshooting",
+      "total_descendant_files_count": 1
+    },
+    "TARA/TOOLS": {
+      "depth": 2,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "TOOLS",
+      "rel_path": "TARA/TOOLS",
+      "total_descendant_files_count": 0
+    },
+    "downloader": {
+      "depth": 1,
+      "direct_files_count": 11,
+      "direct_subdirs_count": 0,
+      "name": "downloader",
+      "rel_path": "downloader",
+      "total_descendant_files_count": 11
+    },
+    "rust": {
+      "depth": 1,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 4,
+      "name": "rust",
+      "rel_path": "rust",
+      "total_descendant_files_count": 240
+    },
+    "rust/tara_core": {
+      "depth": 2,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 1,
+      "name": "tara_core",
+      "rel_path": "rust/tara_core",
+      "total_descendant_files_count": 25
+    },
+    "rust/tara_core/src": {
+      "depth": 3,
+      "direct_files_count": 9,
+      "direct_subdirs_count": 1,
+      "name": "src",
+      "rel_path": "rust/tara_core/src",
+      "total_descendant_files_count": 24
+    },
+    "rust/tara_core/src/runtime": {
+      "depth": 4,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 14,
+      "name": "runtime",
+      "rel_path": "rust/tara_core/src/runtime",
+      "total_descendant_files_count": 15
+    },
+    "rust/tara_core/src/runtime/agent": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "agent",
+      "rel_path": "rust/tara_core/src/runtime/agent",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_core/src/runtime/approval": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "approval",
+      "rel_path": "rust/tara_core/src/runtime/approval",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_core/src/runtime/authorization": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "authorization",
+      "rel_path": "rust/tara_core/src/runtime/authorization",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_core/src/runtime/health": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "health",
+      "rel_path": "rust/tara_core/src/runtime/health",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_core/src/runtime/lifecycle": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "lifecycle",
+      "rel_path": "rust/tara_core/src/runtime/lifecycle",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_core/src/runtime/manager": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "manager",
+      "rel_path": "rust/tara_core/src/runtime/manager",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_core/src/runtime/naming": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "naming",
+      "rel_path": "rust/tara_core/src/runtime/naming",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_core/src/runtime/network": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "network",
+      "rel_path": "rust/tara_core/src/runtime/network",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_core/src/runtime/recovery": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "recovery",
+      "rel_path": "rust/tara_core/src/runtime/recovery",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_core/src/runtime/resource": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "resource",
+      "rel_path": "rust/tara_core/src/runtime/resource",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_core/src/runtime/sandbox": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "sandbox",
+      "rel_path": "rust/tara_core/src/runtime/sandbox",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_core/src/runtime/team": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "team",
+      "rel_path": "rust/tara_core/src/runtime/team",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_core/src/runtime/tools": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "tools",
+      "rel_path": "rust/tara_core/src/runtime/tools",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_core/src/runtime/worker": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "worker",
+      "rel_path": "rust/tara_core/src/runtime/worker",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_engine": {
+      "depth": 2,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 2,
+      "name": "tara_engine",
+      "rel_path": "rust/tara_engine",
+      "total_descendant_files_count": 66
+    },
+    "rust/tara_engine/src": {
+      "depth": 3,
+      "direct_files_count": 15,
+      "direct_subdirs_count": 5,
+      "name": "src",
+      "rel_path": "rust/tara_engine/src",
+      "total_descendant_files_count": 64
+    },
+    "rust/tara_engine/src/bin": {
+      "depth": 4,
+      "direct_files_count": 21,
+      "direct_subdirs_count": 0,
+      "name": "bin",
+      "rel_path": "rust/tara_engine/src/bin",
+      "total_descendant_files_count": 21
+    },
+    "rust/tara_engine/src/computation": {
+      "depth": 4,
+      "direct_files_count": 12,
+      "direct_subdirs_count": 0,
+      "name": "computation",
+      "rel_path": "rust/tara_engine/src/computation",
+      "total_descendant_files_count": 12
+    },
+    "rust/tara_engine/src/cuda": {
+      "depth": 4,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "cuda",
+      "rel_path": "rust/tara_engine/src/cuda",
+      "total_descendant_files_count": 4
+    },
+    "rust/tara_engine/src/dataset": {
+      "depth": 4,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "dataset",
+      "rel_path": "rust/tara_engine/src/dataset",
+      "total_descendant_files_count": 5
+    },
+    "rust/tara_engine/src/inference": {
+      "depth": 4,
+      "direct_files_count": 7,
+      "direct_subdirs_count": 0,
+      "name": "inference",
+      "rel_path": "rust/tara_engine/src/inference",
+      "total_descendant_files_count": 7
+    },
+    "rust/tara_engine/tests": {
+      "depth": 3,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "tests",
+      "rel_path": "rust/tara_engine/tests",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_server": {
+      "depth": 2,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 3,
+      "name": "tara_server",
+      "rel_path": "rust/tara_server",
+      "total_descendant_files_count": 124
+    },
+    "rust/tara_server/TARA": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 2,
+      "name": "TARA",
+      "rel_path": "rust/tara_server/TARA",
+      "total_descendant_files_count": 0
+    },
+    "rust/tara_server/TARA/ACCESS": {
+      "depth": 4,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "ACCESS",
+      "rel_path": "rust/tara_server/TARA/ACCESS",
+      "total_descendant_files_count": 0
+    },
+    "rust/tara_server/TARA/SKILLS": {
+      "depth": 4,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "SKILLS",
+      "rel_path": "rust/tara_server/TARA/SKILLS",
+      "total_descendant_files_count": 0
+    },
+    "rust/tara_server/src": {
+      "depth": 3,
+      "direct_files_count": 20,
+      "direct_subdirs_count": 17,
+      "name": "src",
+      "rel_path": "rust/tara_server/src",
+      "total_descendant_files_count": 120
+    },
+    "rust/tara_server/src/access": {
+      "depth": 4,
+      "direct_files_count": 16,
+      "direct_subdirs_count": 0,
+      "name": "access",
+      "rel_path": "rust/tara_server/src/access",
+      "total_descendant_files_count": 16
+    },
+    "rust/tara_server/src/bin": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "bin",
+      "rel_path": "rust/tara_server/src/bin",
+      "total_descendant_files_count": 3
+    },
+    "rust/tara_server/src/cognitive": {
+      "depth": 4,
+      "direct_files_count": 8,
+      "direct_subdirs_count": 0,
+      "name": "cognitive",
+      "rel_path": "rust/tara_server/src/cognitive",
+      "total_descendant_files_count": 8
+    },
+    "rust/tara_server/src/control_plane": {
+      "depth": 4,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "control_plane",
+      "rel_path": "rust/tara_server/src/control_plane",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_server/src/engines": {
+      "depth": 4,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 3,
+      "name": "engines",
+      "rel_path": "rust/tara_server/src/engines",
+      "total_descendant_files_count": 22
+    },
+    "rust/tara_server/src/engines/math": {
+      "depth": 5,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "math",
+      "rel_path": "rust/tara_server/src/engines/math",
+      "total_descendant_files_count": 5
+    },
+    "rust/tara_server/src/engines/programming": {
+      "depth": 5,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "programming",
+      "rel_path": "rust/tara_server/src/engines/programming",
+      "total_descendant_files_count": 5
+    },
+    "rust/tara_server/src/engines/science": {
+      "depth": 5,
+      "direct_files_count": 8,
+      "direct_subdirs_count": 0,
+      "name": "science",
+      "rel_path": "rust/tara_server/src/engines/science",
+      "total_descendant_files_count": 8
+    },
+    "rust/tara_server/src/knowledge": {
+      "depth": 4,
+      "direct_files_count": 9,
+      "direct_subdirs_count": 0,
+      "name": "knowledge",
+      "rel_path": "rust/tara_server/src/knowledge",
+      "total_descendant_files_count": 9
+    },
+    "rust/tara_server/src/language": {
+      "depth": 4,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "language",
+      "rel_path": "rust/tara_server/src/language",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_server/src/learning": {
+      "depth": 4,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "learning",
+      "rel_path": "rust/tara_server/src/learning",
+      "total_descendant_files_count": 3
+    },
+    "rust/tara_server/src/memory": {
+      "depth": 4,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "memory",
+      "rel_path": "rust/tara_server/src/memory",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_server/src/reward": {
+      "depth": 4,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "reward",
+      "rel_path": "rust/tara_server/src/reward",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_server/src/routes": {
+      "depth": 4,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "routes",
+      "rel_path": "rust/tara_server/src/routes",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_server/src/rules": {
+      "depth": 4,
+      "direct_files_count": 9,
+      "direct_subdirs_count": 0,
+      "name": "rules",
+      "rel_path": "rust/tara_server/src/rules",
+      "total_descendant_files_count": 9
+    },
+    "rust/tara_server/src/runtime": {
+      "depth": 4,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "runtime",
+      "rel_path": "rust/tara_server/src/runtime",
+      "total_descendant_files_count": 4
+    },
+    "rust/tara_server/src/security": {
+      "depth": 4,
+      "direct_files_count": 10,
+      "direct_subdirs_count": 0,
+      "name": "security",
+      "rel_path": "rust/tara_server/src/security",
+      "total_descendant_files_count": 10
+    },
+    "rust/tara_server/src/skills": {
+      "depth": 4,
+      "direct_files_count": 9,
+      "direct_subdirs_count": 0,
+      "name": "skills",
+      "rel_path": "rust/tara_server/src/skills",
+      "total_descendant_files_count": 9
+    },
+    "rust/tara_server/src/voice": {
+      "depth": 4,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "voice",
+      "rel_path": "rust/tara_server/src/voice",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_server/src/workload": {
+      "depth": 4,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "workload",
+      "rel_path": "rust/tara_server/src/workload",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_server/tests": {
+      "depth": 3,
+      "direct_files_count": 3,
+      "direct_subdirs_count": 0,
+      "name": "tests",
+      "rel_path": "rust/tara_server/tests",
+      "total_descendant_files_count": 3
+    },
+    "rust/tara_training_system": {
+      "depth": 2,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 9,
+      "name": "tara_training_system",
+      "rel_path": "rust/tara_training_system",
+      "total_descendant_files_count": 25
+    },
+    "rust/tara_training_system/autonomous_training": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 2,
+      "name": "autonomous_training",
+      "rel_path": "rust/tara_training_system/autonomous_training",
+      "total_descendant_files_count": 4
+    },
+    "rust/tara_training_system/autonomous_training/neural": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 1,
+      "name": "neural",
+      "rel_path": "rust/tara_training_system/autonomous_training/neural",
+      "total_descendant_files_count": 2
+    },
+    "rust/tara_training_system/autonomous_training/neural/candidates": {
+      "depth": 5,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "candidates",
+      "rel_path": "rust/tara_training_system/autonomous_training/neural/candidates",
+      "total_descendant_files_count": 0
+    },
+    "rust/tara_training_system/autonomous_training/world_model": {
+      "depth": 4,
+      "direct_files_count": 2,
+      "direct_subdirs_count": 2,
+      "name": "world_model",
+      "rel_path": "rust/tara_training_system/autonomous_training/world_model",
+      "total_descendant_files_count": 2
+    },
+    "rust/tara_training_system/autonomous_training/world_model/candidates": {
+      "depth": 5,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "candidates",
+      "rel_path": "rust/tara_training_system/autonomous_training/world_model/candidates",
+      "total_descendant_files_count": 0
+    },
+    "rust/tara_training_system/autonomous_training/world_model/evaluation": {
+      "depth": 5,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "evaluation",
+      "rel_path": "rust/tara_training_system/autonomous_training/world_model/evaluation",
+      "total_descendant_files_count": 0
+    },
+    "rust/tara_training_system/curriculum_engine": {
+      "depth": 3,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "curriculum_engine",
+      "rel_path": "rust/tara_training_system/curriculum_engine",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_training_system/dataset_engine": {
+      "depth": 3,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "dataset_engine",
+      "rel_path": "rust/tara_training_system/dataset_engine",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_training_system/manual_training": {
+      "depth": 3,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 3,
+      "name": "manual_training",
+      "rel_path": "rust/tara_training_system/manual_training",
+      "total_descendant_files_count": 3
+    },
+    "rust/tara_training_system/manual_training/checkpoints": {
+      "depth": 4,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 2,
+      "name": "checkpoints",
+      "rel_path": "rust/tara_training_system/manual_training/checkpoints",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_training_system/manual_training/checkpoints/neural": {
+      "depth": 5,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "neural",
+      "rel_path": "rust/tara_training_system/manual_training/checkpoints/neural",
+      "total_descendant_files_count": 0
+    },
+    "rust/tara_training_system/manual_training/checkpoints/world_model": {
+      "depth": 5,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "world_model",
+      "rel_path": "rust/tara_training_system/manual_training/checkpoints/world_model",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_training_system/manual_training/logs": {
+      "depth": 4,
+      "direct_files_count": 1,
+      "direct_subdirs_count": 0,
+      "name": "logs",
+      "rel_path": "rust/tara_training_system/manual_training/logs",
+      "total_descendant_files_count": 1
+    },
+    "rust/tara_training_system/manual_training/runs": {
+      "depth": 4,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "runs",
+      "rel_path": "rust/tara_training_system/manual_training/runs",
+      "total_descendant_files_count": 0
+    },
+    "rust/tara_training_system/neural_model": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 1,
+      "name": "neural_model",
+      "rel_path": "rust/tara_training_system/neural_model",
+      "total_descendant_files_count": 7
+    },
+    "rust/tara_training_system/neural_model/model": {
+      "depth": 4,
+      "direct_files_count": 7,
+      "direct_subdirs_count": 0,
+      "name": "model",
+      "rel_path": "rust/tara_training_system/neural_model/model",
+      "total_descendant_files_count": 7
+    },
+    "rust/tara_training_system/production_repository": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 2,
+      "name": "production_repository",
+      "rel_path": "rust/tara_training_system/production_repository",
+      "total_descendant_files_count": 0
+    },
+    "rust/tara_training_system/production_repository/neural": {
+      "depth": 4,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "neural",
+      "rel_path": "rust/tara_training_system/production_repository/neural",
+      "total_descendant_files_count": 0
+    },
+    "rust/tara_training_system/production_repository/world_model": {
+      "depth": 4,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "world_model",
+      "rel_path": "rust/tara_training_system/production_repository/world_model",
+      "total_descendant_files_count": 0
+    },
+    "rust/tara_training_system/shared_training_infrastructure": {
+      "depth": 3,
+      "direct_files_count": 4,
+      "direct_subdirs_count": 0,
+      "name": "shared_training_infrastructure",
+      "rel_path": "rust/tara_training_system/shared_training_infrastructure",
+      "total_descendant_files_count": 4
+    },
+    "rust/tara_training_system/tara_dataset": {
+      "depth": 3,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 2,
+      "name": "tara_dataset",
+      "rel_path": "rust/tara_training_system/tara_dataset",
+      "total_descendant_files_count": 0
+    },
+    "rust/tara_training_system/tara_dataset/autonomous": {
+      "depth": 4,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "autonomous",
+      "rel_path": "rust/tara_training_system/tara_dataset/autonomous",
+      "total_descendant_files_count": 0
+    },
+    "rust/tara_training_system/tara_dataset/manual": {
+      "depth": 4,
+      "direct_files_count": 0,
+      "direct_subdirs_count": 0,
+      "name": "manual",
+      "rel_path": "rust/tara_training_system/tara_dataset/manual",
+      "total_descendant_files_count": 0
+    },
+    "rust/tara_training_system/world_model": {
+      "depth": 3,
+      "direct_files_count": 5,
+      "direct_subdirs_count": 0,
+      "name": "world_model",
+      "rel_path": "rust/tara_training_system/world_model",
+      "total_descendant_files_count": 5
+    }
+  },
+  "generated_at_utc": "1791363062",
+  "schema_version": "1.0.0",
+  "total_folders": 586
+}

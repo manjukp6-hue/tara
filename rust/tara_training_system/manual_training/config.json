@@ -1,0 +1,19 @@
+{
+  "version": "1.0.0",
+  "training_mode": "neural",
+  "model_source_dir": "storage/models/tara",
+  "dataset_dir": "storage/datasets/tara_dataset_filtered/canonical",
+  "curriculum_path": "storage/datasets/curriculum/master_curriculum.jsonl",
+  "batch_size": 4,
+  "learning_rate": 0.0003,
+  "max_steps": 100,
+  "warmup_steps": 10,
+  "weight_decay": 0.01,
+  "grad_clip_norm": 1.0,
+  "checkpoint_interval_steps": 50,
+  "neural_checkpoint_dir": "rust/tara_training_system/manual_training/checkpoints/neural",
+  "world_model_checkpoint_dir": "rust/tara_training_system/manual_training/checkpoints/world_model",
+  "logs_dir": "rust/tara_training_system/manual_training/logs",
+  "runs_dir": "rust/tara_training_system/manual_training/runs",
+  "evaluation_dir": "rust/tara_training_system/manual_training/evaluation"
+}

@@ -4,9 +4,9 @@
 //! Enforces cross-entity failure isolation: a failure in Sandbox A does not compromise Sandbox B.
 //! Fresh sandbox reconstruction for unverified state, preserved verified work, and rollback mechanisms.
 
+use crate::runtime::lifecycle::EntityState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::runtime::lifecycle::EntityState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FailureCategory {
@@ -31,6 +31,12 @@ pub struct IncidentReport {
 
 pub struct RecoveryOrchestrator {
     incidents: HashMap<String, IncidentReport>,
+}
+
+impl Default for RecoveryOrchestrator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RecoveryOrchestrator {
@@ -71,12 +77,10 @@ impl RecoveryOrchestrator {
                     "Crash/timeout encountered. Isolate failed container, create fresh replacement, reassign task.".to_string(),
                 )
             }
-            FailureCategory::PolicyDenial => {
-                (
-                    EntityState::Paused,
-                    "Action denied by policy. Retain audit record; no automatic retry.".to_string(),
-                )
-            }
+            FailureCategory::PolicyDenial => (
+                EntityState::Paused,
+                "Action denied by policy. Retain audit record; no automatic retry.".to_string(),
+            ),
         };
 
         let report = IncidentReport {
@@ -97,3 +101,46 @@ impl RecoveryOrchestrator {
         self.incidents.get(incident_id)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_recovery_quarantine_on_security_violation() {
+        let mut rec = RecoveryOrchestrator::new();
+        let (state, action) = rec.handle_failure(
+            "entity_malicious",
+            FailureCategory::SecurityViolation,
+            "Attempted host root escape",
+        );
+
+        assert_eq!(state, EntityState::Quarantined);
+        assert!(action.contains("Immediate quarantine"));
+    }
+
+    #[test]
+    fn test_recovery_degraded_on_resource_exhaustion() {
+        let mut rec = RecoveryOrchestrator::new();
+        let (state, _) = rec.handle_failure(
+            "entity_heavy",
+            FailureCategory::ResourceExhaustion,
+            "Out of memory limit",
+        );
+
+        assert_eq!(state, EntityState::Degraded);
+    }
+
+    #[test]
+    fn test_recovery_recoverable_on_process_crash() {
+        let mut rec = RecoveryOrchestrator::new();
+        let (state, _) = rec.handle_failure(
+            "entity_crash",
+            FailureCategory::ProcessCrash,
+            "SIGSEGV trapped",
+        );
+
+        assert_eq!(state, EntityState::Recovering);
+    }
+}
+

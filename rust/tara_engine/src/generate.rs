@@ -4,8 +4,8 @@
 //! complete Python-parity sampling pipeline:
 //! repetition penalty → temperature → top-k → top-p nucleus → categorical.
 
-use std::time::Instant;
 use rand::Rng;
+use std::time::Instant;
 
 use crate::model::causal_lm::TaraForCausalLM;
 use crate::tokenizer::TaraTokenizer;
@@ -23,6 +23,30 @@ pub struct GenerateResult {
     pub total_latency_ms: f64,
     /// Tokens per second.
     pub tps: f64,
+}
+
+/// Configuration options for text generation.
+#[derive(Clone, Debug)]
+pub struct GenerateOptions<'a> {
+    pub max_new_tokens: usize,
+    pub temperature: f32,
+    pub top_k: usize,
+    pub top_p: f32,
+    pub repetition_penalty: f32,
+    pub stop_tokens: Option<&'a [&'a str]>,
+}
+
+impl<'a> Default for GenerateOptions<'a> {
+    fn default() -> Self {
+        Self {
+            max_new_tokens: 128,
+            temperature: 0.7,
+            top_k: 50,
+            top_p: 0.9,
+            repetition_penalty: 1.1,
+            stop_tokens: None,
+        }
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -85,7 +109,11 @@ pub fn sample_next_token(
     }
 
     // 4. Top-k filtering
-    let effective_k = if top_k == 0 { vocab_size } else { top_k.min(vocab_size) };
+    let effective_k = if top_k == 0 {
+        vocab_size
+    } else {
+        top_k.min(vocab_size)
+    };
     let mut indexed: Vec<(usize, f32)> = probs.iter().cloned().enumerate().collect();
     indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
     let top_k_indices: Vec<usize> = indexed[..effective_k].iter().map(|(i, _)| *i).collect();
@@ -140,31 +168,43 @@ pub fn generate_response(
     model: &TaraForCausalLM,
     tokenizer: &TaraTokenizer,
     prompt: &str,
-    max_new_tokens: usize,
-    temperature: f32,
-    top_k: usize,
-    top_p: f32,
-    repetition_penalty: f32,
-    stop_tokens: Option<&[&str]>,
+    options: &GenerateOptions,
 ) -> Result<GenerateResult, String> {
+    let max_new_tokens = options.max_new_tokens;
+    let temperature = options.temperature;
+    let top_k = options.top_k;
+    let top_p = options.top_p;
+    let repetition_penalty = options.repetition_penalty;
+    let stop_tokens = options.stop_tokens;
+
     let start = Instant::now();
     let im_end = tokenizer.im_end_id();
 
     // Encode prompt
-    let mut input_ids: Vec<u32> = tokenizer.encode(prompt);
+    let input_ids: Vec<u32> = tokenizer.encode(prompt);
     let prompt_len = input_ids.len();
     let mut generated: Vec<u32> = Vec::with_capacity(max_new_tokens);
     let mut first_latency_ms = 0.0f64;
+    let mut cache = model.create_kv_cache();
+
+    // Prime cache with all prompt tokens except the last one
+    if prompt_len > 1 {
+        for &id in &input_ids[..prompt_len - 1] {
+            let _ = model.forward_token_cached(id, &mut cache);
+        }
+    }
+
+    let mut current_token = if prompt_len > 0 {
+        input_ids[prompt_len - 1]
+    } else {
+        0
+    };
 
     for step in 0..max_new_tokens {
-        let logits = model.forward(&input_ids);
-        let seq_len = input_ids.len();
-        // Take logits for the last token: shape [vocab_size]
-        let vocab_size = model.config.vocab_size;
-        let last_logits = &logits[(seq_len - 1) * vocab_size..seq_len * vocab_size];
+        let last_logits = model.forward_token_cached(current_token, &mut cache);
 
         let next_id = sample_next_token(
-            last_logits,
+            &last_logits,
             &generated,
             temperature,
             top_k,
@@ -181,7 +221,7 @@ pub fn generate_response(
         }
 
         generated.push(next_id);
-        input_ids.push(next_id);
+        current_token = next_id;
 
         // Stop-token check
         if let Some(stops) = stop_tokens {
@@ -200,7 +240,6 @@ pub fn generate_response(
         0.0
     };
 
-    let _ = prompt_len; // suppress unused warning
     Ok(GenerateResult {
         text: tokenizer.decode(&generated),
         token_count,
@@ -221,29 +260,43 @@ pub fn generate_stream<F>(
     model: &TaraForCausalLM,
     tokenizer: &TaraTokenizer,
     prompt: &str,
-    max_new_tokens: usize,
-    temperature: f32,
-    top_k: usize,
-    top_p: f32,
-    repetition_penalty: f32,
-    stop_tokens: Option<&[&str]>,
+    options: &GenerateOptions,
     mut callback: F,
 ) -> Result<(), String>
 where
     F: FnMut(String),
 {
+    let max_new_tokens = options.max_new_tokens;
+    let temperature = options.temperature;
+    let top_k = options.top_k;
+    let top_p = options.top_p;
+    let repetition_penalty = options.repetition_penalty;
+    let stop_tokens = options.stop_tokens;
+
     let im_end = tokenizer.im_end_id();
-    let mut input_ids: Vec<u32> = tokenizer.encode(prompt);
+    let input_ids: Vec<u32> = tokenizer.encode(prompt);
+    let prompt_len = input_ids.len();
     let mut generated: Vec<u32> = Vec::with_capacity(max_new_tokens);
+    let mut cache = model.create_kv_cache();
+
+    // Prime cache
+    if prompt_len > 1 {
+        for &id in &input_ids[..prompt_len - 1] {
+            let _ = model.forward_token_cached(id, &mut cache);
+        }
+    }
+
+    let mut current_token = if prompt_len > 0 {
+        input_ids[prompt_len - 1]
+    } else {
+        0
+    };
 
     for _ in 0..max_new_tokens {
-        let logits = model.forward(&input_ids);
-        let seq_len = input_ids.len();
-        let vocab_size = model.config.vocab_size;
-        let last_logits = &logits[(seq_len - 1) * vocab_size..seq_len * vocab_size];
+        let last_logits = model.forward_token_cached(current_token, &mut cache);
 
         let next_id = sample_next_token(
-            last_logits,
+            &last_logits,
             &generated,
             temperature,
             top_k,
@@ -256,7 +309,7 @@ where
         }
 
         generated.push(next_id);
-        input_ids.push(next_id);
+        current_token = next_id;
 
         // Decode just this token
         let tok_str = tokenizer

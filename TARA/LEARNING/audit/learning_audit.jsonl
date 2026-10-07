@@ -1,3 +1,0 @@
-{"timestamp": "2026-09-13T05:14:26Z", "event": "RULEBOOK_MODIFICATION_BLOCKED", "severity": "CRITICAL", "details": {"attempted_path": "TARA\\RULES\\RULEBOOK.txt"}}
-{"timestamp": "2026-09-13T06:24:11Z", "event": "SELF_UPGRADE_PROMOTED", "severity": "INFO", "details": {"upgrade_id": "UPG-TEST-001", "subsystem": "TOOLS", "timestamp": 1789280651.4575362, "iso_time": "2026-09-13T06:24:11Z", "files_modified": ["TARA\\TOOLS\\test_upgrade_dummy.py"], "rollback_path": "storage\\rollback\\UPG-TEST-001_1789280651", "creator_id": "ROOT_OPERATOR", "status": "PROMOTED_TO_CURRENT_TARA"}}
-{"timestamp": "2026-09-13T06:51:56Z", "event": "RULEBOOK_MODIFICATION_BLOCKED", "severity": "CRITICAL", "details": {"attempted_path": "TARA\\RULES\\RULEBOOK.txt"}}

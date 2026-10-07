@@ -1,1 +1,0 @@
-# TARA Self-Destruct Package

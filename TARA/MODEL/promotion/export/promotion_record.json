@@ -1,17 +1,9 @@
 {
-  "promotion_id": "PROMOTION_20260917_RUN_20260916_144324",
-  "status": "OFFICIALLY_PROMOTED_PRODUCTION",
-  "promoted_canonical_model": "storage/models/tara/model.safetensors",
-  "promoted_model_sha256": "7a50308b799f2654baeafbd64dec31f088c3b07b446e198cd0f9ec2b7c0af309",
-  "pre_promotion_baseline_sha256": "e4d79abbfd812e4a7310d2e63c76d11e3531ebb6146b5149b68a6b9204d4ee6d",
-  "source_run": "RUN_20260916_144324",
-  "epoch": 102,
-  "global_step": 9888,
-  "candidate_checkpoint_sha": "ce9c3d144a68e13c337e05cfc713fc86e132b742a69e805c680031b533c8825d",
-  "candidate_validation_loss": 0.5642,
-  "candidate_test_loss": 0.4922,
-  "capability_score": "96.05%",
-  "regression_result": "491/491 PASS",
-  "promotion_decision": "8/8 GATES PASS",
-  "timestamp_utc": "2026-09-17T07:13:00Z"
+  "promotion_id": "RETIRED_SMOKE_TEST_20261001",
+  "status": "NO_MODEL_REGISTERED",
+  "historical_record": {
+    "retired_model": "storage/models/tara/model.safetensors",
+    "retirement_reason": "Smoke-test 118K parameter model cleanly removed. No active production model registered."
+  },
+  "timestamp_utc": "2026-10-01T00:00:00Z"
 }

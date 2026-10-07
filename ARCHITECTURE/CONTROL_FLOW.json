@@ -1,0 +1,864 @@
+{
+  "description": "Execution control flow pipelines across TARA's primary operational loops",
+  "pipelines": {
+    "turn_execution_pipeline": {
+      "entry_point": "rust/tara_server/src/brain.rs::TaraBrain::process_turn_stream",
+      "steps": [
+        {
+          "step": 1,
+          "component": "LanguageEngine::detect_script",
+          "action": "Detect script and language mode"
+        },
+        {
+          "step": 2,
+          "component": "SessionContextManager::get_or_create",
+          "action": "Assemble session context and history"
+        },
+        {
+          "step": 3,
+          "component": "MemoryEngine::query_semantic_episodes",
+          "action": "Retrieve relevant episodic memory"
+        },
+        {
+          "step": 4,
+          "component": "SemanticIntentParser::parse",
+          "action": "Extract user intent and arguments"
+        },
+        {
+          "step": 5,
+          "component": "ExecutionGuard::check_permission",
+          "action": "Evaluate safety rules before execution"
+        },
+        {
+          "step": 6,
+          "component": "CuriosityGoalGenerator::evaluate",
+          "action": "Compute epistemic novelty"
+        },
+        {
+          "step": 7,
+          "component": "SpecialistEngines::dispatch",
+          "action": "Compute math/science/programming derivations"
+        },
+        {
+          "step": 8,
+          "component": "DeliberativeSearchEngine::search",
+          "action": "MCTS trajectory exploration if complex"
+        },
+        {
+          "step": 9,
+          "component": "tara_engine::generate_stream",
+          "action": "Stream auto-regressive neural tokens"
+        },
+        {
+          "step": 10,
+          "component": "ControlTokenActionParser::parse",
+          "action": "Execute skills if control tokens emitted"
+        },
+        {
+          "step": 11,
+          "component": "TaskVerifier::verify_turn",
+          "action": "Verify answer against derivations"
+        },
+        {
+          "step": 12,
+          "component": "SelfEvaluator::evaluate",
+          "action": "Score reasoning depth and uncertainty"
+        },
+        {
+          "step": 13,
+          "component": "MemoryEngine::record_episode",
+          "action": "Persist complete turn record"
+        },
+        {
+          "step": 14,
+          "component": "AutonomousOnlineLearner::learn",
+          "action": "Distill experiential lesson for training"
+        }
+      ]
+    },
+    "neural_inference_pipeline": {
+      "entry_point": "rust/tara_engine/src/generate.rs::generate_stream",
+      "steps": [
+        {
+          "step": 1,
+          "component": "TaraTokenizer::encode",
+          "action": "Tokenize text into subword IDs"
+        },
+        {
+          "step": 2,
+          "component": "EmbeddingLayer::forward",
+          "action": "Lookup token embeddings"
+        },
+        {
+          "step": 3,
+          "component": "TaraDecoderLayer (x22)",
+          "action": "Iterate across 22 transformer blocks"
+        },
+        {
+          "step": 4,
+          "component": "RMSNorm::forward",
+          "action": "Pre-attention layer normalization"
+        },
+        {
+          "step": 5,
+          "component": "RotaryEmbedding::apply",
+          "action": "Apply RoPE rotary position embeddings"
+        },
+        {
+          "step": 6,
+          "component": "GroupedQueryAttention::forward",
+          "action": "Compute GQA multi-head attention with KV cache"
+        },
+        {
+          "step": 7,
+          "component": "RMSNorm::forward",
+          "action": "Pre-MLP layer normalization"
+        },
+        {
+          "step": 8,
+          "component": "SwiGLUMlp::forward",
+          "action": "Compute SwiGLU non-linear projection"
+        },
+        {
+          "step": 9,
+          "component": "RMSNorm::forward",
+          "action": "Final output layer normalization"
+        },
+        {
+          "step": 10,
+          "component": "LMHead::forward",
+          "action": "Project hidden states to vocabulary logits"
+        },
+        {
+          "step": 11,
+          "component": "Sample / Greedy",
+          "action": "Sample next token ID via temperature / top-p"
+        },
+        {
+          "step": 12,
+          "component": "TaraTokenizer::decode",
+          "action": "Decode token ID to UTF-8 text and stream"
+        }
+      ]
+    },
+    "self_training_and_evolution_pipeline": {
+      "entry_point": "rust/tara_training_system/shared_training_infrastructure/trainer.rs::NativeSelfTrainer::train_step",
+      "steps": [
+        {
+          "step": 1,
+          "component": "ContinualLearningGovernor::select_batch",
+          "action": "Sample priority training examples"
+        },
+        {
+          "step": 2,
+          "component": "TaraForCausalLM::forward",
+          "action": "Compute forward pass sequence logits"
+        },
+        {
+          "step": 3,
+          "component": "CrossEntropyLoss::compute",
+          "action": "Calculate training loss against ground truth tokens"
+        },
+        {
+          "step": 4,
+          "component": "EWCPenalty::compute",
+          "action": "Add quadratic penalty on critical parameters"
+        },
+        {
+          "step": 5,
+          "component": "BackwardPass::compute",
+          "action": "Compute exact analytical gradients"
+        },
+        {
+          "step": 6,
+          "component": "GradientClipping::clip",
+          "action": "Clip gradients to maximum norm threshold"
+        },
+        {
+          "step": 7,
+          "component": "AdamWOptimizer::step",
+          "action": "Update weights with momentum and weight decay"
+        },
+        {
+          "step": 8,
+          "component": "SkillsEvaluator::benchmark",
+          "action": "Run benchmark evaluation on candidate weights"
+        },
+        {
+          "step": 9,
+          "component": "ModelRegistry::register_active_training",
+          "action": "Promote candidate model on verified improvement"
+        }
+      ]
+    },
+    "dataset_filtering_and_sharding_pipeline": {
+      "entry_point": "rust/tara_engine/src/bin/tara_intelligence_filter_35.rs::main",
+      "steps": [
+        {
+          "step": 1,
+          "component": "HashingReader::read",
+          "action": "Stream raw JSONL lines while computing input SHA-256"
+        },
+        {
+          "step": 2,
+          "component": "BenchmarkDecontaminationRegistry::check",
+          "action": "Reject benchmark contamination"
+        },
+        {
+          "step": 3,
+          "component": "BandedLshRegistry::check",
+          "action": "Reject exact and near duplicates (Hamming <= 3)"
+        },
+        {
+          "step": 4,
+          "component": "evaluate_record_35",
+          "action": "Score 35 intelligence criteria (0-5 scale)"
+        },
+        {
+          "step": 5,
+          "component": "QualityAction::classify",
+          "action": "Classify record into PASS, WEAK, or REJECT"
+        },
+        {
+          "step": 6,
+          "component": "RotatingOutputWriter::append",
+          "action": "Stream record to rotating shard files"
+        },
+        {
+          "step": 7,
+          "component": "DualCheckpointManager::save_ping_pong",
+          "action": "Commit transactional checkpoint with fsync"
+        }
+      ]
+    },
+    "dataset_download_and_ingestion_pipeline": {
+      "entry_point": "rust/tara_engine/src/bin/tara_download_pool.rs::main",
+      "steps": [
+        {
+          "step": 1,
+          "component": "AuthoritativeDatasetRegistry::query_download_status",
+          "action": "Authoritative registry lookup: repeat download exclusion and blacklist/quarantine check"
+        },
+        {
+          "step": 2,
+          "component": "LicenseProvenancePolicy::validate_license",
+          "action": "Centralized permissive SPDX license and provenance policy verification"
+        },
+        {
+          "step": 3,
+          "component": "curl_download",
+          "action": "Native curl.exe streaming download with byte-size and integrity validation"
+        },
+        {
+          "step": 4,
+          "component": "compute_file_sha256",
+          "action": "Runtime dynamic SHA-256 calculation (Rule #2: zero hardcoded hashes)"
+        },
+        {
+          "step": 5,
+          "component": "AuthoritativeDatasetRegistry::check_dynamic_sha256",
+          "action": "Blacklist and repeat-exclusion verification against dynamic SHA registry"
+        },
+        {
+          "step": 6,
+          "component": "evaluate_record_35",
+          "action": "Score 35 intelligence criteria (D01-D35) and benchmark decontamination"
+        },
+        {
+          "step": 7,
+          "component": "BandedLshRegistry::check",
+          "action": "Record-level deduplication via Banded LSH and exact SHA-256 signatures"
+        },
+        {
+          "step": 8,
+          "component": "DatasetCompatibilityChecker::is_compatible_for_merge",
+          "action": "Schema, license, and purpose compatibility check for canonical pool merging"
+        },
+        {
+          "step": 9,
+          "component": "cleanup_weak_and_reject",
+          "action": "Automatic cleanup of weak and rejected temporary partitions"
+        },
+        {
+          "step": 10,
+          "component": "AuthoritativeDatasetRegistry::save_authoritative",
+          "action": "Persist authoritative dataset registry with live record metrics and dynamic hashes"
+        }
+      ]
+    },
+    "autonomous_ability_acquisition_and_evolution_pipeline": {
+      "entry_point": "rust/tara_server/src/learning/capability_synthesizer.rs::CapabilitySynthesizer",
+      "steps": [
+        {
+          "step": 1,
+          "component": "AbilityEngine::evaluate_situation",
+          "action": "Inspect current task and detect existing or missing capability"
+        },
+        {
+          "step": 2,
+          "component": "SkillEngine::select_skill",
+          "action": "Query ToolRegistry and select skill matching capability requirements"
+        },
+        {
+          "step": 3,
+          "component": "ExecutionGuard::authorize_and_execute",
+          "action": "Authorize and execute selected skill in sandboxed environment"
+        },
+        {
+          "step": 4,
+          "component": "TaskVerifier::evaluate_outcome",
+          "action": "Evaluate outcome metrics, precision, and tool telemetry"
+        },
+        {
+          "step": 5,
+          "component": "AutonomousOnlineLearner::analyze_feedback",
+          "action": "Failure root-cause analysis or success reinforcement"
+        },
+        {
+          "step": 6,
+          "component": "CapabilitySynthesizer::update_ability",
+          "action": "Synthesize or update candidate ability in dynamic registry"
+        },
+        {
+          "step": 7,
+          "component": "ContinualLearningGovernor::evaluate_self_training",
+          "action": "Assess whether neural self-training is warranted"
+        },
+        {
+          "step": 8,
+          "component": "SelfUpgradeEngine::prepare_update",
+          "action": "Initiate protocol-compliant self-update and model training"
+        },
+        {
+          "step": 9,
+          "component": "NativeSelfTrainer::train_candidate",
+          "action": "Train candidate model checkpoint with EWC loss protection"
+        },
+        {
+          "step": 10,
+          "component": "SkillsEvaluator::benchmark_candidate",
+          "action": "Evaluate candidate model against baseline regression gates"
+        },
+        {
+          "step": 11,
+          "component": "ModelRegistry::promote_or_rollback",
+          "action": "Execute protocol-compliant promotion on pass or rollback on regression"
+        }
+      ]
+    },
+    "runtime_execution_pipeline": {
+      "entry_point": "rust/tara_server/src/runtime/gate.rs::UniversalRuntimeGate::evaluate_evolution_candidate",
+      "description": "11-step canonical request execution chain with cross-cutting Health, Recovery, Verification, and Audit",
+      "steps": [
+        {
+          "step": 1,
+          "component": "IdentityManager::resolve_identity",
+          "action": "Resolve and authenticate request identity"
+        },
+        {
+          "step": 2,
+          "component": "CreatorAuthService::authorize",
+          "action": "Verify creator authority and operator permissions"
+        },
+        {
+          "step": 3,
+          "component": "PolicyCompiler::evaluate",
+          "action": "Evaluate compiled policy rulebook against request intent"
+        },
+        {
+          "step": 4,
+          "component": "JailbreakDetector::scan",
+          "action": "Scan for injection patterns, homoglyphs, and zero-width chars"
+        },
+        {
+          "step": 5,
+          "component": "ExecutionGuard::check_permission",
+          "action": "Fail-closed permission gate: REJECT unless explicitly permitted"
+        },
+        {
+          "step": 6,
+          "component": "DynamicRuntimeRegistry::verify_runtime_ready",
+          "action": "Verify required runtime dependencies are available and healthy"
+        },
+        {
+          "step": 7,
+          "component": "SkillEngine::select_skill + sandbox isolation",
+          "action": "Select matching skill and initialize sandbox environment"
+        },
+        {
+          "step": 8,
+          "component": "DynamicEngineSystem::execute",
+          "action": "Execute skill/tool in sandboxed context with resource limits"
+        },
+        {
+          "step": 9,
+          "component": "TaskVerifier::verify_turn",
+          "action": "Verify execution result against expected derivation"
+        },
+        {
+          "step": 10,
+          "component": "RewardSystem::record_outcome",
+          "action": "Record execution outcome in cryptographic reward ledger"
+        },
+        {
+          "step": 11,
+          "component": "MemoryEngine::record_episode",
+          "action": "Persist complete execution record to episodic memory with audit trace"
+        }
+      ],
+      "cross_cutting": [
+        "RecoveryEngine::attempt_fallback on step failure",
+        "SelfEvaluator::score_reasoning_quality on result",
+        "AuditLedger::append_entry on every gated action"
+      ]
+    },
+    "goal_planning_pipeline": {
+      "entry_point": "rust/tara_server/src/planner.rs::GoalTracker",
+      "description": "Goal lifecycle: creation, priority ordering, decomposition, dependency resolution, execution, evaluation, and reward linkage with explicit authority chain",
+      "authority_chain": "Safety > Policy > Creator authority > System constraints > Task objective",
+      "steps": [
+        {
+          "step": 1,
+          "component": "GoalTracker::create_goal",
+          "action": "Create goal with creator authority signature and priority level"
+        },
+        {
+          "step": 2,
+          "component": "GoalTracker::assign_priority",
+          "action": "Assign priority: Safety > Policy > Creator > Constraints > Task"
+        },
+        {
+          "step": 3,
+          "component": "GoalTracker::decompose",
+          "action": "Decompose goal into ordered subtask list"
+        },
+        {
+          "step": 4,
+          "component": "GoalTracker::resolve_dependencies",
+          "action": "Resolve inter-task dependencies and build execution DAG"
+        },
+        {
+          "step": 5,
+          "component": "DeliberativeSearchEngine::plan",
+          "action": "Run MCTS/deliberative search to produce optimal task plan"
+        },
+        {
+          "step": 6,
+          "component": "ExecutionGuard::check_permission",
+          "action": "Gate each plan step through policy before execution"
+        },
+        {
+          "step": 7,
+          "component": "DynamicEngineSystem::execute",
+          "action": "Execute plan steps sequentially in sandboxed context"
+        },
+        {
+          "step": 8,
+          "component": "TaskVerifier::evaluate_outcome",
+          "action": "Evaluate outcome against goal success criteria"
+        },
+        {
+          "step": 9,
+          "component": "RewardSystem::credit_milestone",
+          "action": "Credit milestone reward in hash-chained ledger on success"
+        },
+        {
+          "step": 10,
+          "component": "GoalTracker::update_goal_state",
+          "action": "Update goal state: COMPLETED / FAILED / RETRYING with provenance"
+        }
+      ]
+    },
+    "memory_lifecycle_pipeline": {
+      "entry_point": "rust/tara_server/src/memory/mod.rs::MemoryEngine",
+      "description": "Full cognitive memory lifecycle: from working memory through episodic recording, semantic consolidation, procedural encoding, retrieval, and retention management",
+      "steps": [
+        {
+          "step": 1,
+          "component": "MemoryEngine::working_memory_buffer",
+          "action": "Hold current-turn context in transient working memory"
+        },
+        {
+          "step": 2,
+          "component": "MemoryEngine::record_episode",
+          "action": "Encode completed turn as episodic record with timestamp, confidence, provenance, tenant_user, verification_status"
+        },
+        {
+          "step": 3,
+          "component": "MemoryEngine::query_semantic_episodes",
+          "action": "Vector-index retrieval for semantic memory across all stored episodes"
+        },
+        {
+          "step": 4,
+          "component": "CapabilitySynthesizer::update_ability",
+          "action": "Encode successful skill patterns into procedural/skill memory"
+        },
+        {
+          "step": 5,
+          "component": "DynamicMemoryHub::consolidate",
+          "action": "Merge repeated episodic patterns into consolidated semantic memory"
+        },
+        {
+          "step": 6,
+          "component": "MemoryEngine::query_semantic_episodes",
+          "action": "Retrieve relevant memories via top-k vector similarity for current context"
+        },
+        {
+          "step": 7,
+          "component": "StorageRetentionManager::enforce_retention",
+          "action": "Apply retention policy: expire stale low-confidence episodes within quota bounds"
+        }
+      ],
+      "memory_item_traceability_fields": [
+        "source", "timestamp", "confidence", "provenance",
+        "task_context", "tenant_user", "verification_status"
+      ]
+    },
+    "self_evolution_loop_pipeline": {
+      "entry_point": "rust/tara_training_system/autonomous_training/neural/autonomous_learner.rs::AutonomousOnlineLearner",
+      "description": "AGI self-improvement loop: experience extraction, evaluation, failure analysis, knowledge/memory update, skill improvement, training candidate generation, benchmark, regression gate, promotion or reject",
+      "hard_safety_rules": [
+        "No self-promotion without passing regression benchmark gate",
+        "No self-modification without creator authority verification",
+        "Candidate models isolated in staging dir until all benchmarks pass"
+      ],
+      "steps": [
+        {
+          "step": 1,
+          "component": "AutonomousOnlineLearner::extract_experience",
+          "action": "Extract structured experience from completed task episodes"
+        },
+        {
+          "step": 2,
+          "component": "SelfEvaluator::evaluate",
+          "action": "Evaluate experience quality, reasoning depth, and outcome correctness"
+        },
+        {
+          "step": 3,
+          "component": "AutonomousOnlineLearner::analyze_feedback",
+          "action": "Root-cause failure analysis or success reinforcement extraction"
+        },
+        {
+          "step": 4,
+          "component": "MemoryEngine::record_episode + GlobalKnowledgeBase::update",
+          "action": "Update episodic memory and knowledge base with verified lessons"
+        },
+        {
+          "step": 5,
+          "component": "CapabilitySynthesizer::update_ability",
+          "action": "Synthesize or refine skill in dynamic capability registry"
+        },
+        {
+          "step": 6,
+          "component": "ContinualLearningGovernor::evaluate_self_training",
+          "action": "Assess whether neural self-training is warranted by experience volume and quality"
+        },
+        {
+          "step": 7,
+          "component": "NativeSelfTrainer::train_candidate",
+          "action": "Train isolated candidate model with EWC loss protection in staging directory"
+        },
+        {
+          "step": 8,
+          "component": "SkillsEvaluator::benchmark_candidate",
+          "action": "Run full benchmark suite against candidate model — must exceed baseline on ALL benchmarks"
+        },
+        {
+          "step": 9,
+          "component": "ModelRegistry::promote_or_rollback",
+          "action": "Promote on pass (creator authority required) or rollback on any regression"
+        }
+      ]
+    },
+    "skill_tool_execution_loop": {
+      "entry_point": "rust/tara_server/src/ability.rs::AbilityEngine::acquire",
+      "description": "Complete agent skill/tool execution loop: goal-driven selection, authorization, sandbox execution, observation, verification, experience storage, and future selection improvement",
+      "steps": [
+        {
+          "step": 1,
+          "component": "GoalTracker::get_active_goal",
+          "action": "Retrieve active goal and map to required skill or tool capability"
+        },
+        {
+          "step": 2,
+          "component": "AbilityEngine::discover + CapabilityRegistry::get_capability",
+          "action": "Discover available skill/tool matching goal intent from CapabilityRegistry and SkillEngine catalog"
+        },
+        {
+          "step": 3,
+          "component": "ExecutionGuard::check_skill + SkillCertificationAuthority::verify",
+          "action": "Authorize: validate caller permissions, SPDX license, and creator authority for privileged skills"
+        },
+        {
+          "step": 4,
+          "component": "sandbox isolation + resource limits",
+          "action": "Initialize sandboxed execution context with resource and capability bounds"
+        },
+        {
+          "step": 5,
+          "component": "SkillEngine::execute_skill OR ToolRegistry::execute_tool OR CapabilityRegistry::invoke",
+          "action": "Execute skill/tool through category dispatcher (coding, android, data, research, multimedia, math, science)"
+        },
+        {
+          "step": 6,
+          "component": "TaskVerifier::verify",
+          "action": "Observe and verify execution result against expected outcome derivation"
+        },
+        {
+          "step": 7,
+          "component": "MemoryEngine::record_episode",
+          "action": "Store experience: execution inputs, outputs, latency, and outcome in episodic memory"
+        },
+        {
+          "step": 8,
+          "component": "RewardSystem::record_reward",
+          "action": "Credit reward in hash-chained ledger based on verified skill execution outcome"
+        },
+        {
+          "step": 9,
+          "component": "CapabilitySynthesizer::update_ability",
+          "action": "Update skill selection weights: improve future capability selection based on this execution outcome"
+        }
+      ],
+      "cross_cutting": [
+        "RecoveryEngine::attempt_recovery on execution failure",
+        "AbilityEngine::learn_from_failure on verified failure",
+        "AbilityEngine::improve_skill on repeated success to synthesize composite skills"
+      ]
+    },
+    "neural_model_training_pipeline": {
+      "entry_point": "rust/tara_training_system/shared_training_infrastructure/trainer.rs::NativeSelfTrainer",
+      "description": "End-to-end neural model lifecycle: dataset → quality filter → dedup → leakage check → split → tokenizer → training → checkpoint → candidate → evaluation → regression → safety gate → promotion → model registry → inference",
+      "production_model_rule": "Production model and candidate model are STRICTLY separated. Candidate lives in staging dir until all benchmarks pass. No auto-promotion without creator authority + benchmark gate.",
+      "steps": [
+        {
+          "step": 1,
+          "component": "DatasetIngestionEngine::ingest",
+          "action": "Download and ingest datasets from curriculum plan into raw shards"
+        },
+        {
+          "step": 2,
+          "component": "DatasetFilterEngine::filter_quality",
+          "action": "Quality filter: remove low-quality, malformed, and toxic records"
+        },
+        {
+          "step": 3,
+          "component": "KnowledgeDuplicateEngine::deduplicate",
+          "action": "Semantic and exact deduplication across all shards using dynamic SHA registry"
+        },
+        {
+          "step": 4,
+          "component": "DataLeakageDetector::check",
+          "action": "Leakage check: verify no test-set data appears in training shards"
+        },
+        {
+          "step": 5,
+          "component": "DatasetShardManager::split",
+          "action": "Split into canonical/weak/validation shards with dynamic partition ratios"
+        },
+        {
+          "step": 6,
+          "component": "TaraTokenizer::tokenize",
+          "action": "Tokenize all shards using native TARA tokenizer from dynamic vocab config"
+        },
+        {
+          "step": 7,
+          "component": "NativeSelfTrainer::train_candidate",
+          "action": "Train candidate model with EWC loss protection in isolated staging directory"
+        },
+        {
+          "step": 8,
+          "component": "NativeSelfTrainer::checkpoint",
+          "action": "Save checkpoint with SafeTensors format and SHA-256 dynamic manifest entry"
+        },
+        {
+          "step": 9,
+          "component": "ModelRegistry::register_candidate",
+          "action": "Register candidate in staging — NOT promoted to production"
+        },
+        {
+          "step": 10,
+          "component": "SkillsEvaluator::evaluate_candidate",
+          "action": "Evaluate candidate model across full benchmark suite"
+        },
+        {
+          "step": 11,
+          "component": "SkillsEvaluator::regression_check",
+          "action": "Regression check: candidate MUST exceed baseline on ALL benchmarks — one failure = reject"
+        },
+        {
+          "step": 12,
+          "component": "UniversalRuntimeGate::evaluate_evolution_candidate",
+          "action": "Safety gate: all required runtimes must pass before promotion is eligible"
+        },
+        {
+          "step": 13,
+          "component": "ModelRegistry::promote_to_production",
+          "action": "Promote candidate to production (requires creator authority signature)"
+        },
+        {
+          "step": 14,
+          "component": "ModelRegistry::register_active_training",
+          "action": "Register promotion event in versions_manifest.json with dynamic SHA"
+        },
+        {
+          "step": 15,
+          "component": "TaraBrain::reload_model_after_training",
+          "action": "Hot-reload production weights into active inference engine"
+        }
+      ]
+    },
+    "manual_training_pipeline": {
+      "entry_point": "rust/tara_engine/src/bin/manual_trainer.rs::main",
+      "description": "Developer-controlled manual training workspace: reads manual_training/config/, executes NativeSelfTrainer with custom hyperparameters, stages isolated checkpoints to manual_training/checkpoints/ (neural & world_model), writes run metrics to manual_training/runs/ and logs to manual_training/logs/, executes SkillsEvaluator on request, and requires explicit manual promotion gate before writing to production.",
+      "isolation_rule": "Manual training operates in an isolated operational workspace. Production weights (production/neural/ or storage/models/tara/) are never touched without explicit --promote flag and passing evaluation benchmark.",
+      "steps": [
+        {
+          "step": 1,
+          "component": "manual_training/config/default_config.json",
+          "action": "Load hyperparameter configuration (batch size, learning rate, max steps, dataset path, warmup steps, grad clip norm)"
+        },
+        {
+          "step": 2,
+          "component": "NativeSelfTrainer (Shared Training Infrastructure)",
+          "action": "Execute training loop with AdamW optimizer, EWC penalty, and backpropagation"
+        },
+        {
+          "step": 3,
+          "component": "SafeTensors Serialization",
+          "action": "Save intermediate neural checkpoint to manual_training/checkpoints/neural/model.safetensors"
+        },
+        {
+          "step": 4,
+          "component": "WorldStateTracker::save_candidate_snapshot",
+          "action": "Save candidate world model snapshot to manual_training/checkpoints/world_model/world_model_state.json"
+        },
+        {
+          "step": 5,
+          "component": "manual_training/runs/ & manual_training/logs/",
+          "action": "Persist training telemetry run JSON and append loss log"
+        },
+        {
+          "step": 6,
+          "component": "SkillsEvaluator (--evaluate flag)",
+          "action": "Execute core competencies benchmark suite and record manual_eval_report.json"
+        },
+        {
+          "step": 7,
+          "component": "Promotion Gate (--promote flag)",
+          "action": "Verify benchmark pass rate >= 60%, compute dynamic SHA-256, and promote candidate to production (production/neural/ and production/world_model/)"
+        }
+      ]
+    },
+    "world_model_training_and_update_pipeline": {
+      "entry_point": "rust/tara_training_system/world_model/world_state.rs::WorldStateTracker",
+      "description": "World model epistemic updating and snapshot lifecycle: new evidence -> validation -> ontological & causal update -> candidate snapshot staging -> consistency evaluation -> verified promotion.",
+      "neural_distinction": "Neural models update weights via loss gradients and backpropagation; World models update state via evidence validation, causal graph consistency, and verifiable facts without unconstrained weight drift.",
+      "steps": [
+        {
+          "step": 1,
+          "component": "ExperientialLearner / TopicResearcher / Sensory Input",
+          "action": "Acquire new factual or environmental evidence during cognitive turns or autonomous research"
+        },
+        {
+          "step": 2,
+          "component": "KnowledgeValidationEngine / CausalDAG",
+          "action": "Validate consistency against ground-truth knowledge graph and causal constraints"
+        },
+        {
+          "step": 3,
+          "component": "WorldStateTracker::update_entity",
+          "action": "Update in-memory entity attributes and world state graph"
+        },
+        {
+          "step": 4,
+          "component": "WorldStateTracker::save_candidate_snapshot",
+          "action": "Stage candidate world state snapshot to isolated directory (autonomous_training/world_model/candidates/ or manual_training/checkpoints/world_model/)"
+        },
+        {
+          "step": 5,
+          "component": "Consistency & Logic Evaluation",
+          "action": "Validate candidate snapshot consistency before promotion"
+        },
+        {
+          "step": 6,
+          "component": "WorldStateTracker::save_production_snapshot",
+          "action": "Promote candidate snapshot to official production (production/world_model/world_model_state.json and storage/persistence/world_model_state.json)"
+        }
+      ]
+    },
+    "security_governance_pipeline": {
+      "entry_point": "rust/tara_server/src/access/mod.rs::IdentityManager",
+      "description": "Cross-cutting security and governance layer applied at every request boundary and every model/code evolution event",
+      "cross_cutting_scope": "ALL requests, ALL tool invocations, ALL model promotions, ALL source code evolutions",
+      "steps": [
+        {
+          "step": 1,
+          "component": "IdentityManager::resolve_identity",
+          "action": "Resolve and authenticate request identity via token or session"
+        },
+        {
+          "step": 2,
+          "component": "CreatorAuthService::verify_authority",
+          "action": "Verify Creator authority for privileged operations"
+        },
+        {
+          "step": 3,
+          "component": "TokenScanner::scan_all",
+          "action": "Scan payload for embedded credentials, injection tokens, and prompt leaks"
+        },
+        {
+          "step": 4,
+          "component": "JailbreakDetector::inspect",
+          "action": "Inspect for homoglyphs, bidirectional overrides, zero-width chars, and prompt injection"
+        },
+        {
+          "step": 5,
+          "component": "ExecutionGuard::evaluate_action",
+          "action": "Policy gate: fail-closed authorization check before every action"
+        },
+        {
+          "step": 6,
+          "component": "SourceTamperDetector::detect (on evolution events)",
+          "action": "Verify no protected source symbols have been unauthorized-modified"
+        },
+        {
+          "step": 7,
+          "component": "DependencyVerifier::verify_all (on startup)",
+          "action": "Verify all critical runtime dependencies are present and unmodified"
+        },
+        {
+          "step": 8,
+          "component": "ModelIntegrityEngine::verify (on model load)",
+          "action": "Verify HMAC seal over SafeTensors model weights and manifest"
+        },
+        {
+          "step": 9,
+          "component": "ReleaseManifestManager::validate (on promotion)",
+          "action": "Validate release manifest signature and component inventory before promotion"
+        },
+        {
+          "step": 10,
+          "component": "AuditEngine::record_decision",
+          "action": "Append tamper-evident audit entry to encrypted ledger for every gated action"
+        },
+        {
+          "step": 11,
+          "component": "DurableLockdownManager::enforce (on breach detection)",
+          "action": "Trigger durable lockdown on repeated authentication failures or tampering detection"
+        }
+      ],
+      "robotics_command_safety": {
+        "description": "When TARA interfaces with hardware actuators, an additional hardware safety chain applies",
+        "chain": [
+          "Command received",
+          "KinematicLimitsChecker::validate — ensure within joint and workspace bounds",
+          "DestructionGuard::check — reject any command that could cause self-damage or environmental harm",
+          "EmergencyStop::arm — keep hardware kill-switch armed during all actuator operations",
+          "Actuator execution within verified bounds",
+          "SensorFeedback::verify — confirm actuator state matches intended command"
+        ]
+      }
+    }
+  }
+}

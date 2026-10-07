@@ -1,0 +1,70 @@
+{
+  "id": "memory",
+  "name": "Cognitive Memory Hub — Working, Episodic, Semantic, Procedural & Retention",
+  "purpose": "Full cognitive memory lifecycle: working memory buffering, multi-tier episodic memory recording, vector-based semantic retrieval, procedural/skill memory encoding, consolidation, traceability, retention enforcement, and multi-user isolation.",
+  "implementation_files": [
+    "rust/tara_server/src/memory/mod.rs",
+    "rust/tara_server/src/memory_hub.rs",
+    "rust/tara_server/src/storage_retention.rs",
+    "rust/tara_core/src/memory.rs"
+  ],
+  "primary_structs": [
+    "MemoryEngine",
+    "DynamicMemoryHub",
+    "EpisodeRecord",
+    "MemoryVectorIndex",
+    "ConsolidatedMemory",
+    "StorageRetentionManager"
+  ],
+  "registration": "DynamicMemoryHub::register_user allocates isolated user partition; MemoryEngine::init loads existing episode index; StorageRetentionManager::init loads quota configuration dynamically.",
+  "discovery": "MemoryEngine::query_semantic_episodes performs cosine vector search; get_recent_episodes retrieves recency window.",
+  "execution": "MemoryEngine::record_episode stores turn interactions with traceability fields; MemoryEngine::consolidate_episodes compresses older episodes; StorageRetentionManager::enforce_retention expires stale episodes within quota.",
+  "storage": "storage/memory/episodes/<user_id>/, storage/memory/episode_index.json, storage/memory/consolidated/.",
+  "memory_item_traceability_fields": [
+    "source",
+    "timestamp",
+    "confidence",
+    "provenance",
+    "task_context",
+    "tenant_user",
+    "verification_status"
+  ],
+  "memory_link": "Core provider of contextual memory for TaraBrain turn processing.",
+  "learning_link": "Consolidated memory episodes are distilled into training candidates by AutonomousOnlineLearner.",
+  "self_evolution_link": "High-utility memory patterns are prioritized for persistent fast-weights and knowledge graph integration.",
+  "world_model_link": "Memory ≠ World Model. Episodic memory stores WHAT happened; WorldStateTracker stores CURRENT entity states. Both are distinct and explicitly related — memory feeds world model inference but they are not the same.",
+  "curriculum_link": "Curriculum order mirrors memory tiering from primary factual retention to phd conceptual synthesis.",
+  "api_endpoints": [
+    "POST /api/memory/query",
+    "POST /api/memory/record",
+    "GET /api/memory/status"
+  ],
+  "safety_gates": [
+    "Multi-user tenant isolation: user A cannot read user B episodes",
+    "Zero plaintext secret leakage: credential redaction prior to disk write",
+    "StorageRetentionManager enforces quota bounds — no unbounded disk growth",
+    "Sensitive fields (passphrase, token, secret_key, id_token) are [REDACTED] before storage"
+  ],
+  "test_suites": [
+    "rust/tara_server/src/memory/mod.rs::tests",
+    "rust/tara_server/src/memory_hub.rs::tests"
+  ],
+  "lifecycle": {
+    "1_working": "Working memory buffer holds current-turn context (WorkingMemoryGovernor)",
+    "2_retrieve": "Vector retrieval finds top-k relevant past episodes for episodic recall",
+    "3_integrate": "Contextual episodes injected into neural prompt context window",
+    "4_record_episodic": "Post-turn: record_episode saves EpisodeRecord with source, timestamp, confidence, provenance, task_context, tenant_user, verification_status",
+    "5_index": "Exact FNV-1a hash and semantic embedding inserted into memory_index",
+    "6_procedural": "Successful skill/tool patterns encoded into procedural memory via CapabilitySynthesizer",
+    "7_consolidate_semantic": "Background cycle consolidates short-term episodes into long-term semantic schemas",
+    "8_distill": "High-value experiences exported as experiential training lessons",
+    "9_retain": "StorageRetentionManager::enforce_retention — expire stale low-confidence episodes within dynamic quota"
+  },
+  "upstream_capabilities": [
+    "access_and_security"
+  ],
+  "downstream_capabilities": [
+    "cognitive_loop",
+    "training_and_self_evolution"
+  ]
+}

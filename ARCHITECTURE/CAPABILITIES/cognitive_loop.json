@@ -1,0 +1,99 @@
+{
+  "api_endpoints": [
+    "POST /api/interact",
+    "POST /api/cognitive/loop/stream",
+    "GET /api/cognitive/state"
+  ],
+  "curriculum_link": "Matches the 15 educational curriculum tiers from Primary to PhD.",
+  "discovery": "SessionContextManager surfaces active context; SemanticIntentParser extracts goals and slots; CoreferenceResolver resolves pronouns and context references.",
+  "downstream_capabilities": [
+    "memory",
+    "skills",
+    "evaluator_and_recovery",
+    "training_and_self_evolution"
+  ],
+  "execution": "TaraBrain::process executes the 14-step loop: authentication → jailbreak scan → context/memory retrieval → intent/guard → execution → neural inference → verification → world state update → memory consolidation → audit.",
+  "id": "cognitive_loop",
+  "implementation_files": [
+    "rust/tara_server/src/brain.rs",
+    "rust/tara_server/src/cognitive/mod.rs",
+    "rust/tara_server/src/cognitive/affect.rs",
+    "rust/tara_server/src/cognitive/connection.rs",
+    "rust/tara_server/src/cognitive/creativity.rs",
+    "rust/tara_server/src/cognitive/curiosity.rs",
+    "rust/tara_training_system/world_model/deliberative_search.rs",
+    "rust/tara_server/src/cognitive/existential.rs",
+    "rust/tara_training_system/autonomous_training/world_model/experiential.rs",
+    "rust/tara_server/src/cognitive/fast_weights.rs",
+    "rust/tara_training_system/world_model/ontology.rs",
+    "rust/tara_training_system/world_model/reasoning.rs",
+    "rust/tara_server/src/cognitive/self_model.rs",
+    "rust/tara_training_system/world_model/world_state.rs",
+    "rust/tara_server/src/bridge.rs",
+    "rust/tara_server/src/context.rs",
+    "rust/tara_server/src/nlu.rs",
+    "rust/tara_server/src/contract.rs"
+  ],
+  "learning_link": "Step 9.5 extracts experiential lesson; Step 14 records audit decision; Curiosity engine proposes self-training topics.",
+  "lifecycle": {
+    "0.5_jailbreak": "JailbreakDetector::inspect — strip adversarial injection patterns",
+    "0_auth": "CreatorAuthService::verify_session — authenticate creator authority",
+    "10_world": "cognitive.world_state.update_entity + fast_weights.write_association",
+    "11_working": "cognitive.working_memory.govern_session updates working memory",
+    "12_reward": "reward_system.record_reward in hash-chained encrypted ledger",
+    "12_telemetry": "cognitive.event_bus.publish turn_completed event",
+    "13_consolidate": "cognitive.memory_consolidation.consolidate_episode",
+    "14_audit": "cognitive.audit_engine.record_decision — complete explainability trail",
+    "1_context": "SessionContextManager::get_or_create + CoreferenceResolver::resolve",
+    "2_clarify": "Coreference resolution and slot extraction from session history",
+    "3_recall": "knowledge_base.query_knowledge + memory_engine.query_episodes + ontology concepts",
+    "4_intent": "SemanticIntentParser::parse derives intent and entity slots",
+    "5_guard": "ExecutionGuard::evaluate_action validates against compiled policy — fail-closed",
+    "6_execute": "Intent-matched execution: EXECUTE_TOOL / EXECUTE_SKILL / EXECUTE_ENGINE / COMPOSITE_PLAN / SOURCE_CODE_EVOLUTION etc.",
+    "7_infer": "embed_feature_vector + fast_weights.read_association + native neural inference + ControlTokenActionParser",
+    "8_verify": "task_verifier.verify + uncertainty_detector + self_evaluator.evaluate_and_refine",
+    "9.5_lesson": "cognitive.experiential.record_lesson extracts closed-loop lesson",
+    "9_memory": "memory_engine.record_episode persists episode with sanitized result",
+    "9_session": "session.record_turn updates session context"
+  },
+  "memory_link": "Step 3 retrieves past episodes; Step 9 records complete turn episode; Step 13 consolidates to semantic memory.",
+  "name": "TaraBrain 14-Step Cognitive Loop & 15 Cognitive Pillars",
+  "primary_structs": [
+    "TaraBrain",
+    "CognitiveCapabilitiesHub",
+    "DeliberativeSearchEngine",
+    "FastWeightsAssociativeMemory",
+    "AffectiveHomeostasisEngine",
+    "SelfModelIntrospector",
+    "CuriosityGoalGenerator",
+    "UnifiedBridge",
+    "SessionContextManager",
+    "SemanticIntentParser",
+    "Session",
+    "AuthContext",
+    "CanonicalInferenceRequest",
+    "CanonicalInferenceResponse"
+  ],
+  "purpose": "Unified cognitive architecture executing 14 sequential stages per turn with 15 specialized cognitive capability modules, session management, intent parsing, world state tracking, and audit trail.",
+  "registration": "TaraBrain::new initializes all 15 cognitive sub-modules and binds them to the shared cognitive hub. UnifiedBridge::new initializes the native Rust inference dispatch layer.",
+  "safety_gates": [
+    "Step 0: CreatorAuthService::verify_session before any privileged execution",
+    "Step 0.5: JailbreakDetector::inspect blocks adversarial inputs before any processing",
+    "Step 5: ExecutionGuard::evaluate_action — fail-closed policy gate before every tool/skill call",
+    "Step 7 control token gate: ExecutionGuard re-evaluated before model-emitted tool execution",
+    "Existential reasoning rejects false claims of external consciousness / biological agency",
+    "Constraint solver bounds action space"
+  ],
+  "self_evolution_link": "SelfModel updates operational bounds; FastWeights adjust immediate synaptic plasticity; world_state.update_entity tracks entity changes per turn.",
+  "storage": "storage/persistence/self_model.json, storage/persistence/experiential_lessons.jsonl, storage/persistence/world_model_state.json.",
+  "test_suites": [
+    "rust/tara_server/tests/cognitive_15_runtime_e2e.rs",
+    "rust/tara_training_system/world_model/deliberative_search.rs::tests"
+  ],
+  "upstream_capabilities": [
+    "access_and_security",
+    "rules_and_policy",
+    "model_and_inference"
+  ],
+  "world_model_link": "Step 10 (brain.rs line 1474): world_state.update_entity updates per-turn entity states. cognitive.world_state is the living world model updated every cognitive turn."
+}

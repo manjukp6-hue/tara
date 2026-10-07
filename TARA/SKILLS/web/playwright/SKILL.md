@@ -145,3 +145,13 @@ Open only what you need:
 - Use `--headed` when a visual check will help.
 - When capturing artifacts in this repo, use `output/playwright/` and avoid introducing new top-level artifact folders.
 - Default to CLI commands and workflows, not Playwright test specs.
+
+## Interactive Persistent Sessions (QA & Visual Debugging)
+
+For persistent browser sessions and fast iterative UI/visual debugging:
+1. Initialize browser instance via `playwright`:
+   ```bash
+   npx playwright install chromium
+   ```
+2. For interactive evaluation, maintain persistent page handles across tests to verify DOM states, styles, and captures without full toolchain restarts.
+3. Clean up the Playwright session when testing completes.

@@ -1,0 +1,51 @@
+{
+  "id": "evaluator_and_recovery",
+  "name": "Self-Evaluation, Task Verification & Recovery Engine",
+  "purpose": "Self-evaluating reasoning quality, verifying task completion, detecting uncertainty, and executing automated recovery fallbacks.",
+  "implementation_files": [
+    "rust/tara_server/src/evaluator.rs",
+    "rust/tara_server/src/subsystems.rs"
+  ],
+  "primary_structs": [
+    "SelfEvaluator",
+    "TaskVerifier",
+    "UncertaintyDetector",
+    "RecoveryEngine",
+    "ResilienceEngine"
+  ],
+  "registration": "TaraBrain::new initializes evaluators and binds recovery hooks.",
+  "discovery": "Post-generation hook triggers evaluation cycle on every output.",
+  "execution": "TaskVerifier::verify_turn, SelfEvaluator::evaluate_response, RecoveryEngine::attempt_recovery.",
+  "storage": "Evaluation scores appended to turn metadata in memory episodes.",
+  "memory_link": "Evaluation metrics provide quality labels for episodic memory storage.",
+  "learning_link": "High-scoring turns prioritized for continual training replay.",
+  "self_evolution_link": "Frequent uncertainty detections trigger autonomous topic research.",
+  "curriculum_link": "Evaluation rubrics mirror 35-point dataset intelligence criteria.",
+  "api_endpoints": [
+    "POST /api/evaluator/verify",
+    "GET /api/evaluator/metrics"
+  ],
+  "safety_gates": [
+    "Refusal to claim success when TaskVerifier detects derivation mismatch",
+    "Uncertainty threshold forces explicit disclosure of low confidence to user"
+  ],
+  "test_suites": [
+    "rust/tara_server/src/evaluator.rs::tests"
+  ],
+  "lifecycle": {
+    "1_intercept": "Intercept generated response before final emission",
+    "2_verify": "TaskVerifier compares response against specialist derivations and constraint bounds",
+    "3_uncertainty": "UncertaintyDetector computes confidence score from output token entropy",
+    "4_evaluate": "SelfEvaluator scores reasoning depth, factual alignment, and clarity",
+    "5_recover": "If verification fails, RecoveryEngine triggers backtracking or fallback strategy",
+    "6_tag": "Attach evaluation scorecard to turn record in memory hub"
+  },
+  "upstream_capabilities": [
+    "cognitive_loop",
+    "specialist_engines"
+  ],
+  "downstream_capabilities": [
+    "memory",
+    "training_and_self_evolution"
+  ]
+}

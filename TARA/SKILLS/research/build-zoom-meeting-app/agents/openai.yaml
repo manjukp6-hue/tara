@@ -1,5 +1,0 @@
-interface:
-  display_name: "/build-zoom-meeting-app"
-  short_description: Use when embedding meetings.
-policy:
-  allow_implicit_invocation: false

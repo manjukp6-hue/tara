@@ -10,19 +10,19 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::runtime::agent::Agent;
+use crate::runtime::approval::ApprovalGate;
+use crate::runtime::authorization::{ActionType, AuthorizationGate};
+use crate::runtime::health::{EntityHealthStatus, HealthMonitor};
 use crate::runtime::lifecycle::{EntityState, EntityType};
 use crate::runtime::naming::DynamicNamingManager;
-use crate::runtime::sandbox::{IsolatedSandbox, SandboxConfig, SandboxExecutionResult};
-use crate::runtime::agent::Agent;
-use crate::runtime::worker::Worker;
-use crate::runtime::team::{Team, TeamType};
-use crate::runtime::authorization::{AuthorizationGate, ActionType};
-use crate::runtime::approval::ApprovalGate;
-use crate::runtime::resource::{ResourceGovernor, ResourceQuota};
-use crate::runtime::tools::ToolController;
 use crate::runtime::network::{NetworkController, NetworkPermission};
-use crate::runtime::health::{HealthMonitor, EntityHealthStatus};
-use crate::runtime::recovery::{RecoveryOrchestrator, FailureCategory};
+use crate::runtime::recovery::{FailureCategory, RecoveryOrchestrator};
+use crate::runtime::resource::{ResourceGovernor, ResourceQuota};
+use crate::runtime::sandbox::{IsolatedSandbox, SandboxConfig, SandboxExecutionResult};
+use crate::runtime::team::{Team, TeamType};
+use crate::runtime::tools::ToolController;
+use crate::runtime::worker::Worker;
 
 /// Master configuration for dynamic manager instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,9 +36,18 @@ pub struct ManagerConfig {
 
 /// Generic extensible Manager control interface.
 pub trait RuntimeManagerOps {
-    fn create_sandbox(&mut self, sandbox_type: &str, preferred_name: Option<&str>) -> Result<(String, String), String>;
+    fn create_sandbox(
+        &mut self,
+        sandbox_type: &str,
+        preferred_name: Option<&str>,
+    ) -> Result<(String, String), String>;
     fn start_sandbox(&mut self, sandbox_id: &str) -> Result<(), String>;
-    fn assign_agent(&mut self, agent_id: &str, task_id: &str, sandbox_id: &str) -> Result<(), String>;
+    fn assign_agent(
+        &mut self,
+        agent_id: &str,
+        task_id: &str,
+        sandbox_id: &str,
+    ) -> Result<(), String>;
     fn reassign_agent(&mut self, agent_id: &str, new_sandbox_id: &str) -> Result<(), String>;
     fn pause(&mut self, entity_id: &str) -> Result<(), String>;
     fn resume(&mut self, entity_id: &str) -> Result<(), String>;
@@ -52,7 +61,13 @@ pub trait RuntimeManagerOps {
     fn health(&self, entity_id: &str) -> Result<EntityHealthStatus, String>;
     fn resource_quota(&mut self, entity_id: &str, quota: ResourceQuota) -> Result<(), String>;
     fn tool_assign(&mut self, sandbox_id: &str, tools: &[String]) -> Result<(), String>;
-    fn network_grant(&mut self, sandbox_id: &str, task_id: &str, domains: &[String], duration_ms: u64) -> Result<(), String>;
+    fn network_grant(
+        &mut self,
+        sandbox_id: &str,
+        task_id: &str,
+        domains: &[String],
+        duration_ms: u64,
+    ) -> Result<(), String>;
 }
 
 /// Complete production TaraManager.
@@ -72,6 +87,17 @@ pub struct TaraManager {
     pub is_system_lockdown: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct DynamicTaskParams<'a> {
+    pub task_id: &'a str,
+    pub domain_type: &'a str,
+    pub required_tools: &'a [String],
+    pub allow_network_domains: Option<&'a [String]>,
+    pub workload_cmd: &'a str,
+    pub workload_args: &'a [&'a str],
+    pub stdin: Option<&'a [u8]>,
+}
+
 impl TaraManager {
     pub fn new(config: ManagerConfig, naming: Option<Arc<DynamicNamingManager>>) -> Self {
         let naming = naming.unwrap_or_else(|| Arc::new(DynamicNamingManager::new()));
@@ -83,10 +109,10 @@ impl TaraManager {
             workers: HashMap::new(),
             teams: HashMap::new(),
             approval_gate: ApprovalGate::new(),
-            resource_governor: ResourceGovernor::new(300),
+            resource_governor: ResourceGovernor::default(),
             tool_controller: ToolController::new(),
             network_controller: NetworkController::new(),
-            health_monitor: HealthMonitor::new(60),
+            health_monitor: HealthMonitor::default(),
             recovery: RecoveryOrchestrator::new(),
             is_system_lockdown: false,
         }
@@ -96,14 +122,18 @@ impl TaraManager {
     /// TASK -> CREATE -> NAME -> ASSIGN -> WORK -> VERIFY -> RELEASE -> CLEANUP
     pub fn execute_dynamic_task(
         &mut self,
-        task_id: &str,
-        domain_type: &str,
-        required_tools: &[String],
-        allow_network_domains: Option<&[String]>,
-        workload_cmd: &str,
-        workload_args: &[&str],
-        stdin: Option<&[u8]>,
+        params: DynamicTaskParams<'_>,
     ) -> Result<SandboxExecutionResult, String> {
+        let DynamicTaskParams {
+            task_id,
+            domain_type,
+            required_tools,
+            allow_network_domains,
+            workload_cmd,
+            workload_args,
+            stdin,
+        } = params;
+
         // 1. Authorize action
         let caller_caps = HashSet::from(["*".to_string()]);
         let auth = AuthorizationGate::evaluate(
@@ -142,13 +172,19 @@ impl TaraManager {
         let final_result = match exec_result {
             Ok(res) => {
                 if res.exit_code != 0 || res.timed_out {
-                    let cat = if res.timed_out { FailureCategory::Timeout } else { FailureCategory::ProcessCrash };
+                    let cat = if res.timed_out {
+                        FailureCategory::Timeout
+                    } else {
+                        FailureCategory::ProcessCrash
+                    };
                     let _ = self.recovery.handle_failure(&sbx_id, cat, &res.stderr);
                 }
                 res
             }
             Err(e) => {
-                let _ = self.recovery.handle_failure(&sbx_id, FailureCategory::SecurityViolation, &e);
+                let _ =
+                    self.recovery
+                        .handle_failure(&sbx_id, FailureCategory::SecurityViolation, &e);
                 return Err(format!("Execution failed: {}", e));
             }
         };
@@ -160,8 +196,21 @@ impl TaraManager {
     }
 
     /// Spawns a new Agent buddy on demand.
-    pub fn create_agent(&mut self, role: &str, capabilities: &[String], preferred_name: Option<&str>) -> Result<(String, String), String> {
-        let identity = self.naming.register_entity(EntityType::Agent, role, preferred_name)?;
+    pub fn create_agent(
+        &mut self,
+        role: &str,
+        capabilities: &[String],
+        preferred_name: Option<&str>,
+    ) -> Result<(String, String), String> {
+        if self.is_system_lockdown {
+            return Err("Agent creation denied during system lockdown".to_string());
+        }
+        if role.trim().is_empty() {
+            return Err("Agent role must not be empty".to_string());
+        }
+        let identity = self
+            .naming
+            .register_entity(EntityType::Agent, role, preferred_name)?;
         let agent = Agent::new(
             identity.internal_id.clone(),
             identity.display_name.clone(),
@@ -173,8 +222,32 @@ impl TaraManager {
     }
 
     /// Spawns a new Worker buddy on demand.
-    pub fn create_worker(&mut self, specialization: &str, capabilities: &[String], preferred_name: Option<&str>) -> Result<(String, String), String> {
-        let identity = self.naming.register_entity(EntityType::Worker, specialization, preferred_name)?;
+    pub fn create_worker(
+        &mut self,
+        specialization: &str,
+        capabilities: &[String],
+        preferred_name: Option<&str>,
+    ) -> Result<(String, String), String> {
+        if self.is_system_lockdown {
+            return Err("Worker creation denied during system lockdown".to_string());
+        }
+        if specialization.trim().is_empty() {
+            return Err("Worker specialization must not be empty".to_string());
+        }
+        if self.is_system_lockdown {
+            return Err("Sandbox creation denied during system lockdown".to_string());
+        }
+        if self.config.max_concurrent_sandboxes > 0
+            && self.sandboxes.len() >= self.config.max_concurrent_sandboxes
+        {
+            return Err(format!(
+                "Sandbox capacity reached ({})",
+                self.config.max_concurrent_sandboxes
+            ));
+        }
+        let identity =
+            self.naming
+                .register_entity(EntityType::Worker, specialization, preferred_name)?;
         let worker = Worker::new(
             identity.internal_id.clone(),
             identity.display_name.clone(),
@@ -186,8 +259,30 @@ impl TaraManager {
     }
 
     /// Forms a temporary collaborative Team.
-    pub fn form_team(&mut self, team_type: TeamType, objective: &str, member_ids: &[String], preferred_name: Option<&str>) -> Result<(String, String), String> {
-        let identity = self.naming.register_entity(EntityType::Team, objective, preferred_name)?;
+    pub fn form_team(
+        &mut self,
+        team_type: TeamType,
+        objective: &str,
+        member_ids: &[String],
+        preferred_name: Option<&str>,
+    ) -> Result<(String, String), String> {
+        if self.is_system_lockdown {
+            return Err("Team creation denied during system lockdown".to_string());
+        }
+        if objective.trim().is_empty() || member_ids.is_empty() {
+            return Err("Team requires an objective and at least one member".to_string());
+        }
+        for member_id in member_ids {
+            if !self.agents.contains_key(member_id) && !self.workers.contains_key(member_id) {
+                return Err(format!(
+                    "Team member '{}' is not a registered buddy",
+                    member_id
+                ));
+            }
+        }
+        let identity = self
+            .naming
+            .register_entity(EntityType::Team, objective, preferred_name)?;
         let team = Team::new(
             identity.internal_id.clone(),
             identity.display_name.clone(),
@@ -201,7 +296,10 @@ impl TaraManager {
 
     /// Dissolves a Team and returns members to their independent pools.
     pub fn dissolve_team(&mut self, team_id: &str) -> Result<Vec<String>, String> {
-        let mut team = self.teams.remove(team_id).ok_or_else(|| format!("Team '{}' not found", team_id))?;
+        let mut team = self
+            .teams
+            .remove(team_id)
+            .ok_or_else(|| format!("Team '{}' not found", team_id))?;
         let freed_members = team.dissolve("Team objective concluded; dynamic dissolution")?;
         let _ = self.naming.retire_entity(team_id, "Team dissolved");
         Ok(freed_members)
@@ -209,23 +307,26 @@ impl TaraManager {
 }
 
 impl RuntimeManagerOps for TaraManager {
-    fn create_sandbox(&mut self, sandbox_type: &str, preferred_name: Option<&str>) -> Result<(String, String), String> {
-        let identity = self.naming.register_entity(EntityType::Sandbox, sandbox_type, preferred_name)?;
-        let sbx_root = self.config.storage_base_dir.join("sandboxes").join(&identity.internal_id);
+    fn create_sandbox(
+        &mut self,
+        sandbox_type: &str,
+        preferred_name: Option<&str>,
+    ) -> Result<(String, String), String> {
+        let identity =
+            self.naming
+                .register_entity(EntityType::Sandbox, sandbox_type, preferred_name)?;
+        let sbx_root = self
+            .config
+            .storage_base_dir
+            .join("sandboxes")
+            .join(&identity.internal_id);
 
         let config = SandboxConfig {
             sandbox_id: identity.internal_id.clone(),
             display_name: identity.display_name.clone(),
             sandbox_type: sandbox_type.to_string(),
             root_dir: sbx_root,
-            max_memory_bytes: 256 * 1024 * 1024,
-            max_processes: 4,
-            max_disk_bytes: 512 * 1024 * 1024,
-            execution_timeout_ms: 15_000,
-            allow_network: false,
-            allowed_domains: Vec::new(),
-            allowed_tools: HashSet::new(),
-            environment_variables: HashMap::new(),
+            ..SandboxConfig::default()
         };
 
         let sandbox = IsolatedSandbox::new(config)?;
@@ -234,29 +335,72 @@ impl RuntimeManagerOps for TaraManager {
     }
 
     fn start_sandbox(&mut self, sandbox_id: &str) -> Result<(), String> {
-        let sbx = self.sandboxes.get_mut(sandbox_id).ok_or_else(|| format!("Sandbox '{}' not found", sandbox_id))?;
-        sbx.state.transition_to(EntityState::Active, "Sandbox started", "MANAGER")?;
+        let sbx = self
+            .sandboxes
+            .get_mut(sandbox_id)
+            .ok_or_else(|| format!("Sandbox '{}' not found", sandbox_id))?;
+        sbx.state
+            .transition_to(EntityState::Active, "Sandbox started", "MANAGER")?;
         Ok(())
     }
 
-    fn assign_agent(&mut self, agent_id: &str, task_id: &str, sandbox_id: &str) -> Result<(), String> {
-        let agent = self.agents.get_mut(agent_id).ok_or_else(|| format!("Agent '{}' not found", agent_id))?;
+    fn assign_agent(
+        &mut self,
+        agent_id: &str,
+        task_id: &str,
+        sandbox_id: &str,
+    ) -> Result<(), String> {
+        let sandbox = self
+            .sandboxes
+            .get(sandbox_id)
+            .ok_or_else(|| format!("Sandbox '{}' not found", sandbox_id))?;
+        if sandbox.state.current_state() != EntityState::Active {
+            return Err("Agent assignment requires an active sandbox".to_string());
+        }
+        let agent = self
+            .agents
+            .get_mut(agent_id)
+            .ok_or_else(|| format!("Agent '{}' not found", agent_id))?;
         agent.assign_task(task_id, sandbox_id)
     }
 
     fn reassign_agent(&mut self, agent_id: &str, new_sandbox_id: &str) -> Result<(), String> {
-        let agent = self.agents.get_mut(agent_id).ok_or_else(|| format!("Agent '{}' not found", agent_id))?;
+        let target = self
+            .sandboxes
+            .get(new_sandbox_id)
+            .ok_or_else(|| format!("Sandbox '{}' not found", new_sandbox_id))?;
+        if target.state.current_state() != EntityState::Active {
+            return Err("Agent reassignment requires an active sandbox".to_string());
+        }
+        let agent = self
+            .agents
+            .get_mut(agent_id)
+            .ok_or_else(|| format!("Agent '{}' not found", agent_id))?;
+        if agent
+            .assigned_sandbox_id
+            .as_deref()
+            .is_some_and(|old| old != new_sandbox_id)
+        {
+            return Err(
+                "Cross-sandbox reassignment requires an approved broker transfer".to_string(),
+            );
+        }
         agent.assigned_sandbox_id = Some(new_sandbox_id.to_string());
         Ok(())
     }
 
     fn pause(&mut self, entity_id: &str) -> Result<(), String> {
         if let Some(sbx) = self.sandboxes.get_mut(entity_id) {
-            sbx.state.transition_to(EntityState::Paused, "Paused by manager", "MANAGER")?;
+            sbx.state
+                .transition_to(EntityState::Paused, "Paused by manager", "MANAGER")?;
             return Ok(());
         }
         if let Some(agent) = self.agents.get_mut(entity_id) {
-            agent.state_machine.transition_to(EntityState::Paused, "Paused by manager", "MANAGER")?;
+            agent.state_machine.transition_to(
+                EntityState::Paused,
+                "Paused by manager",
+                "MANAGER",
+            )?;
             return Ok(());
         }
         Err(format!("Entity '{}' not found to pause", entity_id))
@@ -264,11 +408,16 @@ impl RuntimeManagerOps for TaraManager {
 
     fn resume(&mut self, entity_id: &str) -> Result<(), String> {
         if let Some(sbx) = self.sandboxes.get_mut(entity_id) {
-            sbx.state.transition_to(EntityState::Active, "Resumed by manager", "MANAGER")?;
+            sbx.state
+                .transition_to(EntityState::Active, "Resumed by manager", "MANAGER")?;
             return Ok(());
         }
         if let Some(agent) = self.agents.get_mut(entity_id) {
-            agent.state_machine.transition_to(EntityState::Active, "Resumed by manager", "MANAGER")?;
+            agent.state_machine.transition_to(
+                EntityState::Active,
+                "Resumed by manager",
+                "MANAGER",
+            )?;
             return Ok(());
         }
         Err(format!("Entity '{}' not found to resume", entity_id))
@@ -279,7 +428,11 @@ impl RuntimeManagerOps for TaraManager {
             return sbx.stop();
         }
         if let Some(agent) = self.agents.get_mut(entity_id) {
-            agent.state_machine.transition_to(EntityState::Stopped, "Stopped by manager", "MANAGER")?;
+            agent.state_machine.transition_to(
+                EntityState::Stopped,
+                "Stopped by manager",
+                "MANAGER",
+            )?;
             return Ok(());
         }
         Err(format!("Entity '{}' not found to stop", entity_id))
@@ -288,7 +441,9 @@ impl RuntimeManagerOps for TaraManager {
     fn release(&mut self, entity_id: &str) -> Result<(), String> {
         if let Some(mut sbx) = self.sandboxes.remove(entity_id) {
             sbx.cleanup()?;
-            let _ = self.naming.retire_entity(entity_id, "Sandbox released and cleaned up");
+            let _ = self
+                .naming
+                .retire_entity(entity_id, "Sandbox released and cleaned up");
             self.tool_controller.revoke_sandbox_tools(entity_id);
             self.network_controller.revoke_network(entity_id);
             return Ok(());
@@ -303,7 +458,10 @@ impl RuntimeManagerOps for TaraManager {
         if let Some(worker) = self.workers.get_mut(entity_id) {
             return worker.evaluate_promotion();
         }
-        Err(format!("Buddy '{}' not found for promotion evaluation", entity_id))
+        Err(format!(
+            "Buddy '{}' not found for promotion evaluation",
+            entity_id
+        ))
     }
 
     fn demote(&mut self, entity_id: &str) -> Result<bool, String> {
@@ -326,11 +484,15 @@ impl RuntimeManagerOps for TaraManager {
 
     fn retire(&mut self, entity_id: &str, reason: &str) -> Result<(), String> {
         if let Some(agent) = self.agents.get_mut(entity_id) {
-            agent.state_machine.transition_to(EntityState::Retired, reason, "MANAGER")?;
+            agent
+                .state_machine
+                .transition_to(EntityState::Retired, reason, "MANAGER")?;
             return self.naming.retire_entity(entity_id, reason);
         }
         if let Some(worker) = self.workers.get_mut(entity_id) {
-            worker.state_machine.transition_to(EntityState::Retired, reason, "MANAGER")?;
+            worker
+                .state_machine
+                .transition_to(EntityState::Retired, reason, "MANAGER")?;
             return self.naming.retire_entity(entity_id, reason);
         }
         self.release(entity_id)
@@ -358,7 +520,9 @@ impl RuntimeManagerOps for TaraManager {
 
     fn health(&self, entity_id: &str) -> Result<EntityHealthStatus, String> {
         let current_state = self.status(entity_id)?;
-        Ok(self.health_monitor.evaluate_health(entity_id, current_state))
+        Ok(self
+            .health_monitor
+            .evaluate_health(entity_id, current_state))
     }
 
     fn resource_quota(&mut self, entity_id: &str, quota: ResourceQuota) -> Result<(), String> {
@@ -367,11 +531,106 @@ impl RuntimeManagerOps for TaraManager {
     }
 
     fn tool_assign(&mut self, sandbox_id: &str, tools: &[String]) -> Result<(), String> {
-        self.tool_controller.assign_tools_to_sandbox(sandbox_id, tools)
+        self.tool_controller
+            .assign_tools_to_sandbox(sandbox_id, tools)
     }
 
-    fn network_grant(&mut self, sandbox_id: &str, task_id: &str, domains: &[String], duration_ms: u64) -> Result<(), String> {
-        self.network_controller.grant_network(sandbox_id, task_id, domains, NetworkPermission::ReadOnly, duration_ms);
+    fn network_grant(
+        &mut self,
+        sandbox_id: &str,
+        task_id: &str,
+        domains: &[String],
+        duration_ms: u64,
+    ) -> Result<(), String> {
+        self.network_controller.grant_network(
+            sandbox_id,
+            task_id,
+            domains,
+            NetworkPermission::ReadOnly,
+            duration_ms,
+        );
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    struct TempDirGuard(PathBuf);
+    impl TempDirGuard {
+        fn new(name: &str) -> Self {
+            let path = std::env::temp_dir().join(format!("tara_mgr_test_{}_{:x}", name, rand::random::<u64>()));
+            let _ = std::fs::create_dir_all(&path);
+            Self(path)
+        }
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn test_manager_sandbox_lifecycle() {
+        let temp = TempDirGuard::new("lifecycle");
+        let config = ManagerConfig {
+            manager_id: "mgr_main".to_string(),
+            display_name: "Manager-Main".to_string(),
+            storage_base_dir: temp.path().to_path_buf(),
+            is_supervisor: true,
+            max_concurrent_sandboxes: 10,
+        };
+
+        let mut mgr = TaraManager::new(config, None);
+
+        // Create sandbox
+        let (sbx_id, name) = mgr.create_sandbox("Standard", Some("Worker-Box")).unwrap();
+        assert_eq!(name, "Worker-Box");
+        assert_eq!(mgr.status(&sbx_id).unwrap(), EntityState::Ready);
+
+        // Start sandbox
+        assert!(mgr.start_sandbox(&sbx_id).is_ok());
+        assert_eq!(mgr.status(&sbx_id).unwrap(), EntityState::Active);
+
+        // Pause and Resume
+        assert!(mgr.pause(&sbx_id).is_ok());
+        assert_eq!(mgr.status(&sbx_id).unwrap(), EntityState::Paused);
+        assert!(mgr.resume(&sbx_id).is_ok());
+        assert_eq!(mgr.status(&sbx_id).unwrap(), EntityState::Active);
+
+        // Release/Cleanup
+        assert!(mgr.release(&sbx_id).is_ok());
+        assert!(mgr.status(&sbx_id).is_err());
+    }
+
+    #[test]
+    fn test_manager_spawn_agent_and_worker() {
+        let temp = TempDirGuard::new("buddies");
+        let config = ManagerConfig {
+            manager_id: "mgr_main".to_string(),
+            display_name: "Manager-Main".to_string(),
+            storage_base_dir: temp.path().to_path_buf(),
+            is_supervisor: true,
+            max_concurrent_sandboxes: 10,
+        };
+
+        let mut mgr = TaraManager::new(config, None);
+
+        let (agt_id, _) = mgr.create_agent("Researcher", &[], None).unwrap();
+        assert_eq!(mgr.status(&agt_id).unwrap(), EntityState::Ready);
+
+        let (wrk_id, _) = mgr.create_worker("Compiler", &[], None).unwrap();
+        assert_eq!(mgr.status(&wrk_id).unwrap(), EntityState::Ready);
+
+        // Promote/Demote
+        assert!(!mgr.promote(&agt_id).unwrap());
+        assert!(!mgr.demote(&agt_id).unwrap());
+    }
+}
+
+

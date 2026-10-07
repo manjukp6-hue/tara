@@ -1,1 +1,0 @@
-# TARA Storage Registry Package

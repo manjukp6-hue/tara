@@ -29,6 +29,12 @@ pub struct NetworkController {
     active_grants: HashMap<String, (NetworkGrant, Instant)>,
 }
 
+impl Default for NetworkController {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NetworkController {
     pub fn new() -> Self {
         Self {
@@ -54,7 +60,8 @@ impl NetworkController {
             duration_ms,
         };
 
-        self.active_grants.insert(sandbox_id.to_string(), (grant, Instant::now()));
+        self.active_grants
+            .insert(sandbox_id.to_string(), (grant, Instant::now()));
     }
 
     /// Checks if a sandbox is permitted outbound connection to a domain.
@@ -76,3 +83,52 @@ impl NetworkController {
         self.active_grants.remove(sandbox_id);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_network_controller_default_off() {
+        let ctrl = NetworkController::new();
+        assert!(!ctrl.is_domain_allowed("sbx_test", "example.com"));
+    }
+
+    #[test]
+    fn test_network_controller_grant_and_revoke() {
+        let mut ctrl = NetworkController::new();
+        let allowed = vec!["api.local".to_string(), "crates.io".to_string()];
+
+        ctrl.grant_network(
+            "sbx_task_net",
+            "task_net",
+            &allowed,
+            NetworkPermission::ReadOnly,
+            60_000,
+        );
+
+        assert!(ctrl.is_domain_allowed("sbx_task_net", "api.local"));
+        assert!(ctrl.is_domain_allowed("sbx_task_net", "crates.io"));
+        assert!(!ctrl.is_domain_allowed("sbx_task_net", "malicious.org"));
+
+        ctrl.revoke_network("sbx_task_net");
+        assert!(!ctrl.is_domain_allowed("sbx_task_net", "api.local"));
+    }
+
+    #[test]
+    fn test_network_controller_wildcard() {
+        let mut ctrl = NetworkController::new();
+        let allowed = vec!["*".to_string()];
+
+        ctrl.grant_network(
+            "sbx_wildcard",
+            "task_wild",
+            &allowed,
+            NetworkPermission::ReadWrite,
+            60_000,
+        );
+
+        assert!(ctrl.is_domain_allowed("sbx_wildcard", "anywhere.com"));
+    }
+}
+

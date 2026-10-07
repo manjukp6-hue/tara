@@ -1,5 +1,0 @@
-interface:
-  display_name: Build Zoom REST API App
-  short_description: Use when calling REST APIs.
-policy:
-  allow_implicit_invocation: false

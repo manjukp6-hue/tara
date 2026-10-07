@@ -36,7 +36,7 @@ impl ToolController {
             description: "Read metadata and inspect head bytes inside sandbox".to_string(),
             required_capability: "tool:file_inspector".to_string(),
             is_high_risk: false,
-            allowed_extensions: vec![".txt".into(), ".json".into(), ".csv".into(), ".rs".into(), ".py".into()],
+            allowed_extensions: vec![".txt".into(), ".json".into(), ".csv".into(), ".rs".into()],
         });
 
         self.register_tool(ToolDefinition {
@@ -52,7 +52,7 @@ impl ToolController {
             description: "Run verification script inside isolated container".to_string(),
             required_capability: "tool:code_evaluator".to_string(),
             is_high_risk: true,
-            allowed_extensions: vec![".rs".into(), ".py".into()],
+            allowed_extensions: vec![".rs".into()],
         });
     }
 
@@ -61,7 +61,11 @@ impl ToolController {
     }
 
     /// Dynamically assigns task-scoped tools to a sandbox.
-    pub fn assign_tools_to_sandbox(&mut self, sandbox_id: &str, tool_names: &[String]) -> Result<(), String> {
+    pub fn assign_tools_to_sandbox(
+        &mut self,
+        sandbox_id: &str,
+        tool_names: &[String],
+    ) -> Result<(), String> {
         let mut allowed = HashSet::new();
         for t in tool_names {
             if !self.catalog.contains_key(t) {
@@ -69,7 +73,8 @@ impl ToolController {
             }
             allowed.insert(t.clone());
         }
-        self.active_assignments.insert(sandbox_id.to_string(), allowed);
+        self.active_assignments
+            .insert(sandbox_id.to_string(), allowed);
         Ok(())
     }
 
@@ -86,3 +91,39 @@ impl ToolController {
         self.active_assignments.remove(sandbox_id);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tool_controller_catalog_and_assignment() {
+        let mut ctrl = ToolController::new();
+
+        // Built-ins exist
+        assert!(ctrl.catalog.contains_key("file_inspector"));
+        assert!(ctrl.catalog.contains_key("code_evaluator"));
+
+        // Assign valid tools
+        let tools = vec!["file_inspector".to_string(), "hash_verifier".to_string()];
+        assert!(ctrl.assign_tools_to_sandbox("sbx_task_01", &tools).is_ok());
+
+        assert!(ctrl.is_tool_allowed("sbx_task_01", "file_inspector"));
+        assert!(ctrl.is_tool_allowed("sbx_task_01", "hash_verifier"));
+        assert!(!ctrl.is_tool_allowed("sbx_task_01", "code_evaluator"));
+
+        // Revoke
+        ctrl.revoke_sandbox_tools("sbx_task_01");
+        assert!(!ctrl.is_tool_allowed("sbx_task_01", "file_inspector"));
+    }
+
+    #[test]
+    fn test_unrecognized_tool_assignment_error() {
+        let mut ctrl = ToolController::new();
+        let tools = vec!["non_existent_tool".to_string()];
+        let res = ctrl.assign_tools_to_sandbox("sbx_err", &tools);
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("Unrecognized tool"));
+    }
+}
+

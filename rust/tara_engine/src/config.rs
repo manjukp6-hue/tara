@@ -17,6 +17,10 @@ pub enum ConfigError {
     /// JSON parse failure.
     #[error("JSON parse error: {0}")]
     Json(#[from] serde_json::Error),
+
+    /// A declared dimension or numerical setting cannot form a valid model.
+    #[error("invalid model configuration: {0}")]
+    Invalid(String),
 }
 
 /// Full model configuration for TaraForCausalLM.
@@ -94,7 +98,49 @@ impl TaraConfig {
     pub fn from_json_file(path: &str) -> Result<Self, ConfigError> {
         let raw = fs::read_to_string(path)?;
         let cfg: Self = serde_json::from_str(&raw)?;
+        cfg.validate()?;
         Ok(cfg)
+    }
+
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.vocab_size == 0
+            || self.hidden_size == 0
+            || self.intermediate_size == 0
+            || self.num_hidden_layers == 0
+            || self.num_attention_heads == 0
+            || self.num_key_value_heads == 0
+            || self.max_position_embeddings == 0
+        {
+            return Err(ConfigError::Invalid(
+                "all model dimensions must be positive".into(),
+            ));
+        }
+        if !self
+            .num_attention_heads
+            .is_multiple_of(self.num_key_value_heads)
+        {
+            return Err(ConfigError::Invalid(
+                "attention head count must be divisible by key/value head count".into(),
+            ));
+        }
+        let head_dim = self.effective_head_dim();
+        if head_dim == 0 || !head_dim.is_multiple_of(2) {
+            return Err(ConfigError::Invalid(
+                "effective head dimension must be positive and even for rotary embeddings".into(),
+            ));
+        }
+        if !self.rope_theta.is_finite()
+            || self.rope_theta <= 0.0
+            || !self.rms_norm_eps.is_finite()
+            || self.rms_norm_eps <= 0.0
+            || !self.initializer_range.is_finite()
+            || self.initializer_range <= 0.0
+        {
+            return Err(ConfigError::Invalid(
+                "numerical hyperparameters must be finite and positive".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// Serialise the configuration to a [`serde_json::Value`].
@@ -112,5 +158,76 @@ impl TaraConfig {
         } else {
             self.hidden_size / self.num_attention_heads
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config_is_valid() {
+        let cfg = TaraConfig::default();
+        assert!(cfg.validate().is_ok());
+        assert_eq!(cfg.effective_head_dim(), 16);
+    }
+
+    #[test]
+    fn test_zero_dimensions_rejected() {
+        let cfg = TaraConfig {
+            vocab_size: 0,
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_err());
+
+        let cfg = TaraConfig {
+            hidden_size: 0,
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_gqa_head_divisibility_enforced() {
+        let cfg = TaraConfig {
+            num_attention_heads: 5,
+            num_key_value_heads: 2, // 5 is not divisible by 2
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_odd_head_dim_rejected_for_rope() {
+        let cfg = TaraConfig {
+            head_dim: 15, // odd head dim cannot support RoPE pair rotation
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_non_finite_hyperparameters_rejected() {
+        let cfg = TaraConfig {
+            rope_theta: f64::NAN,
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_err());
+
+        let cfg = TaraConfig {
+            rms_norm_eps: -1e-5,
+            ..Default::default()
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_json_roundtrip_preserves_configuration() {
+        let cfg = TaraConfig::default();
+        let json_val = cfg.to_json_value();
+        let decoded: TaraConfig = serde_json::from_value(json_val).unwrap();
+        assert_eq!(cfg.vocab_size, decoded.vocab_size);
+        assert_eq!(cfg.hidden_size, decoded.hidden_size);
+        assert_eq!(cfg.num_hidden_layers, decoded.num_hidden_layers);
     }
 }

@@ -1,0 +1,7 @@
+{
+  "clean_up_tokenization_spaces": false,
+  "model_max_length": 2048,
+  "padding_side": "right",
+  "tokenizer_class": "TaraTokenizer",
+  "vocab_size": 8192
+}

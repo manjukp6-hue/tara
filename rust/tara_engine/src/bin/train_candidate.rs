@@ -214,6 +214,7 @@ fn main() {
                     exit(1);
                 }
                 resume_from = Some(args[i].clone());
+                resume = true;
             }
             "--max-memory-mb" => {
                 i += 1;

@@ -248,10 +248,10 @@ impl std::str::FromStr for TrainingDevice {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_lowercase().as_str() {
             "cpu" => Ok(TrainingDevice::Cpu),
-            "gpu" => Ok(TrainingDevice::Gpu),
+            "gpu" | "cuda" => Ok(TrainingDevice::Gpu),
             "auto" => Ok(TrainingDevice::Auto),
             other => Err(format!(
-                "Unknown device '{other}'. Valid options: cpu, gpu, auto"
+                "Unknown device '{other}'. Valid options: cpu, gpu, cuda, auto"
             )),
         }
     }

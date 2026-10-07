@@ -7787,7 +7787,7 @@
         "write_working_candidate"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "ce2a2190d08e3e78af0b190a3d5ee09cba54968f844d77ed6387369691ccff3f",
+      "dynamic_sha256": "70c60d7a26aa447993b04b1d9b522057be6c8f46820d97f697b5480d3c351a25",
       "exports": [
         {
           "kind": "Const",
@@ -7954,7 +7954,7 @@
             "HashMap"
           ],
           "is_public_reexport": false,
-          "line_number": 1486,
+          "line_number": 1491,
           "raw_path": "std::collections::HashMap"
         },
         {
@@ -8012,7 +8012,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 1485,
+          "line_number": 1490,
           "raw_path": "super::*"
         },
         {
@@ -8047,7 +8047,7 @@
             "write_safetensors_with_shapes"
           ],
           "is_public_reexport": false,
-          "line_number": 1487,
+          "line_number": 1492,
           "raw_path": "tara_engine::safetensors::write_safetensors_with_shapes"
         },
         {
@@ -8209,7 +8209,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 1471,
+          "line_number": 1476,
           "name": "main",
           "visibility": "Private"
         },
@@ -8227,43 +8227,43 @@
         },
         {
           "kind": "Function",
-          "line_number": 1589,
+          "line_number": 1594,
           "name": "test_cli_and_malformed_config_reject_invalid_inputs",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1630,
+          "line_number": 1635,
           "name": "test_path_safety_rejects_production_traversal_and_overlaps",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1662,
+          "line_number": 1667,
           "name": "test_world_model_stateful_transition_and_atomic_promotion",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1489,
+          "line_number": 1494,
           "name": "unique_test_dir",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1503,
+          "line_number": 1508,
           "name": "write_working_candidate",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1729,
+      "lines": 1734,
       "module_path": "tara_engine::bin::manual_trainer",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1484,
+          "line_number": 1489,
           "name": "tests"
         }
       ],
@@ -10030,7 +10030,7 @@
         "unwrap_or_else"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "82dfb9278b1e815074f8fb55d090df8ba42a606e56676f3dce18f123e6fd5922",
+      "dynamic_sha256": "b50a64e1cddb28ea7cfbc851b795aaefaeddf71f4792fc45156fd6df38df4d5e",
       "exports": [],
       "imports": [
         {
@@ -10083,7 +10083,7 @@
         }
       ],
       "is_test": false,
-      "lines": 380,
+      "lines": 381,
       "module_path": "tara_engine::bin::train_candidate",
       "modules_declared": [],
       "out_links": [
@@ -13577,6 +13577,7 @@
         "rust/tara_engine/src/model_expansion.rs",
         "rust/tara_engine/src/project_link_engine.rs",
         "rust/tara_engine/src/self_update.rs",
+        "rust/tara_engine/src/train_candidate.rs",
         "rust/tara_training_system/neural_model/model/attention.rs",
         "rust/tara_training_system/neural_model/model/causal_lm.rs",
         "rust/tara_training_system/neural_model/model/decoder_layer.rs",
@@ -18594,6 +18595,7 @@
         "rust/tara_engine/src/self_update.rs",
         "rust/tara_engine/src/shard_manager.rs",
         "rust/tara_engine/src/tokenizer.rs",
+        "rust/tara_engine/src/train_candidate.rs",
         "rust/tara_server/src/brain.rs"
       ],
       "internal_symbols": [],
@@ -20769,6 +20771,7 @@
         "rust/tara_engine/src/lib.rs",
         "rust/tara_engine/src/project_link_engine.rs",
         "rust/tara_engine/src/self_update.rs",
+        "rust/tara_engine/src/train_candidate.rs",
         "rust/tara_training_system/shared_training_infrastructure/skills_evaluator.rs",
         "rust/tara_training_system/shared_training_infrastructure/trainer.rs"
       ],
@@ -20816,66 +20819,273 @@
     },
     "rust/tara_engine/src/train_candidate.rs": {
       "call_references": [
+        "CandidateRejected",
+        "InvalidOption",
+        "InvalidResumeSource",
+        "Some",
+        "String",
         "Trainer",
+        "UnsafePath",
+        "any",
         "as_deref",
+        "as_nanos",
+        "as_object_mut",
+        "as_os_str",
+        "as_ref",
+        "as_u64",
+        "clone",
+        "components",
+        "contract_name",
+        "create_dir_all",
+        "current_dir",
         "default",
+        "display",
+        "ends_with",
         "error",
+        "exists",
+        "expect",
+        "file_name",
+        "forward_with_cache",
+        "from",
+        "from_epochs_and_steps",
+        "from_file",
+        "from_json_file",
+        "from_str",
+        "get",
+        "id",
+        "insert",
+        "is_absolute",
+        "is_dir",
+        "is_empty",
+        "is_err",
+        "is_finite",
+        "is_ok",
+        "is_some",
+        "iter",
+        "join",
+        "len",
+        "load_model_weights_with_shapes",
+        "load_safetensors_with_shapes",
+        "map",
+        "map_err",
+        "new",
+        "now",
+        "ok_or_else",
+        "or_else",
+        "path",
+        "pop",
+        "promote_directory_atomically",
+        "read_to_string",
+        "remove_dir_all",
+        "resolve_and_validate_resume_source",
         "run_controlled_training",
         "run_controlled_training_with_options",
-        "run_full_self_learning_cycle_isolated"
+        "run_full_self_learning_cycle_isolated",
+        "starts_with",
+        "temp_dir",
+        "test_candidate_path_isolation_and_ambiguous_resume_rejection",
+        "test_end_to_end_controlled_training_gate_and_stopping_contract",
+        "test_training_options_validate_rejects_invalid_hyperparameters_and_options",
+        "to_path_buf",
+        "to_string",
+        "to_string_lossy",
+        "to_string_pretty",
+        "trim",
+        "unique_test_dir",
+        "unwrap",
+        "unwrap_err",
+        "unwrap_or",
+        "unwrap_or_default",
+        "unwrap_or_else",
+        "validate",
+        "validate_for_execution",
+        "vec",
+        "verify_staged_candidate_and_probe",
+        "write",
+        "write_minimal_model",
+        "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "94134a294c5ace33abd0d2a3b0b3aea451dbc4a7352485a9c08f691ad170f927",
+      "dynamic_sha256": "2b24ce958d24f7ab820c92f1f1bd08003708389ef1a9aa9629872a503f5703f4",
       "exports": [
         {
           "kind": "Enum",
-          "line_number": 9,
+          "line_number": 60,
+          "name": "StoppingContract",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Enum",
+          "line_number": 45,
           "name": "TrainCandidateError",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 15,
+          "line_number": 102,
           "name": "TrainingOptions",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 35,
+          "line_number": 93,
+          "name": "contract_name",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 72,
+          "name": "from_epochs_and_steps",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 648,
           "name": "run_controlled_training",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 49,
+          "line_number": 663,
           "name": "run_controlled_training_with_options",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 369,
+          "name": "validate",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 467,
+          "name": "validate_for_execution",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 278,
+          "name": "verify_continuation_checkpoint_dir",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 224,
+          "name": "verify_working_model_dir",
           "visibility": "Public"
         }
       ],
       "imports": [
         {
           "imported_symbols": [
-            "NativeSelfTrainer",
-            "TrainerError"
+            "TaraConfig"
           ],
           "is_public_reexport": false,
-          "line_number": 6,
-          "raw_path": "crate::trainer::{NativeSelfTrainer, TrainerError}"
+          "line_number": 35,
+          "raw_path": "crate::config::TaraConfig"
+        },
+        {
+          "imported_symbols": [
+            "TaraForCausalLM"
+          ],
+          "is_public_reexport": false,
+          "line_number": 36,
+          "raw_path": "crate::model::causal_lm::TaraForCausalLM"
+        },
+        {
+          "imported_symbols": [
+            "write_safetensors_with_shapes"
+          ],
+          "is_public_reexport": false,
+          "line_number": 888,
+          "raw_path": "crate::safetensors::write_safetensors_with_shapes"
+        },
+        {
+          "imported_symbols": [
+            "load_model_weights_with_shapes",
+            "load_safetensors_with_shapes"
+          ],
+          "is_public_reexport": false,
+          "line_number": 37,
+          "raw_path": "crate::safetensors::{load_model_weights_with_shapes, load_safetensors_with_shapes}"
+        },
+        {
+          "imported_symbols": [
+            "TaraTokenizer"
+          ],
+          "is_public_reexport": false,
+          "line_number": 38,
+          "raw_path": "crate::tokenizer::TaraTokenizer"
+        },
+        {
+          "imported_symbols": [],
+          "is_public_reexport": false,
+          "line_number": 39,
+          "raw_path": "crate::trainer::{"
         },
         {
           "imported_symbols": [
             "Value"
           ],
           "is_public_reexport": false,
-          "line_number": 3,
+          "line_number": 28,
           "raw_path": "serde_json::Value"
+        },
+        {
+          "imported_symbols": [
+            "HashMap"
+          ],
+          "is_public_reexport": false,
+          "line_number": 889,
+          "raw_path": "std::collections::HashMap"
+        },
+        {
+          "imported_symbols": [
+            "env"
+          ],
+          "is_public_reexport": false,
+          "line_number": 29,
+          "raw_path": "std::env"
+        },
+        {
+          "imported_symbols": [
+            "fs"
+          ],
+          "is_public_reexport": false,
+          "line_number": 30,
+          "raw_path": "std::fs"
+        },
+        {
+          "imported_symbols": [
+            "Component",
+            "Path",
+            "PathBuf"
+          ],
+          "is_public_reexport": false,
+          "line_number": 31,
+          "raw_path": "std::path::{Component, Path, PathBuf}"
+        },
+        {
+          "imported_symbols": [
+            "SystemTime",
+            "UNIX_EPOCH"
+          ],
+          "is_public_reexport": false,
+          "line_number": 32,
+          "raw_path": "std::time::{SystemTime, UNIX_EPOCH}"
+        },
+        {
+          "imported_symbols": [],
+          "is_public_reexport": false,
+          "line_number": 887,
+          "raw_path": "super::*"
         },
         {
           "imported_symbols": [
             "Error"
           ],
           "is_public_reexport": false,
-          "line_number": 4,
+          "line_number": 33,
           "raw_path": "thiserror::Error"
         }
       ],
@@ -20885,12 +21095,97 @@
         "rust/tara_engine/src/bin/train_candidate.rs",
         "rust/tara_engine/src/lib.rs"
       ],
-      "internal_symbols": [],
-      "is_test": false,
-      "lines": 113,
+      "internal_symbols": [
+        {
+          "kind": "Function",
+          "line_number": 124,
+          "name": "has_parent_traversal",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 162,
+          "name": "is_recognized_checkpoint_artifact",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 130,
+          "name": "normalize_path_for_comparison",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 156,
+          "name": "paths_overlap",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 554,
+          "name": "resolve_and_validate_resume_source",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1064,
+          "name": "test_candidate_path_isolation_and_ambiguous_resume_rejection",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1108,
+          "name": "test_end_to_end_controlled_training_gate_and_stopping_contract",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 993,
+          "name": "test_training_options_validate_rejects_invalid_hyperparameters_and_options",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 891,
+          "name": "unique_test_dir",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 178,
+          "name": "validate_existing_candidate_dir_safe",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 618,
+          "name": "verify_staged_candidate_and_probe",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 905,
+          "name": "write_minimal_model",
+          "visibility": "Private"
+        }
+      ],
+      "is_test": true,
+      "lines": 1151,
       "module_path": "tara_engine::train_candidate",
-      "modules_declared": [],
+      "modules_declared": [
+        {
+          "custom_path": null,
+          "is_public": false,
+          "line_number": 886,
+          "name": "tests"
+        }
+      ],
       "out_links": [
+        "rust/tara_engine/src/config.rs",
+        "rust/tara_engine/src/lib.rs",
+        "rust/tara_engine/src/tokenizer.rs",
+        "rust/tara_training_system/neural_model/model/mod.rs",
+        "rust/tara_training_system/shared_training_infrastructure/safetensors.rs",
         "rust/tara_training_system/shared_training_infrastructure/trainer.rs"
       ],
       "rel_path": "rust/tara_engine/src/train_candidate.rs"
@@ -47488,6 +47783,7 @@
         "rust/tara_engine/src/generate.rs",
         "rust/tara_engine/src/lib.rs",
         "rust/tara_engine/src/self_update.rs",
+        "rust/tara_engine/src/train_candidate.rs",
         "rust/tara_training_system/neural_model/model/attention.rs",
         "rust/tara_training_system/neural_model/model/causal_lm.rs",
         "rust/tara_training_system/neural_model/model/decoder_layer.rs",
@@ -48546,6 +48842,7 @@
         "rust/tara_engine/src/lib.rs",
         "rust/tara_engine/src/model_expansion.rs",
         "rust/tara_engine/src/shard_manager.rs",
+        "rust/tara_engine/src/train_candidate.rs",
         "rust/tara_training_system/neural_model/model/causal_lm.rs",
         "rust/tara_training_system/shared_training_infrastructure/trainer.rs"
       ],
@@ -48839,7 +49136,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_training_system",
-      "dynamic_sha256": "359943673e1d40eb0377b9a7e819314eb84101b14cb397fca926e9523fd97f38",
+      "dynamic_sha256": "d3f1781d5e806f9ca5b528c957d57b9e776eb1196f160c8cb6b7856f0c8ba007",
       "exports": [
         {
           "kind": "Struct",
@@ -51113,5 +51410,5 @@
   "schema_version": "1.0.0",
   "total_files": 240,
   "total_modules": 583,
-  "total_symbols": 2268
+  "total_symbols": 2274
 }

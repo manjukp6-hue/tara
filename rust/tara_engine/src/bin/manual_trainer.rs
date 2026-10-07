@@ -1314,10 +1314,14 @@ fn execute_manual_trainer() -> Result<RunStatus, (RunStatus, String)> {
         fs::create_dir_all(&intermediate_cp_dir)
             .map_err(|e| (RunStatus::ExecutionFailed, e.to_string()))?;
 
-        let should_resume = if cli.fresh {
-            false
+        let (should_resume, resolved_resume_from) = if cli.fresh {
+            (false, None)
+        } else if let Some(ref rf) = cli.resume_from {
+            (true, Some(rf.clone()))
+        } else if cli.resume {
+            (true, Some(config.neural_checkpoint_dir.clone()))
         } else {
-            cli.resume || cli.resume_from.is_some()
+            (false, None)
         };
 
         let options = TrainingOptions {
@@ -1339,8 +1343,9 @@ fn execute_manual_trainer() -> Result<RunStatus, (RunStatus, String)> {
             checkpoint_dir: Some(intermediate_cp_dir.to_string_lossy().to_string()),
             checkpoint_interval: Some(config.checkpoint_interval_steps),
             resume: should_resume,
-            resume_from: cli.resume_from.clone(),
+            resume_from: resolved_resume_from,
             max_memory_mb: Some(65536.0),
+            ..Default::default()
         };
 
         println!("Calling shared training infrastructure (NativeSelfTrainer)...");

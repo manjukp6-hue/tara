@@ -96,10 +96,17 @@ if [ -n "$HF_TOKEN" ]; then
     # Upload Stage 2 working model (safetensors, config, tokenizer)
     STAGE2_DIR="storage/models/checkpoints/stage2_ability_training"
     if [ -d "$STAGE2_DIR" ]; then
-        echo "[HUGGING FACE SYNC] Pushing $STAGE2_DIR to $TARGET_REPO..."
+        echo "[HUGGING FACE SYNC] Pushing Stage 2 Neural Model to $TARGET_REPO..."
         huggingface-cli upload "$TARGET_REPO" "$STAGE2_DIR" --repo-type model
-        echo "[HUGGING FACE SYNC] Model safetensors successfully deployed to https://huggingface.co/$TARGET_REPO"
     fi
+
+    # Upload World Model and Joint Candidate Checkpoints
+    WORLD_DIR="manual_training/checkpoints"
+    if [ -d "$WORLD_DIR" ]; then
+        echo "[HUGGING FACE SYNC] Pushing World Model & Joint Checkpoints to $TARGET_REPO..."
+        huggingface-cli upload "$TARGET_REPO" "$WORLD_DIR" --repo-type model
+    fi
+    echo "[HUGGING FACE SYNC] All artifacts successfully deployed to https://huggingface.co/$TARGET_REPO"
 else
     echo "------------------------------------------------------------------------------"
     echo "[HUGGING FACE NOTICE] HF_TOKEN not set. Skipping auto-push to Hugging Face."

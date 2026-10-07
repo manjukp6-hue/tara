@@ -1,0 +1,41 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Brahmagupta",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "tara://historical/ind_math_006_brahmagupta_quadrilateral"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Indian Mathematics Record\nTreatise: Brahmasphutasiddhanta (Chapter XII, Verse 21)\nAuthor: Brahmagupta\nPeriod: 628 CE\nDomain: geometry\n\nHISTORICAL_FORMULA:\nSthūla-phala / Sūkṣma-phala for cyclic quadrilaterals: Area = sqrt((s - a)(s - b)(s - c)(s - d)) where s = (a + b + c + d)/2\n\nMODERN_EQUIVALENT:\nA = \\sqrt{(s - a)(s - b)(s - c)(s - d)} where s = \\frac{a + b + c + d}{2} for cyclic quadrilaterals inscribed in a circle.\n\nMathematical Context: Generalization of Heron's triangle formula to four-sided polygons inscribed in a circle.\nHistorical Significance: Exact formula discovered nearly a millennium before rediscovered in Europe by Snellius in 1619.\nProvenance Reference: Brahmasphutasiddhanta (Edited by Ram Swarup Sharma, 1966)",
+  "content_sha256": "45c11cbccc182de2b7073b5726f80c470c12efc298616a99155e759c0ec6c547",
+  "file_path": "storage/knowledge\\partitions/mathematics/indian_mathematics\\1e\\1e1669531a1352b8.json",
+  "id": "1e1669531a1352b8",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/indian_mathematics",
+  "provenance": {
+    "author_or_curator": "Brahmagupta",
+    "content_sha256": "45c11cbccc182de2b7073b5726f80c470c12efc298616a99155e759c0ec6c547",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "tara://historical/ind_math_006_brahmagupta_quadrilateral"
+  },
+  "source": "tara://historical/ind_math_006_brahmagupta_quadrilateral",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "brahmagupta_geometry",
+  "subpartition": "indian_mathematics",
+  "tags": [
+    "indian_mathematics",
+    "geometry",
+    "brahmagupta",
+    "historical_mathematics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

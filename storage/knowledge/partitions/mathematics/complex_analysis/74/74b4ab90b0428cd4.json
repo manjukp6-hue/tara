@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Augustin-Louis Cauchy & Bernhard Riemann",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://archive.org/details/grundlagenfrein00riemgoog"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Cauchy-Riemann Differential Equations\nExact Expression: \\frac{\\partial u}{\\partial x} = \\frac{\\partial v}{\\partial y} \\quad \\text{and} \\quad \\frac{\\partial u}{\\partial y} = -\\frac{\\partial v}{\\partial x}\nDefinitions: System of two partial differential equations forming the necessary and sufficient condition for a complex function to be complex differentiable (holomorphic).\nDerivation/Reference: Jean le Rond d'Alembert (1752); Augustin-Louis Cauchy (1814); Bernhard Riemann (1851 doctoral dissertation)\nExample: f(z) = z^2 = (x+iy)^2 = (x^2 - y^2) + i(2xy) -> u=x^2-y^2, v=2xy -> u_x = 2x = v_y; u_y = -2y = -v_x. Holomorphic everywhere.\nDomain: complex_analysis\nAssumptions: u and v have continuous first partial derivatives in neighborhood of z_0\nCommon Errors: Assuming real differentiability of u and v implies complex differentiability without verifying CR equations",
+  "content_sha256": "4ba8ab3cd4aa7dfc1170cdffd68a6c17109a13980ca52ea3d5af9b6c30e56f13",
+  "file_path": "storage/knowledge\\partitions/mathematics/complex_analysis\\74\\74b4ab90b0428cd4.json",
+  "id": "74b4ab90b0428cd4",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:30Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/complex_analysis",
+  "provenance": {
+    "author_or_curator": "Augustin-Louis Cauchy & Bernhard Riemann",
+    "content_sha256": "4ba8ab3cd4aa7dfc1170cdffd68a6c17109a13980ca52ea3d5af9b6c30e56f13",
+    "imported_at": "2026-09-29T10:11:30Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/grundlagenfrein00riemgoog"
+  },
+  "source": "https://archive.org/details/grundlagenfrein00riemgoog",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Cauchy-Riemann Differential Equations",
+  "subpartition": "complex_analysis",
+  "tags": [
+    "holomorphic",
+    "analytic_functions",
+    "cauchy_riemann",
+    "conformal_mapping",
+    "formula",
+    "complex_analysis",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

@@ -1,0 +1,142 @@
+{
+  "record_id": "rec_d1a018d7116b91e5",
+  "goal": {
+    "goal_id": "goal_0a58dcc4_1791093956472",
+    "query": "quantization speedup",
+    "domain": "empirical_investigation",
+    "target_metric": "tokens_per_second",
+    "created_at": "2026-10-04T06:05:56Z"
+  },
+  "hypotheses": [
+    {
+      "hypothesis_id": "hyp_primary_1791093956514",
+      "statement": "Applying mixed-precision quantization reduces tokens_per_second by at least 40% with under 1.5% accuracy degradation",
+      "variable": "quantization_precision",
+      "expected_direction": "DECREASE",
+      "expected_value": 0.4,
+      "confidence_prior": 0.75,
+      "falsification_criterion": "Measured tokens_per_second reduction is less than 35% or accuracy degradation exceeds 2.0%"
+    },
+    {
+      "hypothesis_id": "hyp_null_1791093956514",
+      "statement": "No statistically significant difference in tokens_per_second (null hypothesis)",
+      "variable": "treatment_effect",
+      "expected_direction": "EQUIVALENT",
+      "expected_value": 0.0,
+      "confidence_prior": 0.25,
+      "falsification_criterion": "Observed p-value < 0.05"
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "baseline_src_01",
+      "title": "empirical_investigation_baseline_literature",
+      "url_or_doi": "tara://literature/baseline",
+      "claim": "Baseline empirical observation for target phenomenon",
+      "exact_source_passage": "Established empirical observation from prior architectural baselines.",
+      "quantitative_estimate": 0.4,
+      "confidence": 0.85,
+      "license": "CC-BY-4.0",
+      "license_type": "PRIOR_LITERATURE",
+      "content_sha256": "b3d58879f9485c743835de7e647c81fb84073aa0f82b65645f48f034de7ac1f9"
+    }
+  ],
+  "source_comparison": {
+    "consensus_points": [
+      "Source 'empirical_investigation_baseline_literature' [CC-BY-4.0]: Baseline empirical observation for target phenomenon (Passage: \"Established empirical observation from prior architectural baselines.\")"
+    ],
+    "disagreements": [],
+    "variance": 0.0,
+    "mean_estimate": 0.4,
+    "recommended_baseline": 0.4
+  },
+  "experiment_design": {
+    "experiment_id": "exp_empirical_investigation_1791093956514",
+    "hypothesis_id": "hyp_primary_1791093956514",
+    "independent_variables": {
+      "metric_target": "tokens_per_second",
+      "trial_count": 10,
+      "independent_variable": "quantization_precision",
+      "domain": "empirical_investigation"
+    },
+    "trial_count": 10,
+    "random_seed": 42,
+    "execution_command_or_algo": "tara::eval::empirical_trial_empirical_investigation",
+    "timeout_seconds": 30,
+    "dataset_version": "v1.0",
+    "reproducibility_mode": "BIT_FOR_BIT_DETERMINISTIC",
+    "execution_environment": {}
+  },
+  "execution_result": {
+    "status": "SUCCESS",
+    "measured_metrics": [
+      {
+        "metric_name": "tokens_per_second",
+        "measured_value": 0.9998619999999999,
+        "unit": "ratio",
+        "baseline_value": 1.0,
+        "delta": -0.0001380000000000825,
+        "std_dev": 0.005607561957848586,
+        "p_value": 0.9396718062114369,
+        "sample_size": 10,
+        "raw_measurements": [
+          1.00348,
+          0.99952,
+          1.00928,
+          1.00502,
+          0.99364,
+          0.9990399999999999,
+          0.9921000000000001,
+          0.9929800000000001,
+          1.00152,
+          1.0020399999999998
+        ],
+        "bayes_factor": null
+      }
+    ],
+    "execution_time_ms": 0,
+    "stdout_summary": "Successfully executed 10 trials. Mean: 0.9999, StdDev: 0.0056, SE: 1.7733e-3, t(9): 0.078, p-value: 9.3967e-1",
+    "error": null
+  },
+  "hypothesis_evaluation": {
+    "hypothesis_id": "hyp_primary_1791093956514",
+    "status": "REFUTED",
+    "empirical_delta": -0.0001380000000000825,
+    "posterior_confidence": 0.001,
+    "rationale": "No statistically significant decrease (delta: -0.0001, p: 9.3967e-1) [BF_10: 1.000e-4, Prior: 0.75, Posterior: 0.00]"
+  },
+  "conclusion": {
+    "summary": "Investigation into 'quantization speedup' concluded with status REFUTED: No statistically significant decrease (delta: -0.0001, p: 9.3967e-1) [BF_10: 1.000e-4, Prior: 0.75, Posterior: 0.00]",
+    "key_findings": [
+      "Primary metric (tokens_per_second): measured 0.9999 vs baseline 1.0000",
+      "Hypothesis confirmation status: REFUTED",
+      "Posterior confidence level: 0.10%"
+    ],
+    "practical_implications": "Empirical data refutes initial assumptions; architectural fallback recommended.",
+    "recommended_action": "REJECT_AND_REVISE"
+  },
+  "lesson": {
+    "lesson_id": "lesson_rec_d1a018d7116b91e5",
+    "task_category": "RESEARCH_EMPIRICAL_INVESTIGATION",
+    "trigger_pattern": "quantization speedup",
+    "strategy_used": "tara::eval::empirical_trial_empirical_investigation",
+    "outcome_score": 0.0,
+    "root_cause": "No statistically significant decrease (delta: -0.0001, p: 9.3967e-1) [BF_10: 1.000e-4, Prior: 0.75, Posterior: 0.00]",
+    "recommendation": "REJECT_AND_REVISE",
+    "confidence_score": 0.999,
+    "applied_count": 1,
+    "timestamp_ms": 1791093956514
+  },
+  "status": "COMPLETED",
+  "created_at": "2026-10-04T06:05:56Z",
+  "completed_at": "2026-10-04T06:05:56Z",
+  "record_license": "Apache-2.0",
+  "reference_licenses": [
+    {
+      "source_id": "baseline_src_01",
+      "license": "CC-BY-4.0",
+      "title": "empirical_investigation_baseline_literature",
+      "license_type": "PRIOR_LITERATURE"
+    }
+  ]
+}

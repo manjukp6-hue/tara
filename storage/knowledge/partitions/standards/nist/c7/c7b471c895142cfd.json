@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "National Institute of Standards and Technology (NIST)",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://doi.org/10.6028/NIST.FIPS.197-upd1"
+    }
+  ],
+  "category": "standards",
+  "confidence": 1.0,
+  "content": "NIST FIPS PUB 197 specifies the Advanced Encryption Standard (AES), a symmetric block cipher with block size of 128 bits and key lengths of 128, 192, and 256 bits operating through substitution-permutation network rounds (SubBytes, ShiftRows, MixColumns, AddRoundKey).",
+  "content_sha256": "5e1f18dfa68ec9d559d8ee5bcb9181c4d147d93ac4accf73c9976984b33862ee",
+  "file_path": "storage/knowledge\\partitions/standards/nist\\c7\\c7b471c895142cfd.json",
+  "id": "c7b471c895142cfd",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:50Z",
+  "originating_record_id": null,
+  "partition": "partitions/standards/nist",
+  "provenance": {
+    "author_or_curator": "National Institute of Standards and Technology (NIST)",
+    "content_sha256": "5e1f18dfa68ec9d559d8ee5bcb9181c4d147d93ac4accf73c9976984b33862ee",
+    "imported_at": "2026-09-29T09:59:50Z",
+    "license": "Public Domain",
+    "source_uri": "https://doi.org/10.6028/NIST.FIPS.197-upd1"
+  },
+  "source": "https://doi.org/10.6028/NIST.FIPS.197-upd1",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "nist_fips_197_aes_encryption",
+  "subpartition": "nist",
+  "tags": [
+    "nist",
+    "fips197",
+    "aes",
+    "cryptography",
+    "symmetric_encryption",
+    "standards"
+  ],
+  "topic": "standards",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

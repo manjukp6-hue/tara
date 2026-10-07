@@ -1,0 +1,37 @@
+{
+  "status": "SUCCESS",
+  "id": "ac776f29d9d79021",
+  "topic": "mathematics",
+  "subpartition": "indian_mathematics",
+  "subject": "ext_varahamihira_panchasiddhantika_trigonometry_astronomy",
+  "tags": [
+    "mathematics",
+    "indian_mathematics",
+    "varahamihira",
+    "panchasiddhantika",
+    "trigonometry",
+    "astronomy",
+    "formula",
+    "external_download",
+    "cc-by-sa-4.0"
+  ],
+  "category": "mathematics",
+  "partition": "partitions/mathematics/indian_mathematics",
+  "file_path": "storage/knowledge/partitions\\mathematics\\indian_mathematics\\ac\\ac776f29d9d79021.json",
+  "content": "{\"batchcomplete\":\"\",\"query\":{\"pages\":{\"30227688\":{\"pageid\":30227688,\"ns\":0,\"title\":\"Varahamihira\",\"extract\":\"\"}}}}",
+  "content_sha256": "ee2291869fc010daea8989229654df2b84723cc3a0c26333588e8332d3950f26",
+  "confidence": 1.0,
+  "source": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Varahamihira&format=json",
+  "source_type": "EXTERNAL_DOWNLOADED",
+  "originating_record_id": null,
+  "learned_at": "2026-09-29T11:05:42Z",
+  "alternative_sources": [],
+  "verification_status": "OPEN_SOURCE_VERIFIED",
+  "provenance": {
+    "author_or_curator": "Varahamihira (c. 505 - 587 CE)",
+    "content_sha256": "ee2291869fc010daea8989229654df2b84723cc3a0c26333588e8332d3950f26",
+    "imported_at": "2026-09-29T11:05:42Z",
+    "license": "CC-BY-SA-4.0",
+    "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Varahamihira&format=json"
+  }
+}

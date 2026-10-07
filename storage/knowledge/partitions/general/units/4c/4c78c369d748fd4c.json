@@ -1,0 +1,38 @@
+{
+  "status": "SUCCESS",
+  "id": "4c78c369d748fd4c",
+  "topic": "general",
+  "subpartition": "units",
+  "subject": "ext_general_bipm_2019_si_base_units_redefinition",
+  "tags": [
+    "general",
+    "units",
+    "bipm",
+    "si_units",
+    "planck_constant",
+    "speed_of_light",
+    "cesium_frequency",
+    "formula",
+    "external_download",
+    "cc-by-sa-4.0"
+  ],
+  "category": "general",
+  "partition": "partitions/general/units",
+  "file_path": "storage/knowledge/partitions\\general\\units\\4c\\4c78c369d748fd4c.json",
+  "content": "{\"batchcomplete\":\"\",\"query\":{\"normalized\":[{\"from\":\"2019_redefinition_of_the_SI_base_units\",\"to\":\"2019 redefinition of the SI base units\"}],\"pages\":{\"77831167\":{\"pageid\":77831167,\"ns\":0,\"title\":\"2019 redefinition of the SI base units\",\"extract\":\"\"}}}}",
+  "content_sha256": "2f0334f408f9635a8e3958d7af5850c1912181ec91e6bbd272fb09206e5a62e2",
+  "confidence": 1.0,
+  "source": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=2019_redefinition_of_the_SI_base_units&format=json",
+  "source_type": "EXTERNAL_DOWNLOADED",
+  "originating_record_id": null,
+  "learned_at": "2026-09-29T11:06:51Z",
+  "alternative_sources": [],
+  "verification_status": "OPEN_SOURCE_VERIFIED",
+  "provenance": {
+    "author_or_curator": "Bureau International des Poids et Mesures (BIPM)",
+    "content_sha256": "2f0334f408f9635a8e3958d7af5850c1912181ec91e6bbd272fb09206e5a62e2",
+    "imported_at": "2026-09-29T11:06:51Z",
+    "license": "CC-BY-SA-4.0",
+    "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=2019_redefinition_of_the_SI_base_units&format=json"
+  }
+}

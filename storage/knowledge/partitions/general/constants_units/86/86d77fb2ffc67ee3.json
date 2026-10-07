@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "NIST / CODATA Task Group on Fundamental Constants",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:23Z",
+      "source": "https://physics.nist.gov/cuu/Constants/"
+    }
+  ],
+  "category": "general",
+  "confidence": 1.0,
+  "content": "CODATA internationally recommended values of fundamental physical constants: Speed of light in vacuum c = 299,792,458 m/s (exact), Planck constant h = 6.62607015 x 10^-34 J*s (exact), Reduced Planck constant hbar = 1.054571817 x 10^-34 J*s, Gravitational constant G = 6.67430(15) x 10^-11 m^3/(kg*s^2), Elementary electric charge e = 1.602176634 x 10^-19 C (exact), Boltzmann constant k_B = 1.380649 x 10^-23 J/K (exact), Avogadro constant N_A = 6.02214076 x 10^23 mol^-1 (exact).",
+  "content_sha256": "e1c897f6342e47288a561be6488124b7e61e1ba7f90c238041579a51f6f6d61e",
+  "file_path": "storage/knowledge\\partitions/general/constants_units\\86\\86d77fb2ffc67ee3.json",
+  "id": "86d77fb2ffc67ee3",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:50Z",
+  "originating_record_id": null,
+  "partition": "partitions/general/constants_units",
+  "provenance": {
+    "author_or_curator": "NIST / CODATA Task Group on Fundamental Constants",
+    "content_sha256": "e1c897f6342e47288a561be6488124b7e61e1ba7f90c238041579a51f6f6d61e",
+    "imported_at": "2026-09-29T09:59:50Z",
+    "license": "Public Domain",
+    "source_uri": "https://physics.nist.gov/cuu/Constants/"
+  },
+  "source": "https://physics.nist.gov/cuu/Constants/",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "fundamental_physical_constants_codata_2022",
+  "subpartition": "constants_units",
+  "tags": [
+    "physics_constants",
+    "codata",
+    "si_units",
+    "planck",
+    "speed_of_light",
+    "general",
+    "constants_units"
+  ],
+  "topic": "general",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

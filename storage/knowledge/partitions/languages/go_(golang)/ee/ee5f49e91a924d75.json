@@ -1,0 +1,40 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Go (Golang)",
+      "license": "BSD-3-Clause",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://go.dev/doc/"
+    }
+  ],
+  "category": "languages",
+  "confidence": 1.0,
+  "content": "Programming Language Reference: Go (Golang)\nVersion: Go 1.22 / 1.23\nSyntax: Concise C-family syntax without parentheses around conditions, implicit semicolons, public exports via PascalCase.\nSemantics: Compiled, statically typed language prioritizing developer ergonomics, fast compilation, and CSP concurrency primitives.\nType System: Static typing, structural subtyping via interfaces (no explicit implements keyword), parametric polymorphism (generics).\nMemory Model: Automatic memory management with concurrent tri-color mark-and-sweep garbage collector, escape analysis for stack/heap allocation.\nConcurrency: Communicating Sequential Processes (CSP): Goroutines (lightweight green threads) communicating through typed channels.\nError Handling: Explicit error values returned as the last tuple value (val, err := fn()), checked via if err != nil.\nStandard APIs: net/http, sync, context, io, fmt, encoding/json\nSpecification: The Go Programming Language Specification (https://go.dev/ref/spec)\nOfficial Docs: https://go.dev/doc/",
+  "content_sha256": "cf3df475069483142626f63487fca0e141a8e6aac4775b8d5fba803d459da051",
+  "file_path": "storage/knowledge\\partitions/languages/go_(golang)\\ee\\ee5f49e91a924d75.json",
+  "id": "ee5f49e91a924d75",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:49Z",
+  "originating_record_id": null,
+  "partition": "partitions/languages/go_(golang)",
+  "provenance": {
+    "author_or_curator": "Go (Golang)",
+    "content_sha256": "cf3df475069483142626f63487fca0e141a8e6aac4775b8d5fba803d459da051",
+    "imported_at": "2026-09-29T09:59:49Z",
+    "license": "BSD-3-Clause",
+    "source_uri": "https://go.dev/doc/"
+  },
+  "source": "https://go.dev/doc/",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "language_spec_go_(golang)",
+  "subpartition": "go_(golang)",
+  "tags": [
+    "programming_languages",
+    "go_(golang)",
+    "language_specification",
+    "languages"
+  ],
+  "topic": "languages",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

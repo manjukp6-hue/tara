@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "W3C / WHATWG",
+      "license": "W3C-Software-Notice",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://www.w3.org/TR/dom41/"
+    }
+  ],
+  "category": "standards",
+  "confidence": 1.0,
+  "content": "W3C and WHATWG DOM (Document Object Model) Level 4 Specification defines a platform-neutral model for representing tree-structured documents with event dispatching, mutation observers, and node manipulation contracts.",
+  "content_sha256": "a7fa54694708835907a24efbc67faddec4ee55a9884e65cea111217e313992de",
+  "file_path": "storage/knowledge\\partitions/standards/w3c\\e9\\e9224d1fec001ecc.json",
+  "id": "e9224d1fec001ecc",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:50Z",
+  "originating_record_id": null,
+  "partition": "partitions/standards/w3c",
+  "provenance": {
+    "author_or_curator": "W3C / WHATWG",
+    "content_sha256": "a7fa54694708835907a24efbc67faddec4ee55a9884e65cea111217e313992de",
+    "imported_at": "2026-09-29T09:59:50Z",
+    "license": "W3C-Software-Notice",
+    "source_uri": "https://www.w3.org/TR/dom41/"
+  },
+  "source": "https://www.w3.org/TR/dom41/",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "w3c_html5_dom_specification",
+  "subpartition": "w3c",
+  "tags": [
+    "w3c",
+    "dom",
+    "html5",
+    "web_standards",
+    "specification",
+    "standards"
+  ],
+  "topic": "standards",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "World Factbook / Geopolitical Reference",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://www.cia.gov/the-world-factbook/"
+    }
+  ],
+  "category": "geography",
+  "confidence": 1.0,
+  "content": "Major geopolitical capitals with geographic coordinates: India (New Delhi, 28.6139 N, 77.2090 E), United States (Washington D.C., 38.9072 N, 77.0369 W), United Kingdom (London, 51.5074 N, 0.1278 W), Japan (Tokyo, 35.6762 N, 139.6503 E), Germany (Berlin, 52.5200 N, 13.4050 E), France (Paris, 48.8566 N, 2.3522 E), Brazil (Brasilia, 15.7975 S, 47.8919 W), Australia (Canberra, 35.2809 S, 149.1300 E).",
+  "content_sha256": "9a03d1981658bf7467441d0c49cc58ef99a25fd2fc01a3efecceb0685ae58166",
+  "file_path": "storage/knowledge\\partitions/geography/political\\12\\127880e97cb1e0e6.json",
+  "id": "127880e97cb1e0e6",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:50Z",
+  "originating_record_id": null,
+  "partition": "partitions/geography/political",
+  "provenance": {
+    "author_or_curator": "World Factbook / Geopolitical Reference",
+    "content_sha256": "9a03d1981658bf7467441d0c49cc58ef99a25fd2fc01a3efecceb0685ae58166",
+    "imported_at": "2026-09-29T09:59:50Z",
+    "license": "Public Domain",
+    "source_uri": "https://www.cia.gov/the-world-factbook/"
+  },
+  "source": "https://www.cia.gov/the-world-factbook/",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "major_world_capitals_and_geographic_coordinates",
+  "subpartition": "political",
+  "tags": [
+    "geography",
+    "capitals",
+    "countries",
+    "coordinates",
+    "political_geography",
+    "political"
+  ],
+  "topic": "geography",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

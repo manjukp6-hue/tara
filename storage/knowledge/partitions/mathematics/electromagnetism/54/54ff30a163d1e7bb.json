@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Michael Faraday & James Clerk Maxwell",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://archive.org/details/scientificpapers01maxw"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Maxwell-Faraday Equation\nExact Expression: \\nabla \\times \\mathbf{E} = -\\frac{\\partial \\mathbf{B}}{\\partial t}\nDefinitions: Fundamental Maxwell equation stating that a time-varying magnetic field induces an orthogonal circulating non-conservative electric field.\nDerivation/Reference: Michael Faraday experimental law (1831); James Clerk Maxwell differential formulation (1861)\nExample: Transformer coil: EMF = -N (d Phi / dt) according to Lenz's law opposing flux changes\nDomain: electromagnetism\nAssumptions: Valid in classical electrodynamics across all inertial reference frames\nCommon Errors: Omitting minus sign which enforces Lenz's law and energy conservation",
+  "content_sha256": "8eadfb915eaac10082e1f642cc606be6d9ca905ec4b3becc0b02c649d7227481",
+  "file_path": "storage/knowledge\\partitions/mathematics/electromagnetism\\54\\54ff30a163d1e7bb.json",
+  "id": "54ff30a163d1e7bb",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:32Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/electromagnetism",
+  "provenance": {
+    "author_or_curator": "Michael Faraday & James Clerk Maxwell",
+    "content_sha256": "8eadfb915eaac10082e1f642cc606be6d9ca905ec4b3becc0b02c649d7227481",
+    "imported_at": "2026-09-29T10:11:32Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/scientificpapers01maxw"
+  },
+  "source": "https://archive.org/details/scientificpapers01maxw",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Maxwell-Faraday Equation",
+  "subpartition": "electromagnetism",
+  "tags": [
+    "maxwell_equations",
+    "faraday_law",
+    "electrodynamics",
+    "induction",
+    "lenz",
+    "formula",
+    "electromagnetism",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

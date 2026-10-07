@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Rudolf Clausius & James Prescott Joule",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://doi.org/10.1002/andp.18501550306"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: First Law of Thermodynamics\nExact Expression: dU = \\delta Q - \\delta W\nDefinitions: Law of conservation of energy for thermodynamic systems stating that the change in internal energy equals heat supplied minus work done.\nDerivation/Reference: Julius Robert von Mayer (1842); James Prescott Joule (1843); Rudolf Clausius (1850)\nExample: Isochoric process (constant volume dV = 0): dW = 0 -> dU = dQ = C_v dT\nDomain: thermodynamics\nAssumptions: Closed system interacting thermally and mechanically with surroundings\nCommon Errors: Treating heat Q and work W as state functions instead of path-dependent process quantities",
+  "content_sha256": "8fe07c433b040f71e204f0e9ba3c12aa4a3b2571e53252f4514e5e13ce4fc060",
+  "file_path": "storage/knowledge\\partitions/mathematics/thermodynamics\\08\\08de1e646f2ff3db.json",
+  "id": "08de1e646f2ff3db",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:32Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/thermodynamics",
+  "provenance": {
+    "author_or_curator": "Rudolf Clausius & James Prescott Joule",
+    "content_sha256": "8fe07c433b040f71e204f0e9ba3c12aa4a3b2571e53252f4514e5e13ce4fc060",
+    "imported_at": "2026-09-29T10:11:32Z",
+    "license": "Public Domain",
+    "source_uri": "https://doi.org/10.1002/andp.18501550306"
+  },
+  "source": "https://doi.org/10.1002/andp.18501550306",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "First Law of Thermodynamics",
+  "subpartition": "thermodynamics",
+  "tags": [
+    "first_law_of_thermodynamics",
+    "internal_energy",
+    "heat",
+    "work",
+    "conservation_of_energy",
+    "formula",
+    "thermodynamics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

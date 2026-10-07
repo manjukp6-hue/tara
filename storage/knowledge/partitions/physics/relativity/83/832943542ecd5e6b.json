@@ -1,0 +1,39 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Science Reference",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "Annalen der Physik: Zur Elektrodynamik bewegter Körper (1905) & Die Grundlage der allgemeinen Relativitätstheorie (1916)"
+    }
+  ],
+  "category": "physics",
+  "confidence": 1.0,
+  "content": "Scientific Concept: Einstein's Theory of Relativity\nDomain: physics / relativity\nDefinition: Physical theories establishing spacetime geometry: Special Relativity unifies space and time via constant c, and General Relativity describes gravity as spacetime curvature.\n\nPrinciples:\nPrinciple of Relativity: Laws of physics are invariant across all inertial frames.\nConstancy of the Speed of Light: Speed of light c in vacuum is constant regardless of motion of source or observer.\nEquivalence Principle: Inertial mass and gravitational mass are identical; local acceleration is indistinguishable from gravitational field.\nEinstein Field Equations: Spacetime curvature determined by stress-energy tensor: G_munu + Lambda g_munu = (8pi G / c^4) T_munu\n\nExperimental Proofs:\nEddington 1919 solar eclipse observation of gravitational deflection of starlight\nPound-Rebka gravitational redshift experiment (1959)\nLIGO direct detection of gravitational waves from binary black hole merger GW150914 (2015)\nAtomic clock time dilation verification on GPS satellites (38 microseconds/day net drift)\n\nApplications:\nGPS satellite constellation time synchronization\nAstrophysical modeling\nCosmology",
+  "content_sha256": "3b3d12fd301132b02a8dd74f3b5c0461823c659554d03e309d91fb1b5681746d",
+  "file_path": "storage/knowledge\\partitions/physics/relativity\\83\\832943542ecd5e6b.json",
+  "id": "832943542ecd5e6b",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/physics/relativity",
+  "provenance": {
+    "author_or_curator": "Science Reference",
+    "content_sha256": "3b3d12fd301132b02a8dd74f3b5c0461823c659554d03e309d91fb1b5681746d",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "Annalen der Physik: Zur Elektrodynamik bewegter Körper (1905) & Die Grundlage der allgemeinen Relativitätstheorie (1916)"
+  },
+  "source": "Annalen der Physik: Zur Elektrodynamik bewegter Körper (1905) & Die Grundlage der allgemeinen Relativitätstheorie (1916)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Einstein's Theory of Relativity",
+  "subpartition": "relativity",
+  "tags": [
+    "physics",
+    "relativity",
+    "scientific_concept"
+  ],
+  "topic": "physics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

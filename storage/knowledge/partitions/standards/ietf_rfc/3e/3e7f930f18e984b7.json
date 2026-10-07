@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "R. Fielding, M. Nottingham, J. Reschke (IETF)",
+      "license": "IETF-Trust",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://www.rfc-editor.org/rfc/rfc9110"
+    }
+  ],
+  "category": "standards",
+  "confidence": 1.0,
+  "content": "IETF RFC 9110 establishes the architecture of the Hypertext Transfer Protocol (HTTP), specifying request methods (GET, POST, PUT, DELETE), status codes (2xx, 3xx, 4xx, 5xx), header fields, content negotiation, and caching semantics across HTTP/1.1, HTTP/2, and HTTP/3.",
+  "content_sha256": "115b432b451dba928b3d26552013131aef445c3d9b2cae10efc9eba5e289cf21",
+  "file_path": "storage/knowledge\\partitions/standards/ietf_rfc\\3e\\3e7f930f18e984b7.json",
+  "id": "3e7f930f18e984b7",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:50Z",
+  "originating_record_id": null,
+  "partition": "partitions/standards/ietf_rfc",
+  "provenance": {
+    "author_or_curator": "R. Fielding, M. Nottingham, J. Reschke (IETF)",
+    "content_sha256": "115b432b451dba928b3d26552013131aef445c3d9b2cae10efc9eba5e289cf21",
+    "imported_at": "2026-09-29T09:59:50Z",
+    "license": "IETF-Trust",
+    "source_uri": "https://www.rfc-editor.org/rfc/rfc9110"
+  },
+  "source": "https://www.rfc-editor.org/rfc/rfc9110",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "ietf_rfc_9110_http_semantics",
+  "subpartition": "ietf_rfc",
+  "tags": [
+    "ietf",
+    "rfc",
+    "rfc9110",
+    "http",
+    "networking",
+    "protocol",
+    "standards",
+    "ietf_rfc"
+  ],
+  "topic": "standards",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

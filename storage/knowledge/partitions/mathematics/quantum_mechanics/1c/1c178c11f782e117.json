@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Erwin Schrödinger",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://doi.org/10.1002/andp.19263840404"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Time-Dependent Schrödinger Equation\nExact Expression: i\\hbar \\frac{\\partial \\psi}{\\partial t} = \\hat{H}\\psi\nDefinitions: Fundamental differential equation governing the wave function and unitary deterministic time-evolution of a non-relativistic quantum mechanical system.\nDerivation/Reference: Erwin Schrödinger, Annalen der Physik (Quantisierung als Eigenwertproblem, 1926)\nExample: Particle in a 1D infinite square well of width L: stationary energy eigenvalues E_n = (n^2 pi^2 hbar^2) / (2 m L^2)\nDomain: quantum_mechanics\nAssumptions: Non-relativistic quantum regimes (v << c); Isolated quantum system undergoing unitary evolution\nCommon Errors: Interpreting wavefunction psi as physical matter density rather than probability amplitude whose norm |psi|^2 gives probability density",
+  "content_sha256": "2479ad0a029d46db924cffad6576c913c8b734de103a9fbd873ed02cb93a9a55",
+  "file_path": "storage/knowledge\\partitions/mathematics/quantum_mechanics\\1c\\1c178c11f782e117.json",
+  "id": "1c178c11f782e117",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:32Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/quantum_mechanics",
+  "provenance": {
+    "author_or_curator": "Erwin Schrödinger",
+    "content_sha256": "2479ad0a029d46db924cffad6576c913c8b734de103a9fbd873ed02cb93a9a55",
+    "imported_at": "2026-09-29T10:11:32Z",
+    "license": "Public Domain",
+    "source_uri": "https://doi.org/10.1002/andp.19263840404"
+  },
+  "source": "https://doi.org/10.1002/andp.19263840404",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Time-Dependent Schrödinger Equation",
+  "subpartition": "quantum_mechanics",
+  "tags": [
+    "schrodinger_equation",
+    "quantum_mechanics",
+    "wavefunction",
+    "hamiltonian",
+    "planck",
+    "formula",
+    "quantum_mechanics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

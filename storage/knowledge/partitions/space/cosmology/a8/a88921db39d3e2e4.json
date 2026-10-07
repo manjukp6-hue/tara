@@ -1,0 +1,39 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Science Reference",
+      "license": "CC-BY-4.0",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "Planck 2018 results. VI. Cosmological parameters (Astronomy & Astrophysics, 2020)"
+    }
+  ],
+  "category": "space",
+  "confidence": 1.0,
+  "content": "Scientific Concept: Lambda-CDM Standard Cosmological Model\nDomain: space / cosmology\nDefinition: Standard cosmological model of the Universe based on General Relativity, expanding space according to Friedmann-Lemaitre-Robertson-Walker (FLRW) metric.\n\nPrinciples:\nHubble-Lemaitre Law: Recessional velocity of distant galaxies is proportional to distance: v = H_0 * d\nCosmic Microwave Background (CMB): Thermal blackbody radiation remnant from recombination era (T_0 = 2.7255 K).\nEnergy Budget: ~68.3% Dark Energy (Cosmological constant Lambda), ~26.8% Cold Dark Matter (CDM), ~4.9% Ordinary Baryonic Matter.\nGravitational Collapse & Compact Objects: Black holes (Schwarzschild radius r_s = 2GM/c^2), Neutron stars (TOV limit ~2.2 M_sun).\n\nExperimental Proofs:\nEdwin Hubble 1929 distance-redshift measurements using Cepheid variable stars\nPenzias & Wilson 1964 discovery of CMB isotropic radiation; COBE, WMAP, Planck precision measurements\nType Ia Supernovae 1998 discovery of accelerating cosmic expansion (Perlmutter, Riess, Schmidt)\nEvent Horizon Telescope (EHT) direct shadow imaging of supermassive black holes M87* and Sgr A*\n\nApplications:\nSpace exploration mission planning\nInterplanetary navigation\nDeep space telemetry",
+  "content_sha256": "de5c36aabaca10530f717b5e055f546b1ad7e36ba0962959da5c5cfdaf87648b",
+  "file_path": "storage/knowledge\\partitions/space/cosmology\\a8\\a88921db39d3e2e4.json",
+  "id": "a88921db39d3e2e4",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:49Z",
+  "originating_record_id": null,
+  "partition": "partitions/space/cosmology",
+  "provenance": {
+    "author_or_curator": "Science Reference",
+    "content_sha256": "de5c36aabaca10530f717b5e055f546b1ad7e36ba0962959da5c5cfdaf87648b",
+    "imported_at": "2026-09-29T09:59:49Z",
+    "license": "CC-BY-4.0",
+    "source_uri": "Planck 2018 results. VI. Cosmological parameters (Astronomy & Astrophysics, 2020)"
+  },
+  "source": "Planck 2018 results. VI. Cosmological parameters (Astronomy & Astrophysics, 2020)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Lambda-CDM Standard Cosmological Model",
+  "subpartition": "cosmology",
+  "tags": [
+    "space",
+    "cosmology",
+    "scientific_concept"
+  ],
+  "topic": "space",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

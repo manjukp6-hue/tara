@@ -1,0 +1,33 @@
+{
+  "status": "SUCCESS",
+  "id": "b5b02677ff92477e",
+  "topic": "mathematics",
+  "subpartition": "indian_mathematics",
+  "subject": "ext_brahmasphutasiddhanta_algebra_and_quadrilaterals",
+  "tags": [
+    "mathematics",
+    "indian_mathematics",
+    "external_download",
+    "cc-by-sa-4.0",
+    "formula",
+    "indian_mathematics"
+  ],
+  "category": "mathematics",
+  "partition": "partitions/mathematics/indian_mathematics",
+  "file_path": "storage\\knowledge\\partitions\\mathematics\\indian_mathematics\\b5\\b5b02677ff92477e.json",
+  "content": "{\"batchcomplete\":\"\",\"query\":{\"pages\":{\"30220596\":{\"pageid\":30220596,\"ns\":0,\"title\":\"Brahmasphutasiddhanta\",\"extract\":\"\"}}}}",
+  "confidence": 1.0,
+  "source_type": "EXTERNAL_DOWNLOADED",
+  "originating_record_id": null,
+  "verification_status": "OPEN_SOURCE_VERIFIED",
+  "source": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Brahmasphutasiddhanta&format=json",
+  "learned_at": "2026-09-29T10:42:18Z",
+  "content_sha256": "fe91fa58bb52d45eace46a0b5b65d04f83765bd9850d61ab1f4bd4269c13bee6",
+  "provenance": {
+    "author_or_curator": "Brahmagupta",
+    "content_sha256": "fe91fa58bb52d45eace46a0b5b65d04f83765bd9850d61ab1f4bd4269c13bee6",
+    "imported_at": "2026-09-29T10:42:18Z",
+    "license": "CC-BY-SA-4.0",
+    "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Brahmasphutasiddhanta&format=json"
+  }
+}

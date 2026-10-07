@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Rene Descartes",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://archive.org/details/geometryofrenede00desc"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Euclidean Distance Formula\nExact Expression: d = \\sqrt{(x_2 - x_1)^2 + (y_2 - y_1)^2 + (z_2 - z_1)^2}\nDefinitions: Metric distance between two points in three-dimensional Euclidean space R^3.\nDerivation/Reference: Derived from Pythagorean theorem applied successively in orthogonal coordinate planes; Rene Descartes, La Geometrie (1637)\nExample: P1=(0,0,0), P2=(1,2,2) -> d = sqrt(1^2 + 2^2 + 2^2) = sqrt(9) = 3\nDomain: coordinate_geometry\nAssumptions: Flat Euclidean geometry metric g_ij = delta_ij\nCommon Errors: Confusing difference order (x2 - x1) with addition",
+  "content_sha256": "577e553c69a6c41151e88714a0dbbf12f0857b49171b3fcec58e3f68ff8ba436",
+  "file_path": "storage/knowledge\\partitions/mathematics/coordinate_geometry\\d1\\d14e8d7225277c52.json",
+  "id": "d14e8d7225277c52",
+  "last_merged_at": "2026-09-29T10:34:32Z",
+  "learned_at": "2026-09-29T10:11:29Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/coordinate_geometry",
+  "provenance": {
+    "author_or_curator": "Rene Descartes",
+    "content_sha256": "577e553c69a6c41151e88714a0dbbf12f0857b49171b3fcec58e3f68ff8ba436",
+    "imported_at": "2026-09-29T10:11:29Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/geometryofrenede00desc"
+  },
+  "source": "https://archive.org/details/geometryofrenede00desc",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Euclidean Distance Formula",
+  "subpartition": "coordinate_geometry",
+  "tags": [
+    "distance",
+    "euclidean_space",
+    "cartesian_coordinates",
+    "metric",
+    "formula",
+    "coordinate_geometry",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

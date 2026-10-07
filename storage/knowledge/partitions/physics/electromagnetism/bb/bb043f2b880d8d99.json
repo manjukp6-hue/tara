@@ -1,0 +1,39 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Science Reference",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "A Dynamical Theory of the Electromagnetic Field (James Clerk Maxwell, 1865)"
+    }
+  ],
+  "category": "physics",
+  "confidence": 1.0,
+  "content": "Scientific Concept: Maxwell's Equations of Electrodynamics\nDomain: physics / electromagnetism\nDefinition: Unified set of coupled partial differential equations describing how electric and magnetic fields are generated and altered by charges and currents.\n\nPrinciples:\nGauss's Law for Electricity: Electric flux through closed surface proportional to enclosed charge: div(E) = rho / epsilon_0\nGauss's Law for Magnetism: No magnetic monopoles exist: div(B) = 0\nFaraday's Law of Induction: Time-varying magnetic field induces electric field: curl(E) = -dB/dt\nAmpere-Maxwell Law: Magnetic fields induced by electric currents and displacement current: curl(B) = mu_0 J + mu_0 epsilon_0 dE/dt\n\nExperimental Proofs:\nHeinrich Hertz spark-gap electromagnetic wave transmission experiments (1887)\nSpeed of light c = 1/sqrt(mu_0 * epsilon_0) matching astronomical and laboratory optical measurements\n\nApplications:\nWireless telecommunications\nRadar\nElectrical power generators\nOptics",
+  "content_sha256": "b1c785186b7f43e853ca45fafccda46d744d2d19995625ceb59513657ea3acb3",
+  "file_path": "storage/knowledge\\partitions/physics/electromagnetism\\bb\\bb043f2b880d8d99.json",
+  "id": "bb043f2b880d8d99",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/physics/electromagnetism",
+  "provenance": {
+    "author_or_curator": "Science Reference",
+    "content_sha256": "b1c785186b7f43e853ca45fafccda46d744d2d19995625ceb59513657ea3acb3",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "A Dynamical Theory of the Electromagnetic Field (James Clerk Maxwell, 1865)"
+  },
+  "source": "A Dynamical Theory of the Electromagnetic Field (James Clerk Maxwell, 1865)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Maxwell's Equations of Electrodynamics",
+  "subpartition": "electromagnetism",
+  "tags": [
+    "physics",
+    "electromagnetism",
+    "scientific_concept"
+  ],
+  "topic": "physics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

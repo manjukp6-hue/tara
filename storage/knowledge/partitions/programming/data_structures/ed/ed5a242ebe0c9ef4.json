@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Donald E. Knuth",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:39Z",
+      "source": "The Art of Computer Programming, Vol 3: Sorting and Searching (Donald E. Knuth, 1973)"
+    }
+  ],
+  "category": "programming",
+  "confidence": 1.0,
+  "content": "High-performance data structures optimize access, search, and modification complexity: 1) B+ Trees provide balanced multi-way disk-friendly indexing with sequential leaf node linked lists for range queries (O(log n)); 2) Hash Tables with Robin Hood linear probing minimize probe sequence variance for O(1) average lookup; 3) Red-Black Trees maintain self-balancing binary search invariant with at most 2 rotations per insertion; 4) Skip Lists provide probabilistic O(log n) search, insertion, and deletion via multi-level forward pointers without tree rebalancing.",
+  "content_sha256": "19bd23a5600aa478ad20eb268881ec5a5278f531b1891f4ddea2871fd496ea95",
+  "file_path": "storage/knowledge\\partitions/programming/data_structures\\ed\\ed5a242ebe0c9ef4.json",
+  "id": "ed5a242ebe0c9ef4",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:34Z",
+  "originating_record_id": null,
+  "partition": "partitions/programming/data_structures",
+  "provenance": {
+    "author_or_curator": "Donald E. Knuth",
+    "content_sha256": "19bd23a5600aa478ad20eb268881ec5a5278f531b1891f4ddea2871fd496ea95",
+    "imported_at": "2026-09-29T10:11:34Z",
+    "license": "Public Domain",
+    "source_uri": "The Art of Computer Programming, Vol 3: Sorting and Searching (Donald E. Knuth, 1973)"
+  },
+  "source": "The Art of Computer Programming, Vol 3: Sorting and Searching (Donald E. Knuth, 1973)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "advanced_persistent_and_indexing_data_structures",
+  "subpartition": "data_structures",
+  "tags": [
+    "data_structures",
+    "b_plus_tree",
+    "hash_tables",
+    "red_black_tree",
+    "skip_list",
+    "programming"
+  ],
+  "topic": "programming",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

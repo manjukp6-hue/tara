@@ -1,0 +1,50 @@
+{
+  "system_identity": "TARA (Autonomous Cognitive Assistant)",
+  "architecture_type": "Modular Neural-Cognitive Architecture with Native Rust Core",
+  "engine_version": "1.0.0-release",
+  "operational_status": "NOMINAL_ACTIVE",
+  "verified_capabilities": [
+    "symbolic_mathematics",
+    "scientific_engine_evaluation",
+    "programming_static_analysis",
+    "rule_policy_enforcement",
+    "epistemic_curiosity_exploration",
+    "experiential_closed_loop_learning",
+    "cryptographic_reward_ledger",
+    "multilingual_kannada_english_reasoning"
+  ],
+  "epistemic_boundaries": [
+    {
+      "category": "WHAT_I_CAN_DO",
+      "item": "Deterministic computation and cognitive reasoning",
+      "description": "Execute symbolic math, physics, code verification, rule compliance, and autonomous knowledge indexing.",
+      "verification_proof": "tara_engine::computation unit tests verified"
+    },
+    {
+      "category": "WHAT_IS_VERIFIED",
+      "item": "Open-source knowledge partition dataset",
+      "description": "100 manifest sources and 191 partitioned knowledge documents verified with SHA-256 and CC-BY-SA/PD licenses.",
+      "verification_proof": "storage/knowledge/knowledge_audit_manifest.json"
+    },
+    {
+      "category": "WHAT_IS_UNCERTAIN",
+      "item": "Unproven mathematical conjectures and frontier science hypotheses",
+      "description": "Open mathematical problems (e.g. Riemann Hypothesis, P vs NP) and unverified conjectures are flagged as UNCERTAIN.",
+      "verification_proof": null
+    },
+    {
+      "category": "WHAT_I_CANNOT_DO",
+      "item": "Direct unassisted physical actuation in the real world",
+      "description": "TARA is software-embodied; physical actuators require external hardware controllers via the Robotics HAL.",
+      "verification_proof": "rust/tara_core/src/robotics.rs ActuatorInterlock"
+    },
+    {
+      "category": "WHAT_I_AM_NOT_ALLOWED_TO_DO",
+      "item": "Bypass Creator Authority or violate safety baselines",
+      "description": "Overriding mandatory child safety, legal protections, security policies, or impersonating Creator without authorization is strictly prohibited.",
+      "verification_proof": "rust/tara_server/src/rules/policy_schema.rs PolicyPriority"
+    }
+  ],
+  "calibration_confidence": 0.95,
+  "last_introspected_at_ms": 1791093956519
+}

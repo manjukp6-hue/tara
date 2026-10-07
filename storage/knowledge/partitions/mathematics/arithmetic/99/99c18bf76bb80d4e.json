@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Carl Friedrich Gauss",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://gutenberg.org/ebooks/gauss-disquisitiones"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Fundamental Theorem of Arithmetic\nExact Expression: n = \\prod_{i=1}^{k} p_i^{a_i}\nDefinitions: Every integer greater than 1 can be represented uniquely as a product of prime powers up to order of factors.\nDerivation/Reference: Euclid's Elements Book VII, Propositions 30-32; Carl Friedrich Gauss, Disquisitiones Arithmeticae (1801)\nExample: 360 = 2^3 * 3^2 * 5^1\nDomain: arithmetic\nAssumptions: n in Z, n > 1\nCommon Errors: Assuming 1 is prime (violates uniqueness)",
+  "content_sha256": "a2cd96b65261b2e54c94c3b15e02598ac1880ba25f5a21452e6785bd1fee6bf6",
+  "file_path": "storage/knowledge\\partitions/mathematics/arithmetic\\99\\99c18bf76bb80d4e.json",
+  "id": "99c18bf76bb80d4e",
+  "last_merged_at": "2026-09-29T10:34:32Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/arithmetic",
+  "provenance": {
+    "author_or_curator": "Carl Friedrich Gauss",
+    "content_sha256": "a2cd96b65261b2e54c94c3b15e02598ac1880ba25f5a21452e6785bd1fee6bf6",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "https://gutenberg.org/ebooks/gauss-disquisitiones"
+  },
+  "source": "https://gutenberg.org/ebooks/gauss-disquisitiones",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Fundamental Theorem of Arithmetic",
+  "subpartition": "arithmetic",
+  "tags": [
+    "prime_factorization",
+    "canonical_form",
+    "euclid",
+    "formula",
+    "arithmetic",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

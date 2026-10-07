@@ -1,0 +1,41 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Bhaskara II (Bhaskaracharya)",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "tara://historical/ind_math_008_bhaskara2_chakravala"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Indian Mathematics Record\nTreatise: Bijaganita (Verses 69-73)\nAuthor: Bhaskara II (Bhaskaracharya)\nPeriod: 1150 CE (Vijjadhavida / Patan, Maharashtra)\nDomain: number_theory\n\nHISTORICAL_FORMULA:\nChakravala (Cyclic algorithm): Iterative composition method combining Brahmagupta's Bhavana identity to solve varga-prakriti (Nx^2 + 1 = y^2)\n\nMODERN_EQUIVALENT:\nNx^2 + 1 = y^2 (Pell's equation); Chakravala algorithm finds minimal integer fundamental solutions via modular inverse optimization, proved optimal by Hermann Hankel (1874)\n\nMathematical Context: Bhaskara II solved 61x^2 + 1 = y^2 finding minimal integers x = 226153980, y = 1766319049, later posed by Pierre de Fermat to European mathematicians in 1657.\nHistorical Significance: Hankel described Chakravala as 'the finest thing achieved in the theory of numbers before Lagrange'.\nProvenance Reference: Bijaganita of Bhaskara II (English translation by H. T. Colebrooke, 1817; C. N. Srinivasiengar, 1967)",
+  "content_sha256": "88ff00f2fae1abcf106b70745448ad60230327258aaef792ee1186d1d32bfabe",
+  "file_path": "storage/knowledge\\partitions/mathematics/indian_mathematics\\93\\93d7946735e282c3.json",
+  "id": "93d7946735e282c3",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/indian_mathematics",
+  "provenance": {
+    "author_or_curator": "Bhaskara II (Bhaskaracharya)",
+    "content_sha256": "88ff00f2fae1abcf106b70745448ad60230327258aaef792ee1186d1d32bfabe",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "tara://historical/ind_math_008_bhaskara2_chakravala"
+  },
+  "source": "tara://historical/ind_math_008_bhaskara2_chakravala",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "bhaskara_ii_(bhaskaracharya)_number_theory",
+  "subpartition": "indian_mathematics",
+  "tags": [
+    "indian_mathematics",
+    "number_theory",
+    "bhaskara_ii_(bhaskaracharya)",
+    "historical_mathematics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

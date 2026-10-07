@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Linus Pauling",
+      "license": "CC-BY-4.0",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "The Nature of the Chemical Bond (Linus Pauling, Cornell University Press, 1939)"
+    }
+  ],
+  "category": "science",
+  "confidence": 1.0,
+  "content": "Chemical bonding governs the stability and geometry of molecular matter through electromagnetic valence electron interactions: Covalent sharing, Ionic electrostatic attraction, and Metallic delocalization. Reaction spontaneity is determined by the Gibbs Free Energy change: Delta G = Delta H - T * Delta S, where Delta G < 0 indicates an exergonic spontaneous process under constant temperature and pressure.",
+  "content_sha256": "ec5ac8fc360c46b2f179997a7a1ef806a196cc4a7f37f757177f31b7a6177410",
+  "file_path": "storage/knowledge\\partitions/science/scientific_method\\8b\\8b7ec6b239b9e300.json",
+  "id": "8b7ec6b239b9e300",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:34Z",
+  "originating_record_id": null,
+  "partition": "partitions/science/scientific_method",
+  "provenance": {
+    "author_or_curator": "Linus Pauling",
+    "content_sha256": "ec5ac8fc360c46b2f179997a7a1ef806a196cc4a7f37f757177f31b7a6177410",
+    "imported_at": "2026-09-29T10:11:34Z",
+    "license": "CC-BY-4.0",
+    "source_uri": "The Nature of the Chemical Bond (Linus Pauling, Cornell University Press, 1939)"
+  },
+  "source": "The Nature of the Chemical Bond (Linus Pauling, Cornell University Press, 1939)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "chemical_bonding_and_reaction_thermodynamics",
+  "subpartition": "scientific_method",
+  "tags": [
+    "chemistry",
+    "chemical_bonding",
+    "gibbs_free_energy",
+    "thermodynamics",
+    "valence_electrons",
+    "science",
+    "scientific_method"
+  ],
+  "topic": "science",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

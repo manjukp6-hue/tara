@@ -9,6 +9,7 @@ storage/secrets/
 storage/deployment/
 storage/vault/
 storage/audit/
+storage/ledger/
 TARA/IDENTITY/secrets/
 TARA/ACCESS/secrets/
 TARA/ACCESS/vault/
@@ -69,3 +70,18 @@ target/
 Thumbs.db
 scratch/
 .github/
+
+# Standalone downloader (Rule 3 isolated boundary)
+downloader/
+
+# Weak and unverified raw datasets (User directive)
+**/weak/
+storage/datasets/**/weak/
+storage/datasets/tara_dataset_filtered/
+storage/datasets/tara_dataset_pool_v2/raw/
+storage/knowledge/verified_download_pool/
+*.zip
+*.tar.gz
+*.tgz
+*.pdf
+*.html

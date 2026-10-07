@@ -43,12 +43,12 @@
     ".gitignore": {
       "extension": "",
       "file_id": 2814749767172450,
-      "line_count": 71,
-      "modified_epoch": 1791363033,
+      "line_count": 87,
+      "modified_epoch": 1791363271,
       "name": ".gitignore",
       "rel_path": ".gitignore",
-      "sha256": "a523d95b9bd2cb1ec58ac04c0b16b1f8b93ca9705e87124fb7f72d47cb14b914",
-      "size_bytes": 1158
+      "sha256": "87909b44862a6eb1fed3eccf49d006a8a10e83c28a50cc54b572684c40aec7f0",
+      "size_bytes": 1485
     },
     "AGENTS.md": {
       "extension": "md",
@@ -17013,12 +17013,12 @@
     "downloader/download_register.json": {
       "extension": "json",
       "file_id": 12384898975583725,
-      "line_count": 44256,
-      "modified_epoch": 1791363059,
+      "line_count": 45516,
+      "modified_epoch": 1791363305,
       "name": "download_register.json",
       "rel_path": "downloader/download_register.json",
-      "sha256": "0bab99051704871b4ded536f1e8f33f48b188dc1996edd29f5efc9cec842a816",
-      "size_bytes": 1964912
+      "sha256": "921365764d81f562a38c797ae10cf6ee4735023ad26138d40f277399ff4248bb",
+      "size_bytes": 2022955
     },
     "downloader/download_register.rs": {
       "extension": "rs",
@@ -17033,12 +17033,12 @@
     "downloader/download_register.txt": {
       "extension": "txt",
       "file_id": 12384898975594305,
-      "line_count": 29398,
-      "modified_epoch": 1791363059,
+      "line_count": 30250,
+      "modified_epoch": 1791363305,
       "name": "download_register.txt",
       "rel_path": "downloader/download_register.txt",
-      "sha256": "7a7482fb8a8fdcee412917a960d797344573cc7a05ef2a8e9a09eef921e81a34",
-      "size_bytes": 1442729
+      "sha256": "abe64e97edceb392e4df140a79a66587c27b701d8f681ba80554e92f1889d86a",
+      "size_bytes": 1483854
     },
     "downloader/downloader.rs": {
       "extension": "rs",
@@ -17063,12 +17063,12 @@
     "downloader/license_register.json": {
       "extension": "json",
       "file_id": 25614222880996476,
-      "line_count": 29578,
-      "modified_epoch": 1791363053,
+      "line_count": 31018,
+      "modified_epoch": 1791363305,
       "name": "license_register.json",
       "rel_path": "downloader/license_register.json",
-      "sha256": "9c7a28e6e8f1ca17e7c6a8a69ac92c0be2f35f2072bbf813a8454aaa5d21607d",
-      "size_bytes": 1232423
+      "sha256": "0d7e855548eae12ae85a206521cb84fcb0e18fbcb2d4c2527d56be6d0efcf458",
+      "size_bytes": 1292657
     },
     "downloader/license_register.rs": {
       "extension": "rs",
@@ -17083,12 +17083,12 @@
     "downloader/license_register.txt": {
       "extension": "txt",
       "file_id": 6473924464671900,
-      "line_count": 17573,
-      "modified_epoch": 1791363053,
+      "line_count": 18429,
+      "modified_epoch": 1791363305,
       "name": "license_register.txt",
       "rel_path": "downloader/license_register.txt",
-      "sha256": "194c9cda70fd0d95ebe7360405119ad8e3989c3eff8132bf64bea0ecd263cef6",
-      "size_bytes": 785121
+      "sha256": "611db24df4493c12b6878f41607086166836a3d300f451ee5d183fd86fc64875",
+      "size_bytes": 823107
     },
     "rust/tara_core/Cargo.toml": {
       "extension": "toml",
@@ -19511,7 +19511,7 @@
       "size_bytes": 1242
     }
   },
-  "generated_at_utc": "1791363062",
+  "generated_at_utc": "1791363312",
   "schema_version": "1.0.0",
   "total_files": 1951
 }

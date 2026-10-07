@@ -1,0 +1,39 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Science Reference",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "Philosophiae Naturalis Principia Mathematica (Isaac Newton, 1687)"
+    }
+  ],
+  "category": "physics",
+  "confidence": 1.0,
+  "content": "Scientific Concept: Newton's Laws of Motion\nDomain: physics / classical_mechanics\nDefinition: Three physical laws establishing the fundamental relationship between a body, the forces acting upon it, and its motion in response.\n\nPrinciples:\n1st Law (Inertia): A body remains at rest or in uniform linear motion unless acted upon by a net external force.\n2nd Law (Force & Momentum): Net force equals time rate of change of linear momentum F = dp/dt = ma (for constant mass).\n3rd Law (Action-Reaction): To every action force there is an equal and opposite reaction force F_AB = -F_BA.\n\nExperimental Proofs:\nCavendish torsion balance experiment (1798) verifying universal gravitation constant G\nAtwood machine measurements validating F = ma in inertial reference frames\n\nApplications:\nOrbital trajectory calculation\nStructural engineering\nBallistics",
+  "content_sha256": "1d883361b6ebd233783bec5b4f91e8d962093454a48e86cbde0be30ca0467424",
+  "file_path": "storage/knowledge\\partitions/physics/classical_mechanics\\a8\\a88cd48da8289b5f.json",
+  "id": "a88cd48da8289b5f",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/physics/classical_mechanics",
+  "provenance": {
+    "author_or_curator": "Science Reference",
+    "content_sha256": "1d883361b6ebd233783bec5b4f91e8d962093454a48e86cbde0be30ca0467424",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "Philosophiae Naturalis Principia Mathematica (Isaac Newton, 1687)"
+  },
+  "source": "Philosophiae Naturalis Principia Mathematica (Isaac Newton, 1687)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Newton's Laws of Motion",
+  "subpartition": "classical_mechanics",
+  "tags": [
+    "physics",
+    "classical_mechanics",
+    "scientific_concept"
+  ],
+  "topic": "physics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

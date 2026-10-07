@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Gottfried Wilhelm Leibniz",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://archive.org/details/actaeruditorum1684leib"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Product Rule for Differentiation\nExact Expression: \\frac{d}{dx}[u(x)v(x)] = u'(x)v(x) + u(x)v'(x)\nDefinitions: Derivative of the product of two differentiable functions equals derivative of the first times second plus first times derivative of the second.\nDerivation/Reference: Derived via limit definition of derivative: lim_{h->0} [u(x+h)v(x+h) - u(x)v(x)]/h; Gottfried Wilhelm Leibniz (1684)\nExample: d/dx [x^2 * sin(x)] = 2x*sin(x) + x^2*cos(x)\nDomain: calculus\nAssumptions: u and v are differentiable at point x\nCommon Errors: Mistakenly claiming (uv)' = u'v'",
+  "content_sha256": "46931d1b13e37a5a8d8a690fb504ffed2f1ad09b66c81f329d6f11b81dbc9246",
+  "file_path": "storage/knowledge\\partitions/mathematics/calculus\\a1\\a1a8649ebd2003a7.json",
+  "id": "a1a8649ebd2003a7",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:29Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/calculus",
+  "provenance": {
+    "author_or_curator": "Gottfried Wilhelm Leibniz",
+    "content_sha256": "46931d1b13e37a5a8d8a690fb504ffed2f1ad09b66c81f329d6f11b81dbc9246",
+    "imported_at": "2026-09-29T10:11:29Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/actaeruditorum1684leib"
+  },
+  "source": "https://archive.org/details/actaeruditorum1684leib",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Product Rule for Differentiation",
+  "subpartition": "calculus",
+  "tags": [
+    "product_rule",
+    "differentiation",
+    "leibniz",
+    "derivatives",
+    "formula",
+    "calculus",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

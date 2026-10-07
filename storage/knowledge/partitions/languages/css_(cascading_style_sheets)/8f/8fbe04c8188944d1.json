@@ -1,0 +1,40 @@
+{
+  "alternative_sources": [
+    {
+      "author": "CSS (Cascading Style Sheets)",
+      "license": "W3C Document License / CC-BY-4.0",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://developer.mozilla.org/en-US/docs/Web/CSS"
+    }
+  ],
+  "category": "languages",
+  "confidence": 1.0,
+  "content": "Programming Language Reference: CSS (Cascading Style Sheets)\nVersion: CSS Snapshot 2023 / CSS3 & CSS4 Modules (W3C)\nSyntax: Rule-based stylesheet language composed of selectors, declarations, properties, and values.\nSemantics: Cascade algorithm, specificity rules, inheritance, Box Model, formatting contexts (Flexbox, Grid).\nType System: Property value types: lengths (px, rem, vh), colors (rgb, oklch), percentages, custom properties (--var).\nMemory Model: Computed style maps and render tree layout nodes maintained by browser styling engine.\nConcurrency: Hardware-accelerated compositing on separate GPU threads (transforms, opacity).\nError Handling: Forward-compatible error recovery: invalid property-value pairs or unrecognized selectors are safely ignored.\nStandard APIs: CSS Object Model (CSSOM), CSS Typed OM API, CSS Grid Layout, CSS Flexible Box\nSpecification: W3C CSS Specifications (https://www.w3.org/Style/CSS/current-work)\nOfficial Docs: https://developer.mozilla.org/en-US/docs/Web/CSS",
+  "content_sha256": "fbcc2bafe3e1e45c21934dd33ed4ff5efd0fc8ed02d639a4563ec722ff806d93",
+  "file_path": "storage/knowledge\\partitions/languages/css_(cascading_style_sheets)\\8f\\8fbe04c8188944d1.json",
+  "id": "8fbe04c8188944d1",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:50Z",
+  "originating_record_id": null,
+  "partition": "partitions/languages/css_(cascading_style_sheets)",
+  "provenance": {
+    "author_or_curator": "CSS (Cascading Style Sheets)",
+    "content_sha256": "fbcc2bafe3e1e45c21934dd33ed4ff5efd0fc8ed02d639a4563ec722ff806d93",
+    "imported_at": "2026-09-29T09:59:50Z",
+    "license": "W3C Document License / CC-BY-4.0",
+    "source_uri": "https://developer.mozilla.org/en-US/docs/Web/CSS"
+  },
+  "source": "https://developer.mozilla.org/en-US/docs/Web/CSS",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "language_spec_css_(cascading_style_sheets)",
+  "subpartition": "css_(cascading_style_sheets)",
+  "tags": [
+    "programming_languages",
+    "css_(cascading_style_sheets)",
+    "language_specification",
+    "languages"
+  ],
+  "topic": "languages",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

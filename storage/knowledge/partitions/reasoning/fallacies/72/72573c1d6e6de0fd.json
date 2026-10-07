@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Aristotle & Charles Leonard Hamblin",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:39Z",
+      "source": "Sophistical Refutations (Aristotle) & Fallacies (C. L. Hamblin, 1970)"
+    }
+  ],
+  "category": "reasoning",
+  "confidence": 1.0,
+  "content": "Logical fallacies represent flaws in reasoning that undermine argument validity. Formal fallacies include Affirming the Consequent (If P then Q; Q; therefore P) and Denying the Antecedent (If P then Q; not P; therefore not Q). Informal fallacies include Post Hoc Ergo Propter Hoc (causal conflation with temporal precedence), Straw Man (misrepresenting opposing view), and Circular Reasoning (Petitio Principii where premises assume conclusion).",
+  "content_sha256": "0b62dabf6dcb2ed9166047f14ab22e145709e0bfae527a8cdb88467cd8b83a4c",
+  "file_path": "storage/knowledge\\partitions/reasoning/fallacies\\72\\72573c1d6e6de0fd.json",
+  "id": "72573c1d6e6de0fd",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:35Z",
+  "originating_record_id": null,
+  "partition": "partitions/reasoning/fallacies",
+  "provenance": {
+    "author_or_curator": "Aristotle & Charles Leonard Hamblin",
+    "content_sha256": "0b62dabf6dcb2ed9166047f14ab22e145709e0bfae527a8cdb88467cd8b83a4c",
+    "imported_at": "2026-09-29T10:11:35Z",
+    "license": "Public Domain",
+    "source_uri": "Sophistical Refutations (Aristotle) & Fallacies (C. L. Hamblin, 1970)"
+  },
+  "source": "Sophistical Refutations (Aristotle) & Fallacies (C. L. Hamblin, 1970)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "cognitive_and_formal_logical_fallacies",
+  "subpartition": "fallacies",
+  "tags": [
+    "fallacies",
+    "affirming_the_consequent",
+    "informal_fallacies",
+    "straw_man",
+    "logic_errors",
+    "reasoning"
+  ],
+  "topic": "reasoning",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

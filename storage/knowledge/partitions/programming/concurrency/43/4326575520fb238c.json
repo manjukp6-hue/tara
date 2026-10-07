@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Maurice Herlihy & Nir Shavit",
+      "license": "CC-BY-4.0",
+      "merged_at": "2026-09-29T10:12:39Z",
+      "source": "The Art of Multiprocessor Programming (Maurice Herlihy & Nir Shavit, 2008)"
+    }
+  ],
+  "category": "programming",
+  "confidence": 1.0,
+  "content": "Concurrency engineering guarantees safe state access across threads without data races. Primitives include: 1) Hardware Memory Barriers ensuring CPU instruction reordering respects memory model semantics; 2) Atomic Compare-And-Swap (CAS) allowing lock-free optimistic concurrency; 3) Sequential Consistency vs Acquire-Release semantics; 4) Communicating Sequential Processes (CSP) eliminating shared memory mutable state through message-passing channels.",
+  "content_sha256": "d1b075b35b184b033019e46943ea312b3085e18bef011eec91a5f3a3083c6c64",
+  "file_path": "storage/knowledge\\partitions/programming/concurrency\\43\\4326575520fb238c.json",
+  "id": "4326575520fb238c",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:35Z",
+  "originating_record_id": null,
+  "partition": "partitions/programming/concurrency",
+  "provenance": {
+    "author_or_curator": "Maurice Herlihy & Nir Shavit",
+    "content_sha256": "d1b075b35b184b033019e46943ea312b3085e18bef011eec91a5f3a3083c6c64",
+    "imported_at": "2026-09-29T10:11:35Z",
+    "license": "CC-BY-4.0",
+    "source_uri": "The Art of Multiprocessor Programming (Maurice Herlihy & Nir Shavit, 2008)"
+  },
+  "source": "The Art of Multiprocessor Programming (Maurice Herlihy & Nir Shavit, 2008)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "concurrency_control_memory_barriers_and_lock_free_primitives",
+  "subpartition": "concurrency",
+  "tags": [
+    "concurrency",
+    "lock_free",
+    "cas",
+    "memory_barriers",
+    "csp",
+    "threads",
+    "programming"
+  ],
+  "topic": "programming",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

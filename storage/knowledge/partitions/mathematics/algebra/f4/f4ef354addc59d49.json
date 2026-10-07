@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Muhammad ibn Musa al-Khwarizmi",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://archive.org/details/algebra-al-khwarizmi"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Quadratic Formula\nExact Expression: x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}\nDefinitions: Analytic closed-form solution for the roots of any single-variable second-degree polynomial equation.\nDerivation/Reference: Derived via completing the square on ax^2 + bx + c = 0; Al-Khwarizmi (820 CE), Brahmagupta (628 CE)\nExample: 2x^2 - 4x - 6 = 0 -> x = (4 +/- sqrt(16 - 4*2*(-6))) / 4 = (4 +/- 8)/4 -> x = 3 or x = -1\nDomain: algebra\nAssumptions: a != 0\nCommon Errors: Dividing only sqrt term by 2a instead of entire numerator; Sign error on -b when b is negative",
+  "content_sha256": "bf86ba457382e01132d61b08341e1285481bfe6493e3a1d7e4c10e6b7cc0ac66",
+  "file_path": "storage/knowledge\\partitions/mathematics/algebra\\f4\\f4ef354addc59d49.json",
+  "id": "f4ef354addc59d49",
+  "last_merged_at": "2026-09-29T10:34:32Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/algebra",
+  "provenance": {
+    "author_or_curator": "Muhammad ibn Musa al-Khwarizmi",
+    "content_sha256": "bf86ba457382e01132d61b08341e1285481bfe6493e3a1d7e4c10e6b7cc0ac66",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/algebra-al-khwarizmi"
+  },
+  "source": "https://archive.org/details/algebra-al-khwarizmi",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Quadratic Formula",
+  "subpartition": "algebra",
+  "tags": [
+    "polynomial",
+    "quadratic",
+    "discriminant",
+    "formula",
+    "algebra",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

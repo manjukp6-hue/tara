@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Elwin Bruno Christoffel",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://doi.org/10.1515/crll.1869.70.46"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Christoffel Symbols of the Second Kind\nExact Expression: \\Gamma^k_{ij} = \\frac{1}{2} g^{kl} \\left( \\frac{\\partial g_{jl}}{\\partial x^i} + \\frac{\\partial g_{il}}{\\partial x^j} - \\frac{\\partial g_{ij}}{\\partial x^l} \\right)\nDefinitions: Array of numbers representing the affine connection of a metric tensor in coordinate basis, determining parallel transport and geodesics.\nDerivation/Reference: Elwin Bruno Christoffel, Ueber die Transformation der homogenen Differentialausdrücke zweiten Grades (Crelle's Journal, 1869); Gregorio Ricci-Curbastro & Tullio Levi-Civita (1900)\nExample: In 2D polar coordinates (r, theta) with ds^2 = dr^2 + r^2 dtheta^2: Gamma^r_thetatheta = -r, Gamma^theta_rtheta = 1/r, all other components zero\nDomain: differential_geometry\nAssumptions: Symmetric Levi-Civita connection (torsion-free: Gamma^k_ij = Gamma^k_ji); Metric-compatibility: nabla_k g_ij = 0\nCommon Errors: Treating Christoffel symbols as tensors (they transform non-tensorially due to inhomogeneous coordinate derivative terms)",
+  "content_sha256": "53c9726ca7c45eeede6acb19aab08ef8a7b80c2a70e92fa31ffc2b8b1f3cbb6c",
+  "file_path": "storage/knowledge\\partitions/mathematics/differential_geometry\\34\\34d4e7481f7ad506.json",
+  "id": "34d4e7481f7ad506",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:33Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/differential_geometry",
+  "provenance": {
+    "author_or_curator": "Elwin Bruno Christoffel",
+    "content_sha256": "53c9726ca7c45eeede6acb19aab08ef8a7b80c2a70e92fa31ffc2b8b1f3cbb6c",
+    "imported_at": "2026-09-29T10:11:33Z",
+    "license": "Public Domain",
+    "source_uri": "https://doi.org/10.1515/crll.1869.70.46"
+  },
+  "source": "https://doi.org/10.1515/crll.1869.70.46",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Christoffel Symbols of the Second Kind",
+  "subpartition": "differential_geometry",
+  "tags": [
+    "christoffel_symbols",
+    "tensor_calculus",
+    "differential_geometry",
+    "metric_connection",
+    "geodesic",
+    "formula",
+    "differential_geometry",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

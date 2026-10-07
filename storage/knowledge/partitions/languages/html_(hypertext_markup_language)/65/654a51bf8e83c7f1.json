@@ -1,0 +1,40 @@
+{
+  "alternative_sources": [
+    {
+      "author": "HTML (HyperText Markup Language)",
+      "license": "CC-BY-4.0 (WHATWG / W3C)",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://developer.mozilla.org/en-US/docs/Web/HTML"
+    }
+  ],
+  "category": "languages",
+  "confidence": 1.0,
+  "content": "Programming Language Reference: HTML (HyperText Markup Language)\nVersion: HTML Living Standard (WHATWG / W3C)\nSyntax: Tag-based markup language structuring web documents using elements, attributes, and text nodes.\nSemantics: Semantic markup elements ( , , , , , ) parsed into the Document Object Model (DOM).\nType System: Markup tree hierarchy of DOM Nodes (Element, Text, Comment, Document).\nMemory Model: Browser DOM tree in C++ heap, managed via garbage collector linked with JavaScript runtime.\nConcurrency: Declarative resource loading with async and defer attributes on , web workers.\nError Handling: Forgiving parser: graceful error recovery specification ensuring document renders despite malformed tags.\nStandard APIs: DOM API, Canvas API, WebGL API, Web Audio API, WebRTC\nSpecification: WHATWG HTML Living Standard (https://html.spec.whatwg.org/)\nOfficial Docs: https://developer.mozilla.org/en-US/docs/Web/HTML",
+  "content_sha256": "13b7e3506df697a46518879468d2822c3820f1dcfcefebca0b8630729a5b7b08",
+  "file_path": "storage/knowledge\\partitions/languages/html_(hypertext_markup_language)\\65\\654a51bf8e83c7f1.json",
+  "id": "654a51bf8e83c7f1",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:49Z",
+  "originating_record_id": null,
+  "partition": "partitions/languages/html_(hypertext_markup_language)",
+  "provenance": {
+    "author_or_curator": "HTML (HyperText Markup Language)",
+    "content_sha256": "13b7e3506df697a46518879468d2822c3820f1dcfcefebca0b8630729a5b7b08",
+    "imported_at": "2026-09-29T09:59:49Z",
+    "license": "CC-BY-4.0 (WHATWG / W3C)",
+    "source_uri": "https://developer.mozilla.org/en-US/docs/Web/HTML"
+  },
+  "source": "https://developer.mozilla.org/en-US/docs/Web/HTML",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "language_spec_html_(hypertext_markup_language)",
+  "subpartition": "html_(hypertext_markup_language)",
+  "tags": [
+    "programming_languages",
+    "html_(hypertext_markup_language)",
+    "language_specification",
+    "languages"
+  ],
+  "topic": "languages",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

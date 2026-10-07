@@ -1,0 +1,41 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Baudhayana",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "tara://historical/ind_math_001_baudhayana"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Indian Mathematics Record\nTreatise: Baudhayana Sulba Sutra (Sutra 1.48)\nAuthor: Baudhayana\nPeriod: c. 800 BCE - 600 BCE (Vedic Period)\nDomain: geometry\n\nHISTORICAL_FORMULA:\ndīrghasyākṣaṇayā rajjuḥ pārśvamānī tiryaṅmānī ca yatpṛthagbhūte kurutastadubhayaṅ karoti (The diagonal chord of a rectangle produces both areas which the length and breadth produce separately)\n\nMODERN_EQUIVALENT:\nd^2 = l^2 + w^2 (Geometric diagonal theorem for rectangles / Pythagorean theorem in plane Euclidean geometry)\n\nMathematical Context: Prescribed exact geometric cord constructions for Vedic fire altars (agnicayana), including squaring the circle and doubling the square.\nHistorical Significance: Earliest known recorded explicit Sanskrit statement of the diagonal area relationship predating Pythagoras of Samos.\nProvenance Reference: The Sulba Sutras: Texts on Vedic Geometry (G. Thibaut, Journal of the Asiatic Society of Bengal, 1875)",
+  "content_sha256": "0889091e224c511a8f078ee4012cd2c890ef6568b34550f213c7abc996458a40",
+  "file_path": "storage/knowledge\\partitions/mathematics/indian_mathematics\\22\\22f6ce16ec5a5fba.json",
+  "id": "22f6ce16ec5a5fba",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/indian_mathematics",
+  "provenance": {
+    "author_or_curator": "Baudhayana",
+    "content_sha256": "0889091e224c511a8f078ee4012cd2c890ef6568b34550f213c7abc996458a40",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "tara://historical/ind_math_001_baudhayana"
+  },
+  "source": "tara://historical/ind_math_001_baudhayana",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "baudhayana_geometry",
+  "subpartition": "indian_mathematics",
+  "tags": [
+    "indian_mathematics",
+    "geometry",
+    "baudhayana",
+    "historical_mathematics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

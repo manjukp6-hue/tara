@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Alfred V. Aho, Monica S. Lam, Ravi Sethi, Jeffrey D. Ullman",
+      "license": "Apache-2.0",
+      "merged_at": "2026-09-29T10:12:39Z",
+      "source": "Compilers: Principles, Techniques, and Tools (Aho, Lam, Sethi, Ullman, 2006) & LLVM Compiler Infrastructure"
+    }
+  ],
+  "category": "programming",
+  "confidence": 1.0,
+  "content": "Modern compiler architecture executes in phased pipelines: Lexical Analysis (tokenization) -> Syntactic Analysis (Abstract Syntax Tree generation via LR/Pratt parsers) -> Semantic Analysis (type checking and symbol resolution) -> Intermediate Representation lowering (Static Single Assignment - SSA form where every variable is assigned exactly once) -> Machine-independent optimization passes (dead code elimination, constant propagation, loop invariant code motion) -> Machine code emission and register allocation (graph coloring).",
+  "content_sha256": "26aae8e69f74142b1bdbe9beaa8a4c29fd083e01d2579b33f2a86cf135624844",
+  "file_path": "storage/knowledge\\partitions/programming/compilers\\da\\da306b228f22d207.json",
+  "id": "da306b228f22d207",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:34Z",
+  "originating_record_id": null,
+  "partition": "partitions/programming/compilers",
+  "provenance": {
+    "author_or_curator": "Alfred V. Aho, Monica S. Lam, Ravi Sethi, Jeffrey D. Ullman",
+    "content_sha256": "26aae8e69f74142b1bdbe9beaa8a4c29fd083e01d2579b33f2a86cf135624844",
+    "imported_at": "2026-09-29T10:11:34Z",
+    "license": "Apache-2.0",
+    "source_uri": "Compilers: Principles, Techniques, and Tools (Aho, Lam, Sethi, Ullman, 2006) & LLVM Compiler Infrastructure"
+  },
+  "source": "Compilers: Principles, Techniques, and Tools (Aho, Lam, Sethi, Ullman, 2006) & LLVM Compiler Infrastructure",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "modern_compiler_pipeline_and_ssa_intermediate_representation",
+  "subpartition": "compilers",
+  "tags": [
+    "compilers",
+    "ssa",
+    "intermediate_representation",
+    "ast",
+    "llvm",
+    "optimization",
+    "programming"
+  ],
+  "topic": "programming",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

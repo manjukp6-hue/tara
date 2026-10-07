@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Bureau International des Poids et Mesures (BIPM)",
+      "license": "CC-BY-4.0",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "BIPM SI Brochure: The International System of Units (9th Edition, 2019)"
+    }
+  ],
+  "category": "science",
+  "confidence": 1.0,
+  "content": "The International System of Units (SI - BIPM 9th Edition 2019) defines the 7 base units entirely in terms of fixed numerical values of seven defining physical constants: the caesium-133 hyperfine transition frequency Delta nu_Cs (second), the speed of light c (metre), the Planck constant h (kilogram), the elementary charge e (ampere), the Boltzmann constant k (kelvin), the Avogadro constant N_A (mole), and the luminous efficacy K_cd (candela).",
+  "content_sha256": "12a80672d02cca2f0dd3c5faa19b8b92c20b1d1ca8069ebb5c187e7ccf4d51b6",
+  "file_path": "storage/knowledge\\partitions/science/measurement_units\\52\\520152712c325bd0.json",
+  "id": "520152712c325bd0",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:33Z",
+  "originating_record_id": null,
+  "partition": "partitions/science/measurement_units",
+  "provenance": {
+    "author_or_curator": "Bureau International des Poids et Mesures (BIPM)",
+    "content_sha256": "12a80672d02cca2f0dd3c5faa19b8b92c20b1d1ca8069ebb5c187e7ccf4d51b6",
+    "imported_at": "2026-09-29T10:11:33Z",
+    "license": "CC-BY-4.0",
+    "source_uri": "BIPM SI Brochure: The International System of Units (9th Edition, 2019)"
+  },
+  "source": "BIPM SI Brochure: The International System of Units (9th Edition, 2019)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "international_system_of_units_si_bipm_2019_standards",
+  "subpartition": "measurement_units",
+  "tags": [
+    "si_units",
+    "bipm",
+    "metrology",
+    "fundamental_constants",
+    "standards",
+    "science",
+    "measurement_units"
+  ],
+  "topic": "science",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

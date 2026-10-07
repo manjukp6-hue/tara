@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Brook Taylor",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://archive.org/details/methodusincreme00taylgoog"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Integration by Parts\nExact Expression: \\int u \\, dv = uv - \\int v \\, du\nDefinitions: Theorem that transforms the integral of a product of functions into a potentially simpler integral.\nDerivation/Reference: Integration of the product rule differential d(uv) = u dv + v du; Brook Taylor (1715)\nExample: int x*e^x dx: let u=x, dv=e^x dx -> du=dx, v=e^x -> x*e^x - int e^x dx = x*e^x - e^x + C\nDomain: integral_calculus\nAssumptions: u and v have continuous derivatives on integration domain\nCommon Errors: Incorrect assignment of u and dv causing circular or escalating complexity",
+  "content_sha256": "a367bcebed4d28302d3241de254589953c2b7630b0b694d8e22f651a3902c069",
+  "file_path": "storage/knowledge\\partitions/mathematics/integral_calculus\\28\\28b9d58ec7578911.json",
+  "id": "28b9d58ec7578911",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:29Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/integral_calculus",
+  "provenance": {
+    "author_or_curator": "Brook Taylor",
+    "content_sha256": "a367bcebed4d28302d3241de254589953c2b7630b0b694d8e22f651a3902c069",
+    "imported_at": "2026-09-29T10:11:29Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/methodusincreme00taylgoog"
+  },
+  "source": "https://archive.org/details/methodusincreme00taylgoog",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Integration by Parts",
+  "subpartition": "integral_calculus",
+  "tags": [
+    "integration_by_parts",
+    "indefinite_integral",
+    "liouville",
+    "formula",
+    "integral_calculus",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

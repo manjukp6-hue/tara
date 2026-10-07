@@ -1,0 +1,40 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Swift",
+      "license": "Apache-2.0 with Runtime Library Exception",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://developer.apple.com/documentation/swift"
+    }
+  ],
+  "category": "languages",
+  "confidence": 1.0,
+  "content": "Programming Language Reference: Swift\nVersion: Swift 5.10 / Swift 6\nSyntax: Safe, fast, and modern systems language developed by Apple with type inference and protocol-oriented programming.\nSemantics: Compiled to native code via LLVM, Automatic Reference Counting (ARC), data race safety in Swift 6.\nType System: Static strong typing with Optionals (Type?), value-type preference (structs/enums), Protocol-oriented design.\nMemory Model: Automatic Reference Counting (ARC) with weak and unowned references to prevent retain cycles.\nConcurrency: Async/await, Actors (isolate mutable state), Task groups, Sendable protocol for thread-safe data transfer.\nError Handling: throws / try / catch pattern, Result enum.\nStandard APIs: Swift Standard Library, Foundation, Combine, Dispatch (GCD)\nSpecification: The Swift Programming Language (https://swift.org/documentation/)\nOfficial Docs: https://developer.apple.com/documentation/swift",
+  "content_sha256": "8758bc81393f7e3f7157797b91a79c5868ff2a35efc5baf97f139dd88dd4c192",
+  "file_path": "storage/knowledge\\partitions/languages/swift\\1f\\1fcc819eef7daa53.json",
+  "id": "1fcc819eef7daa53",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:49Z",
+  "originating_record_id": null,
+  "partition": "partitions/languages/swift",
+  "provenance": {
+    "author_or_curator": "Swift",
+    "content_sha256": "8758bc81393f7e3f7157797b91a79c5868ff2a35efc5baf97f139dd88dd4c192",
+    "imported_at": "2026-09-29T09:59:49Z",
+    "license": "Apache-2.0 with Runtime Library Exception",
+    "source_uri": "https://developer.apple.com/documentation/swift"
+  },
+  "source": "https://developer.apple.com/documentation/swift",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "language_spec_swift",
+  "subpartition": "swift",
+  "tags": [
+    "programming_languages",
+    "swift",
+    "language_specification",
+    "languages"
+  ],
+  "topic": "languages",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

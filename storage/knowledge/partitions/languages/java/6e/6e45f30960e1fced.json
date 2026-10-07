@@ -1,0 +1,40 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Java",
+      "license": "GPL-2.0 with Classpath Exception (OpenJDK)",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://docs.oracle.com/en/java/javase/21/"
+    }
+  ],
+  "category": "languages",
+  "confidence": 1.0,
+  "content": "Programming Language Reference: Java\nVersion: Java SE 21 / 22 (LTS)\nSyntax: Class-centric object-oriented syntax running on the Java Virtual Machine (JVM).\nSemantics: Compiled to bytecode, JIT-compiled at runtime, strictly object-oriented with primitive value types.\nType System: Static, strong, nominal subtyping with interfaces, class inheritance, and type erasure generics.\nMemory Model: JVM generational garbage collection (G1, ZGC, Shenandoah) with Java Memory Model (JMM) happens-before guarantees.\nConcurrency: Project Loom Virtual Threads, synchronized blocks, java.util.concurrent executors, locks, and atomic variables.\nError Handling: Checked and unchecked exceptions derived from Throwable (Exception vs RuntimeException).\nStandard APIs: java.util.List, java.util.Map, java.util.stream.Stream, java.nio.file.Files\nSpecification: The Java Language Specification (JLS, Oracle)\nOfficial Docs: https://docs.oracle.com/en/java/javase/21/",
+  "content_sha256": "62f9a36b96c2e09fb90c902e8253eeb3e8b84aac29679707543ec4285bbca3a1",
+  "file_path": "storage/knowledge\\partitions/languages/java\\6e\\6e45f30960e1fced.json",
+  "id": "6e45f30960e1fced",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:49Z",
+  "originating_record_id": null,
+  "partition": "partitions/languages/java",
+  "provenance": {
+    "author_or_curator": "Java",
+    "content_sha256": "62f9a36b96c2e09fb90c902e8253eeb3e8b84aac29679707543ec4285bbca3a1",
+    "imported_at": "2026-09-29T09:59:49Z",
+    "license": "GPL-2.0 with Classpath Exception (OpenJDK)",
+    "source_uri": "https://docs.oracle.com/en/java/javase/21/"
+  },
+  "source": "https://docs.oracle.com/en/java/javase/21/",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "language_spec_java",
+  "subpartition": "java",
+  "tags": [
+    "programming_languages",
+    "java",
+    "language_specification",
+    "languages"
+  ],
+  "topic": "languages",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

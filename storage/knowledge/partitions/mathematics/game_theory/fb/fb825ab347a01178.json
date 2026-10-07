@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "John Forbes Nash Jr.",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://doi.org/10.1073/pnas.36.1.48"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Nash Equilibrium Condition\nExact Expression: u_i(s_i^*, \\mathbf{s}_{-i}^*) \\ge u_i(s_i, \\mathbf{s}_{-i}^*) \\quad \\forall s_i \\in S_i, \\forall i\nDefinitions: Proposed solution concept of a non-cooperative game where no player has an incentive to deviate unilaterally from their chosen strategy.\nDerivation/Reference: John Forbes Nash Jr., Equilibrium points in n-person games (PNAS, 1950); Kakutani fixed-point theorem proof\nExample: Prisoner's Dilemma: (Defect, Defect) is the unique dominant strategy Nash Equilibrium\nDomain: game_theory\nAssumptions: Finite game with mixed strategy extensions; Players are rational payoff-maximizers with common knowledge of game rules\nCommon Errors: Assuming Nash equilibrium is always Pareto-optimal or socially efficient",
+  "content_sha256": "b071e144e48bcc227ec08ccc42d3e28f5ab004a1c45184e7acbe35ae2c227cfa",
+  "file_path": "storage/knowledge\\partitions/mathematics/game_theory\\fb\\fb825ab347a01178.json",
+  "id": "fb825ab347a01178",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:31Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/game_theory",
+  "provenance": {
+    "author_or_curator": "John Forbes Nash Jr.",
+    "content_sha256": "b071e144e48bcc227ec08ccc42d3e28f5ab004a1c45184e7acbe35ae2c227cfa",
+    "imported_at": "2026-09-29T10:11:31Z",
+    "license": "Public Domain",
+    "source_uri": "https://doi.org/10.1073/pnas.36.1.48"
+  },
+  "source": "https://doi.org/10.1073/pnas.36.1.48",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Nash Equilibrium Condition",
+  "subpartition": "game_theory",
+  "tags": [
+    "nash_equilibrium",
+    "game_theory",
+    "strategic_form",
+    "minimax",
+    "rationality",
+    "formula",
+    "game_theory",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

@@ -1,0 +1,40 @@
+{
+  "alternative_sources": [
+    {
+      "author": "C",
+      "license": "Public ISO Standard (Reference implementations open-source under BSD/MIT/GPL)",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://en.cppreference.com/w/c"
+    }
+  ],
+  "category": "languages",
+  "confidence": 1.0,
+  "content": "Programming Language Reference: C\nVersion: ISO/IEC 9899:2018 (C17 / C23)\nSyntax: Imperative, procedural systems programming language providing direct mapping to hardware instructions.\nSemantics: Compiled to native machine code, manual memory management, undefined behavior (UB) for out-of-bounds or invalid pointer operations.\nType System: Statically and weakly typed, basic arithmetic types, pointers, structs, unions, and enums.\nMemory Model: Manual heap allocation via malloc/free, automatic stack frames, static/global data segments, direct raw memory addressing.\nConcurrency: POSIX threads (pthreads), C11 threads.h, atomic operations (stdatomic.h).\nError Handling: Return codes, errno global thread-local variable, setjmp/longjmp for non-local jumps.\nStandard APIs: stdio.h, stdlib.h, string.h, math.h, stdint.h, pthread.h\nSpecification: ISO/IEC 9899 Standard\nOfficial Docs: https://en.cppreference.com/w/c",
+  "content_sha256": "351251da173b47e13412aa43ecb1cea89b6db1f89e2919d4bda9ba15455ad157",
+  "file_path": "storage/knowledge\\partitions/languages/c\\db\\dbe011c2974e3f3d.json",
+  "id": "dbe011c2974e3f3d",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:49Z",
+  "originating_record_id": null,
+  "partition": "partitions/languages/c",
+  "provenance": {
+    "author_or_curator": "C",
+    "content_sha256": "351251da173b47e13412aa43ecb1cea89b6db1f89e2919d4bda9ba15455ad157",
+    "imported_at": "2026-09-29T09:59:49Z",
+    "license": "Public ISO Standard (Reference implementations open-source under BSD/MIT/GPL)",
+    "source_uri": "https://en.cppreference.com/w/c"
+  },
+  "source": "https://en.cppreference.com/w/c",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "language_spec_c",
+  "subpartition": "c",
+  "tags": [
+    "programming_languages",
+    "c",
+    "language_specification",
+    "languages"
+  ],
+  "topic": "languages",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

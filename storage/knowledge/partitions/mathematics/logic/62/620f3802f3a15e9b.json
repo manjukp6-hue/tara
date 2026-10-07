@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Augustus De Morgan",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://archive.org/details/formallogicorthe00demoiala"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: De Morgan's Laws\nExact Expression: \\neg(P \\wedge Q) \\iff (\\neg P \\vee \\neg Q) \\quad \\text{and} \\quad \\neg(P \\vee Q) \\iff (\\neg P \\wedge \\neg Q)\nDefinitions: Pair of transformation rules in formal logic and set theory relating conjunction and disjunction through logical negation.\nDerivation/Reference: Augustus De Morgan, Formal Logic (1847); anticipated by Aristotle and William of Ockham\nExample: not (Rain AND Weekend) = (not Rain) OR (not Weekend)\nDomain: logic\nAssumptions: Classical Boolean logic / Boolean algebra with Law of Excluded Middle\nCommon Errors: Failing to negate the individual operands when changing AND to OR",
+  "content_sha256": "235e733987ef8965096ac83400a6d23bd8b3a7970586a83b2633e442175868d0",
+  "file_path": "storage/knowledge\\partitions/mathematics/logic\\62\\620f3802f3a15e9b.json",
+  "id": "620f3802f3a15e9b",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:33Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/logic",
+  "provenance": {
+    "author_or_curator": "Augustus De Morgan",
+    "content_sha256": "235e733987ef8965096ac83400a6d23bd8b3a7970586a83b2633e442175868d0",
+    "imported_at": "2026-09-29T10:11:33Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/formallogicorthe00demoiala"
+  },
+  "source": "https://archive.org/details/formallogicorthe00demoiala",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "De Morgan's Laws",
+  "subpartition": "logic",
+  "tags": [
+    "de_morgan",
+    "boolean_logic",
+    "propositional_calculus",
+    "duality",
+    "formula",
+    "logic",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

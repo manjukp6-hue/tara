@@ -1,0 +1,1767 @@
+[
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Chakravala_method&format=json",
+    "source_title": "Chakravala Method (Cyclic Algorithm for Pell's Equation)",
+    "artifact_type": "HISTORICAL_TREATISE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:42:15Z",
+    "downloaded_file_size": 56952,
+    "source_sha256": "4c67c3444ae9d19b00b1ea86b889b47f31b933e295dc017a0bf9f1de3c0429c4",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\indian_math_chakravala_method.json",
+    "provenance": {
+      "author_or_curator": "Bhaskara II & Jayadeva",
+      "content_sha256": "4c67c3444ae9d19b00b1ea86b889b47f31b933e295dc017a0bf9f1de3c0429c4",
+      "imported_at": "2026-09-29T10:42:15Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Chakravala_method&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Aryabhata&format=json",
+    "source_title": "Aryabhata Mathematical Treatises and Planetary Constants",
+    "artifact_type": "HISTORICAL_TREATISE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:42:16Z",
+    "downloaded_file_size": 23588,
+    "source_sha256": "dffb0f2c3217aed9face2cb1b02ae067d87743657c1f8a66951bcf520c8287ab",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\indian_math_aryabhata.json",
+    "provenance": {
+      "author_or_curator": "Aryabhata (c. 499 CE)",
+      "content_sha256": "dffb0f2c3217aed9face2cb1b02ae067d87743657c1f8a66951bcf520c8287ab",
+      "imported_at": "2026-09-29T10:42:16Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Aryabhata&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Aryabhatiya&format=json",
+    "source_title": "Aryabhatiya Kuttaka Pulverizer and Sine Tables",
+    "artifact_type": "HISTORICAL_TREATISE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:42:17Z",
+    "downloaded_file_size": 8938,
+    "source_sha256": "d9fc079e0a8b58b38a158a9099af84aeb97229780c3f8a011f3624930a80244a",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\indian_math_aryabhatiya.json",
+    "provenance": {
+      "author_or_curator": "Aryabhata",
+      "content_sha256": "d9fc079e0a8b58b38a158a9099af84aeb97229780c3f8a011f3624930a80244a",
+      "imported_at": "2026-09-29T10:42:17Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Aryabhatiya&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Brahmagupta&format=json",
+    "source_title": "Brahmagupta Arithmetic of Zero Negative Numbers and Quadrilaterals",
+    "artifact_type": "HISTORICAL_TREATISE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:42:17Z",
+    "downloaded_file_size": 35545,
+    "source_sha256": "35ec11f7a1244bbe1cb4f380339a92d03516a326ba8163241c327b84323e5ff5",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\indian_math_brahmagupta.json",
+    "provenance": {
+      "author_or_curator": "Brahmagupta (c. 628 CE)",
+      "content_sha256": "35ec11f7a1244bbe1cb4f380339a92d03516a326ba8163241c327b84323e5ff5",
+      "imported_at": "2026-09-29T10:42:17Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Brahmagupta&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Brahmasphutasiddhanta&format=json",
+    "source_title": "Brahmasphutasiddhanta Mathematical and Astronomical Treatise",
+    "artifact_type": "HISTORICAL_TREATISE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:42:18Z",
+    "downloaded_file_size": 123,
+    "source_sha256": "fe91fa58bb52d45eace46a0b5b65d04f83765bd9850d61ab1f4bd4269c13bee6",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\indian_math_brahmasphutasiddhanta.json",
+    "provenance": {
+      "author_or_curator": "Brahmagupta",
+      "content_sha256": "fe91fa58bb52d45eace46a0b5b65d04f83765bd9850d61ab1f4bd4269c13bee6",
+      "imported_at": "2026-09-29T10:42:18Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Brahmasphutasiddhanta&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Bh%C4%81skara_II&format=json",
+    "source_title": "Bhaskara II (Bhaskaracharya) Siddhanta Shiromani and Lilavati",
+    "artifact_type": "HISTORICAL_TREATISE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:42:19Z",
+    "downloaded_file_size": 28854,
+    "source_sha256": "f49dc0a9d7f3f258699d154468218a898bfce76f8e62e94bb1ac0dca03c0dc9d",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\indian_math_bhaskara_ii.json",
+    "provenance": {
+      "author_or_curator": "Bhaskara II (1150 CE)",
+      "content_sha256": "f49dc0a9d7f3f258699d154468218a898bfce76f8e62e94bb1ac0dca03c0dc9d",
+      "imported_at": "2026-09-29T10:42:19Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Bh%C4%81skara_II&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=B%C4%ABjaga%E1%B9%87ita&format=json",
+    "source_title": "Bijaganita Algebraic Treatises and Indeterminate Equations",
+    "artifact_type": "HISTORICAL_TREATISE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:42:19Z",
+    "downloaded_file_size": 98,
+    "source_sha256": "c2695a9477907951b25ec0df10d58f28a1eddf6c67c84cc968c6ec30eaad52c8",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\indian_math_bijaganita.json",
+    "provenance": {
+      "author_or_curator": "Bhaskara II",
+      "content_sha256": "c2695a9477907951b25ec0df10d58f28a1eddf6c67c84cc968c6ec30eaad52c8",
+      "imported_at": "2026-09-29T10:42:19Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=B%C4%ABjaga%E1%B9%87ita&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Madhava_of_Sangamagrama&format=json",
+    "source_title": "Madhava of Sangamagrama Infinite Series for Pi and Trigonometry",
+    "artifact_type": "HISTORICAL_TREATISE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:42:20Z",
+    "downloaded_file_size": 36403,
+    "source_sha256": "5420cabcb8c6b160782db25c43c3ca0dee78d0939bfba5fc0bce05f8ff3fba4b",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\indian_math_madhava_sangamagrama.json",
+    "provenance": {
+      "author_or_curator": "Madhava of Sangamagrama (c. 1340 - 1425 CE)",
+      "content_sha256": "5420cabcb8c6b160782db25c43c3ca0dee78d0939bfba5fc0bce05f8ff3fba4b",
+      "imported_at": "2026-09-29T10:42:20Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Madhava_of_Sangamagrama&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Kerala_school_of_astronomy_and_mathematics&format=json",
+    "source_title": "Kerala School of Astronomy and Mathematics Rationales (Yuktibhasa)",
+    "artifact_type": "HISTORICAL_TREATISE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:42:21Z",
+    "downloaded_file_size": 13541,
+    "source_sha256": "7551e1db9b77d9983b4e26fc42b709c5957ed0259f3a1bdd6323341b8547dfcc",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\indian_math_kerala_school.json",
+    "provenance": {
+      "author_or_curator": "Kerala School of Mathematics (Jyesthadeva / Madhava)",
+      "content_sha256": "7551e1db9b77d9983b4e26fc42b709c5957ed0259f3a1bdd6323341b8547dfcc",
+      "imported_at": "2026-09-29T10:42:21Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Kerala_school_of_astronomy_and_mathematics&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Shulba_Sutras&format=json",
+    "source_title": "Shulba Sutras Geometric Fire-Altar Geometry and Cord Theorem",
+    "artifact_type": "HISTORICAL_TREATISE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:42:22Z",
+    "downloaded_file_size": 17191,
+    "source_sha256": "9a28053f8d8e68828ba60a32c11b94022c208c142437f83c9056c13c3d1c2994",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\indian_math_shulba_sutras.json",
+    "provenance": {
+      "author_or_curator": "Baudhayana, Apastamba, Katyayana (c. 800 - 500 BCE)",
+      "content_sha256": "9a28053f8d8e68828ba60a32c11b94022c208c142437f83c9056c13c3d1c2994",
+      "imported_at": "2026-09-29T10:42:22Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Shulba_Sutras&format=json"
+    }
+  },
+  {
+    "source_url": "https://www.gutenberg.org/files/28233/28233-0.txt",
+    "source_title": "A History of Mathematics (Florian Cajori, 1919)",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "Public Domain",
+    "license_evidence_url": "https://www.gutenberg.org/policy/license.html",
+    "download_timestamp": "2026-09-29T10:42:37Z",
+    "downloaded_file_size": 817669,
+    "source_sha256": "34e7189133f226c9edf394775f854650dc6c7ad799c57c75b8e14b06b6a75bf9",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\gutenberg_28233_history_of_mathematics.txt",
+    "provenance": {
+      "author_or_curator": "Florian Cajori",
+      "content_sha256": "34e7189133f226c9edf394775f854650dc6c7ad799c57c75b8e14b06b6a75bf9",
+      "imported_at": "2026-09-29T10:42:37Z",
+      "license": "Public Domain",
+      "source_uri": "https://www.gutenberg.org/files/28233/28233-0.txt"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Trigonometry&format=json",
+    "source_title": "Trigonometric Functions Identities and Spherical Laws",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:43:02Z",
+    "downloaded_file_size": 35210,
+    "source_sha256": "078f34161c9afb1bd7b88882c1eb9cfb8edde3145ef812e539b4b15554af91f5",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_trigonometry.json",
+    "provenance": {
+      "author_or_curator": "Mathematical Community",
+      "content_sha256": "078f34161c9afb1bd7b88882c1eb9cfb8edde3145ef812e539b4b15554af91f5",
+      "imported_at": "2026-09-29T10:43:02Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Trigonometry&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Analytic_geometry&format=json",
+    "source_title": "Analytic Coordinate Geometry Conics and Vector Spaces",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:43:03Z",
+    "downloaded_file_size": 48158,
+    "source_sha256": "9498b3841027bbe69744f9a9ae71d4fd89cc1ecba304e8de5fe8b75e6e713dcc",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_coordinate_geometry.json",
+    "provenance": {
+      "author_or_curator": "Rene Descartes, Pierre de Fermat & Community",
+      "content_sha256": "9498b3841027bbe69744f9a9ae71d4fd89cc1ecba304e8de5fe8b75e6e713dcc",
+      "imported_at": "2026-09-29T10:43:03Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Analytic_geometry&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Calculus&format=json",
+    "source_title": "Infinitesimal Calculus Differentiation and Integration",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:43:04Z",
+    "downloaded_file_size": 46446,
+    "source_sha256": "75ed3d6a1ee9b19cb58447c241e44631bf74936bf74884e90e96f38e3ffce9c3",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_calculus.json",
+    "provenance": {
+      "author_or_curator": "Isaac Newton, Gottfried Wilhelm Leibniz & Community",
+      "content_sha256": "75ed3d6a1ee9b19cb58447c241e44631bf74936bf74884e90e96f38e3ffce9c3",
+      "imported_at": "2026-09-29T10:43:04Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Calculus&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Differential_equation&format=json",
+    "source_title": "Differential Equations ODEs PDEs and Boundary Problems",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:43:05Z",
+    "downloaded_file_size": 33846,
+    "source_sha256": "956c92ae2225c954c2c2451bf154cd380b68e21d7852692bf2d9d83f42cf7cc5",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_differential_equations.json",
+    "provenance": {
+      "author_or_curator": "Mathematical Community",
+      "content_sha256": "956c92ae2225c954c2c2451bf154cd380b68e21d7852692bf2d9d83f42cf7cc5",
+      "imported_at": "2026-09-29T10:43:05Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Differential_equation&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Linear_algebra&format=json",
+    "source_title": "Linear Algebra Matrices Transformations and Spectral Theory",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:43:06Z",
+    "downloaded_file_size": 68635,
+    "source_sha256": "a94672d7442f8bee41adc912de5a5efd71a7b622f068efffcf16e826a8374818",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_linear_algebra.json",
+    "provenance": {
+      "author_or_curator": "Mathematical Community",
+      "content_sha256": "a94672d7442f8bee41adc912de5a5efd71a7b622f068efffcf16e826a8374818",
+      "imported_at": "2026-09-29T10:43:06Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Linear_algebra&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Probability_theory&format=json",
+    "source_title": "Probability Theory Measure Distributions and Stochastic Processes",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:43:07Z",
+    "downloaded_file_size": 34333,
+    "source_sha256": "0645e25f137095b61b6a5e60aafaba9c3144ceb3897072b46f0288479b1330cc",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_probability.json",
+    "provenance": {
+      "author_or_curator": "Andrey Kolmogorov & Community",
+      "content_sha256": "0645e25f137095b61b6a5e60aafaba9c3144ceb3897072b46f0288479b1330cc",
+      "imported_at": "2026-09-29T10:43:07Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Probability_theory&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Statistics&format=json",
+    "source_title": "Mathematical Statistics Estimation and Hypothesis Testing",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:43:08Z",
+    "downloaded_file_size": 48825,
+    "source_sha256": "1c1d08a2fa56478d719ffa90a2669c970eabd4878bfd2f0c304c7424690a1253",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_statistics.json",
+    "provenance": {
+      "author_or_curator": "Ronald Fisher, Jerzy Neyman & Community",
+      "content_sha256": "1c1d08a2fa56478d719ffa90a2669c970eabd4878bfd2f0c304c7424690a1253",
+      "imported_at": "2026-09-29T10:43:08Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Statistics&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Number_theory&format=json",
+    "source_title": "Number Theory Primes Diophantine and Modular Arithmetic",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:43:09Z",
+    "downloaded_file_size": 52696,
+    "source_sha256": "8ce5900d675dbc1c15ef2cc5a59329808fc906e4659f0d7810ef2bddd04aa79c",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_number_theory.json",
+    "provenance": {
+      "author_or_curator": "Carl Friedrich Gauss & Community",
+      "content_sha256": "8ce5900d675dbc1c15ef2cc5a59329808fc906e4659f0d7810ef2bddd04aa79c",
+      "imported_at": "2026-09-29T10:43:09Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Number_theory&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Combinatorics&format=json",
+    "source_title": "Combinatorics Enumeration Partitions and Graphs",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:43:10Z",
+    "downloaded_file_size": 20398,
+    "source_sha256": "7161e78fab071f0565a229c6118628a2e3deb4a5d6a9a0de91d808062b230f45",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_combinatorics.json",
+    "provenance": {
+      "author_or_curator": "Mathematical Community",
+      "content_sha256": "7161e78fab071f0565a229c6118628a2e3deb4a5d6a9a0de91d808062b230f45",
+      "imported_at": "2026-09-29T10:43:10Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Combinatorics&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Graph_theory&format=json",
+    "source_title": "Graph Theory Networks Trees and Topological Invariants",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:43:11Z",
+    "downloaded_file_size": 49381,
+    "source_sha256": "9a4a032feb41fba5b79d93b29b4d165862eaaba534339be4f56cceef70ad1f10",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_graph_theory.json",
+    "provenance": {
+      "author_or_curator": "Leonhard Euler & Community",
+      "content_sha256": "9a4a032feb41fba5b79d93b29b4d165862eaaba534339be4f56cceef70ad1f10",
+      "imported_at": "2026-09-29T10:43:11Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Graph_theory&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Topology&format=json",
+    "source_title": "Topology Topological Spaces Homeomorphisms and Homotopy",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:44:01Z",
+    "downloaded_file_size": 23406,
+    "source_sha256": "91281aa5c0863735756c0d51441d9da0706f064c7fed273ee446b7f29a15cf72",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_topology.json",
+    "provenance": {
+      "author_or_curator": "Henri Poincare, Felix Hausdorff & Community",
+      "content_sha256": "91281aa5c0863735756c0d51441d9da0706f064c7fed273ee446b7f29a15cf72",
+      "imported_at": "2026-09-29T10:44:01Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Topology&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Mathematical_physics&format=json",
+    "source_title": "Mathematical Physics Lagrangian Mechanics and Field Theories",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:44:02Z",
+    "downloaded_file_size": 36193,
+    "source_sha256": "5e58e2347b93500fc97bea14f7adea4ec784e0d4e5e606b20322a9985787016d",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_mathematical_physics.json",
+    "provenance": {
+      "author_or_curator": "Mathematical Physics Community",
+      "content_sha256": "5e58e2347b93500fc97bea14f7adea4ec784e0d4e5e606b20322a9985787016d",
+      "imported_at": "2026-09-29T10:44:02Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Mathematical_physics&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Information_theory&format=json",
+    "source_title": "Information Theory Entropy Channel Capacity and Coding",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:44:03Z",
+    "downloaded_file_size": 61554,
+    "source_sha256": "a93db40abd3e6ed7bafc188db2a77e74d80030e295f2a3281cebc0d185fd4e7d",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_information_theory.json",
+    "provenance": {
+      "author_or_curator": "Claude Shannon & Community",
+      "content_sha256": "a93db40abd3e6ed7bafc188db2a77e74d80030e295f2a3281cebc0d185fd4e7d",
+      "imported_at": "2026-09-29T10:44:03Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Information_theory&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Mathematical_constant&format=json",
+    "source_title": "Mathematical Constants Pi Euler Ratio and Golden Ratio",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:44:04Z",
+    "downloaded_file_size": 28728,
+    "source_sha256": "b742a987ee623973373bfa608b1ed61ac6deecef79b2bb664ca12ce9df37bcbb",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_constants.json",
+    "provenance": {
+      "author_or_curator": "Mathematical Community",
+      "content_sha256": "b742a987ee623973373bfa608b1ed61ac6deecef79b2bb664ca12ce9df37bcbb",
+      "imported_at": "2026-09-29T10:44:04Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Mathematical_constant&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Deductive_reasoning&format=json",
+    "source_title": "Deductive Reasoning Formal Syllogisms and Validity",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:44:05Z",
+    "downloaded_file_size": 47972,
+    "source_sha256": "919d9fa28399e0e0773240782fa8b1de3fbc1417ea2e0a73e6bd0b6237a017e6",
+    "local_path": "storage\\knowledge\\source_artifacts\\reasoning\\reasoning_deductive.json",
+    "provenance": {
+      "author_or_curator": "Aristotle & Philosophy Community",
+      "content_sha256": "919d9fa28399e0e0773240782fa8b1de3fbc1417ea2e0a73e6bd0b6237a017e6",
+      "imported_at": "2026-09-29T10:44:05Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Deductive_reasoning&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Inductive_reasoning&format=json",
+    "source_title": "Inductive Reasoning Generalization and Empirical Probability",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:44:06Z",
+    "downloaded_file_size": 46254,
+    "source_sha256": "78f97ae79f17d112a4ae8066a82c04de1f226e35d7ae3a4f14e1aedb7464d0ae",
+    "local_path": "storage\\knowledge\\source_artifacts\\reasoning\\reasoning_inductive.json",
+    "provenance": {
+      "author_or_curator": "Francis Bacon, David Hume & Community",
+      "content_sha256": "78f97ae79f17d112a4ae8066a82c04de1f226e35d7ae3a4f14e1aedb7464d0ae",
+      "imported_at": "2026-09-29T10:44:06Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Inductive_reasoning&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Abductive_reasoning&format=json",
+    "source_title": "Abductive Reasoning Inference to the Best Explanation",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:44:07Z",
+    "downloaded_file_size": 52710,
+    "source_sha256": "d9c50fc1d1d82ca146a38a6d1338d6377553cb13eee47948abb9223c34accc7f",
+    "local_path": "storage\\knowledge\\source_artifacts\\reasoning\\reasoning_abductive.json",
+    "provenance": {
+      "author_or_curator": "Charles Sanders Peirce & Community",
+      "content_sha256": "d9c50fc1d1d82ca146a38a6d1338d6377553cb13eee47948abb9223c34accc7f",
+      "imported_at": "2026-09-29T10:44:07Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Abductive_reasoning&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Causal_model&format=json",
+    "source_title": "Causal Models Structural DAGs and Interventions",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:44:09Z",
+    "downloaded_file_size": 51528,
+    "source_sha256": "a14379f92ea582d7af5678d449307206607f7d778a211c50d5c8d0ec95c236ee",
+    "local_path": "storage\\knowledge\\source_artifacts\\reasoning\\reasoning_causal.json",
+    "provenance": {
+      "author_or_curator": "Judea Pearl & Community",
+      "content_sha256": "a14379f92ea582d7af5678d449307206607f7d778a211c50d5c8d0ec95c236ee",
+      "imported_at": "2026-09-29T10:44:09Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Causal_model&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Falsifiability&format=json",
+    "source_title": "Falsifiability Scientific Demarcation and Null Hypothesis",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:44:10Z",
+    "downloaded_file_size": 61387,
+    "source_sha256": "5ee5c4e3f1149b0a9b58c61b8022ee146070be1ce3443fe8b809163bdb051a45",
+    "local_path": "storage\\knowledge\\source_artifacts\\reasoning\\reasoning_falsifiability.json",
+    "provenance": {
+      "author_or_curator": "Karl Popper & Community",
+      "content_sha256": "5ee5c4e3f1149b0a9b58c61b8022ee146070be1ce3443fe8b809163bdb051a45",
+      "imported_at": "2026-09-29T10:44:10Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Falsifiability&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Formal_fallacy&format=json",
+    "source_title": "Formal and Informal Logical Fallacies Catalog",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:44:10Z",
+    "downloaded_file_size": 5349,
+    "source_sha256": "1920e789021643a125a4cbe6f6cfbe222ec02f34a6d40f453a7a3f14f50e438e",
+    "local_path": "storage\\knowledge\\source_artifacts\\reasoning\\reasoning_fallacies.json",
+    "provenance": {
+      "author_or_curator": "Philosophy and Logic Community",
+      "content_sha256": "1920e789021643a125a4cbe6f6cfbe222ec02f34a6d40f453a7a3f14f50e438e",
+      "imported_at": "2026-09-29T10:44:10Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Formal_fallacy&format=json"
+    }
+  },
+  {
+    "source_url": "https://www.gutenberg.org/cache/epub/37729/pg37729.txt",
+    "source_title": "Galileo Dialogues Concerning Two New Sciences (1638)",
+    "artifact_type": "HISTORICAL_TREATISE",
+    "license": "Public Domain",
+    "license_evidence_url": "https://www.gutenberg.org/policy/license.html",
+    "download_timestamp": "2026-09-29T10:44:18Z",
+    "downloaded_file_size": 248230,
+    "source_sha256": "6deb8f8ddbefd27d24697f5bff187b879058603964865e7d3b7b95d35b5c4bc1",
+    "local_path": "storage\\knowledge\\source_artifacts\\physics\\gutenberg_37729_galileo_two_new_sciences.txt",
+    "provenance": {
+      "author_or_curator": "Galileo Galilei",
+      "content_sha256": "6deb8f8ddbefd27d24697f5bff187b879058603964865e7d3b7b95d35b5c4bc1",
+      "imported_at": "2026-09-29T10:44:18Z",
+      "license": "Public Domain",
+      "source_uri": "https://www.gutenberg.org/cache/epub/37729/pg37729.txt"
+    }
+  },
+  {
+    "source_url": "https://www.gutenberg.org/cache/epub/45988/pg45988.txt",
+    "source_title": "Francis Bacon Novum Organum (1620)",
+    "artifact_type": "HISTORICAL_TREATISE",
+    "license": "Public Domain",
+    "license_evidence_url": "https://www.gutenberg.org/policy/license.html",
+    "download_timestamp": "2026-09-29T10:44:39Z",
+    "downloaded_file_size": 568062,
+    "source_sha256": "23069dbf726dafe72ec081bbb69bd08c1b32b3b8f63ba3c39361aa0622f4df4b",
+    "local_path": "storage\\knowledge\\source_artifacts\\science\\gutenberg_45988_bacon_novum_organum.txt",
+    "provenance": {
+      "author_or_curator": "Francis Bacon",
+      "content_sha256": "23069dbf726dafe72ec081bbb69bd08c1b32b3b8f63ba3c39361aa0622f4df4b",
+      "imported_at": "2026-09-29T10:44:39Z",
+      "license": "Public Domain",
+      "source_uri": "https://www.gutenberg.org/cache/epub/45988/pg45988.txt"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Computational_complexity_theory&format=json",
+    "source_title": "Computational Complexity Theory Master Theorem and P vs NP",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:45:01Z",
+    "downloaded_file_size": 54721,
+    "source_sha256": "7acc20e34ca9c2422df7d596bbfc92f08f20a30b3bfed0551dae66d2c3cec7cb",
+    "local_path": "storage\\knowledge\\source_artifacts\\programming\\programming_complexity_theory.json",
+    "provenance": {
+      "author_or_curator": "Computer Science Community",
+      "content_sha256": "7acc20e34ca9c2422df7d596bbfc92f08f20a30b3bfed0551dae66d2c3cec7cb",
+      "imported_at": "2026-09-29T10:45:01Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Computational_complexity_theory&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Data_structure&format=json",
+    "source_title": "Data Structures Trees Hash Tables and Persistent Indices",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:45:02Z",
+    "downloaded_file_size": 9537,
+    "source_sha256": "3ec10bdcc47e76bb083d6da5fe6a81fd46a0b369314bd8278a600feab04abc7e",
+    "local_path": "storage\\knowledge\\source_artifacts\\programming\\programming_data_structures.json",
+    "provenance": {
+      "author_or_curator": "Computer Science Community",
+      "content_sha256": "3ec10bdcc47e76bb083d6da5fe6a81fd46a0b369314bd8278a600feab04abc7e",
+      "imported_at": "2026-09-29T10:45:02Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Data_structure&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Rust_(programming_language)&format=json",
+    "source_title": "Rust Programming Language Memory Safety and Borrow Checking",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:45:02Z",
+    "downloaded_file_size": 35721,
+    "source_sha256": "a6ff7bf193c210ef65ba75732f1feae5aeaad04328f4e272dd002d6eeb7cdccd",
+    "local_path": "storage\\knowledge\\source_artifacts\\languages\\languages_rust.json",
+    "provenance": {
+      "author_or_curator": "Rust Project Developers & Community",
+      "content_sha256": "a6ff7bf193c210ef65ba75732f1feae5aeaad04328f4e272dd002d6eeb7cdccd",
+      "imported_at": "2026-09-29T10:45:02Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Rust_(programming_language)&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=WebAssembly&format=json",
+    "source_title": "WebAssembly Binary Instruction Format and Virtual Machine",
+    "artifact_type": "SPECIFICATION_STANDARD",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:45:03Z",
+    "downloaded_file_size": 22462,
+    "source_sha256": "c1863c4d11777fd7f0b24951effa732a3abd8755d08b3673eace172f829a1592",
+    "local_path": "storage\\knowledge\\source_artifacts\\languages\\languages_webassembly.json",
+    "provenance": {
+      "author_or_curator": "W3C WebAssembly Working Group",
+      "content_sha256": "c1863c4d11777fd7f0b24951effa732a3abd8755d08b3673eace172f829a1592",
+      "imported_at": "2026-09-29T10:45:03Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=WebAssembly&format=json"
+    }
+  },
+  {
+    "source_url": "https://www.rfc-editor.org/rfc/rfc9110.txt",
+    "source_title": "IETF RFC 9110 HTTP Semantics Standard",
+    "artifact_type": "SPECIFICATION_STANDARD",
+    "license": "IETF Trust Legal Provisions (TLP 5.0) / BCP 78 (Code Components: Revised BSD License)",
+    "license_evidence_url": "https://trustee.ietf.org/license-info/ and RFC 9110 Copyright Notice",
+    "download_timestamp": "2026-09-29T10:45:04Z",
+    "downloaded_file_size": 502941,
+    "source_sha256": "21c1cdce6ab0e5509b04d84a28000836c7a087cf786efe6f04877ebfff47232a",
+    "local_path": "storage\\knowledge\\source_artifacts\\standards\\ietf_rfc_9110_http_semantics.txt",
+    "provenance": {
+      "author_or_curator": "R. Fielding, M. Nottingham, J. Reschke (IETF)",
+      "content_sha256": "21c1cdce6ab0e5509b04d84a28000836c7a087cf786efe6f04877ebfff47232a",
+      "imported_at": "2026-09-29T10:45:04Z",
+      "license": "IETF",
+      "source_uri": "https://www.rfc-editor.org/rfc/rfc9110.txt"
+    }
+  },
+  {
+    "source_url": "https://www.rfc-editor.org/rfc/rfc8446.txt",
+    "source_title": "IETF RFC 8446 The Transport Layer Security (TLS) Protocol Version 1.3",
+    "artifact_type": "SPECIFICATION_STANDARD",
+    "license": "IETF Trust Legal Provisions (TLP 5.0) / BCP 78 (Code Components: Revised BSD License)",
+    "license_evidence_url": "https://trustee.ietf.org/license-info/ and RFC 8446 Copyright Notice",
+    "download_timestamp": "2026-09-29T10:45:05Z",
+    "downloaded_file_size": 337736,
+    "source_sha256": "47871bc8820a2c3b6ea89f061055577058862cf543686b82d10131239702b3bd",
+    "local_path": "storage\\knowledge\\source_artifacts\\standards\\ietf_rfc_8446_tls13.txt",
+    "provenance": {
+      "author_or_curator": "E. Rescorla (IETF)",
+      "content_sha256": "47871bc8820a2c3b6ea89f061055577058862cf543686b82d10131239702b3bd",
+      "imported_at": "2026-09-29T10:45:05Z",
+      "license": "IETF",
+      "source_uri": "https://www.rfc-editor.org/rfc/rfc8446.txt"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=POSIX&format=json",
+    "source_title": "POSIX IEEE 1003.1 Operating System Standard Interface",
+    "artifact_type": "SPECIFICATION_STANDARD",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:45:05Z",
+    "downloaded_file_size": 12664,
+    "source_sha256": "c6a0bea46b4f4302ddedc6a963420a32facdad46471de3a7aa5b90b1b1d5f1fc",
+    "local_path": "storage\\knowledge\\source_artifacts\\manuals\\manuals_posix_ieee.json",
+    "provenance": {
+      "author_or_curator": "IEEE / The Open Group",
+      "content_sha256": "c6a0bea46b4f4302ddedc6a963420a32facdad46471de3a7aa5b90b1b1d5f1fc",
+      "imported_at": "2026-09-29T10:45:05Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=POSIX&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Physical_geography&format=json",
+    "source_title": "Physical Geography Earth Continents Oceans and Tectonics",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:45:06Z",
+    "downloaded_file_size": 16130,
+    "source_sha256": "eb841c7e895ea7369aac43facce1a250f67506d4741fad2a2765c1e3007d157b",
+    "local_path": "storage\\knowledge\\source_artifacts\\geography\\geography_physical_earth.json",
+    "provenance": {
+      "author_or_curator": "Geographic Science Community",
+      "content_sha256": "eb841c7e895ea7369aac43facce1a250f67506d4741fad2a2765c1e3007d157b",
+      "imported_at": "2026-09-29T10:45:06Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Physical_geography&format=json"
+    }
+  },
+  {
+    "source_url": "https://physics.nist.gov/cuu/Constants/Table/allascii.txt",
+    "source_title": "NIST CODATA Fundamental Physical Constants 2022",
+    "artifact_type": "SPECIFICATION_STANDARD",
+    "license": "Public Domain",
+    "license_evidence_url": "https://www.nist.gov/oism/copyrights",
+    "download_timestamp": "2026-09-29T10:45:07Z",
+    "downloaded_file_size": 40801,
+    "source_sha256": "77fb90e66c40db3e6eb16630bc9c88e4c7c8beddbe5e71be406f2f26e3f67e67",
+    "local_path": "storage\\knowledge\\source_artifacts\\general\\nist_codata_fundamental_constants.txt",
+    "provenance": {
+      "author_or_curator": "E. Tiesinga, P. J. Mohr, D. B. Newell, B. N. Taylor (NIST CODATA)",
+      "content_sha256": "77fb90e66c40db3e6eb16630bc9c88e4c7c8beddbe5e71be406f2f26e3f67e67",
+      "imported_at": "2026-09-29T10:45:07Z",
+      "license": "Public Domain",
+      "source_uri": "https://physics.nist.gov/cuu/Constants/Table/allascii.txt"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Mathematical_logic&format=json",
+    "source_title": "Mathematical Logic Model Theory and Proof Theory",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:45:36Z",
+    "downloaded_file_size": 56338,
+    "source_sha256": "bbbb4566047769ba6429aeb6b29af26dd8481e17423c9ba12167dfc6dca2dc92",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_logic.json",
+    "provenance": {
+      "author_or_curator": "Kurt Godel, Bertrand Russell & Community",
+      "content_sha256": "bbbb4566047769ba6429aeb6b29af26dd8481e17423c9ba12167dfc6dca2dc92",
+      "imported_at": "2026-09-29T10:45:36Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Mathematical_logic&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Abstract_algebra&format=json",
+    "source_title": "Abstract Algebra Groups Rings Fields and Modules",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:45:39Z",
+    "downloaded_file_size": 25733,
+    "source_sha256": "7d43849984f9028a82bd0cbaba165d6836b807bc36524cb9340852c875e5e7b3",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_abstract_algebra.json",
+    "provenance": {
+      "author_or_curator": "Emmy Noether, Evariste Galois & Community",
+      "content_sha256": "7d43849984f9028a82bd0cbaba165d6836b807bc36524cb9340852c875e5e7b3",
+      "imported_at": "2026-09-29T10:45:39Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Abstract_algebra&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Real_analysis&format=json",
+    "source_title": "Real Analysis Metric Spaces Limits and Continuity",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:45:42Z",
+    "downloaded_file_size": 29846,
+    "source_sha256": "2668c9f69d94842f828bf7dff33dd0003a7e0e82fdbe2c5bdfc0f8d76392e5ad",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_real_analysis.json",
+    "provenance": {
+      "author_or_curator": "Augustin-Louis Cauchy, Karl Weierstrass & Community",
+      "content_sha256": "2668c9f69d94842f828bf7dff33dd0003a7e0e82fdbe2c5bdfc0f8d76392e5ad",
+      "imported_at": "2026-09-29T10:45:42Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Real_analysis&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Complex_analysis&format=json",
+    "source_title": "Complex Analysis Holomorphic Functions and Conformal Mappings",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:45:45Z",
+    "downloaded_file_size": 22971,
+    "source_sha256": "4a8f8755571f2dc281e7bc009b167a37e70c3332cf619b9836cd6fd0ee674b91",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_complex_analysis.json",
+    "provenance": {
+      "author_or_curator": "Bernhard Riemann, Augustin-Louis Cauchy & Community",
+      "content_sha256": "4a8f8755571f2dc281e7bc009b167a37e70c3332cf619b9836cd6fd0ee674b91",
+      "imported_at": "2026-09-29T10:45:45Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Complex_analysis&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Numerical_analysis&format=json",
+    "source_title": "Numerical Analysis Approximation Algorithms and Stability",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:45:47Z",
+    "downloaded_file_size": 19355,
+    "source_sha256": "a82ee165b0a76cb6eb3f26f72dcd732912341bebebf1cb11b4cbb7398b8add5e",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_numerical_methods.json",
+    "provenance": {
+      "author_or_curator": "Mathematical Community",
+      "content_sha256": "a82ee165b0a76cb6eb3f26f72dcd732912341bebebf1cb11b4cbb7398b8add5e",
+      "imported_at": "2026-09-29T10:45:47Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Numerical_analysis&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Mathematical_optimization&format=json",
+    "source_title": "Mathematical Optimization Convex Analysis and Duality",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:45:51Z",
+    "downloaded_file_size": 38999,
+    "source_sha256": "adf1fa754fbcc5371ceb63a1b3e106c131143688077c7686ce97d639c2d3f613",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_optimization.json",
+    "provenance": {
+      "author_or_curator": "George Dantzig, Harold Kuhn, Albert Tucker & Community",
+      "content_sha256": "adf1fa754fbcc5371ceb63a1b3e106c131143688077c7686ce97d639c2d3f613",
+      "imported_at": "2026-09-29T10:45:51Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Mathematical_optimization&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Differential_geometry&format=json",
+    "source_title": "Differential Geometry Manifolds Tensors and Curvature",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:45:54Z",
+    "downloaded_file_size": 39399,
+    "source_sha256": "7d62424d1a5fabb3f6023bbe47c7e415b8d3151e054aab4f1f7c1a0cdaa13b60",
+    "local_path": "storage\\knowledge\\source_artifacts\\mathematics\\math_differential_geometry.json",
+    "provenance": {
+      "author_or_curator": "Bernhard Riemann, Carl Friedrich Gauss & Community",
+      "content_sha256": "7d62424d1a5fabb3f6023bbe47c7e415b8d3151e054aab4f1f7c1a0cdaa13b60",
+      "imported_at": "2026-09-29T10:45:54Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Differential_geometry&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Bayesian_epistemology&format=json",
+    "source_title": "Bayesian Epistemology Degrees of Belief and Dutch Book",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:45:57Z",
+    "downloaded_file_size": 26472,
+    "source_sha256": "2e907ac59bbeb2bd7342e9e8bb06371cc4143a7375faace50190f25086fbbdba",
+    "local_path": "storage\\knowledge\\source_artifacts\\reasoning\\reasoning_bayesian_epistemology.json",
+    "provenance": {
+      "author_or_curator": "Thomas Bayes, Richard Jeffrey & Community",
+      "content_sha256": "2e907ac59bbeb2bd7342e9e8bb06371cc4143a7375faace50190f25086fbbdba",
+      "imported_at": "2026-09-29T10:45:57Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Bayesian_epistemology&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Maxwell%27s_equations&format=json",
+    "source_title": "Maxwell's Equations and Classical Electromagnetism",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:46:00Z",
+    "downloaded_file_size": 84387,
+    "source_sha256": "6df8dd04f9d0915bab10826eb2364fc04746e2684a136d4bc8939efcc50c29f4",
+    "local_path": "storage\\knowledge\\source_artifacts\\physics\\physics_maxwells_equations.json",
+    "provenance": {
+      "author_or_curator": "James Clerk Maxwell & Community",
+      "content_sha256": "6df8dd04f9d0915bab10826eb2364fc04746e2684a136d4bc8939efcc50c29f4",
+      "imported_at": "2026-09-29T10:46:00Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Maxwell%27s_equations&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Quantum_mechanics&format=json",
+    "source_title": "Quantum Mechanics Wave-Particle Duality and State Vectors",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:46:03Z",
+    "downloaded_file_size": 82112,
+    "source_sha256": "8b7d2fdab5b193e00af6b544ef1bc7a5799e5e97e475d353537f6d65ef61644d",
+    "local_path": "storage\\knowledge\\source_artifacts\\physics\\physics_quantum_mechanics.json",
+    "provenance": {
+      "author_or_curator": "Quantum Physics Community",
+      "content_sha256": "8b7d2fdab5b193e00af6b544ef1bc7a5799e5e97e475d353537f6d65ef61644d",
+      "imported_at": "2026-09-29T10:46:03Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Quantum_mechanics&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Laws_of_thermodynamics&format=json",
+    "source_title": "Laws of Thermodynamics Heat Work and Entropy",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:46:06Z",
+    "downloaded_file_size": 20531,
+    "source_sha256": "fc2af14b3c0fb75b405021c3b7192967dd1adc6c1f70afe5adce022049c52aa4",
+    "local_path": "storage\\knowledge\\source_artifacts\\physics\\physics_laws_of_thermodynamics.json",
+    "provenance": {
+      "author_or_curator": "Rudolf Clausius, Lord Kelvin & Community",
+      "content_sha256": "fc2af14b3c0fb75b405021c3b7192967dd1adc6c1f70afe5adce022049c52aa4",
+      "imported_at": "2026-09-29T10:46:06Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Laws_of_thermodynamics&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=International_System_of_Units&format=json",
+    "source_title": "International System of Units (SI) 2019 Redefinition",
+    "artifact_type": "SPECIFICATION_STANDARD",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:46:09Z",
+    "downloaded_file_size": 29018,
+    "source_sha256": "4edb685e8efbea1244ebc54b97e72220dafea21af1822af86083fc7aff91ab11",
+    "local_path": "storage\\knowledge\\source_artifacts\\science\\science_si_units.json",
+    "provenance": {
+      "author_or_curator": "BIPM & Metrology Community",
+      "content_sha256": "4edb685e8efbea1244ebc54b97e72220dafea21af1822af86083fc7aff91ab11",
+      "imported_at": "2026-09-29T10:46:09Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=International_System_of_Units&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Orbital_mechanics&format=json",
+    "source_title": "Orbital Mechanics Keplerian Orbits and Vis-Viva Equation",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:46:12Z",
+    "downloaded_file_size": 68854,
+    "source_sha256": "7089e20b990a327a62948d8c95a1638545217f406a97c58aa77e1945f3759552",
+    "local_path": "storage\\knowledge\\source_artifacts\\space\\space_orbital_mechanics.json",
+    "provenance": {
+      "author_or_curator": "Johannes Kepler, NASA & Community",
+      "content_sha256": "7089e20b990a327a62948d8c95a1638545217f406a97c58aa77e1945f3759552",
+      "imported_at": "2026-09-29T10:46:12Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Orbital_mechanics&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Standard_Model&format=json",
+    "source_title": "Standard Model of Particle Physics Quarks Leptons and Gauge Bosons",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T10:46:15Z",
+    "downloaded_file_size": 53424,
+    "source_sha256": "92d00b34fbc4258b9d4955a5568d4838204633b3bc015ea080c8ed8457b60273",
+    "local_path": "storage\\knowledge\\source_artifacts\\particles\\particles_standard_model.json",
+    "provenance": {
+      "author_or_curator": "CERN / Particle Physics Community",
+      "content_sha256": "92d00b34fbc4258b9d4955a5568d4838204633b3bc015ea080c8ed8457b60273",
+      "imported_at": "2026-09-29T10:46:15Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Standard_Model&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Taylor_series&format=json",
+    "source_title": "Taylor Series and Maclaurin Series Analytic Expansion",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:06Z",
+    "downloaded_file_size": 176740,
+    "source_sha256": "ddc07f6e76b927bd557a3d197c77468c14886bd82e8b04c342040f8a84ffbd2f",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\math_calculus_taylor_series.json",
+    "provenance": {
+      "author_or_curator": "Brook Taylor, Colin Maclaurin & Wikipedia Math Community",
+      "content_sha256": "ddc07f6e76b927bd557a3d197c77468c14886bd82e8b04c342040f8a84ffbd2f",
+      "imported_at": "2026-09-29T11:05:06Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Taylor_series&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Fourier_series&format=json",
+    "source_title": "Fourier Series Periodic Function Harmonic Decomposition",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:10Z",
+    "downloaded_file_size": 172194,
+    "source_sha256": "7133c67e07c1abcf520eabb4debb0afb849ff9f96aa804ae02119804b4faea3e",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\math_calculus_fourier_series.json",
+    "provenance": {
+      "author_or_curator": "Joseph Fourier & Mathematical Community",
+      "content_sha256": "7133c67e07c1abcf520eabb4debb0afb849ff9f96aa804ae02119804b4faea3e",
+      "imported_at": "2026-09-29T11:05:10Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Fourier_series&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Green%27s_theorem&format=json",
+    "source_title": "Green's Theorem Planar Line and Double Integral Relationship",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:13Z",
+    "downloaded_file_size": 55892,
+    "source_sha256": "00cfc840145b2fa98f15636a5a1cc103fb3fa3d95df56b0469c2aa40fdcd826c",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\math_calculus_greens_theorem.json",
+    "provenance": {
+      "author_or_curator": "George Green & Mathematical Community",
+      "content_sha256": "00cfc840145b2fa98f15636a5a1cc103fb3fa3d95df56b0469c2aa40fdcd826c",
+      "imported_at": "2026-09-29T11:05:13Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Green%27s_theorem&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Divergence_theorem&format=json",
+    "source_title": "Divergence Theorem Gauss-Ostrogradsky Flux Conservation",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:16Z",
+    "downloaded_file_size": 84208,
+    "source_sha256": "2ca49c9ce0481e7c25a04d095005196bc9d2134bbeccb2069a6752301cfc60d8",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\math_calculus_divergence_theorem.json",
+    "provenance": {
+      "author_or_curator": "Carl Friedrich Gauss & Mikhail Ostrogradsky",
+      "content_sha256": "2ca49c9ce0481e7c25a04d095005196bc9d2134bbeccb2069a6752301cfc60d8",
+      "imported_at": "2026-09-29T11:05:16Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Divergence_theorem&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Ordinary_differential_equation&format=json",
+    "source_title": "Ordinary Differential Equations Boundary Value and Initial Value Problems",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:19Z",
+    "downloaded_file_size": 68182,
+    "source_sha256": "4ff2843ad35f0a05c08010edf6c94fe6e2c1dbc4cc9d04c9e2dec6c16015d27b",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\math_ode_linear_nonlinear_solutions.json",
+    "provenance": {
+      "author_or_curator": "Isaac Newton, Gottfried Leibniz, Leonhard Euler & Community",
+      "content_sha256": "4ff2843ad35f0a05c08010edf6c94fe6e2c1dbc4cc9d04c9e2dec6c16015d27b",
+      "imported_at": "2026-09-29T11:05:19Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Ordinary_differential_equation&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Cubic_equation&format=json",
+    "source_title": "Cubic Equation Algebraic Solution Cardano and Tartaglia Formulas",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:22Z",
+    "downloaded_file_size": 124298,
+    "source_sha256": "0356ae3d721a05336ecd30f420005fff3154a2ea8a633a96e1bbc8ea04c2f2a1",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\math_algebra_cardano_cubic_solution.json",
+    "provenance": {
+      "author_or_curator": "Gerolamo Cardano, Niccolo Tartaglia & Community",
+      "content_sha256": "0356ae3d721a05336ecd30f420005fff3154a2ea8a633a96e1bbc8ea04c2f2a1",
+      "imported_at": "2026-09-29T11:05:22Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Cubic_equation&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Fermat%27s_little_theorem&format=json",
+    "source_title": "Fermat's Little Theorem and Euler's Modular Totient Generalization",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:24Z",
+    "downloaded_file_size": 16938,
+    "source_sha256": "8a90fbcb18518ba3e29bdbfa0000010cee32f13c0e794eb8d9b8c3dfb2721b80",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\math_number_theory_fermats_little_theorem.json",
+    "provenance": {
+      "author_or_curator": "Pierre de Fermat, Leonhard Euler & Community",
+      "content_sha256": "8a90fbcb18518ba3e29bdbfa0000010cee32f13c0e794eb8d9b8c3dfb2721b80",
+      "imported_at": "2026-09-29T11:05:24Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Fermat%27s_little_theorem&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Chinese_remainder_theorem&format=json",
+    "source_title": "Chinese Remainder Theorem Simultaneous Modular Congruences",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:27Z",
+    "downloaded_file_size": 109260,
+    "source_sha256": "dc6a983fb559c59223c7d1bd1f3145e9773d6abf3601408c0e406b7f97d49e2d",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\math_number_theory_chinese_remainder_theorem.json",
+    "provenance": {
+      "author_or_curator": "Sunzi, Qin Jiushao, Carl Friedrich Gauss & Community",
+      "content_sha256": "dc6a983fb559c59223c7d1bd1f3145e9773d6abf3601408c0e406b7f97d49e2d",
+      "imported_at": "2026-09-29T11:05:27Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Chinese_remainder_theorem&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=List_of_trigonometric_identities&format=json",
+    "source_title": "Trigonometric Identities Pythagorean Sum Difference and Product Formulas",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:30Z",
+    "downloaded_file_size": 329896,
+    "source_sha256": "b7fbc1d2291cc3877d177a7fe9a9146322e31f4bdd484bd5e197e828e80ac4d3",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\math_trigonometry_identities_compendium.json",
+    "provenance": {
+      "author_or_curator": "Hipparchus, Ptolemy, Aryabhata & Mathematical Community",
+      "content_sha256": "b7fbc1d2291cc3877d177a7fe9a9146322e31f4bdd484bd5e197e828e80ac4d3",
+      "imported_at": "2026-09-29T11:05:30Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=List_of_trigonometric_identities&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Heron%27s_formula&format=json",
+    "source_title": "Heron's Formula Triangle Area from Semi-Perimeter and Side Lengths",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:33Z",
+    "downloaded_file_size": 87167,
+    "source_sha256": "e978ed089b8bf0122adfaf0819fad1b1c5c56a6a64c2cf2919d938fbe20aa616",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\math_geometry_herons_formula.json",
+    "provenance": {
+      "author_or_curator": "Heron of Alexandria & Mathematical Community",
+      "content_sha256": "e978ed089b8bf0122adfaf0819fad1b1c5c56a6a64c2cf2919d938fbe20aa616",
+      "imported_at": "2026-09-29T11:05:33Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Heron%27s_formula&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Eigenvalues_and_eigenvectors&format=json",
+    "source_title": "Eigenvalues and Eigenvectors Characteristic Polynomial and Diagonalization",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:36Z",
+    "downloaded_file_size": 156664,
+    "source_sha256": "2f209b835580a24d2d86addc571ec115ae0812d317a29070c51595225748e4f2",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\math_linear_algebra_eigenvalues_eigenvectors.json",
+    "provenance": {
+      "author_or_curator": "Augustin-Louis Cauchy, David Hilbert & Community",
+      "content_sha256": "2f209b835580a24d2d86addc571ec115ae0812d317a29070c51595225748e4f2",
+      "imported_at": "2026-09-29T11:05:36Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Eigenvalues_and_eigenvectors&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Central_limit_theorem&format=json",
+    "source_title": "Central Limit Theorem Asymptotic Normality of Sample Means",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:39Z",
+    "downloaded_file_size": 94230,
+    "source_sha256": "3cce55a623a42b6f4fafa3329ab1567de2396943f46cafca39fa349536a58694",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\math_statistics_central_limit_theorem.json",
+    "provenance": {
+      "author_or_curator": "Pierre-Simon Laplace, Aleksandr Lyapunov & Community",
+      "content_sha256": "3cce55a623a42b6f4fafa3329ab1567de2396943f46cafca39fa349536a58694",
+      "imported_at": "2026-09-29T11:05:39Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Central_limit_theorem&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=Var%C4%81hamihira&format=json",
+    "source_title": "Varahamihira Pancha-Siddhantika Trigonometry and Astronomy",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-30T11:20:00Z",
+    "downloaded_file_size": 25895,
+    "source_sha256": "6ad5d71c4eef73db36f82ae4d1ea1855cd93e50b0ceaf7a5f0a4c0ce74bba349",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\indian_math_varahamihira_panchasiddhantika.json",
+    "provenance": {
+      "author_or_curator": "Varahamihira (c. 505 - 587 CE)",
+      "content_sha256": "6ad5d71c4eef73db36f82ae4d1ea1855cd93e50b0ceaf7a5f0a4c0ce74bba349",
+      "imported_at": "2026-09-30T11:20:00Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=Var%C4%81hamihira&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Yuktibh%C4%81%E1%B9%A3%C4%81&format=json",
+    "source_title": "Jyesthadeva Yuktibhasa Mathematical Analysis and Calculus Proofs",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:45Z",
+    "downloaded_file_size": 14824,
+    "source_sha256": "3c7dc2223b57bdabefee434327fee54f647641a89d1d71ec457cb7bf6b10ac78",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\indian_math_jyesthadeva_yuktibhasa_calculus.json",
+    "provenance": {
+      "author_or_curator": "Jyesthadeva (c. 1500 - 1575 CE, Kerala School)",
+      "content_sha256": "3c7dc2223b57bdabefee434327fee54f647641a89d1d71ec457cb7bf6b10ac78",
+      "imported_at": "2026-09-29T11:05:45Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Yuktibh%C4%81%E1%B9%A3%C4%81&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=First-order_logic&format=json",
+    "source_title": "First-Order Predicate Logic Quantifiers Validity and Completeness",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:48Z",
+    "downloaded_file_size": 95730,
+    "source_sha256": "823e58242ecf984f72a7725f272292112aab882c028743eab05b64a51d7c9bb0",
+    "local_path": "storage/knowledge/source_artifacts\\reasoning\\reasoning_first_order_logic.json",
+    "provenance": {
+      "author_or_curator": "Gottlob Frege, Bertrand Russell, Kurt Godel & Community",
+      "content_sha256": "823e58242ecf984f72a7725f272292112aab882c028743eab05b64a51d7c9bb0",
+      "imported_at": "2026-09-29T11:05:48Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=First-order_logic&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Mathematical_proof&format=json",
+    "source_title": "Mathematical Proof Techniques Induction Contradiction and Direct Deduction",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:50Z",
+    "downloaded_file_size": 26258,
+    "source_sha256": "609cfd29405405da51eb682a19d4f2de04f4a0f6564c572ee43eb92495f92709",
+    "local_path": "storage/knowledge/source_artifacts\\reasoning\\reasoning_mathematical_proof_methods.json",
+    "provenance": {
+      "author_or_curator": "Euclid, Aristotle & Mathematical Community",
+      "content_sha256": "609cfd29405405da51eb682a19d4f2de04f4a0f6564c572ee43eb92495f92709",
+      "imported_at": "2026-09-29T11:05:50Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Mathematical_proof&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=How_to_Solve_It&format=json",
+    "source_title": "George Polya How to Solve It Mathematical Problem-Solving Heuristics",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:53Z",
+    "downloaded_file_size": 10155,
+    "source_sha256": "f25cba0a579d6ff7a9cabd5cca8eda072f6bc0dc718fd5727d8bf714c18d6682",
+    "local_path": "storage/knowledge/source_artifacts\\reasoning\\reasoning_polya_how_to_solve_it_heuristics.json",
+    "provenance": {
+      "author_or_curator": "George Polya (1945)",
+      "content_sha256": "f25cba0a579d6ff7a9cabd5cca8eda072f6bc0dc718fd5727d8bf714c18d6682",
+      "imported_at": "2026-09-29T11:05:53Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=How_to_Solve_It&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Newton%27s_laws_of_motion&format=json",
+    "source_title": "Isaac Newton Principia Mathematica Laws of Motion and Gravitation",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:56Z",
+    "downloaded_file_size": 98475,
+    "source_sha256": "1982ebdafaaec003c1c281363296df2203479f0174460cd5a46c8d4b9402e0b9",
+    "local_path": "storage/knowledge/source_artifacts\\physics\\physics_newtons_laws_of_motion_principia.json",
+    "provenance": {
+      "author_or_curator": "Sir Isaac Newton (1687) & Physics Community",
+      "content_sha256": "1982ebdafaaec003c1c281363296df2203479f0174460cd5a46c8d4b9402e0b9",
+      "imported_at": "2026-09-29T11:05:56Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Newton%27s_laws_of_motion&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Second_law_of_thermodynamics&format=json",
+    "source_title": "Second Law of Thermodynamics Entropy and Carnot Heat Engines",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:05:59Z",
+    "downloaded_file_size": 137490,
+    "source_sha256": "5c750c72f3d2528c6cdac650d76fe8df656ad12b4f1b26d3d2988472c8a5bdff",
+    "local_path": "storage/knowledge/source_artifacts\\physics\\physics_second_law_of_thermodynamics_entropy.json",
+    "provenance": {
+      "author_or_curator": "Nicolas Leonard Sadi Carnot, Rudolf Clausius, Ludwig Boltzmann",
+      "content_sha256": "5c750c72f3d2528c6cdac650d76fe8df656ad12b4f1b26d3d2988472c8a5bdff",
+      "imported_at": "2026-09-29T11:05:59Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Second_law_of_thermodynamics&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Snell%27s_law&format=json",
+    "source_title": "Snell's Law of Refraction Wave Optics and Fermat's Principle",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:03Z",
+    "downloaded_file_size": 48813,
+    "source_sha256": "f94de79e75164d8e76357b38655d94dc5823da4fe94866dd6aeae98775f2dfa1",
+    "local_path": "storage/knowledge/source_artifacts\\physics\\physics_snells_law_wave_optics.json",
+    "provenance": {
+      "author_or_curator": "Willebrord Snellius, Pierre de Fermat & Optics Community",
+      "content_sha256": "f94de79e75164d8e76357b38655d94dc5823da4fe94866dd6aeae98775f2dfa1",
+      "imported_at": "2026-09-29T11:06:03Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Snell%27s_law&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Special_relativity&format=json",
+    "source_title": "Special Relativity Lorentz Transformations Time Dilation Length Contraction",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:06Z",
+    "downloaded_file_size": 193134,
+    "source_sha256": "aefe1302767b9507bea0e5a663a3f8a3e6cfeb053058fa1c66a906e0337679d4",
+    "local_path": "storage/knowledge/source_artifacts\\physics\\physics_special_relativity_lorentz_transformations.json",
+    "provenance": {
+      "author_or_curator": "Albert Einstein (1905), Hendrik Lorentz & Community",
+      "content_sha256": "aefe1302767b9507bea0e5a663a3f8a3e6cfeb053058fa1c66a906e0337679d4",
+      "imported_at": "2026-09-29T11:06:06Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Special_relativity&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Chemical_equilibrium&format=json",
+    "source_title": "Chemical Equilibrium Law of Mass Action and Le Chatelier's Principle",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:09Z",
+    "downloaded_file_size": 89959,
+    "source_sha256": "475acc87ed1f9566a506b2c07449de9005309df8c22a05b1e3add4eb6f9dac8c",
+    "local_path": "storage/knowledge/source_artifacts\\science\\science_chemistry_chemical_equilibrium.json",
+    "provenance": {
+      "author_or_curator": "Cato Guldberg, Peter Waage, Henri Le Chatelier",
+      "content_sha256": "475acc87ed1f9566a506b2c07449de9005309df8c22a05b1e3add4eb6f9dac8c",
+      "imported_at": "2026-09-29T11:06:09Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Chemical_equilibrium&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Hubble%27s_law&format=json",
+    "source_title": "Hubble-Lemaitre Law Expansion of the Universe and Cosmic Distance Scale",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:12Z",
+    "downloaded_file_size": 69920,
+    "source_sha256": "cfdc42c43fe0ec384762bc1d417f90a1c8c84622cb127e80e4451c8c6cd4bafd",
+    "local_path": "storage/knowledge/source_artifacts\\space\\space_hubble_lemaitre_expansion_law.json",
+    "provenance": {
+      "author_or_curator": "Edwin Hubble, Georges Lemaitre & Astronomy Community",
+      "content_sha256": "cfdc42c43fe0ec384762bc1d417f90a1c8c84622cb127e80e4451c8c6cd4bafd",
+      "imported_at": "2026-09-29T11:06:12Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Hubble%27s_law&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Black_hole&format=json",
+    "source_title": "Black Hole Physics Event Horizon Schwarzschild Metric and Hawking Radiation",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:14Z",
+    "downloaded_file_size": 77691,
+    "source_sha256": "29489253ddc601bc46c508fb425c1fe10860cfdfe3299176fccff8385fd477a9",
+    "local_path": "storage/knowledge/source_artifacts\\space\\space_black_hole_general_relativity_hawking.json",
+    "provenance": {
+      "author_or_curator": "Karl Schwarzschild, John Wheeler, Stephen Hawking",
+      "content_sha256": "29489253ddc601bc46c508fb425c1fe10860cfdfe3299176fccff8385fd477a9",
+      "imported_at": "2026-09-29T11:06:14Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Black_hole&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Quantum_chromodynamics&format=json",
+    "source_title": "Quantum Chromodynamics Strong Force Color Charge and Asymptotic Freedom",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:17Z",
+    "downloaded_file_size": 39079,
+    "source_sha256": "02d1d95ebe4d6383d4d261bfc60aeeb5f164218c5afda013fbd05c2508fa23b7",
+    "local_path": "storage/knowledge/source_artifacts\\particles\\particles_quantum_chromodynamics_strong_force.json",
+    "provenance": {
+      "author_or_curator": "Murray Gell-Mann, Frank Wilczek, David Gross, David Politzer",
+      "content_sha256": "02d1d95ebe4d6383d4d261bfc60aeeb5f164218c5afda013fbd05c2508fa23b7",
+      "imported_at": "2026-09-29T11:06:17Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Quantum_chromodynamics&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Dijkstra%27s_algorithm&format=json",
+    "source_title": "Dijkstra's Algorithm and Shortest Path Single-Source Optimization",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:19Z",
+    "downloaded_file_size": 39329,
+    "source_sha256": "32f72b7066b2900e252157981e51a165b9108fa0849348b60a5b4c41169c5eae",
+    "local_path": "storage/knowledge/source_artifacts\\programming\\prog_algorithms_dijkstra_shortest_path.json",
+    "provenance": {
+      "author_or_curator": "Edsger W. Dijkstra (1959) & CS Community",
+      "content_sha256": "32f72b7066b2900e252157981e51a165b9108fa0849348b60a5b4c41169c5eae",
+      "imported_at": "2026-09-29T11:06:19Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Dijkstra%27s_algorithm&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=B-tree&format=json",
+    "source_title": "B-Tree and B+ Tree Balanced Indexing Data Structures",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:22Z",
+    "downloaded_file_size": 41141,
+    "source_sha256": "2194bd7f1f386312f944cef56164f00e12f28e7d2d1a073b97fcfe88966ab2c7",
+    "local_path": "storage/knowledge/source_artifacts\\programming\\prog_data_structures_b_trees_indexing.json",
+    "provenance": {
+      "author_or_curator": "Rudolf Bayer, Edward M. McCreight (1972)",
+      "content_sha256": "2194bd7f1f386312f944cef56164f00e12f28e7d2d1a073b97fcfe88966ab2c7",
+      "imported_at": "2026-09-29T11:06:22Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=B-tree&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Virtual_memory&format=json",
+    "source_title": "Virtual Memory Paging Page Replacement and Memory Management",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:24Z",
+    "downloaded_file_size": 26867,
+    "source_sha256": "5546d7796ec356e295936bc2874b77b063cbf4ecc180810ad6b6232eaac3a059",
+    "local_path": "storage/knowledge/source_artifacts\\programming\\prog_os_virtual_memory_paging.json",
+    "provenance": {
+      "author_or_curator": "Peter Denning & Computer Systems Community",
+      "content_sha256": "5546d7796ec356e295936bc2874b77b063cbf4ecc180810ad6b6232eaac3a059",
+      "imported_at": "2026-09-29T11:06:24Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Virtual_memory&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Database_normalization&format=json",
+    "source_title": "Relational Database Normalization 1NF 2NF 3NF BCNF and Codd's Relational Model",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:27Z",
+    "downloaded_file_size": 15669,
+    "source_sha256": "2355a521ea7d8be8c2e5465d954d12fe1a8528aafe9355e8613c584d50eea25e",
+    "local_path": "storage/knowledge/source_artifacts\\programming\\prog_db_relational_normalization_codd.json",
+    "provenance": {
+      "author_or_curator": "Edgar F. Codd (1970) & Database Community",
+      "content_sha256": "2355a521ea7d8be8c2e5465d954d12fe1a8528aafe9355e8613c584d50eea25e",
+      "imported_at": "2026-09-29T11:06:27Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Database_normalization&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Non-blocking_algorithm&format=json",
+    "source_title": "Concurrency Control Lock-Free Synchronization Compare-And-Swap and Memory Barriers",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:29Z",
+    "downloaded_file_size": 11625,
+    "source_sha256": "d31fdddc062549c39c3d415bd0e0d9a8881cca6b22aeeec8b83840b17756bafe",
+    "local_path": "storage/knowledge/source_artifacts\\programming\\prog_concurrency_lock_free_cas.json",
+    "provenance": {
+      "author_or_curator": "Maurice Herlihy, Nir Shavit & Distributed Systems Community",
+      "content_sha256": "d31fdddc062549c39c3d415bd0e0d9a8881cca6b22aeeec8b83840b17756bafe",
+      "imported_at": "2026-09-29T11:06:29Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Non-blocking_algorithm&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=C%2B%2B&format=json",
+    "source_title": "C++ Programming Language RAII Move Semantics Smart Pointers and Templates",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:31Z",
+    "downloaded_file_size": 18151,
+    "source_sha256": "592f73a26d23675db91fe5a3d4e0b705f6e2d63481539dcaba21a756eadb3cb8",
+    "local_path": "storage/knowledge/source_artifacts\\languages\\lang_cpp_raii_templates_standard.json",
+    "provenance": {
+      "author_or_curator": "Bjarne Stroustrup & ISO C++ Committee",
+      "content_sha256": "592f73a26d23675db91fe5a3d4e0b705f6e2d63481539dcaba21a756eadb3cb8",
+      "imported_at": "2026-09-29T11:06:31Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=C%2B%2B&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Go_(programming_language)&format=json",
+    "source_title": "Go Programming Language Goroutines Channels and CSP Concurrency",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:34Z",
+    "downloaded_file_size": 32366,
+    "source_sha256": "21f71ca5c963985da5782d87d09475401b8206a9b410dfb151b7506347dce10c",
+    "local_path": "storage/knowledge/source_artifacts\\languages\\lang_go_goroutines_csp_runtime.json",
+    "provenance": {
+      "author_or_curator": "Robert Griesemer, Rob Pike, Ken Thompson & Google",
+      "content_sha256": "21f71ca5c963985da5782d87d09475401b8206a9b410dfb151b7506347dce10c",
+      "imported_at": "2026-09-29T11:06:34Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Go_(programming_language)&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Java_virtual_machine&format=json",
+    "source_title": "Java Virtual Machine Architecture Garbage Collection and Bytecode Specification",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:36Z",
+    "downloaded_file_size": 20556,
+    "source_sha256": "5f729f5714ec291ba6083eba5749c6bcda67be717bb5c54fa20ea94265489448",
+    "local_path": "storage/knowledge/source_artifacts\\languages\\lang_java_jvm_bytecode_architecture.json",
+    "provenance": {
+      "author_or_curator": "James Gosling, Sun Microsystems / Oracle & OpenJDK Community",
+      "content_sha256": "5f729f5714ec291ba6083eba5749c6bcda67be717bb5c54fa20ea94265489448",
+      "imported_at": "2026-09-29T11:06:36Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Java_virtual_machine&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=JavaScript&format=json",
+    "source_title": "JavaScript ECMAScript Event Loop Promises and Asynchronous Architecture",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:38Z",
+    "downloaded_file_size": 34860,
+    "source_sha256": "c0d95a2aa59e5d68bb36647c73ef89defe90a1364ef43cbc78d912e4c391efc5",
+    "local_path": "storage/knowledge/source_artifacts\\languages\\lang_javascript_ecmascript_event_loop.json",
+    "provenance": {
+      "author_or_curator": "Brendan Eich, ECMA TC39 & Web Standards Community",
+      "content_sha256": "c0d95a2aa59e5d68bb36647c73ef89defe90a1364ef43cbc78d912e4c391efc5",
+      "imported_at": "2026-09-29T11:06:38Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=JavaScript&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Document_Object_Model&format=json",
+    "source_title": "W3C Document Object Model (DOM) Level 4 Specification Interface",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:41Z",
+    "downloaded_file_size": 11815,
+    "source_sha256": "664635db64184522da500ce5a1254a2bb8077ed3a6a37805d6340d532b47b63b",
+    "local_path": "storage/knowledge/source_artifacts\\standards\\standards_w3c_dom_tree_events.json",
+    "provenance": {
+      "author_or_curator": "W3C DOM Working Group",
+      "content_sha256": "664635db64184522da500ce5a1254a2bb8077ed3a6a37805d6340d532b47b63b",
+      "imported_at": "2026-09-29T11:06:41Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Document_Object_Model&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=SHA-2&format=json",
+    "source_title": "NIST FIPS 180-4 Secure Hash Standard (SHA-256 and SHA-512)",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:43Z",
+    "downloaded_file_size": 24955,
+    "source_sha256": "16f7d243071e4acadfcea5c74ebbd02328e2adc229740676f59d6e634aee9659",
+    "local_path": "storage/knowledge/source_artifacts\\standards\\standards_nist_fips_180_4_sha2.json",
+    "provenance": {
+      "author_or_curator": "National Institute of Standards and Technology (NIST)",
+      "content_sha256": "16f7d243071e4acadfcea5c74ebbd02328e2adc229740676f59d6e634aee9659",
+      "imported_at": "2026-09-29T11:06:43Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=SHA-2&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=River&format=json",
+    "source_title": "World Rivers Hydrology Drainage Basins and Fluvial Geomorphology",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:45Z",
+    "downloaded_file_size": 33717,
+    "source_sha256": "9f0bccf575510450d45493e61136f1eb870517c2d9e29f2bf87d2eb4c04541a1",
+    "local_path": "storage/knowledge/source_artifacts\\geography\\geography_world_rivers_hydrology.json",
+    "provenance": {
+      "author_or_curator": "Geographical and Hydrological Community",
+      "content_sha256": "9f0bccf575510450d45493e61136f1eb870517c2d9e29f2bf87d2eb4c04541a1",
+      "imported_at": "2026-09-29T11:06:45Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=River&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Mountain_range&format=json",
+    "source_title": "World Mountain Ranges Orogeny Tectonic Elevation and Peaks",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-29T11:06:47Z",
+    "downloaded_file_size": 5260,
+    "source_sha256": "727f3b0c9178206d6abf387cd2bf86cead1be1b9dc2d8cfd6b7ec867a997c774",
+    "local_path": "storage/knowledge/source_artifacts\\geography\\geography_world_mountain_ranges_orogeny.json",
+    "provenance": {
+      "author_or_curator": "Geological and Earth Science Community",
+      "content_sha256": "727f3b0c9178206d6abf387cd2bf86cead1be1b9dc2d8cfd6b7ec867a997c774",
+      "imported_at": "2026-09-29T11:06:47Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=Mountain_range&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=2019_redefinition_of_the_SI_base_units&format=json",
+    "source_title": "2019 BIPM SI Base Units Redefinition Based on Invariant Constants of Nature",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-30T11:20:00Z",
+    "downloaded_file_size": 37141,
+    "source_sha256": "d72bca6fecedb43214f62b7ee2e55d302b9f5dc45f866cd1ed82a3db23de3e7e",
+    "local_path": "storage/knowledge/source_artifacts\\general\\general_bipm_2019_si_units_redefinition.json",
+    "provenance": {
+      "author_or_curator": "Bureau International des Poids et Mesures (BIPM)",
+      "content_sha256": "d72bca6fecedb43214f62b7ee2e55d302b9f5dc45f866cd1ed82a3db23de3e7e",
+      "imported_at": "2026-09-30T11:20:00Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=2019_redefinition_of_the_SI_base_units&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=Brahmasphutasiddhanta&format=json",
+    "source_title": "Brahmasphutasiddhanta Mathematical and Astronomical Treatise",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-30T11:20:00Z",
+    "downloaded_file_size": 2263,
+    "source_sha256": "89ea5dcf8823271f0f8949b414e2f5ccc71612e66cfbb6731aab60277d884070",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\indian_math_brahmasphutasiddhanta.json",
+    "provenance": {
+      "author_or_curator": "Brahmagupta (c. 628 CE)",
+      "content_sha256": "89ea5dcf8823271f0f8949b414e2f5ccc71612e66cfbb6731aab60277d884070",
+      "imported_at": "2026-09-30T11:20:00Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=Brahmasphutasiddhanta&format=json"
+    }
+  },
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=Bijaganita&format=json",
+    "source_title": "Bijaganita Algebraic Treatises and Indeterminate Equations",
+    "artifact_type": "TECHNICAL_MANUAL",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-30T11:20:00Z",
+    "downloaded_file_size": 2706,
+    "source_sha256": "85cc34ed26f9ca77bc6172a5b23fde8acad91f192899df53e6cc0c2e7ffda933",
+    "local_path": "storage/knowledge/source_artifacts\\mathematics\\indian_math_bijaganita.json",
+    "provenance": {
+      "author_or_curator": "Bhaskara II",
+      "content_sha256": "85cc34ed26f9ca77bc6172a5b23fde8acad91f192899df53e6cc0c2e7ffda933",
+      "imported_at": "2026-09-30T11:20:00Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=Bijaganita&format=json"
+    }
+  },
+
+  {
+    "source_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=ISO_3166-1&format=json",
+    "source_title": "ISO 3166-1 Country Codes World Capitals and Standardized Territories",
+    "artifact_type": "EDUCATIONAL_REFERENCE",
+    "license": "CC-BY-SA-4.0",
+    "license_evidence_url": "https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License",
+    "download_timestamp": "2026-09-30T11:20:00Z",
+    "downloaded_file_size": 9523,
+    "source_sha256": "ff45989704d4f2a854450545d77f477eb2eb54c04ac889a16d5a041dd0e25a32",
+    "local_path": "storage/knowledge/source_artifacts\\geography\\geography_iso_3166_1_country_codes.json",
+    "provenance": {
+      "author_or_curator": "ISO 3166 Maintenance Agency & United Nations Statistics Division",
+      "content_sha256": "ff45989704d4f2a854450545d77f477eb2eb54c04ac889a16d5a041dd0e25a32",
+      "imported_at": "2026-09-30T11:20:00Z",
+      "license": "CC-BY-SA-4.0",
+      "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=ISO_3166-1&format=json"
+    }
+  }
+]

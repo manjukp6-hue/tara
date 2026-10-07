@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Peter Van Roy & Seif Haridi",
+      "license": "CC-BY-4.0",
+      "merged_at": "2026-09-29T10:12:39Z",
+      "source": "Concepts, Techniques, and Models of Computer Programming (Peter Van Roy & Seif Haridi, MIT Press, 2004)"
+    }
+  ],
+  "category": "programming",
+  "confidence": 1.0,
+  "content": "Programming paradigms dictate architectural computation strategies: 1) Functional Programming emphasizes pure mathematical functions, referential transparency, and immutability (Haskell, Clojure); 2) Imperative/Procedural organizes computation through sequential state mutation (C); 3) Object-Oriented encapsulates state and behavior in classes with inheritance and polymorphism (Java, Smalltalk); 4) Declarative specifies what to compute rather than how (SQL, Prolog); 5) Concurrent/Actor model isolates state in autonomous entities communicating exclusively via asynchronous message queues (Erlang, Akka).",
+  "content_sha256": "62b9c48567addd92a82fde8535133386409460b0b0582290e670235d9a99c1af",
+  "file_path": "storage/knowledge\\partitions/programming/paradigms\\f7\\f771372def4964cf.json",
+  "id": "f771372def4964cf",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:34Z",
+  "originating_record_id": null,
+  "partition": "partitions/programming/paradigms",
+  "provenance": {
+    "author_or_curator": "Peter Van Roy & Seif Haridi",
+    "content_sha256": "62b9c48567addd92a82fde8535133386409460b0b0582290e670235d9a99c1af",
+    "imported_at": "2026-09-29T10:11:34Z",
+    "license": "CC-BY-4.0",
+    "source_uri": "Concepts, Techniques, and Models of Computer Programming (Peter Van Roy & Seif Haridi, MIT Press, 2004)"
+  },
+  "source": "Concepts, Techniques, and Models of Computer Programming (Peter Van Roy & Seif Haridi, MIT Press, 2004)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "comparative_programming_paradigms",
+  "subpartition": "paradigms",
+  "tags": [
+    "paradigms",
+    "functional_programming",
+    "object_oriented",
+    "declarative",
+    "actor_model",
+    "programming"
+  ],
+  "topic": "programming",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

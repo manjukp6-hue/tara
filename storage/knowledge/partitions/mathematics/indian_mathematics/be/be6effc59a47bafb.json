@@ -1,0 +1,41 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Aryabhata I",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "tara://historical/ind_math_003_aryabhata_kuttaka"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Indian Mathematics Record\nTreatise: Aryabhatiya (Ganitapada, Verses 32-33)\nAuthor: Aryabhata I\nPeriod: 499 CE (Classical Period, Kusumapura / Pataliputra)\nDomain: algebra\n\nHISTORICAL_FORMULA:\nKuttaka (The Pulverizer algorithm): Recursive division method for solving indeterminate linear equations in integers\n\nMODERN_EQUIVALENT:\nax - by = c where a, b, c in Z; solved via Extended Euclidean Algorithm computing Bézout coefficients x_0, y_0\n\nMathematical Context: Developed to solve astronomical conjunction problems determining the elapsed time (ahargana) from mean planetary positions.\nHistorical Significance: First systematic algorithmic treatment of linear Diophantine equations in mathematical history.\nProvenance Reference: The Aryabhatiya of Aryabhata (Translated by Walter Eugene Clark, University of Chicago Press, 1930)",
+  "content_sha256": "4787099946ff271c6f67c8fc7a88b236679c5b01cafa61ff3b6a590827059eaf",
+  "file_path": "storage/knowledge\\partitions/mathematics/indian_mathematics\\be\\be6effc59a47bafb.json",
+  "id": "be6effc59a47bafb",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/indian_mathematics",
+  "provenance": {
+    "author_or_curator": "Aryabhata I",
+    "content_sha256": "4787099946ff271c6f67c8fc7a88b236679c5b01cafa61ff3b6a590827059eaf",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "tara://historical/ind_math_003_aryabhata_kuttaka"
+  },
+  "source": "tara://historical/ind_math_003_aryabhata_kuttaka",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "aryabhata_i_algebra",
+  "subpartition": "indian_mathematics",
+  "tags": [
+    "indian_mathematics",
+    "algebra",
+    "aryabhata_i",
+    "historical_mathematics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

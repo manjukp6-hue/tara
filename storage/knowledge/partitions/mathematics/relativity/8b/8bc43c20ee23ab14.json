@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Albert Einstein",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://archive.org/details/sitzungsberichte1915akaderich"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Einstein Field Equations of General Relativity\nExact Expression: G_{\\mu\\nu} + \\Lambda g_{\\mu\\nu} = \\frac{8\\pi G}{c^4} T_{\\mu\\nu}\nDefinitions: Ten coupled non-linear hyperbolic-elliptic partial differential equations describing gravitation as a manifestation of spacetime curvature caused by mass and energy.\nDerivation/Reference: Albert Einstein, Die Feldgleichungen der Gravitation (Königlich Preußische Akademie der Wissenschaften, 1915); David Hilbert (1915)\nExample: In vacuum (T_munu = 0, Lambda = 0), spherical symmetry yields unique Schwarzschild metric: ds^2 = -(1 - 2GM/(c^2 r)) c^2 dt^2 + (1 - 2GM/(c^2 r))^-1 dr^2 + r^2 dOmega^2\nDomain: relativity\nAssumptions: 4-dimensional pseudo-Riemannian spacetime manifold with Lorentzian signature (-+++); Torsion-free Levi-Civita connection\nCommon Errors: Treating gravity as a classical Newtonian force field instead of spacetime geometric curvature",
+  "content_sha256": "07fba8d21925128b49108fc3ee4c88e6ed451d7d3c552af8f0bc14899a0e3379",
+  "file_path": "storage/knowledge\\partitions/mathematics/relativity\\8b\\8bc43c20ee23ab14.json",
+  "id": "8bc43c20ee23ab14",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:32Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/relativity",
+  "provenance": {
+    "author_or_curator": "Albert Einstein",
+    "content_sha256": "07fba8d21925128b49108fc3ee4c88e6ed451d7d3c552af8f0bc14899a0e3379",
+    "imported_at": "2026-09-29T10:11:32Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/sitzungsberichte1915akaderich"
+  },
+  "source": "https://archive.org/details/sitzungsberichte1915akaderich",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Einstein Field Equations of General Relativity",
+  "subpartition": "relativity",
+  "tags": [
+    "einstein_field_equations",
+    "general_relativity",
+    "spacetime_curvature",
+    "stress_energy",
+    "schwarzschild",
+    "formula",
+    "relativity",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

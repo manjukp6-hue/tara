@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Sir George Gabriel Stokes",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://archive.org/details/mathphyspapers05stokrich"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Kelvin-Stokes Theorem\nExact Expression: \\iint_{S} (\\nabla \\times \\mathbf{F}) \\cdot d\\mathbf{S} = \\oint_{\\partial S} \\mathbf{F} \\cdot d\\mathbf{r}\nDefinitions: Relates the surface integral of the curl of a vector field over surface S to the line integral of the vector field around its boundary.\nDerivation/Reference: Sir George Stokes, Cambridge Smith's Prize Examination (1854); Lord Kelvin letter to Stokes (1850)\nExample: Circulation of F around unit circle in xy-plane equals flux of curl(F) through unit disk\nDomain: vector_calculus\nAssumptions: S is oriented, piecewise-smooth surface; F has continuous first partial derivatives\nCommon Errors: Inconsistent right-hand rule orientation between boundary curve and surface normal",
+  "content_sha256": "ad73e669a6a8f52affd6c240db53d282eb403eebb4cdae024e6bf2a03176bef3",
+  "file_path": "storage/knowledge\\partitions/mathematics/vector_calculus\\14\\140ea9594e8f9969.json",
+  "id": "140ea9594e8f9969",
+  "last_merged_at": "2026-09-29T10:34:32Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/vector_calculus",
+  "provenance": {
+    "author_or_curator": "Sir George Gabriel Stokes",
+    "content_sha256": "ad73e669a6a8f52affd6c240db53d282eb403eebb4cdae024e6bf2a03176bef3",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/mathphyspapers05stokrich"
+  },
+  "source": "https://archive.org/details/mathphyspapers05stokrich",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Kelvin-Stokes Theorem",
+  "subpartition": "vector_calculus",
+  "tags": [
+    "differential_forms",
+    "curl",
+    "flux",
+    "circulation",
+    "formula",
+    "vector_calculus",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

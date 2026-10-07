@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Classical Epistemology & Formal Logic",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:23Z",
+      "source": "Prior Analytics (Aristotle) & Introduction to Logic (Suppes)"
+    }
+  ],
+  "category": "reasoning",
+  "confidence": 1.0,
+  "content": "Deductive reasoning derives logically necessary conclusions from given premises. Canonical inference rules include Modus Ponens (If P then Q; P; therefore Q), Modus Tollens (If P then Q; not Q; therefore not P), and Disjunctive Syllogism (P or Q; not P; therefore Q). A deductive argument is valid if conclusion must follow from premises, and sound if it is valid and premises are true in reality.",
+  "content_sha256": "b49150df7cdef783e78a68f828badb7553a9e43c58ed47edf9d86db8981d5307",
+  "file_path": "storage/knowledge\\partitions/reasoning/deduction\\8d\\8d4ef574c15803e0.json",
+  "id": "8d4ef574c15803e0",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:50Z",
+  "originating_record_id": null,
+  "partition": "partitions/reasoning/deduction",
+  "provenance": {
+    "author_or_curator": "Classical Epistemology & Formal Logic",
+    "content_sha256": "b49150df7cdef783e78a68f828badb7553a9e43c58ed47edf9d86db8981d5307",
+    "imported_at": "2026-09-29T09:59:50Z",
+    "license": "Public Domain",
+    "source_uri": "Prior Analytics (Aristotle) & Introduction to Logic (Suppes)"
+  },
+  "source": "Prior Analytics (Aristotle) & Introduction to Logic (Suppes)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "formal_deductive_reasoning_and_syllogisms",
+  "subpartition": "deduction",
+  "tags": [
+    "deduction",
+    "modus_ponens",
+    "modus_tollens",
+    "syllogism",
+    "formal_logic",
+    "reasoning"
+  ],
+  "topic": "reasoning",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

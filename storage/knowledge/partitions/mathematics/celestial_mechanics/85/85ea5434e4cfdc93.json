@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Johannes Kepler & Isaac Newton",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://archive.org/details/ioanniskeppleri00kepl"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Kepler's Third Harmonic Law of Planetary Motion\nExact Expression: T^2 = \\frac{4\\pi^2}{G(M + m)} a^3\nDefinitions: Astronomical law stating that the square of the orbital period of a planet is directly proportional to the cube of the semi-major axis of its orbit.\nDerivation/Reference: Johannes Kepler, Harmonices Mundi (1619); Isaac Newton derived from law of universal gravitation in Principia (1687)\nExample: Earth orbit around Sun: a = 1.0 AU, T = 1.0 year -> T^2 / a^3 = 1.0 yr^2 / AU^3 for all Solar System planets\nDomain: celestial_mechanics\nAssumptions: Two-body gravitational system subject to inverse-square central force; Negligible perturbations from other planetary bodies\nCommon Errors: Neglecting central body mass M in binary systems of comparable masses (e.g. binary neutron stars)",
+  "content_sha256": "4c7fa27e69ff672c19aab9a20c66b0ce92bbbf24efc8c4280638a67d5a01ef77",
+  "file_path": "storage/knowledge\\partitions/mathematics/celestial_mechanics\\85\\85ea5434e4cfdc93.json",
+  "id": "85ea5434e4cfdc93",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:32Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/celestial_mechanics",
+  "provenance": {
+    "author_or_curator": "Johannes Kepler & Isaac Newton",
+    "content_sha256": "4c7fa27e69ff672c19aab9a20c66b0ce92bbbf24efc8c4280638a67d5a01ef77",
+    "imported_at": "2026-09-29T10:11:32Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/ioanniskeppleri00kepl"
+  },
+  "source": "https://archive.org/details/ioanniskeppleri00kepl",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Kepler's Third Harmonic Law of Planetary Motion",
+  "subpartition": "celestial_mechanics",
+  "tags": [
+    "keplers_third_law",
+    "celestial_mechanics",
+    "orbital_mechanics",
+    "gravitation",
+    "kepler",
+    "formula",
+    "celestial_mechanics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

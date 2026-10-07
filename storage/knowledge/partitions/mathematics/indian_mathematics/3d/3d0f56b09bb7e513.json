@@ -1,0 +1,41 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Baudhayana",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "tara://historical/ind_math_002_baudhayana_sqrt2"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Indian Mathematics Record\nTreatise: Baudhayana Sulba Sutra (Sutra 1.61)\nAuthor: Baudhayana\nPeriod: c. 800 BCE - 600 BCE\nDomain: arithmetic\n\nHISTORICAL_FORMULA:\npramāṇaṃ tṛtīyena vardhayettacca caturthenātmacatustriṃśonena (Increase the unit by a third, that third by its fourth, less the thirty-fourth part of that fourth)\n\nMODERN_EQUIVALENT:\n\\sqrt{2} \\approx 1 + \\frac{1}{3} + \\frac{1}{3 \\times 4} - \\frac{1}{3 \\times 4 \\times 34} = \\frac{577}{408} \\approx 1.414215686... (Accurate to 5 decimal places; true sqrt(2) = 1.414213562...)\n\nMathematical Context: Precise rational approximation for computing the diagonal of a square altar of side length 1.\nHistorical Significance: Demonstrates advanced early fractional series approximation algorithms in ancient Indian mathematics.\nProvenance Reference: History of Hindu Mathematics (Datta and Singh, 1935)",
+  "content_sha256": "2dc77b7b58bf51a6ffeb205b6c3ff191ac5963377a5370917e45660f4083105b",
+  "file_path": "storage/knowledge\\partitions/mathematics/indian_mathematics\\3d\\3d0f56b09bb7e513.json",
+  "id": "3d0f56b09bb7e513",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/indian_mathematics",
+  "provenance": {
+    "author_or_curator": "Baudhayana",
+    "content_sha256": "2dc77b7b58bf51a6ffeb205b6c3ff191ac5963377a5370917e45660f4083105b",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "tara://historical/ind_math_002_baudhayana_sqrt2"
+  },
+  "source": "tara://historical/ind_math_002_baudhayana_sqrt2",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "baudhayana_arithmetic",
+  "subpartition": "indian_mathematics",
+  "tags": [
+    "indian_mathematics",
+    "arithmetic",
+    "baudhayana",
+    "historical_mathematics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

@@ -1,0 +1,41 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Brahmagupta",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "tara://historical/ind_math_005_brahmagupta_zero"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Indian Mathematics Record\nTreatise: Brahmasphutasiddhanta (Chapter XVIII, Verses 30-35)\nAuthor: Brahmagupta\nPeriod: 628 CE (Bhillamala / Bhinmal, Rajasthan)\nDomain: arithmetic\n\nHISTORICAL_FORMULA:\nKha-karmāṇi (Operations on zero / sunya and negative quantities / rina): 0 + a = a, 0 - a = -a, a * 0 = 0, a + (-a) = 0, rina * rina = dhana (negative * negative = positive)\n\nMODERN_EQUIVALENT:\nFormal algebraic ring axioms of additive identity 0 + x = x, additive inverse x + (-x) = 0, multiplicative null element x * 0 = 0, and sign rule (-x)(-y) = xy.\n\nMathematical Context: First comprehensive mathematical treatise establishing zero as a number in its own right with operational arithmetic rules, rather than merely a placeholder.\nHistorical Significance: Foundation of modern zero arithmetic and positive/negative signed integer algebra.\nProvenance Reference: Algebra with Arithmetic and Mensuration, from the Sanscrit of Brahmegupta and Bhascara (H. T. Colebrooke, 1817)",
+  "content_sha256": "fe93ded5f44bec6455202aac97b8951c7d28a82abe057b2f4199f808a383af0a",
+  "file_path": "storage/knowledge\\partitions/mathematics/indian_mathematics\\6e\\6e0843727b39107c.json",
+  "id": "6e0843727b39107c",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/indian_mathematics",
+  "provenance": {
+    "author_or_curator": "Brahmagupta",
+    "content_sha256": "fe93ded5f44bec6455202aac97b8951c7d28a82abe057b2f4199f808a383af0a",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "tara://historical/ind_math_005_brahmagupta_zero"
+  },
+  "source": "tara://historical/ind_math_005_brahmagupta_zero",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "brahmagupta_arithmetic",
+  "subpartition": "indian_mathematics",
+  "tags": [
+    "indian_mathematics",
+    "arithmetic",
+    "brahmagupta",
+    "historical_mathematics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

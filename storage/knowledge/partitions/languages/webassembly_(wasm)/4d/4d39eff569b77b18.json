@@ -1,0 +1,40 @@
+{
+  "alternative_sources": [
+    {
+      "author": "WebAssembly (Wasm)",
+      "license": "W3C Software Notice and License / Apache-2.0",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://webassembly.org/docs/"
+    }
+  ],
+  "category": "languages",
+  "confidence": 1.0,
+  "content": "Programming Language Reference: WebAssembly (Wasm)\nVersion: WebAssembly 2.0 (W3C Recommendation)\nSyntax: Binary instruction format (.wasm) with human-readable S-expression text format (.wat) for a stack-based virtual machine.\nSemantics: Deterministic sandboxed low-level bytecode executing at near-native speed, independent of hardware architecture.\nType System: Compact static type system: 4 numeric value types (i32, i64, f32, f64), vector types (v128 SIMD), and reference types (externref, funcref).\nMemory Model: Linear memory: continuous unmanaged byte array resizable in 64KiB pages, bounds-checked at runtime.\nConcurrency: WebAssembly Threads proposal: shared linear memory via SharedArrayBuffer and atomic instructions (atomic.wait / notify).\nError Handling: Traps (halts execution on integer division by zero, invalid memory access), Wasm Exception Handling proposal.\nStandard APIs: WebAssembly JavaScript API (WebAssembly.instantiate), WASI (WebAssembly System Interface)\nSpecification: W3C WebAssembly Core Specification (https://webassembly.github.io/spec/core/)\nOfficial Docs: https://webassembly.org/docs/",
+  "content_sha256": "5ab3e6a74f26bdd508a0557c2145de30c01355f1a5b9369f9d193d2045922092",
+  "file_path": "storage/knowledge\\partitions/languages/webassembly_(wasm)\\4d\\4d39eff569b77b18.json",
+  "id": "4d39eff569b77b18",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:50Z",
+  "originating_record_id": null,
+  "partition": "partitions/languages/webassembly_(wasm)",
+  "provenance": {
+    "author_or_curator": "WebAssembly (Wasm)",
+    "content_sha256": "5ab3e6a74f26bdd508a0557c2145de30c01355f1a5b9369f9d193d2045922092",
+    "imported_at": "2026-09-29T09:59:50Z",
+    "license": "W3C Software Notice and License / Apache-2.0",
+    "source_uri": "https://webassembly.org/docs/"
+  },
+  "source": "https://webassembly.org/docs/",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "language_spec_webassembly_(wasm)",
+  "subpartition": "webassembly_(wasm)",
+  "tags": [
+    "programming_languages",
+    "webassembly_(wasm)",
+    "language_specification",
+    "languages"
+  ],
+  "topic": "languages",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

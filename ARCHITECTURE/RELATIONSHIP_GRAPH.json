@@ -8590,45 +8590,151 @@
     "rust/tara_engine/src/bin/tara_dataset_splitter.rs": {
       "call_references": [
         "Err",
+        "Some",
         "and_then",
         "any",
         "args",
+        "as_bool",
+        "as_bytes",
+        "as_millis",
+        "as_nanos",
+        "as_os_str",
         "as_str",
         "audit",
+        "capture_input_snapshot",
         "check_leakage",
         "collect",
+        "compute_file_sha256",
+        "compute_input_multiset",
+        "compute_semantic_fingerprints",
+        "contains",
+        "create",
+        "create_dir_all",
         "decontaminate",
         "display",
         "elapsed",
+        "entry",
+        "execution",
         "exists",
+        "extension",
         "file_name",
+        "file_stem",
+        "filter",
+        "filter_map",
+        "finalize",
+        "flush",
         "from",
+        "from_str",
         "into",
         "is_dir",
+        "is_disjoint",
+        "is_empty",
+        "is_err",
+        "is_file",
+        "is_ok",
         "iter",
         "join",
         "len",
+        "lines",
         "main",
+        "make_temp_dir",
+        "map",
+        "metadata",
         "new",
         "now",
+        "ok",
         "parent",
+        "path",
         "print_usage",
+        "read_to_string",
+        "remove_dir_all",
+        "rename",
+        "run_splitter_cli",
+        "sort",
         "split",
+        "starts_with",
+        "sync_all",
+        "temp_dir",
+        "test_cli_empty_dataset_rejected",
+        "test_cli_path_overlap_rejected_and_default_output_safe",
+        "test_cli_skip_leakage_fails_gate",
+        "to_path_buf",
         "to_str",
+        "to_string",
+        "to_string_lossy",
+        "to_string_pretty",
+        "trim",
+        "unwrap",
+        "unwrap_err",
         "unwrap_or",
-        "unwrap_or_else"
+        "unwrap_or_default",
+        "unwrap_or_else",
+        "vec"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "81bb5c921795fadfab0f83bd53d846faa9d258b762dcecc41b7df908be65270c",
-      "exports": [],
+      "dynamic_sha256": "184307ba7d394f9e2c0ac4024626dcfc1887c0cd071f09322a6ca7b366637d77",
+      "exports": [
+        {
+          "kind": "Function",
+          "line_number": 150,
+          "name": "run_splitter_cli",
+          "visibility": "Public"
+        }
+      ],
       "imports": [
+        {
+          "imported_symbols": [
+            "json",
+            "Value"
+          ],
+          "is_public_reexport": false,
+          "line_number": 12,
+          "raw_path": "serde_json::{json, Value}"
+        },
+        {
+          "imported_symbols": [
+            "Digest",
+            "Sha256"
+          ],
+          "is_public_reexport": false,
+          "line_number": 13,
+          "raw_path": "sha2::{Digest, Sha256}"
+        },
+        {
+          "imported_symbols": [
+            "HashMap",
+            "HashSet"
+          ],
+          "is_public_reexport": false,
+          "line_number": 14,
+          "raw_path": "std::collections::{HashMap, HashSet}"
+        },
         {
           "imported_symbols": [
             "env"
           ],
           "is_public_reexport": false,
-          "line_number": 7,
+          "line_number": 15,
           "raw_path": "std::env"
+        },
+        {
+          "imported_symbols": [
+            "self",
+            "File"
+          ],
+          "is_public_reexport": false,
+          "line_number": 16,
+          "raw_path": "std::fs::{self, File}"
+        },
+        {
+          "imported_symbols": [
+            "BufRead",
+            "BufReader",
+            "Write"
+          ],
+          "is_public_reexport": false,
+          "line_number": 17,
+          "raw_path": "std::io::{BufRead, BufReader, Write}"
         },
         {
           "imported_symbols": [
@@ -8636,55 +8742,114 @@
             "PathBuf"
           ],
           "is_public_reexport": false,
-          "line_number": 8,
+          "line_number": 18,
           "raw_path": "std::path::{Path, PathBuf}"
         },
         {
           "imported_symbols": [
-            "Instant"
+            "Instant",
+            "SystemTime",
+            "UNIX_EPOCH"
           ],
           "is_public_reexport": false,
-          "line_number": 9,
-          "raw_path": "std::time::Instant"
+          "line_number": 19,
+          "raw_path": "std::time::{Instant, SystemTime, UNIX_EPOCH}"
+        },
+        {
+          "imported_symbols": [],
+          "is_public_reexport": false,
+          "line_number": 550,
+          "raw_path": "super::*"
         },
         {
           "imported_symbols": [
             "compute_file_sha256"
           ],
           "is_public_reexport": false,
-          "line_number": 10,
+          "line_number": 20,
           "raw_path": "tara_engine::dataset::compute_file_sha256"
         },
         {
-          "imported_symbols": [
-            "DatasetSplitter",
-            "LeakageChecker",
-            "SplitRatio"
-          ],
+          "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 11,
-          "raw_path": "tara_engine::dataset::splitter::{DatasetSplitter, LeakageChecker, SplitRatio}"
+          "line_number": 21,
+          "raw_path": "tara_engine::dataset::splitter::{"
         }
       ],
       "in_links": [],
       "internal_symbols": [
         {
+          "kind": "Struct",
+          "line_number": 46,
+          "name": "ShardSnapshot",
+          "visibility": "Private"
+        },
+        {
           "kind": "Function",
-          "line_number": 31,
+          "line_number": 53,
+          "name": "capture_input_snapshot",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 135,
+          "name": "compute_input_multiset",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 109,
+          "name": "compute_semantic_fingerprints",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 543,
           "name": "main",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 13,
+          "line_number": 552,
+          "name": "make_temp_dir",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 26,
           "name": "print_usage",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 594,
+          "name": "test_cli_empty_dataset_rejected",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 614,
+          "name": "test_cli_path_overlap_rejected_and_default_output_safe",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 563,
+          "name": "test_cli_skip_leakage_fails_gate",
           "visibility": "Private"
         }
       ],
-      "is_test": false,
-      "lines": 298,
+      "is_test": true,
+      "lines": 661,
       "module_path": "tara_engine::bin::tara_dataset_splitter",
-      "modules_declared": [],
+      "modules_declared": [
+        {
+          "custom_path": null,
+          "is_public": false,
+          "line_number": 549,
+          "name": "tests"
+        }
+      ],
       "out_links": [
         "rust/tara_engine/src/dataset/mod.rs",
         "rust/tara_engine/src/dataset/splitter.rs"
@@ -14382,6 +14547,7 @@
         "create",
         "create_dir_all",
         "decontaminate",
+        "dedup",
         "default",
         "display",
         "energy",
@@ -14438,7 +14604,7 @@
         "rfind",
         "shade",
         "sort",
-        "sort_by_key",
+        "sort_unstable",
         "split",
         "split_whitespace",
         "starts_with",
@@ -14476,7 +14642,7 @@
         "vec"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "c02147e08281c1997c0161fccf640486555865a4e4fc716dace058bcb37cfb9e",
+      "dynamic_sha256": "e8af89df73a0d6df0462b9601b3fb0ef87296551594c2f13687dfd912d2e3e2e",
       "exports": [
         {
           "kind": "Struct",
@@ -14498,7 +14664,7 @@
         },
         {
           "kind": "Struct",
-          "line_number": 829,
+          "line_number": 849,
           "name": "LeakageChecker",
           "visibility": "Public"
         },
@@ -14540,7 +14706,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 840,
+          "line_number": 860,
           "name": "check_leakage",
           "visibility": "Public"
         },
@@ -14558,13 +14724,13 @@
         },
         {
           "kind": "Function",
-          "line_number": 985,
+          "line_number": 1005,
           "name": "compute_file_sha256",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 916,
+          "line_number": 936,
           "name": "decontaminate",
           "visibility": "Public"
         },
@@ -14653,7 +14819,7 @@
             "Sha256"
           ],
           "is_public_reexport": false,
-          "line_number": 986,
+          "line_number": 1006,
           "raw_path": "sha2::{Digest, Sha256}"
         },
         {
@@ -14679,7 +14845,7 @@
             "Read"
           ],
           "is_public_reexport": false,
-          "line_number": 987,
+          "line_number": 1007,
           "raw_path": "std::io::Read"
         },
         {
@@ -14687,7 +14853,7 @@
             "Write"
           ],
           "is_public_reexport": false,
-          "line_number": 1006,
+          "line_number": 1026,
           "raw_path": "std::io::Write"
         },
         {
@@ -14722,7 +14888,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 1005,
+          "line_number": 1025,
           "raw_path": "super::*"
         },
         {
@@ -14759,7 +14925,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 1008,
+          "line_number": 1028,
           "name": "make_test_dir",
           "visibility": "Private"
         },
@@ -14771,103 +14937,103 @@
         },
         {
           "kind": "Function",
-          "line_number": 1318,
+          "line_number": 1338,
           "name": "read_canonical_samples_from_file",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1519,
+          "line_number": 1539,
           "name": "test_13gram_boundary_and_normalization_semantics",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1444,
+          "line_number": 1464,
           "name": "test_bidirectional_path_containment_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1101,
+          "line_number": 1121,
           "name": "test_cross_split_zero_leakage_and_isolation",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1019,
+          "line_number": 1039,
           "name": "test_dataset_split_deterministic",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1425,
+          "line_number": 1445,
           "name": "test_empty_dataset_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1355,
+          "line_number": 1375,
           "name": "test_end_to_end_split_contaminate_decontaminate_verify_clean",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1046,
+          "line_number": 1066,
           "name": "test_leakage_detection_and_decontamination",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1334,
+          "line_number": 1354,
           "name": "test_nan_split_ratio_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1197,
+          "line_number": 1217,
           "name": "test_near_duplicate_decontaminated",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1163,
+          "line_number": 1183,
           "name": "test_near_duplicate_overlap_detected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1302,
+          "line_number": 1322,
           "name": "test_no_trailing_newline_counted",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1557,
+          "line_number": 1577,
           "name": "test_repeated_split_idempotent_and_different_ratio",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1270,
+          "line_number": 1290,
           "name": "test_same_target_different_prompt_detected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1346,
+          "line_number": 1366,
           "name": "test_source_equals_output_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1478,
+          "line_number": 1498,
           "name": "test_stale_artifact_recovery_and_audit_manifest",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1239,
+          "line_number": 1259,
           "name": "test_tara_schema_fields_detected",
           "visibility": "Private"
         },
@@ -14879,13 +15045,13 @@
         }
       ],
       "is_test": true,
-      "lines": 1585,
+      "lines": 1605,
       "module_path": "tara_engine::dataset::splitter",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1004,
+          "line_number": 1024,
           "name": "tests"
         }
       ],
@@ -50024,5 +50190,5 @@
   "schema_version": "1.0.0",
   "total_files": 240,
   "total_modules": 583,
-  "total_symbols": 2217
+  "total_symbols": 2218
 }

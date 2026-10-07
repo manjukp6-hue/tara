@@ -632,8 +632,8 @@ impl DatasetSplitter {
                 prompt_map.entry(s.prompt_hash).or_default().push(i);
             }
 
-            // Exact target match (substantive)
-            if s.target.len() >= 20 {
+            // Exact target match (substantive, >= 15 chars matching LeakageIndex)
+            if s.target.len() >= 15 {
                 if let Some(cands) = target_map.get(&s.target_hash) {
                     for &prev in cands {
                         if canonical_samples[prev].target == s.target {
@@ -644,42 +644,62 @@ impl DatasetSplitter {
                 target_map.entry(s.target_hash).or_default().push(i);
             }
 
-            for &sh in &s.shingles {
+            for &sh in s.shingles.iter().chain(s.prompt_shingles.iter()) {
                 raw_inv_index.entry(sh).or_default().push(i);
             }
         }
 
         // Document-frequency cutoff for common shingles
         let df_threshold = if total > 20 { (total / 2).max(10) } else { usize::MAX };
-        let mut inv_index = HashMap::new();
-        for (sh, doc_ids) in raw_inv_index {
+        let mut inv_index: HashMap<u64, Vec<usize>> = HashMap::new();
+        for (sh, mut doc_ids) in raw_inv_index {
+            doc_ids.sort_unstable();
+            doc_ids.dedup();
             if doc_ids.len() <= df_threshold {
                 inv_index.insert(sh, doc_ids);
             }
         }
 
-        // Pairwise near-duplicate union
+        // Pairwise near-duplicate union across both combined shingles and prompt shingles
         for i in 0..total {
-            let s_set = &canonical_samples[i].shingles;
-            if s_set.is_empty() {
+            let s_comb = &canonical_samples[i].shingles;
+            let s_prompt = &canonical_samples[i].prompt_shingles;
+            if s_comb.is_empty() && s_prompt.is_empty() {
                 continue;
             }
-            let mut cand_counts: HashMap<usize, usize> = HashMap::new();
-            for sh in s_set {
+            let mut cand_set: HashSet<usize> = HashSet::new();
+            for sh in s_comb.iter().chain(s_prompt.iter()) {
                 if let Some(cands) = inv_index.get(sh) {
                     for &j in cands {
                         if j > i {
-                            *cand_counts.entry(j).or_insert(0) += 1;
+                            cand_set.insert(j);
                         }
                     }
                 }
             }
-            let mut sorted_cands: Vec<_> = cand_counts.into_iter().collect();
-            sorted_cands.sort_by_key(|&(j, _)| j);
-            for (j, count) in sorted_cands {
-                let overlap_i = count as f64 / s_set.len() as f64;
-                let overlap_j = count as f64 / canonical_samples[j].shingles.len() as f64;
-                if overlap_i >= LEAKAGE_OVERLAP_THRESHOLD || overlap_j >= LEAKAGE_OVERLAP_THRESHOLD {
+            let mut sorted_cands: Vec<usize> = cand_set.into_iter().collect();
+            sorted_cands.sort_unstable();
+            for j in sorted_cands {
+                let t_comb = &canonical_samples[j].shingles;
+                let t_prompt = &canonical_samples[j].prompt_shingles;
+
+                let overlap_comb = if !s_comb.is_empty() && !t_comb.is_empty() {
+                    let shared = s_comb.intersection(t_comb).count();
+                    (shared as f64 / s_comb.len() as f64)
+                        .max(shared as f64 / t_comb.len() as f64)
+                } else {
+                    0.0
+                };
+
+                let overlap_prompt = if !s_prompt.is_empty() && !t_prompt.is_empty() {
+                    let shared = s_prompt.intersection(t_prompt).count();
+                    (shared as f64 / s_prompt.len() as f64)
+                        .max(shared as f64 / t_prompt.len() as f64)
+                } else {
+                    0.0
+                };
+
+                if overlap_comb.max(overlap_prompt) >= LEAKAGE_OVERLAP_THRESHOLD {
                     dsu.union(i, j);
                 }
             }

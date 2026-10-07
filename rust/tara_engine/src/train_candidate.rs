@@ -24,6 +24,7 @@ pub struct TrainingOptions {
     pub checkpoint_dir: Option<String>,
     pub checkpoint_interval: Option<usize>,
     pub resume: bool,
+    pub resume_from: Option<String>,
     pub max_memory_mb: Option<f64>,
 }
 
@@ -87,6 +88,9 @@ pub fn run_controlled_training_with_options(
     }
     if options.resume {
         trainer = trainer.with_resume(true);
+    }
+    if let Some(rf) = options.resume_from {
+        trainer = trainer.with_resume_from(rf);
     }
     let result = trainer.run_full_self_learning_cycle_isolated(
         max_epochs,

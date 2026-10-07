@@ -17403,12 +17403,12 @@
     "rust/tara_engine/src/bin/manual_trainer.rs": {
       "extension": "rs",
       "file_id": 2814749767527299,
-      "line_count": 413,
-      "modified_epoch": 1791361718,
+      "line_count": 414,
+      "modified_epoch": 1791391919,
       "name": "manual_trainer.rs",
       "rel_path": "rust/tara_engine/src/bin/manual_trainer.rs",
-      "sha256": "a5fff7f9c5a84b381e44eb998812c0d0e02266fa8cf007bfab5ffac1b1c86076",
-      "size_bytes": 19240
+      "sha256": "8015ba1c1237192c001235a3906e24593697fd5c3ec6c105056de492f10ef118",
+      "size_bytes": 19271
     },
     "rust/tara_engine/src/bin/process_restart_proof.rs": {
       "extension": "rs",
@@ -17503,12 +17503,12 @@
     "rust/tara_engine/src/bin/tara_training_stages.rs": {
       "extension": "rs",
       "file_id": 3940649674300748,
-      "line_count": 711,
-      "modified_epoch": 1791376286,
+      "line_count": 1060,
+      "modified_epoch": 1791391912,
       "name": "tara_training_stages.rs",
       "rel_path": "rust/tara_engine/src/bin/tara_training_stages.rs",
-      "sha256": "9d54fad34ea4f0419dc1ccf255621e9ac8c1998140d60447dcc32ca907be2b4a",
-      "size_bytes": 30470
+      "sha256": "6f317c29f7a68c2084341e13edfa937db3fefb86994973c139272b19d0abc96e",
+      "size_bytes": 45480
     },
     "rust/tara_engine/src/bin/trace_22layer_gpu_execution.rs": {
       "extension": "rs",
@@ -17523,12 +17523,12 @@
     "rust/tara_engine/src/bin/train_candidate.rs": {
       "extension": "rs",
       "file_id": 8162774324941680,
-      "line_count": 368,
-      "modified_epoch": 1791093505,
+      "line_count": 379,
+      "modified_epoch": 1791391986,
       "name": "train_candidate.rs",
       "rel_path": "rust/tara_engine/src/bin/train_candidate.rs",
-      "sha256": "69703140a2362f7c4b65a48d8984074791e0eefb018e836c0aa236b3a1e925d5",
-      "size_bytes": 14590
+      "sha256": "5f500cbb3e4f01df580e290bb22f12b0acbf976b8ce5bbdaf169d99614a7ca32",
+      "size_bytes": 15044
     },
     "rust/tara_engine/src/bin/training_proof.rs": {
       "extension": "rs",
@@ -18003,12 +18003,12 @@
     "rust/tara_engine/src/train_candidate.rs": {
       "extension": "rs",
       "file_id": 1125899907296083,
-      "line_count": 97,
-      "modified_epoch": 1791093467,
+      "line_count": 101,
+      "modified_epoch": 1791391684,
       "name": "train_candidate.rs",
       "rel_path": "rust/tara_engine/src/train_candidate.rs",
-      "sha256": "3a8ce809fbb0190e1be05d9c3beb205e99c51fe13f49d751eaefd2e9162ec283",
-      "size_bytes": 2994
+      "sha256": "7f1720dd68d2a1deedeea56461bc52bafe6711bdad5eaa8c1dff569524b403cc",
+      "size_bytes": 3129
     },
     "rust/tara_engine/tests/dataset_classifier_tests.rs": {
       "extension": "rs",
@@ -19453,12 +19453,12 @@
     "rust/tara_training_system/shared_training_infrastructure/trainer.rs": {
       "extension": "rs",
       "file_id": 10133099161620255,
-      "line_count": 1790,
-      "modified_epoch": 1791389943,
+      "line_count": 1833,
+      "modified_epoch": 1791391822,
       "name": "trainer.rs",
       "rel_path": "rust/tara_training_system/shared_training_infrastructure/trainer.rs",
-      "sha256": "932e8eb6dd4ba22b5698f40441e932a286991136bf68f0eb381375f690ff8475",
-      "size_bytes": 77942
+      "sha256": "941a3f84a9dc5586401dc7a5e6152be907a38b8f39d97d04a3eb5460db75bb98",
+      "size_bytes": 79775
     },
     "rust/tara_training_system/world_model/deliberative_search.rs": {
       "extension": "rs",
@@ -19531,7 +19531,7 @@
       "size_bytes": 1242
     }
   },
-  "generated_at_utc": "1791391288",
+  "generated_at_utc": "1791391988",
   "schema_version": "1.0.0",
   "total_files": 1953
 }

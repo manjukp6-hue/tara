@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
@@ -272,6 +272,7 @@ pub struct NativeSelfTrainer {
     pub checkpoint_dir: Option<String>,
     pub checkpoint_interval: Option<usize>,
     pub resume: bool,
+    pub resume_from: Option<String>,
 }
 
 impl NativeSelfTrainer {
@@ -291,7 +292,15 @@ impl NativeSelfTrainer {
             checkpoint_dir: None,
             checkpoint_interval: None,
             resume: false,
+            resume_from: None,
         }
+    }
+
+    /// Set an explicit source directory or checkpoint from which to resume.
+    pub fn with_resume_from<P: AsRef<Path>>(mut self, path: P) -> Self {
+        self.resume_from = Some(path.as_ref().to_string_lossy().to_string());
+        self.resume = true;
+        self
     }
 
     /// Set an explicit checkpoint directory for periodic saving and resuming.
@@ -761,24 +770,42 @@ impl NativeSelfTrainer {
 
         // Check for resumable checkpoint state
         if self.resume {
-            let cp_dir_to_check = if let Some(ref cp_dir) = self.checkpoint_dir {
-                let cp_path = Path::new(cp_dir);
-                if cp_path.join("checkpoint_state.json").exists() {
-                    Some(cp_dir.clone())
+            let explicit_resume = if let Some(ref r_from) = self.resume_from {
+                let p = Path::new(r_from);
+                if p.join("checkpoint_state.json").exists() {
+                    Some(r_from.clone())
                 } else {
+                    println!(
+                        "[Checkpoint] Notice: explicit resume_from path '{}' has no checkpoint_state.json; checking model directory.",
+                        r_from
+                    );
                     None
                 }
             } else {
                 None
             };
-            let resume_path_str = cp_dir_to_check.or_else(|| {
-                let m_path = Path::new(&self.model_dir);
-                if m_path.join("checkpoint_state.json").exists() {
-                    Some(self.model_dir.clone())
-                } else {
-                    None
-                }
-            });
+
+            let resume_path_str = explicit_resume
+                .or_else(|| {
+                    let m_path = Path::new(&self.model_dir);
+                    if m_path.join("checkpoint_state.json").exists() {
+                        Some(self.model_dir.clone())
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| {
+                    if let Some(ref cp_dir) = self.checkpoint_dir {
+                        let cp_path = Path::new(cp_dir);
+                        if cp_path.join("checkpoint_state.json").exists() {
+                            Some(cp_dir.clone())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                });
             if let Some(ref resume_dir) = resume_path_str {
                 let cp_path = Path::new(resume_dir);
                 let state_file = cp_path.join("checkpoint_state.json");
@@ -1476,11 +1503,27 @@ impl NativeSelfTrainer {
             }
             let _ = fs::remove_dir_all(&staging_dir);
         } else {
-            // Atomic rename
-            if Path::new(&target_candidate_dir).exists() {
-                let _ = fs::remove_dir_all(&target_candidate_dir);
+            // Two-phase atomic directory promotion with crash-safe fallback
+            let target_path = Path::new(&target_candidate_dir);
+            let backup_path = PathBuf::from(format!("{}.bak_{}", target_candidate_dir, now_stamp));
+            if target_path.exists() {
+                fs::rename(target_path, &backup_path)?;
             }
-            fs::rename(&staging_dir, &target_candidate_dir)?;
+            match fs::rename(&staging_dir, target_path) {
+                Ok(_) => {
+                    // Promotion succeeded: safely purge backup
+                    if backup_path.exists() {
+                        let _ = fs::remove_dir_all(&backup_path);
+                    }
+                }
+                Err(e) => {
+                    // Rollback backup on promotion failure to preserve working model
+                    if backup_path.exists() {
+                        let _ = fs::rename(&backup_path, target_path);
+                    }
+                    return Err(TrainerError::Io(e));
+                }
+            }
         }
 
         // Persist status

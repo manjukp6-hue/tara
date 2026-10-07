@@ -350,6 +350,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             checkpoint_dir: Some(config.neural_checkpoint_dir.clone()),
             checkpoint_interval: Some(config.checkpoint_interval_steps),
             resume: false,
+            resume_from: None,
             max_memory_mb: Some(65536.0),
         };
 

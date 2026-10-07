@@ -37,6 +37,7 @@ fn print_usage() {
         "  --checkpoint-interval <n> Periodic checkpoint saving interval in steps (default: 500)"
     );
     println!("  --resume                Resume training from last saved checkpoint if present");
+    println!("  --resume-from <path>    Explicit checkpoint or model directory to resume from");
     println!("  --max-memory-mb <f>     Maximum memory footprint ceiling in MB (default: 65536.0)");
     println!("  -h, --help              Print this help message");
 }
@@ -57,6 +58,7 @@ fn main() {
     let mut checkpoint_dir: Option<String> = None;
     let mut checkpoint_interval: Option<usize> = None;
     let mut resume = false;
+    let mut resume_from: Option<String> = None;
     let mut max_memory_mb: Option<f64> = None;
 
     let mut i = 1;
@@ -205,6 +207,14 @@ fn main() {
             "--resume" => {
                 resume = true;
             }
+            "--resume-from" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("Error: --resume-from requires a path argument");
+                    exit(1);
+                }
+                resume_from = Some(args[i].clone());
+            }
             "--max-memory-mb" => {
                 i += 1;
                 if i >= args.len() {
@@ -289,6 +299,7 @@ fn main() {
         checkpoint_dir,
         checkpoint_interval,
         resume,
+        resume_from,
         max_memory_mb,
     };
 

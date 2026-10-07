@@ -68,6 +68,8 @@ target/
 # OS generated
 .DS_Store
 Thumbs.db
+__MACOSX/
+._*
 scratch/
 .github/
 
@@ -78,7 +80,6 @@ downloader/
 **/weak/
 storage/datasets/**/weak/
 storage/datasets/tara_dataset_filtered/
-storage/datasets/tara_dataset_pool_v2/raw/
 storage/knowledge/verified_download_pool/
 *.zip
 *.tar.gz

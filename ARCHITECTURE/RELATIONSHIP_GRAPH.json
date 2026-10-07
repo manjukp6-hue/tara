@@ -13187,7 +13187,6 @@
         "KernelError",
         "accumulate_gradient",
         "add_residual",
-        "as_mut_ptr",
         "as_ptr",
         "as_ref",
         "as_str",
@@ -13218,6 +13217,7 @@
         "get_vram_info",
         "insert",
         "into",
+        "is_finite",
         "iter",
         "launch",
         "len",
@@ -13239,7 +13239,6 @@
         "sum",
         "swiglu_bwd_kernel",
         "synchronize",
-        "to_f32",
         "to_lowercase",
         "trim",
         "unwrap",
@@ -13249,7 +13248,7 @@
         "vec"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "214ed7da78d5b8bdc079f610789fa11621db8a4cccb5e87cbe815a0c31f27f6c",
+      "dynamic_sha256": "87e55ce71551d899d7ee4d4f57caf981ecf97f206dc69091be5fa5fffc1d4e0d",
       "exports": [
         {
           "kind": "Struct",
@@ -13277,151 +13276,151 @@
         },
         {
           "kind": "Function",
-          "line_number": 1027,
+          "line_number": 1011,
           "name": "accumulate_gradient",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 980,
+          "line_number": 964,
           "name": "add_residual",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 833,
+          "line_number": 817,
           "name": "backward_linear",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 406,
+          "line_number": 401,
           "name": "backward_lm_head",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 159,
+          "line_number": 153,
           "name": "device",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1333,
+          "line_number": 1272,
           "name": "download_weights",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1406,
+          "line_number": 1345,
           "name": "embedding_bwd_kernel",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1349,
+          "line_number": 1288,
           "name": "export_optimizer_state",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 638,
+          "line_number": 622,
           "name": "forward_embedding",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 770,
+          "line_number": 754,
           "name": "forward_linear",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 266,
+          "line_number": 261,
           "name": "forward_lm_head",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 708,
+          "line_number": 692,
           "name": "forward_rmsnorm",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 933,
+          "line_number": 917,
           "name": "forward_swiglu",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1398,
+          "line_number": 1337,
           "name": "get_step_count",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 168,
+          "line_number": 162,
           "name": "get_vram_info",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1375,
+          "line_number": 1314,
           "name": "load_optimizer_state",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1414,
+          "line_number": 1353,
           "name": "module_handle",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 90,
+          "line_number": 88,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 94,
+          "line_number": 92,
           "name": "new_with_precision",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 164,
+          "line_number": 158,
           "name": "precision",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 178,
+          "line_number": 172,
           "name": "register_weights",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1082,
+          "line_number": 1038,
           "name": "scale_accumulated_gradients",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1402,
+          "line_number": 1341,
           "name": "set_step_count",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1118,
+          "line_number": 1063,
           "name": "step_adamw",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1410,
+          "line_number": 1349,
           "name": "swiglu_bwd_kernel",
           "visibility": "Public"
         }
@@ -13478,25 +13477,25 @@
         },
         {
           "kind": "Function",
-          "line_number": 515,
+          "line_number": 510,
           "name": "backward_lm_head_f16",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 421,
+          "line_number": 416,
           "name": "backward_lm_head_fp32",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 337,
+          "line_number": 332,
           "name": "forward_lm_head_f16",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 280,
+          "line_number": 275,
           "name": "forward_lm_head_fp32",
           "visibility": "Private"
         },
@@ -13508,7 +13507,7 @@
         }
       ],
       "is_test": false,
-      "lines": 1417,
+      "lines": 1356,
       "module_path": "tara_engine::cuda::gpu_trainer",
       "modules_declared": [],
       "out_links": [
@@ -13539,7 +13538,7 @@
         "swiglu_fwd_kernel"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "e704a741f131971023206e6fbb0b211bdaeb98f2d3084de8aa12cca4fbbb32d4",
+      "dynamic_sha256": "57f21f7d7eebce5cf6334f1de78785affe40d6d126d7195dc6a55d87ca751940",
       "exports": [
         {
           "kind": "Const",
@@ -13555,7 +13554,7 @@
       ],
       "internal_symbols": [],
       "is_test": false,
-      "lines": 1114,
+      "lines": 1111,
       "module_path": "tara_engine::cuda::kernels",
       "modules_declared": [],
       "out_links": [],
@@ -46843,7 +46842,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_training_system",
-      "dynamic_sha256": "9a32442db835dc97313487ea1876a7eb5e91e79dad368f95fb4a828850c7dd3a",
+      "dynamic_sha256": "b0d676180cd0dbad6e7cf365b1e26b80cedebe47f54906936606f91301ed706e",
       "exports": [
         {
           "kind": "Struct",
@@ -47040,7 +47039,7 @@
             "TaraConfig"
           ],
           "is_public_reexport": false,
-          "line_number": 1478,
+          "line_number": 1483,
           "raw_path": "crate::config::TaraConfig"
         },
         {
@@ -47072,7 +47071,7 @@
             "write_safetensors_with_shapes"
           ],
           "is_public_reexport": false,
-          "line_number": 1479,
+          "line_number": 1484,
           "raw_path": "crate::safetensors::{load_model_weights, write_safetensors_with_shapes}"
         },
         {
@@ -47105,7 +47104,7 @@
             "HashMap"
           ],
           "is_public_reexport": false,
-          "line_number": 1480,
+          "line_number": 1485,
           "raw_path": "std::collections::HashMap"
         },
         {
@@ -47149,7 +47148,7 @@
             "StreamingDatasetReader"
           ],
           "is_public_reexport": false,
-          "line_number": 1477,
+          "line_number": 1482,
           "raw_path": "super::{NativeSelfTrainer, StreamingDatasetReader}"
         },
         {
@@ -47177,7 +47176,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 1447,
+          "line_number": 1452,
           "name": "compute_model_loss",
           "visibility": "Private"
         },
@@ -47195,31 +47194,31 @@
         },
         {
           "kind": "Function",
-          "line_number": 1435,
+          "line_number": 1440,
           "name": "softmax",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1483,
+          "line_number": 1488,
           "name": "supervised_cycle_updates_real_model_parameters_and_reduces_loss",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1592,
+          "line_number": 1597,
           "name": "test_streaming_dataset_reader_format_compatibility",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1636,
+      "lines": 1641,
       "module_path": "tara_training_system::shared_training_infrastructure::trainer",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1476,
+          "line_number": 1481,
           "name": "tests"
         }
       ],

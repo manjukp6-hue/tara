@@ -16541,15 +16541,15 @@
                       "name": "gpu_trainer.rs",
                       "rel_path": "rust/tara_engine/src/cuda/gpu_trainer.rs",
                       "entry_type": "file",
-                      "size_bytes": 53041,
-                      "sha256": "214ed7da78d5b8bdc079f610789fa11621db8a4cccb5e87cbe815a0c31f27f6c"
+                      "size_bytes": 50507,
+                      "sha256": "87e55ce71551d899d7ee4d4f57caf981ecf97f206dc69091be5fa5fffc1d4e0d"
                     },
                     {
                       "name": "kernels.rs",
                       "rel_path": "rust/tara_engine/src/cuda/kernels.rs",
                       "entry_type": "file",
-                      "size_bytes": 26239,
-                      "sha256": "e704a741f131971023206e6fbb0b211bdaeb98f2d3084de8aa12cca4fbbb32d4"
+                      "size_bytes": 26167,
+                      "sha256": "57f21f7d7eebce5cf6334f1de78785affe40d6d126d7195dc6a55d87ca751940"
                     },
                     {
                       "name": "mod.rs",
@@ -18150,8 +18150,8 @@
                   "name": "trainer.rs",
                   "rel_path": "rust/tara_training_system/shared_training_infrastructure/trainer.rs",
                   "entry_type": "file",
-                  "size_bytes": 71258,
-                  "sha256": "9a32442db835dc97313487ea1876a7eb5e91e79dad368f95fb4a828850c7dd3a"
+                  "size_bytes": 71422,
+                  "sha256": "b0d676180cd0dbad6e7cf365b1e26b80cedebe47f54906936606f91301ed706e"
                 }
               ]
             },

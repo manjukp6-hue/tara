@@ -618,9 +618,14 @@ impl NativeSelfTrainer {
 
         // 6. Split into Train (90%) and Held-out Validation (10%) to prevent evaluation contamination
         let total_seq_count = training_tokens.len();
-        let val_count = (total_seq_count / 10).clamp(16.min(total_seq_count), 256.min(total_seq_count));
-        let train_tokens = training_tokens[..total_seq_count - val_count].to_vec();
-        let val_tokens = training_tokens[total_seq_count - val_count..].to_vec();
+        let (train_tokens, val_tokens) = if total_seq_count > 1 {
+            let val_count = (total_seq_count / 10).clamp(1, (total_seq_count - 1).min(256));
+            let train = training_tokens[..total_seq_count - val_count].to_vec();
+            let val = training_tokens[total_seq_count - val_count..].to_vec();
+            (train, val)
+        } else {
+            (training_tokens.clone(), training_tokens.clone())
+        };
 
         println!(
             "[Dataset Split] Partitioned {} train sequences and {} held-out validation sequences.",

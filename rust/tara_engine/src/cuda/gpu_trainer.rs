@@ -67,8 +67,6 @@ pub struct CudaTrainer {
     k_lm_bwd_weight: CudaKernel,
     k_lm_bwd_input: CudaKernel,
     // FP16 Kernels
-    k_accum_grads_f16: CudaKernel,
-    k_scale_grads_f16: CudaKernel,
     k_adamw_step_f16: CudaKernel,
     k_lm_fwd_f16: CudaKernel,
     k_lm_bwd_weight_f16: CudaKernel,
@@ -107,8 +105,6 @@ impl CudaTrainer {
         let k_lm_bwd_input = module.get_kernel("lm_head_bwd_input_kernel")?;
 
         // Load FP16 kernels
-        let k_accum_grads_f16 = module.get_kernel("accum_grads_f16_kernel")?;
-        let k_scale_grads_f16 = module.get_kernel("scale_grads_f16_kernel")?;
         let k_adamw_step_f16 = module.get_kernel("adamw_step_mixed_f16_kernel")?;
         let k_lm_fwd_f16 = module.get_kernel("lm_head_fwd_f16_kernel")?;
         let k_lm_bwd_weight_f16 = module.get_kernel("lm_head_bwd_weight_f16_kernel")?;
@@ -138,8 +134,6 @@ impl CudaTrainer {
             k_lm_fwd,
             k_lm_bwd_weight,
             k_lm_bwd_input,
-            k_accum_grads_f16,
-            k_scale_grads_f16,
             k_adamw_step_f16,
             k_lm_fwd_f16,
             k_lm_bwd_weight_f16,
@@ -226,7 +220,8 @@ impl CudaTrainer {
                 // FP16 model weight buffer: (len + 1) / 2 floats = len * 2 bytes
                 let f16_elements = len.div_ceil(2);
                 let d_wf16 = self.session.allocate_f32(f16_elements)?;
-                let d_gf16 = self.session.allocate_f32(f16_elements)?;
+                // Gradient buffer is kept strictly in FP32 to prevent underflow and preserve precision
+                let d_g = self.session.allocate_f32(len)?;
 
                 // Convert FP32 values to FP16 bytes and upload
                 let h_f16: Vec<f16> = vals.iter().map(|&x| f16::from_f32(x)).collect();
@@ -235,10 +230,10 @@ impl CudaTrainer {
                     let slice = std::slice::from_raw_parts(ptr, f16_elements);
                     self.session.upload_f32(&d_wf16, slice)?;
                 }
-                let zeros_f16 = vec![0.0f32; f16_elements];
-                self.session.upload_f32(&d_gf16, &zeros_f16)?;
+                let zeros = vec![0.0f32; len];
+                self.session.upload_f32(&d_g, &zeros)?;
 
-                (Some(d_wf16), d_gf16)
+                (Some(d_wf16), d_g)
             } else {
                 let d_g = self.session.allocate_f32(len)?;
                 let zeros = vec![0.0f32; len];
@@ -529,12 +524,13 @@ impl CudaTrainer {
 
         let dlog_elems = (seq_len * vs).div_ceil(2);
         let norm_elems = (seq_len * hs).div_ceil(2);
-        let dlm_elems = (vs * hs).div_ceil(2);
+        let total_w = vs * hs;
+        let total_in = seq_len * hs;
 
         let d_dlogits = self.session.allocate_f32(dlog_elems)?;
         let d_normed = self.session.allocate_f32(norm_elems)?;
-        let d_dlm = self.session.allocate_f32(dlm_elems)?;
-        let d_dnormed = self.session.allocate_f32(norm_elems)?;
+        let d_dlm = self.session.allocate_f32(total_w)?;
+        let d_dnormed = self.session.allocate_f32(total_in)?;
 
         // Upload FP16 inputs
         let h_dlog_f16: Vec<f16> = d_logits.iter().map(|&x| f16::from_f32(x)).collect();
@@ -551,9 +547,8 @@ impl CudaTrainer {
 
         let block_dim = 128u32;
 
-        // 1. Compute d_lm_head in FP16 on GPU
-        let total_w = (vs * hs) as u32;
-        let grid_w = total_w.div_ceil(block_dim);
+        // 1. Compute d_lm_head directly into FP32 on GPU
+        let grid_w = (total_w as u32).div_ceil(block_dim);
         let mut arg_dlog = d_dlogits.dptr;
         let mut arg_norm = d_normed.dptr;
         let mut arg_out_dlm = d_dlm.dptr;
@@ -584,9 +579,8 @@ impl CudaTrainer {
                 .launch((grid_w, 1, 1), (block_dim, 1, 1), 0, params_w, 6)?;
         }
 
-        // 2. Compute d_final_normed in FP16 on GPU
-        let total_in = (seq_len * hs) as u32;
-        let grid_in = total_in.div_ceil(block_dim);
+        // 2. Compute d_final_normed directly into FP32 on GPU
+        let grid_in = (total_in as u32).div_ceil(block_dim);
         let mut arg_lm = d_lm_f16.dptr;
         let mut arg_out_dnorm = d_dnormed.dptr;
 
@@ -615,21 +609,11 @@ impl CudaTrainer {
 
         self.session.synchronize()?;
 
-        // Download and convert results to FP32
-        let mut host_dlm_f16 = vec![f16::ZERO; vs * hs];
-        let mut host_dnorm_f16 = vec![f16::ZERO; seq_len * hs];
-        unsafe {
-            let p1 = host_dlm_f16.as_mut_ptr() as *mut f32;
-            let s1 = std::slice::from_raw_parts_mut(p1, dlm_elems);
-            self.session.download_f32(&d_dlm, s1)?;
-
-            let p2 = host_dnorm_f16.as_mut_ptr() as *mut f32;
-            let s2 = std::slice::from_raw_parts_mut(p2, norm_elems);
-            self.session.download_f32(&d_dnormed, s2)?;
-        }
-
-        let host_dlm: Vec<f32> = host_dlm_f16.iter().map(|&x| x.to_f32()).collect();
-        let host_dnorm: Vec<f32> = host_dnorm_f16.iter().map(|&x| x.to_f32()).collect();
+        // Download full-precision FP32 gradients directly
+        let mut host_dlm = vec![0.0f32; total_w];
+        let mut host_dnorm = vec![0.0f32; total_in];
+        self.session.download_f32(&d_dlm, &mut host_dlm)?;
+        self.session.download_f32(&d_dnormed, &mut host_dnorm)?;
 
         Ok((host_dlm, host_dnorm))
     }
@@ -1029,49 +1013,21 @@ impl CudaTrainer {
             let block_dim = 128u32;
             let grid_dim = (param.len as u32).div_ceil(block_dim);
 
-            if self.precision == TrainingPrecision::Fp16 {
-                let f16_elems = grad.len().div_ceil(2);
-                let d_sample = self.session.allocate_f32(f16_elems)?;
-                let h_f16: Vec<f16> = grad.iter().map(|&x| f16::from_f32(x)).collect();
-                unsafe {
-                    let ptr = h_f16.as_ptr() as *const f32;
-                    let slice = std::slice::from_raw_parts(ptr, f16_elems);
-                    self.session.upload_f32(&d_sample, slice)?;
-                }
+            // Gradients are always accumulated in FP32 to prevent underflow and preserve precision
+            let d_sample = self.session.allocate_f32(grad.len())?;
+            self.session.upload_f32(&d_sample, grad)?;
 
-                let mut arg_accum = param.d_grad.dptr;
-                let mut arg_sample = d_sample.dptr;
-                let mut arg_n = param.len as u32;
+            let mut arg_accum = param.d_grad.dptr;
+            let mut arg_sample = d_sample.dptr;
+            let mut arg_n = param.len as u32;
 
-                let mut params = [std::ptr::null_mut(); 16];
-                params[0] = &mut arg_accum as *mut u64 as *mut c_void;
-                params[1] = &mut arg_sample as *mut u64 as *mut c_void;
-                params[2] = &mut arg_n as *mut u32 as *mut c_void;
-                unsafe {
-                    self.k_accum_grads_f16.launch(
-                        (grid_dim, 1, 1),
-                        (block_dim, 1, 1),
-                        0,
-                        params,
-                        3,
-                    )?;
-                }
-            } else {
-                let d_sample = self.session.allocate_f32(grad.len())?;
-                self.session.upload_f32(&d_sample, grad)?;
-
-                let mut arg_accum = param.d_grad.dptr;
-                let mut arg_sample = d_sample.dptr;
-                let mut arg_n = param.len as u32;
-
-                let mut params = [std::ptr::null_mut(); 16];
-                params[0] = &mut arg_accum as *mut u64 as *mut c_void;
-                params[1] = &mut arg_sample as *mut u64 as *mut c_void;
-                params[2] = &mut arg_n as *mut u32 as *mut c_void;
-                unsafe {
-                    self.k_accum_grads
-                        .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
-                }
+            let mut params = [std::ptr::null_mut(); 16];
+            params[0] = &mut arg_accum as *mut u64 as *mut c_void;
+            params[1] = &mut arg_sample as *mut u64 as *mut c_void;
+            params[2] = &mut arg_n as *mut u32 as *mut c_void;
+            unsafe {
+                self.k_accum_grads
+                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
             }
             self.session.synchronize()?;
         }
@@ -1082,7 +1038,6 @@ impl CudaTrainer {
     pub fn scale_accumulated_gradients(&self, count: usize) -> Result<(), CudaError> {
         let scale = 1.0f32 / (count.max(1) as f32);
         let block_dim = 128u32;
-        let is_f16 = self.precision == TrainingPrecision::Fp16;
 
         for param in self.params.values() {
             let grid_dim = (param.len as u32).div_ceil(block_dim);
@@ -1096,18 +1051,8 @@ impl CudaTrainer {
             params[2] = &mut arg_n as *mut u32 as *mut c_void;
 
             unsafe {
-                if is_f16 {
-                    self.k_scale_grads_f16.launch(
-                        (grid_dim, 1, 1),
-                        (block_dim, 1, 1),
-                        0,
-                        params,
-                        3,
-                    )?;
-                } else {
-                    self.k_scale_grads
-                        .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
-                }
+                self.k_scale_grads
+                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
             }
         }
         self.session.synchronize()?;
@@ -1129,30 +1074,25 @@ impl CudaTrainer {
         let bc2 = 1.0 - beta2.powi(self.step_count as i32);
         let is_f16 = self.precision == TrainingPrecision::Fp16;
 
-        // Compute global gradient norm
+        // Compute global gradient norm in pure FP32 and guard against non-finite values
         let mut total_norm_sq = 0.0f32;
         for param in self.params.values() {
-            if is_f16 {
-                let f16_elems = param.len.div_ceil(2);
-                let mut h_f16 = vec![f16::ZERO; param.len];
-                unsafe {
-                    let ptr = h_f16.as_mut_ptr() as *mut f32;
-                    let slice = std::slice::from_raw_parts_mut(ptr, f16_elems);
-                    self.session.download_f32(&param.d_grad, slice)?;
+            let mut host_grads = vec![0.0f32; param.len];
+            self.session.download_f32(&param.d_grad, &mut host_grads)?;
+            for &g in &host_grads {
+                if !g.is_finite() {
+                    // Non-finite gradient detected (NaN or Inf), safely clear and abort step
+                    let zeros = vec![0.0f32; param.len];
+                    self.session.upload_f32(&param.d_grad, &zeros)?;
+                    return Ok(());
                 }
-                for &g in &h_f16 {
-                    let val = g.to_f32();
-                    total_norm_sq += val * val;
-                }
-            } else {
-                let mut host_grads = vec![0.0f32; param.len];
-                self.session.download_f32(&param.d_grad, &mut host_grads)?;
-                for &g in &host_grads {
-                    total_norm_sq += g * g;
-                }
+                total_norm_sq += g * g;
             }
         }
         let total_norm = total_norm_sq.sqrt();
+        if !total_norm.is_finite() {
+            return Ok(());
+        }
         let clip_scale = if total_norm > max_grad_norm && total_norm > 0.0 {
             max_grad_norm / total_norm
         } else {
@@ -1245,10 +1185,9 @@ impl CudaTrainer {
                     self.session.download_f32_slice(d_cv, hv)?;
                 }
 
-                // Reset FP16 gradients
-                let f16_elems = param.len.div_ceil(2);
-                let zeros_f16 = vec![0.0f32; f16_elems];
-                self.session.upload_f32(&param.d_grad, &zeros_f16)?;
+                // Reset gradient buffer
+                let zeros = vec![0.0f32; param.len];
+                self.session.upload_f32(&param.d_grad, &zeros)?;
             } else {
                 let (arg_w, arg_m, arg_v) = if self.stream_optimizer {
                     let d_cw = self.d_chunk_w.as_ref().unwrap();

@@ -4589,7 +4589,6 @@
         "KernelError",
         "accumulate_gradient",
         "add_residual",
-        "as_mut_ptr",
         "as_ptr",
         "as_ref",
         "as_str",
@@ -4620,6 +4619,7 @@
         "get_vram_info",
         "insert",
         "into",
+        "is_finite",
         "iter",
         "launch",
         "len",
@@ -4641,7 +4641,6 @@
         "sum",
         "swiglu_bwd_kernel",
         "synchronize",
-        "to_f32",
         "to_lowercase",
         "trim",
         "unwrap",
@@ -4651,7 +4650,7 @@
         "vec"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "214ed7da78d5b8bdc079f610789fa11621db8a4cccb5e87cbe815a0c31f27f6c",
+      "dynamic_sha256": "87e55ce71551d899d7ee4d4f57caf981ecf97f206dc69091be5fa5fffc1d4e0d",
       "enums": [
         "TrainingPrecision"
       ],
@@ -4691,7 +4690,7 @@
         "rust/tara_engine/src/cuda/mod.rs"
       ],
       "is_test": false,
-      "lines": 1417,
+      "lines": 1356,
       "module": "tara_engine::cuda::gpu_trainer",
       "out_links": [
         "rust/tara_engine/src/cuda/driver.rs",
@@ -4726,7 +4725,7 @@
         "swiglu_fwd_kernel"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "e704a741f131971023206e6fbb0b211bdaeb98f2d3084de8aa12cca4fbbb32d4",
+      "dynamic_sha256": "57f21f7d7eebce5cf6334f1de78785affe40d6d126d7195dc6a55d87ca751940",
       "enums": [],
       "functions": [],
       "in_links": [
@@ -4734,7 +4733,7 @@
         "rust/tara_engine/src/cuda/mod.rs"
       ],
       "is_test": false,
-      "lines": 1114,
+      "lines": 1111,
       "module": "tara_engine::cuda::kernels",
       "out_links": [],
       "rel_path": "rust/tara_engine/src/cuda/kernels.rs",
@@ -16707,7 +16706,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate": "tara_training_system",
-      "dynamic_sha256": "9a32442db835dc97313487ea1876a7eb5e91e79dad368f95fb4a828850c7dd3a",
+      "dynamic_sha256": "b0d676180cd0dbad6e7cf365b1e26b80cedebe47f54906936606f91301ed706e",
       "enums": [
         "TrainerError",
         "TrainingDevice"
@@ -16751,7 +16750,7 @@
         "rust/tara_server/src/brain.rs"
       ],
       "is_test": true,
-      "lines": 1636,
+      "lines": 1641,
       "module": "tara_training_system::shared_training_infrastructure::trainer",
       "out_links": [
         "rust/tara_engine/src/config.rs",

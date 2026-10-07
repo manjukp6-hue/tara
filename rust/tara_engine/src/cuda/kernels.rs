@@ -450,7 +450,7 @@ $LM_FWD_F16_DONE:
 }
 
 // 8. FP16 LM Head Backward Weight Gradient: d_lm_head[v, h] = sum_t (d_logits[t, v] * final_normed[t, h])
-// p_d_logits: .b16, p_final_normed: .b16, p_d_lm_head: .b16
+// p_d_logits: .b16, p_final_normed: .b16, p_d_lm_head: .f32
 .visible .entry lm_head_bwd_weight_f16_kernel(
     .param .u64 p_d_logits,
     .param .u64 p_final_normed,
@@ -512,17 +512,16 @@ $BWD_W_F16_LOOP:
 
 $BWD_W_F16_STORE:
     ld.param.u64 %rd1, [p_d_lm_head];
-    mul.wide.u32 %rd3, %r3, 2;
+    mul.wide.u32 %rd3, %r3, 4;
     add.u64 %rd4, %rd1, %rd3;
-    cvt.rn.f16.f32 %h0, %f0;
-    st.global.b16 [%rd4], %h0;
+    st.global.f32 [%rd4], %f0;
 
 $BWD_W_F16_DONE:
     ret;
 }
 
 // 9. FP16 LM Head Backward Input Gradient: d_final_normed[t, h] = sum_v (d_logits[t, v] * lm_head[v, h])
-// p_d_logits: .b16, p_lm_head: .b16, p_d_final_normed: .b16
+// p_d_logits: .b16, p_lm_head: .b16, p_d_final_normed: .f32
 .visible .entry lm_head_bwd_input_f16_kernel(
     .param .u64 p_d_logits,
     .param .u64 p_lm_head,
@@ -584,10 +583,9 @@ $BWD_IN_F16_LOOP:
 
 $BWD_IN_F16_STORE:
     ld.param.u64 %rd1, [p_d_final_normed];
-    mul.wide.u32 %rd3, %r3, 2;
+    mul.wide.u32 %rd3, %r3, 4;
     add.u64 %rd4, %rd1, %rd3;
-    cvt.rn.f16.f32 %h0, %f0;
-    st.global.b16 [%rd4], %h0;
+    st.global.f32 [%rd4], %f0;
 
 $BWD_IN_F16_DONE:
     ret;
@@ -668,11 +666,11 @@ $SCALE_F16_DONE:
     ret;
 }
 
-// 12. Mixed-Precision AdamW Optimizer Step with FP32 Master Weights and FP16 Model Weights
+// 12. Mixed-Precision AdamW Optimizer Step with FP32 Master Weights, FP32 Gradients and FP16 Model Weights
 .visible .entry adamw_step_mixed_f16_kernel(
     .param .u64 p_master_weight,
     .param .u64 p_model_weight_f16,
-    .param .u64 p_grad_f16,
+    .param .u64 p_grad,
     .param .u64 p_m,
     .param .u64 p_v,
     .param .f32 p_lr,
@@ -686,10 +684,10 @@ $SCALE_F16_DONE:
     .param .u32 p_n
 ) {
     .reg .pred %p;
-    .reg .b16 %h<3>;
+    .reg .b16 %h<2>;
     .reg .b32 %r<5>;
     .reg .b64 %rd<11>;
-    .reg .f32 %f<15>;
+    .reg .f32 %f<16>;
 
     mov.u32 %r0, %ctaid.x;
     mov.u32 %r1, %ntid.x;
@@ -705,19 +703,18 @@ $SCALE_F16_DONE:
 
     ld.param.u64 %rd2, [p_master_weight];
     ld.param.u64 %rd3, [p_model_weight_f16];
-    ld.param.u64 %rd4, [p_grad_f16];
+    ld.param.u64 %rd4, [p_grad];
     ld.param.u64 %rd5, [p_m];
     ld.param.u64 %rd6, [p_v];
 
     add.u64 %rd7, %rd2, %rd0;
     add.u64 %rd8, %rd3, %rd1;
-    add.u64 %rd9, %rd4, %rd1;
+    add.u64 %rd9, %rd4, %rd0;
     add.u64 %rd10, %rd5, %rd0;
     add.u64 %rd2, %rd6, %rd0;
 
     ld.global.f32 %f0, [%rd7];
-    ld.global.b16 %h0, [%rd9];
-    cvt.f32.f16 %f1, %h0;
+    ld.global.f32 %f1, [%rd9];
     ld.global.f32 %f2, [%rd10];
     ld.global.f32 %f3, [%rd2];
 
@@ -773,8 +770,8 @@ $SCALE_F16_DONE:
     st.global.f32 [%rd2], %f3;
 
     // Reset gradient buffer to zero
-    mov.b16 %h2, 0;
-    st.global.b16 [%rd9], %h2;
+    mov.f32 %f15, 0.0;
+    st.global.f32 [%rd9], %f15;
 
 $ADAMW_F16_DONE:
     ret;

@@ -557,8 +557,16 @@ pub struct CudaContextGuard<'a> {
 }
 
 impl<'a> CudaContextGuard<'a> {
-    /// Pushes the specified context onto the current host thread.
+    /// Pushes the specified raw `CUcontext` onto the current host thread's CUDA context stack.
     /// Restricted to `pub(crate) unsafe` so external callers cannot pass arbitrary raw pointers.
+    ///
+    /// # Safety
+    /// - `ctx` must be a non-null, valid, live raw `CUcontext` handle created by `driver`.
+    /// - Exclusive ownership/lifetime of `ctx` and `driver` for the entire guard scope must be
+    ///   externally guaranteed by the caller (e.g., under `CudaContextInner::lock`).
+    /// - Current-thread CUDA context-stack discipline is the caller's responsibility: the guard
+    ///   must be finished (`finish()`) or dropped on the exact same OS thread that called `push`,
+    ///   and nested context pushes must be popped in strict LIFO order.
     pub(crate) unsafe fn push(
         ctx: *mut c_void,
         driver: &'a CudaDriverInner,
@@ -1721,5 +1729,75 @@ mod tests {
             unloaded_before + 1,
             "Dropping last CudaKernel must unload module under bound context"
         );
+    }
+
+    #[test]
+    fn test_multithreaded_concurrent_context_contention() {
+        use std::sync::Barrier;
+
+        let driver = build_harness_driver();
+        let dev = driver.get_device_info(0).unwrap();
+        let ctx = driver.create_context(&dev).unwrap();
+        let session = Arc::new(CudaSession {
+            driver: driver.clone(),
+            device: dev,
+            context: ctx,
+        });
+
+        let num_threads = 8usize;
+        let iterations = 16usize;
+        let barrier = Arc::new(Barrier::new(num_threads));
+        let mut handles = Vec::with_capacity(num_threads);
+
+        for tid in 0..num_threads {
+            let sess = Arc::clone(&session);
+            let bar = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                MOCK_CTX_STACK.with(|s| s.borrow_mut().clear());
+                bar.wait();
+                for iter in 0..iterations {
+                    let buf = sess.allocate_f32(8).unwrap();
+                    let payload = [(tid * 100 + iter) as f32; 8];
+                    sess.upload_f32(&buf, &payload).unwrap();
+                    let mut out = [0.0f32; 8];
+                    sess.download_f32(&buf, &mut out).unwrap();
+                    sess.synchronize().unwrap();
+                    drop(buf);
+                    // Thread-local CUDA context stack must be completely empty after every operation
+                    assert!(sess.driver().current_context().unwrap().is_null());
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // Also run simultaneous barrier-synchronized contention on real GPU hardware if available
+        if let Ok(real_sess) = CudaSession::init(0) {
+            let real_sess = Arc::new(real_sess);
+            let real_barrier = Arc::new(Barrier::new(4));
+            let mut real_handles = Vec::with_capacity(4);
+            for tid in 0..4 {
+                let s = Arc::clone(&real_sess);
+                let b = Arc::clone(&real_barrier);
+                real_handles.push(std::thread::spawn(move || {
+                    b.wait();
+                    for iter in 0..8 {
+                        let val = (tid * 10 + iter) as f32;
+                        let buf = s.allocate_f32(4).unwrap();
+                        s.upload_f32(&buf, &[val, val + 1.0, val + 2.0, val + 3.0])
+                            .unwrap();
+                        let mut out = [0.0f32; 4];
+                        s.download_f32(&buf, &mut out).unwrap();
+                        assert_eq!(out, [val, val + 1.0, val + 2.0, val + 3.0]);
+                        drop(buf);
+                    }
+                }));
+            }
+            for h in real_handles {
+                h.join().unwrap();
+            }
+        }
     }
 }

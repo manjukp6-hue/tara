@@ -509,10 +509,57 @@ impl DatasetSplitter {
         Ok(purged)
     }
 
+    /// Resolves a path (which may not yet exist on disk) into a canonicalized comparable `PathBuf`
+    /// by canonicalizing its deepest existing ancestor and lexically normalizing remaining components.
+    fn resolve_comparable_path(path: &Path) -> std::io::Result<PathBuf> {
+        let abs = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()?.join(path)
+        };
+
+        let mut normalized = PathBuf::new();
+        for comp in abs.components() {
+            match comp {
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    normalized.pop();
+                }
+                other => normalized.push(other.as_os_str()),
+            }
+        }
+
+        let mut existing = normalized.as_path();
+        let mut tail: Vec<std::ffi::OsString> = Vec::new();
+        while !existing.exists() {
+            if let Some(name) = existing.file_name() {
+                tail.push(name.to_os_string());
+            }
+            match existing.parent() {
+                Some(p) if !p.as_os_str().is_empty() => existing = p,
+                _ => break,
+            }
+        }
+
+        let mut resolved = if existing.exists() {
+            existing.canonicalize()?
+        } else {
+            normalized
+        };
+        for part in tail.into_iter().rev() {
+            resolved.push(part);
+        }
+        Ok(resolved)
+    }
+
     /// Deterministically split a JSONL dataset file or directory into train, val, and test partitions.
     ///
     /// The split assignment uses content hashing and DSU transitive cluster isolation so identical
     /// or near-duplicate prompts/targets are grouped into the same partition, eliminating cross-split leakage.
+    /// Output files are published via a **manifest-committed crash-safe publication** protocol:
+    /// `.tmp_*` files are written and `fsync`ed, promoted to `train.jsonl` / `val.jsonl` / `test.jsonl`,
+    /// and finalized by atomically renaming `split_manifest.json`. Any interrupted run without a committed
+    /// manifest is automatically purged on recovery.
     pub fn split<P: AsRef<Path>, Q: AsRef<Path>>(
         source_jsonl: P,
         output_dir: Q,
@@ -528,21 +575,35 @@ impl DatasetSplitter {
             )));
         }
 
-        let out_existed = out_dir.exists();
+        if !src_path.exists() {
+            return Err(SplitterError::EmptyDataset(src_path.display().to_string()));
+        }
+
+        // Pre-creation containment check using existing-ancestor canonicalization + lexical normalization
+        // so we never create directories inside the source dataset tree before rejecting.
+        let s_canon = src_path.canonicalize()?;
+        let o_pre_canon = Self::resolve_comparable_path(out_dir)?;
+        if s_canon == o_pre_canon
+            || o_pre_canon.starts_with(&s_canon)
+            || s_canon.starts_with(&o_pre_canon)
+        {
+            return Err(SplitterError::SourceEqualsOutput(format!(
+                "Source path '{}' overlaps with or contains/is contained by output directory '{}'",
+                src_path.display(),
+                out_dir.display()
+            )));
+        }
+
         fs::create_dir_all(out_dir)?;
 
-        // Bidirectional safety constraint: reject if output == source, output inside source, or source inside output
-        if let (Ok(s_canon), Ok(o_canon)) = (src_path.canonicalize(), out_dir.canonicalize()) {
-            if s_canon == o_canon || o_canon.starts_with(&s_canon) || s_canon.starts_with(&o_canon) {
-                if !out_existed {
-                    let _ = fs::remove_dir(out_dir);
-                }
-                return Err(SplitterError::SourceEqualsOutput(format!(
-                    "Source path '{}' overlaps with or contains/is contained by output directory '{}'",
-                    src_path.display(),
-                    out_dir.display()
-                )));
-            }
+        // Post-creation canonical verification (fail-closed)
+        let o_canon = out_dir.canonicalize()?;
+        if s_canon == o_canon || o_canon.starts_with(&s_canon) || s_canon.starts_with(&o_canon) {
+            return Err(SplitterError::SourceEqualsOutput(format!(
+                "Source path '{}' overlaps with or contains/is contained by output directory '{}'",
+                src_path.display(),
+                out_dir.display()
+            )));
         }
 
         // Purge any stale .tmp_* or uncommitted split artifacts before starting
@@ -785,12 +846,13 @@ impl DatasetSplitter {
         drop(test_w);
 
         let manifest_file = out_dir.join("split_manifest.json");
-        // Remove any prior manifest before replacing split files so the output directory is marked in-flight
+        // Manifest-committed crash-safe publication:
+        // 1. Remove any prior manifest before replacing split files so the output directory is marked in-flight
         if manifest_file.exists() {
             let _ = fs::remove_file(&manifest_file);
         }
 
-        // Atomic file promotion
+        // 2. Promote fsynced temporary split files into place
         fs::rename(&tmp_train_path, &train_path)?;
         fs::rename(&tmp_val_path, &val_path)?;
         fs::rename(&tmp_test_path, &test_path)?;
@@ -799,7 +861,7 @@ impl DatasetSplitter {
         let val_sha256 = compute_file_sha256(&val_path).unwrap_or_default();
         let test_sha256 = compute_file_sha256(&test_path).unwrap_or_default();
 
-        // Write atomic commit manifest marker with full audit provenance
+        // 3. Finalize publication by writing, fsyncing, and renaming the commit manifest marker with full audit provenance
         let tmp_manifest_file = out_dir.join(format!(".tmp_manifest_{now_stamp}.json"));
         let manifest_content = serde_json::json!({
             "timestamp_ms": now_stamp,
@@ -1599,6 +1661,39 @@ mod tests {
         let rep3 = DatasetSplitter::split(&src_file, &out_dir, r2).unwrap();
         assert_eq!(rep3.total_samples, 100);
         assert!(rep3.train_samples < rep1.train_samples);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_nonexistent_nested_output_inside_source_rejected_without_creating_dirs() {
+        let dir = make_test_dir();
+        let src_dir = dir.join("canonical");
+        fs::create_dir_all(&src_dir).unwrap();
+        let shard = src_dir.join("shard_0.jsonl");
+        {
+            let mut f = File::create(&shard).unwrap();
+            for i in 0..30 {
+                writeln!(f, r#"{{"input":"q_{i}","output":"a_{i}"}}"#).unwrap();
+            }
+        }
+
+        let ratio = SplitRatio::new(0.80, 0.10, 0.10).unwrap();
+
+        // Deep non-existent path inside source -> must be rejected BEFORE creating any directories inside src_dir
+        let deep_nested = src_dir.join("deep").join("nested").join("splits");
+        let res = DatasetSplitter::split(&src_dir, &deep_nested, ratio);
+        assert!(matches!(res, Err(SplitterError::SourceEqualsOutput(_))));
+        assert!(
+            !src_dir.join("deep").exists(),
+            "Pre-creation containment check must not leave partial directories inside source"
+        );
+
+        // Non-existent sibling with '..' traversal -> must resolve cleanly and succeed on first run
+        let sibling_via_dotdot = src_dir.join("..").join("canonical_splits");
+        let ok_rep = DatasetSplitter::split(&src_dir, &sibling_via_dotdot, ratio).unwrap();
+        assert_eq!(ok_rep.total_samples, 30);
+        assert!(dir.join("canonical_splits").join("split_manifest.json").exists());
 
         let _ = fs::remove_dir_all(&dir);
     }

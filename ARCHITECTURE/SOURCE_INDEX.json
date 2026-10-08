@@ -2454,6 +2454,7 @@
         "as_os_str",
         "as_str",
         "audit",
+        "canonicalize",
         "capture_input_snapshot",
         "check_leakage",
         "collect",
@@ -2496,6 +2497,7 @@
         "new",
         "now",
         "ok",
+        "ok_or",
         "parent",
         "path",
         "print_usage",
@@ -2525,7 +2527,7 @@
         "vec"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "184307ba7d394f9e2c0ac4024626dcfc1887c0cd071f09322a6ca7b366637d77",
+      "dynamic_sha256": "76605137306535069715443907d8d2734c66d3017fe1cf2227ac23e09ec596cd",
       "enums": [],
       "functions": [
         "capture_input_snapshot",
@@ -2541,7 +2543,7 @@
       ],
       "in_links": [],
       "is_test": true,
-      "lines": 661,
+      "lines": 666,
       "module": "tara_engine::bin::tara_dataset_splitter",
       "out_links": [
         "rust/tara_engine/src/dataset/mod.rs",
@@ -4372,6 +4374,7 @@
         "test_driver_singleton_cached",
         "test_error_string_fallback",
         "test_module_kernel_survives_session_scope",
+        "test_multithreaded_concurrent_context_contention",
         "test_multithreaded_context_sequential_usage",
         "test_overflow_and_zero_size_handling",
         "test_session_created_on_thread_a_dropped_on_thread_b",
@@ -4386,11 +4389,12 @@
         "upload_u32",
         "var",
         "vec",
+        "wait",
         "with",
         "with_context"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "d5f1ac8d7a7b0ef24106f6555d1864db31432c8771e050ac6164559fe455f77f",
+      "dynamic_sha256": "2c23e21b54346c7e73856c62468f92df6f5c65d63f8340e2151a68b7d6b3c613",
       "enums": [
         "CudaError"
       ],
@@ -4438,6 +4442,7 @@
         "test_driver_singleton_cached",
         "test_error_string_fallback",
         "test_module_kernel_survives_session_scope",
+        "test_multithreaded_concurrent_context_contention",
         "test_multithreaded_context_sequential_usage",
         "test_overflow_and_zero_size_handling",
         "test_session_created_on_thread_a_dropped_on_thread_b",
@@ -4454,7 +4459,7 @@
         "rust/tara_engine/src/inference/tiered_store.rs"
       ],
       "is_test": true,
-      "lines": 1725,
+      "lines": 1803,
       "module": "tara_engine::cuda::driver",
       "out_links": [
         "rust/tara_engine/src/cuda/mod.rs"
@@ -4880,6 +4885,8 @@
         "as_bytes",
         "as_millis",
         "as_nanos",
+        "as_os_str",
+        "as_path",
         "as_ref",
         "as_str",
         "canonicalize",
@@ -4889,6 +4896,7 @@
         "clear",
         "clone",
         "collect",
+        "components",
         "compute_13gram_hashes",
         "compute_file_sha256",
         "contains",
@@ -4897,6 +4905,7 @@
         "count",
         "create",
         "create_dir_all",
+        "current_dir",
         "decontaminate",
         "dedup",
         "default",
@@ -4920,6 +4929,7 @@
         "get_ref",
         "intersection",
         "into_iter",
+        "is_absolute",
         "is_dir",
         "is_empty",
         "is_err",
@@ -4944,6 +4954,7 @@
         "or_default",
         "parent",
         "path",
+        "pop",
         "qs",
         "read",
         "read_canonical_samples_from_file",
@@ -4952,6 +4963,7 @@
         "remove_dir_all",
         "remove_file",
         "rename",
+        "rev",
         "rfind",
         "shade",
         "sort",
@@ -4972,12 +4984,14 @@
         "test_near_duplicate_decontaminated",
         "test_near_duplicate_overlap_detected",
         "test_no_trailing_newline_counted",
+        "test_nonexistent_nested_output_inside_source_rejected_without_creating_dirs",
         "test_repeated_split_idempotent_and_different_ratio",
         "test_same_target_different_prompt_detected",
         "test_source_equals_output_rejected",
         "test_stale_artifact_recovery_and_audit_manifest",
         "test_tara_schema_fields_detected",
         "to_lowercase",
+        "to_os_string",
         "to_path_buf",
         "to_str",
         "to_string",
@@ -4993,7 +5007,7 @@
         "vec"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "e8af89df73a0d6df0462b9601b3fb0ef87296551594c2f13687dfd912d2e3e2e",
+      "dynamic_sha256": "4da7b68c2eb295d7f7a3f86467304694b2c75a1404c49eedd474a098dc550796",
       "enums": [
         "LeakageKind",
         "SplitterError"
@@ -5016,6 +5030,7 @@
         "normalize_text",
         "read_canonical_samples_from_file",
         "recover_or_purge_stale_artifacts",
+        "resolve_comparable_path",
         "split",
         "test_13gram_boundary_and_normalization_semantics",
         "test_bidirectional_path_containment_rejected",
@@ -5028,6 +5043,7 @@
         "test_near_duplicate_decontaminated",
         "test_near_duplicate_overlap_detected",
         "test_no_trailing_newline_counted",
+        "test_nonexistent_nested_output_inside_source_rejected_without_creating_dirs",
         "test_repeated_split_idempotent_and_different_ratio",
         "test_same_target_different_prompt_detected",
         "test_source_equals_output_rejected",
@@ -5040,7 +5056,7 @@
         "rust/tara_engine/src/dataset/mod.rs"
       ],
       "is_test": true,
-      "lines": 1605,
+      "lines": 1700,
       "module": "tara_engine::dataset::splitter",
       "out_links": [
         "rust/tara_engine/src/dataset/mod.rs"

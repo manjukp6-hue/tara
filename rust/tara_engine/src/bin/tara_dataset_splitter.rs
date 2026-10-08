@@ -272,15 +272,18 @@ pub fn run_splitter_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error
         return Ok(());
     }
 
-    // Default output path is placed outside the input directory (<stem>_splits) to prevent self-ingestion
+    // Default output path is placed outside the input directory (<parent>/<stem>_splits) to prevent self-ingestion.
+    // Canonicalizing input_dir first ensures that relative paths like `.`, `./canonical`, or `canonical/`
+    // always resolve to a true sibling directory outside the source tree.
     let output_dir = match output_path {
         Some(p) => p,
         None => {
-            let parent = input_dir
+            let canon_in = input_dir.canonicalize()?;
+            let parent = canon_in
                 .parent()
                 .filter(|p| !p.as_os_str().is_empty())
-                .unwrap_or_else(|| Path::new("."));
-            let stem = input_dir
+                .ok_or("Cannot derive sibling default output directory for filesystem root; please pass --output explicitly")?;
+            let stem = canon_in
                 .file_stem()
                 .and_then(|n| n.to_str())
                 .unwrap_or("dataset");
@@ -634,17 +637,19 @@ mod tests {
         ];
         assert!(run_splitter_cli(&bad_args).is_err());
 
-        // 2. Default output (when --output omitted) places splits outside src_dir (<stem>_splits) and SUCCEEDS
+        // 2. Default output (when --output omitted, including trailing slash on --input) places splits
+        //    outside src_dir (<parent>/<stem>_splits) and SUCCEEDS without self-rejection
         let ok_args = vec![
             "tara_dataset_splitter".to_string(),
             "--input".to_string(),
-            src_dir.to_string_lossy().to_string(),
+            format!("{}/", src_dir.to_string_lossy()),
         ];
         assert!(run_splitter_cli(&ok_args).is_ok());
 
         let expected_default_out = dir.join("canonical_data_splits");
         let manifest_path = expected_default_out.join("split_manifest.json");
         assert!(manifest_path.exists());
+        assert!(!src_dir.join("splits").exists());
 
         let manifest: Value =
             serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();

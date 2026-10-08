@@ -168,7 +168,7 @@ impl ModelRegistry {
             return Err("only a completed training cycle can be registered".into());
         }
         let weights_path = Path::new(model_dir).join("model.safetensors");
-        let sha256 = tara_engine::safetensors::compute_sha256(&weights_path.to_string_lossy())
+        let sha256 = tara_engine::compute_sha256(&weights_path.to_string_lossy())
             .map_err(|error| error.to_string())?;
         if sha256.len() != 64 {
             return Err("trained model checkpoint has an invalid SHA-256 digest".into());
@@ -177,7 +177,7 @@ impl ModelRegistry {
         let config: Value =
             serde_json::from_slice(&fs::read(&config_path).map_err(|error| error.to_string())?)
                 .map_err(|error| error.to_string())?;
-        let parameter_count = tara_engine::safetensors::load_model_weights(model_dir)
+        let parameter_count = tara_engine::load_model_weights(model_dir)
             .map_err(|error| error.to_string())?
             .values()
             .map(|tensor| tensor.len() as u64)
@@ -391,7 +391,7 @@ mod tests {
             r#"{"vocab_size":2,"hidden_size":2}"#,
         )
         .unwrap();
-        tara_engine::safetensors::write_safetensors_with_shapes(
+        tara_engine::write_safetensors_with_shapes(
             &[("lm_head.weight".to_string(), vec![1.0f32, 2.0, 3.0, 4.0])]
                 .into_iter()
                 .collect(),

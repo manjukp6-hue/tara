@@ -39,9 +39,7 @@ use crate::registry::{Capability, CapabilityCategory, CapabilityRegistry};
 use crate::rules::ExecutionGuard;
 use crate::skills::SkillEngine;
 use crate::tools_registry::ToolRegistry;
-use tara_engine::self_update::SelfUpdateController;
-use tara_engine::skills_evaluator::SkillsEvaluator;
-use tara_engine::trainer::NativeSelfTrainer;
+use tara_engine::{NativeSelfTrainer, SelfUpdateController, SkillsEvaluator};
 
 /// Unified orchestrator coordinating TARA's existing capability and self-evolution systems.
 pub struct AbilityEngine {

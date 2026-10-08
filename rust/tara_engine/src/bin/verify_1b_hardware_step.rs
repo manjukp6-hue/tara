@@ -2,7 +2,7 @@
 //! queries physical CUDA hardware via Driver API, traces transformer operation device placement,
 //! and evaluates 16GB VRAM feasibility.
 
-use tara_engine::cuda::{CudaTrainer, TrainingPrecision};
+use tara_engine::{CudaTrainer, TrainingPrecision};
 
 fn main() {
     println!("==================================================================");

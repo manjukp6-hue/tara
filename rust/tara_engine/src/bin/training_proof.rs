@@ -113,7 +113,7 @@ fn main() {
     // Step 5: Run real training via NativeSelfTrainer on CANDIDATE only
     println!("\n[Step 5] Running real training on candidate (1 epoch, force=true)...");
     let dataset_dir_for_trainer = dataset_path.clone();
-    let trainer = tara_engine::trainer::NativeSelfTrainer::new(&candidate_dir, &repo_root)
+    let trainer = tara_engine::NativeSelfTrainer::new(&candidate_dir, &repo_root)
         .with_dataset_dir(&dataset_dir_for_trainer)
         .with_learning_rate(1e-3)
         .with_batch_size(4)
@@ -192,7 +192,7 @@ fn main() {
     let prod_exists = std::path::Path::new(&prod_model_path).exists();
     println!("  Production model.safetensors exists: {}", prod_exists);
     if prod_exists {
-        let prod_sha = tara_engine::safetensors::compute_sha256(&prod_model_path)
+        let prod_sha = tara_engine::compute_sha256(&prod_model_path)
             .unwrap_or_else(|e| format!("ERROR: {}", e));
         println!("  Production model SHA: {}", prod_sha);
         println!(

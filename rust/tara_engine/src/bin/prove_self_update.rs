@@ -11,10 +11,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use tara_engine::config::TaraConfig;
-use tara_engine::model::causal_lm::TaraForCausalLM;
-use tara_engine::safetensors::load_safetensors_with_shapes;
-use tara_engine::self_update::SelfUpdateController;
 use tara_engine::tokenizer::TaraTokenizer;
+use tara_engine::{load_safetensors_with_shapes, SelfUpdateController, TaraForCausalLM};
 
 fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;

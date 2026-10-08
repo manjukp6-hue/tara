@@ -38,7 +38,7 @@ use crate::subsystems::{
 };
 use crate::tools_registry::ToolRegistry;
 
-use tara_engine::trainer::NativeSelfTrainer;
+use tara_engine::NativeSelfTrainer;
 
 struct BrainResultParams<'a> {
     input: &'a str,
@@ -330,7 +330,7 @@ impl TaraBrain {
         // (not a hardcoded bootstrap hash). After self-training promotes a new model,
         // ModelRegistry records the new SHA as the active version.
         let model_metadata = {
-            let sha = tara_engine::safetensors::compute_sha256(&format!(
+            let sha = tara_engine::compute_sha256(&format!(
                 "{}/model.safetensors",
                 resolved_model_dir
             ))
@@ -609,7 +609,7 @@ impl TaraBrain {
 
     /// Get full model status with SHA256 integrity check.
     pub fn get_model_status(&self) -> Value {
-        let sha = tara_engine::safetensors::compute_sha256(&format!(
+        let sha = tara_engine::compute_sha256(&format!(
             "{}/model.safetensors",
             self.model_dir
         ))

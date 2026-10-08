@@ -63,7 +63,7 @@ impl UnifiedBridge {
             request_id: req.request_id.clone(),
             status: "SUCCESS".to_string(),
             text: result.text,
-            model_checksum: tara_engine::safetensors::compute_sha256(&format!(
+            model_checksum: tara_engine::compute_sha256(&format!(
                 "{model_dir}/model.safetensors"
             ))
             .map_err(|error| error.to_string())?,

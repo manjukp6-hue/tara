@@ -1881,7 +1881,7 @@
         "write_expanded_model_with_tokens"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "e7192ae55d996144339133dcfc0ca8b33e798714d3e76e3e6aa4dc560a737070",
+      "dynamic_sha256": "160974a61269ed22f09340926c939bc501245e9f70b71d51efa9ec14e784cba7",
       "enums": [],
       "functions": [
         "main",
@@ -1889,13 +1889,11 @@
       ],
       "in_links": [],
       "is_test": false,
-      "lines": 747,
+      "lines": 746,
       "module": "tara_engine::bin::expand_candidate",
       "out_links": [
         "rust/tara_engine/src/config.rs",
-        "rust/tara_engine/src/cuda/mod.rs",
-        "rust/tara_engine/src/model_expansion.rs",
-        "rust/tara_training_system/neural_model/model/mod.rs"
+        "rust/tara_engine/src/lib.rs"
       ],
       "rel_path": "rust/tara_engine/src/bin/expand_candidate.rs",
       "structs": [],
@@ -1927,7 +1925,7 @@
         "vec"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "d77fee4402acc9cf02cf5c0cceade67ae5be8c92c48e498b25142726a252b880",
+      "dynamic_sha256": "987c832edb0b0c0cedada137058fcc47f03405bbd1942af704114789fdf2cc04",
       "enums": [],
       "functions": [
         "main"
@@ -2069,7 +2067,7 @@
         "write_working_candidate"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "70c60d7a26aa447993b04b1d9b522057be6c8f46820d97f697b5480d3c351a25",
+      "dynamic_sha256": "15f93dbaec059ccf9292cfd4bff980fb611bcbf5d8cdd7dab6d5b56099be33cb",
       "enums": [
         "RunStatus"
       ],
@@ -2120,17 +2118,15 @@
       ],
       "in_links": [],
       "is_test": true,
-      "lines": 1734,
+      "lines": 1733,
       "module": "tara_engine::bin::manual_trainer",
       "out_links": [
         "rust/tara_engine/src/config.rs",
+        "rust/tara_engine/src/lib.rs",
         "rust/tara_engine/src/tokenizer.rs",
         "rust/tara_engine/src/train_candidate.rs",
         "rust/tara_training_system/curriculum_engine/curriculum_engine.rs",
-        "rust/tara_training_system/dataset_engine/dataset_engine.rs",
-        "rust/tara_training_system/shared_training_infrastructure/safetensors.rs",
-        "rust/tara_training_system/shared_training_infrastructure/skills_evaluator.rs",
-        "rust/tara_training_system/shared_training_infrastructure/trainer.rs"
+        "rust/tara_training_system/dataset_engine/dataset_engine.rs"
       ],
       "rel_path": "rust/tara_engine/src/bin/manual_trainer.rs",
       "structs": [
@@ -2275,7 +2271,7 @@
         "vec"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "288363ad8b636e66db506442a5ead6217bc4db783198a17555826fd9acf88956",
+      "dynamic_sha256": "29b4acb5ef4457c83f1dfaee0ae482697743a16bec980b276898f8afadd9e2ee",
       "enums": [],
       "functions": [
         "copy_dir_all",
@@ -2283,14 +2279,12 @@
       ],
       "in_links": [],
       "is_test": false,
-      "lines": 403,
+      "lines": 401,
       "module": "tara_engine::bin::prove_self_update",
       "out_links": [
         "rust/tara_engine/src/config.rs",
-        "rust/tara_engine/src/self_update.rs",
-        "rust/tara_engine/src/tokenizer.rs",
-        "rust/tara_training_system/neural_model/model/mod.rs",
-        "rust/tara_training_system/shared_training_infrastructure/safetensors.rs"
+        "rust/tara_engine/src/lib.rs",
+        "rust/tara_engine/src/tokenizer.rs"
       ],
       "rel_path": "rust/tara_engine/src/bin/prove_self_update.rs",
       "structs": [],
@@ -2806,7 +2800,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "2734782e98e2ce929632894e80547993997d68acb978fe2c2217f2243ec0e8c9",
+      "dynamic_sha256": "28900e7b61be62e768669e6bc2cf8a3eebc078893578e5d49f4469f6094fd3a0",
       "enums": [],
       "functions": [
         "CloseHandle",
@@ -2850,16 +2844,14 @@
       ],
       "in_links": [],
       "is_test": true,
-      "lines": 2712,
+      "lines": 2713,
       "module": "tara_engine::bin::tara_training_stages",
       "out_links": [
         "rust/tara_engine/src/config.rs",
         "rust/tara_engine/src/dataset/mod.rs",
+        "rust/tara_engine/src/lib.rs",
         "rust/tara_engine/src/tokenizer.rs",
-        "rust/tara_engine/src/train_candidate.rs",
-        "rust/tara_training_system/neural_model/model/mod.rs",
-        "rust/tara_training_system/shared_training_infrastructure/safetensors.rs",
-        "rust/tara_training_system/shared_training_infrastructure/trainer.rs"
+        "rust/tara_engine/src/train_candidate.rs"
       ],
       "rel_path": "rust/tara_engine/src/bin/tara_training_stages.rs",
       "structs": [
@@ -2898,7 +2890,7 @@
         "vec"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "0560e78860e88e682a20c371590b0bf8d84ac7780a449539ffce13e755cbe9a7",
+      "dynamic_sha256": "ec6f46da4dced00d3caedf8be2743c2d439f50e83a41789b03f3311e0bf19f00",
       "enums": [],
       "functions": [
         "main"
@@ -2908,7 +2900,7 @@
       "lines": 337,
       "module": "tara_engine::bin::trace_22layer_gpu_execution",
       "out_links": [
-        "rust/tara_engine/src/cuda/mod.rs"
+        "rust/tara_engine/src/lib.rs"
       ],
       "rel_path": "rust/tara_engine/src/bin/trace_22layer_gpu_execution.rs",
       "structs": [],
@@ -3003,7 +2995,7 @@
         "with_dataset_dir"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "0fc13ad1f034cfeb251ae044601983e0e9110c522958675f4f806f92a613268b",
+      "dynamic_sha256": "f68c6ebccc4f344db06a26e88ec3e53e521008fa3269a2289da4062e39d2eb9e",
       "enums": [],
       "functions": [
         "hash_first_layer_weights",
@@ -3026,7 +3018,7 @@
         "main"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "8ec326db0bc2e56391a8963212dbe519c0853959e09b5b7a7c441de815f8c381",
+      "dynamic_sha256": "0bfea48fba30eafbfb180cbca91e335137c0dd90a52e3cbe2642729f9dd5178e",
       "enums": [],
       "functions": [
         "main"
@@ -3036,7 +3028,7 @@
       "lines": 125,
       "module": "tara_engine::bin::verify_1b_hardware_step",
       "out_links": [
-        "rust/tara_engine/src/cuda/mod.rs"
+        "rust/tara_engine/src/lib.rs"
       ],
       "rel_path": "rust/tara_engine/src/bin/verify_1b_hardware_step.rs",
       "structs": [],
@@ -3047,6 +3039,7 @@
         "Err",
         "Some",
         "and_then",
+        "any",
         "args",
         "as_str",
         "canonicalize",
@@ -3085,7 +3078,7 @@
         "unwrap_or"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "4c0c8f829eac3fac9e639066c730943cc13ee008f2dbd12fc8ba68681d0f6f44",
+      "dynamic_sha256": "f92004ea1dd24ea51db5168c330b5d63825301d8c1e43115ccdc90c6c9a053ca",
       "enums": [],
       "functions": [
         "collect_rs_files",
@@ -3094,7 +3087,7 @@
       ],
       "in_links": [],
       "is_test": false,
-      "lines": 246,
+      "lines": 266,
       "module": "tara_engine::bin::verify_architecture",
       "out_links": [],
       "rel_path": "rust/tara_engine/src/bin/verify_architecture.rs",
@@ -4757,20 +4750,17 @@
     "rust/tara_engine/src/cuda/mod.rs": {
       "calls": [],
       "crate": "tara_engine",
-      "dynamic_sha256": "228f092b4e10d88bc9da102f84dc9ff6c6f182af20b9d3782d39b3ce8c934a99",
+      "dynamic_sha256": "df523f513ff228b92ab7b411b6f8677d7a58733d59dd1c2451019dcd929c073c",
       "enums": [],
       "functions": [],
       "in_links": [
-        "rust/tara_engine/src/bin/expand_candidate.rs",
-        "rust/tara_engine/src/bin/trace_22layer_gpu_execution.rs",
-        "rust/tara_engine/src/bin/verify_1b_hardware_step.rs",
         "rust/tara_engine/src/cuda/driver.rs",
         "rust/tara_engine/src/cuda/gpu_trainer.rs",
         "rust/tara_engine/src/cuda/kernels.rs",
         "rust/tara_engine/src/lib.rs"
       ],
       "is_test": false,
-      "lines": 11,
+      "lines": 14,
       "module": "tara_engine::cuda",
       "out_links": [
         "rust/tara_engine/src/cuda/driver.rs",
@@ -6497,7 +6487,7 @@
         "unwrap_or_default"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "d9d635e69469a28551182aaa5cb735b1c9389bcf9c8c37cad3a39413f70b223c",
+      "dynamic_sha256": "729d108e771ad957eaafe80cb4aa029ffa36fd48e7c1555b3ba141838c5f5c6d",
       "enums": [],
       "functions": [
         "format_system_time_iso",
@@ -6508,6 +6498,12 @@
       ],
       "in_links": [
         "rust/tara_engine/src/auto_loader.rs",
+        "rust/tara_engine/src/bin/expand_candidate.rs",
+        "rust/tara_engine/src/bin/manual_trainer.rs",
+        "rust/tara_engine/src/bin/prove_self_update.rs",
+        "rust/tara_engine/src/bin/tara_training_stages.rs",
+        "rust/tara_engine/src/bin/trace_22layer_gpu_execution.rs",
+        "rust/tara_engine/src/bin/verify_1b_hardware_step.rs",
         "rust/tara_engine/src/computation/mod.rs",
         "rust/tara_engine/src/config.rs",
         "rust/tara_engine/src/dataset/mod.rs",
@@ -6519,10 +6515,11 @@
         "rust/tara_engine/src/shard_manager.rs",
         "rust/tara_engine/src/tokenizer.rs",
         "rust/tara_engine/src/train_candidate.rs",
+        "rust/tara_server/src/ability.rs",
         "rust/tara_server/src/brain.rs"
       ],
       "is_test": true,
-      "lines": 246,
+      "lines": 264,
       "module": "tara_engine",
       "out_links": [
         "rust/tara_engine/src/auto_loader.rs",
@@ -6725,7 +6722,6 @@
         "write_expanded_weights_for_config"
       ],
       "in_links": [
-        "rust/tara_engine/src/bin/expand_candidate.rs",
         "rust/tara_engine/src/dataset/vocab_builder.rs",
         "rust/tara_engine/src/lib.rs"
       ],
@@ -7063,9 +7059,7 @@
         "test_update_state_lifecycle_transitions"
       ],
       "in_links": [
-        "rust/tara_engine/src/bin/prove_self_update.rs",
-        "rust/tara_engine/src/lib.rs",
-        "rust/tara_server/src/ability.rs"
+        "rust/tara_engine/src/lib.rs"
       ],
       "is_test": true,
       "lines": 425,
@@ -7548,7 +7542,7 @@
         "unwrap_or_default"
       ],
       "crate": "tara_server",
-      "dynamic_sha256": "317bbde9af7698ff946f602f8eb6fdcb543cb268f602ff4de56ca5a92d98f82c",
+      "dynamic_sha256": "92ab4ddf56f02d4f99508b04fb3837bf155da7a7da1417b478ee906d0cd635c0",
       "enums": [],
       "functions": [
         "acquire",
@@ -7573,18 +7567,16 @@
         "rust/tara_server/src/lib.rs"
       ],
       "is_test": true,
-      "lines": 506,
+      "lines": 504,
       "module": "tara_server::ability",
       "out_links": [
-        "rust/tara_engine/src/self_update.rs",
+        "rust/tara_engine/src/lib.rs",
         "rust/tara_server/src/learning/mod.rs",
         "rust/tara_server/src/main.rs",
         "rust/tara_server/src/rules/mod.rs",
         "rust/tara_server/src/runtime/registry.rs",
         "rust/tara_server/src/skills/mod.rs",
-        "rust/tara_server/src/tools_registry.rs",
-        "rust/tara_training_system/shared_training_infrastructure/skills_evaluator.rs",
-        "rust/tara_training_system/shared_training_infrastructure/trainer.rs"
+        "rust/tara_server/src/tools_registry.rs"
       ],
       "rel_path": "rust/tara_server/src/ability.rs",
       "structs": [
@@ -9115,7 +9107,7 @@
         "write"
       ],
       "crate": "tara_server",
-      "dynamic_sha256": "c7aab6e248b4856b72282a99437132df0fbd41b9446cfa68055b5f9c048e8d6e",
+      "dynamic_sha256": "3b9d34aafcbea80e5db5a95fa995b032f8810f9fc37a0c1d50f7eee81cfd8cc5",
       "enums": [],
       "functions": [
         "_execute_skill",
@@ -9166,8 +9158,7 @@
         "rust/tara_server/src/server.rs",
         "rust/tara_server/src/skills/mod.rs",
         "rust/tara_server/src/subsystems.rs",
-        "rust/tara_server/src/tools_registry.rs",
-        "rust/tara_training_system/shared_training_infrastructure/trainer.rs"
+        "rust/tara_server/src/tools_registry.rs"
       ],
       "rel_path": "rust/tara_server/src/brain.rs",
       "structs": [
@@ -9206,7 +9197,7 @@
         "var"
       ],
       "crate": "tara_server",
-      "dynamic_sha256": "59596ec29cffcc90dfad0b86381d6e8c56e90705434fb870f3d123c9ee846e0b",
+      "dynamic_sha256": "9df3e19c62a098aeb9462d6a09743e599092c3ae6110e9ff594d8f4ff09516b1",
       "enums": [
         "WorkerMode"
       ],
@@ -12779,7 +12770,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate": "tara_server",
-      "dynamic_sha256": "78efb7f79184d7c89c2271ee3cacb3b78271922a916a46737c261cc345e88227",
+      "dynamic_sha256": "d21510b497a723d0198a2017cae5abc95dbaa33a18353ba4baf4d53b0a61f1d9",
       "enums": [],
       "functions": [
         "get_active_version",
@@ -16910,9 +16901,6 @@
       "enums": [],
       "functions": [],
       "in_links": [
-        "rust/tara_engine/src/bin/expand_candidate.rs",
-        "rust/tara_engine/src/bin/prove_self_update.rs",
-        "rust/tara_engine/src/bin/tara_training_stages.rs",
         "rust/tara_engine/src/generate.rs",
         "rust/tara_engine/src/lib.rs",
         "rust/tara_engine/src/self_update.rs",
@@ -17347,9 +17335,6 @@
       ],
       "in_links": [
         "rust/tara_engine/src/auto_loader.rs",
-        "rust/tara_engine/src/bin/manual_trainer.rs",
-        "rust/tara_engine/src/bin/prove_self_update.rs",
-        "rust/tara_engine/src/bin/tara_training_stages.rs",
         "rust/tara_engine/src/inference/mod.rs",
         "rust/tara_engine/src/inference/tiered_store.rs",
         "rust/tara_engine/src/lib.rs",
@@ -17390,9 +17375,7 @@
         "new"
       ],
       "in_links": [
-        "rust/tara_engine/src/bin/manual_trainer.rs",
-        "rust/tara_engine/src/lib.rs",
-        "rust/tara_server/src/ability.rs"
+        "rust/tara_engine/src/lib.rs"
       ],
       "is_test": false,
       "lines": 86,
@@ -17602,14 +17585,10 @@
         "with_weight_decay"
       ],
       "in_links": [
-        "rust/tara_engine/src/bin/manual_trainer.rs",
-        "rust/tara_engine/src/bin/tara_training_stages.rs",
         "rust/tara_engine/src/cuda/gpu_trainer.rs",
         "rust/tara_engine/src/lib.rs",
         "rust/tara_engine/src/self_update.rs",
-        "rust/tara_engine/src/train_candidate.rs",
-        "rust/tara_server/src/ability.rs",
-        "rust/tara_server/src/brain.rs"
+        "rust/tara_engine/src/train_candidate.rs"
       ],
       "is_test": true,
       "lines": 2039,

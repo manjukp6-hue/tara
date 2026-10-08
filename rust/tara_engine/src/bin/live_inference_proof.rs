@@ -23,7 +23,7 @@ fn main() {
         eprintln!("FATAL: model file not found: {}", model_file);
         std::process::exit(1);
     }
-    let sha = tara_engine::safetensors::compute_sha256(&model_file).unwrap_or_else(|e| {
+    let sha = tara_engine::compute_sha256(&model_file).unwrap_or_else(|e| {
         eprintln!("SHA256 failed: {}", e);
         std::process::exit(1);
     });

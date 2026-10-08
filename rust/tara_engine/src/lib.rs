@@ -48,23 +48,24 @@ pub mod loading_policy;
 pub mod project_link_engine;
 
 // ============================================================================
-// Tier 3: Low-Level Engine & Training Infrastructure
+// Tier 3: Private Low-Level Engine & Training Implementation Modules
+// (Enforced as private `mod` so external callers must use curated root/facade contracts)
 // ============================================================================
-pub mod cuda;
+mod cuda;
 #[path = "../../tara_training_system/neural_model/model/mod.rs"]
-pub mod model;
-pub mod model_expansion;
+mod model;
+mod model_expansion;
 #[path = "../../tara_training_system/shared_training_infrastructure/safetensors.rs"]
-pub mod safetensors;
-pub mod self_update;
-pub mod shard_manager;
+mod safetensors;
+mod self_update;
+mod shard_manager;
 #[path = "../../tara_training_system/shared_training_infrastructure/skills_evaluator.rs"]
-pub mod skills_evaluator;
+mod skills_evaluator;
 #[path = "../../tara_training_system/shared_training_infrastructure/trainer.rs"]
-pub mod trainer;
+mod trainer;
 
 /// Authoritative list of `rust/tara_training_system/` relative paths owned exclusively by `tara_engine`.
-/// Verified by `verify_architecture` to guarantee zero duplicate cross-crate compilation.
+/// Verified by `verify_architecture` to guarantee zero duplicate `#[path]` inclusions across crates.
 pub const OWNED_TRAINING_SYSTEM_MODULES: &[&str] = &[
     "rust/tara_training_system/curriculum_engine/curriculum_engine.rs",
     "rust/tara_training_system/dataset_engine/dataset_engine.rs",
@@ -87,6 +88,10 @@ pub use computation::{
 };
 pub use config::TaraConfig;
 pub use control_tokens::{ControlTokenAction, ControlTokenActionParser};
+pub use cuda::{
+    is_cuda_required, is_cuda_required_value, unpack_u32_to_f16, validate_ptx_registers,
+    CudaDeviceInfo, CudaDriver, CudaError, CudaSession, CudaTrainer, TrainingPrecision,
+};
 pub use curriculum_engine::{
     CurriculumBatch, CurriculumConfig, CurriculumEngine, CurriculumReport, CurriculumStage,
     NeuralCurriculum, WorldModelCurriculum,
@@ -111,7 +116,7 @@ pub use loading_policy::{
     InsufficientMemoryError, LoadingPlan, LoadingPolicyEngine, ModelLoadingStrategy,
     QuantizationPrecision,
 };
-pub use model::causal_lm::TaraForCausalLM;
+pub use model::TaraForCausalLM;
 pub use model_expansion::{
     ArchitectureConstraints, ArchitectureScaler, GrowthType, ModelExpansionEngine,
 };
@@ -120,12 +125,22 @@ pub use project_link_engine::{
     RelationshipDelta, RelationshipGraphSnapshot, RelationshipReport, RustFileNode,
     SymbolDeclaration, SymbolKind, Visibility,
 };
+pub use safetensors::{
+    compute_sha256, load_model_weights, load_model_weights_with_shapes, load_safetensors,
+    load_safetensors_with_shapes, write_safetensors, write_safetensors_sharded,
+    write_safetensors_with_shapes, SafeTensorsError,
+};
 pub use self_update::{ExpansionDecision, SelfUpdateController, SelfUpdateReport, UpdateState};
 pub use shard_manager::{ShardedSafeTensorsManager, TensorMetadata};
+pub use skills_evaluator::SkillsEvaluator;
 pub use tokenizer::TaraTokenizer;
 pub use train_candidate::{
     run_controlled_training, run_controlled_training_with_options, StoppingContract,
     TrainCandidateError, TrainingOptions,
+};
+pub use trainer::{
+    promote_directory_atomically, recover_interrupted_promotion, DynamicAdamW, NativeSelfTrainer,
+    TrainerError, TrainingDevice,
 };
 
 /// Formats non-negative Unix epoch seconds (`secs` since `1970-01-01T00:00:00Z`) into an
@@ -186,7 +201,9 @@ mod tests {
         // 3. 400-year leap century day: 2000-02-29T12:34:56Z (951827696)
         assert_eq!(format_unix_seconds_iso(951_827_696), "2000-02-29T12:34:56Z");
 
-        // 4. Standard leap year boundary: 2024-02-29T23:59:59Z -> 2024-03-01T00:00:00Z
+        // 4. Standard leap year +1s transition:
+        //    1_709_251_199 -> 2024-02-29T23:59:59Z
+        //    1_709_251_200 -> 2024-03-01T00:00:00Z (+1 second later)
         assert_eq!(
             format_unix_seconds_iso(1_709_251_199),
             "2024-02-29T23:59:59Z"
@@ -202,8 +219,9 @@ mod tests {
             "2099-12-31T23:59:59Z"
         );
 
-        // 6. Non-leap century boundary (2100 is divisible by 100 but NOT 400 -> NOT a leap year):
-        // 2100-02-28T23:59:59Z (4107542399) must roll directly to 2100-03-01T00:00:00Z (4107542400)
+        // 6. Non-leap century +1s transition (2100 is divisible by 100 but NOT 400 -> Feb has 28 days):
+        //    4_107_542_399 -> 2100-02-28T23:59:59Z
+        //    4_107_542_400 -> 2100-03-01T00:00:00Z (+1 second later, skipping nonexistent 2100-02-29)
         assert_eq!(
             format_unix_seconds_iso(4_107_542_399),
             "2100-02-28T23:59:59Z"

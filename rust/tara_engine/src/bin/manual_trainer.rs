@@ -26,13 +26,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tara_engine::config::TaraConfig;
 use tara_engine::curriculum_engine::{CurriculumConfig, CurriculumEngine};
 use tara_engine::dataset_engine::{DatasetEngine, DatasetEngineConfig, DatasetSource};
-use tara_engine::safetensors::{
-    compute_sha256, load_model_weights_with_shapes, load_safetensors_with_shapes,
-};
-use tara_engine::skills_evaluator::SkillsEvaluator;
 use tara_engine::tokenizer::TaraTokenizer;
 use tara_engine::train_candidate::{run_controlled_training_with_options, TrainingOptions};
-use tara_engine::trainer::{promote_directory_atomically, recover_interrupted_promotion};
+use tara_engine::{
+    compute_sha256, load_model_weights_with_shapes, load_safetensors_with_shapes,
+    promote_directory_atomically, recover_interrupted_promotion, SkillsEvaluator,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManualTrainingConfig {
@@ -1489,7 +1488,7 @@ fn main() {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use tara_engine::safetensors::write_safetensors_with_shapes;
+    use tara_engine::write_safetensors_with_shapes;
 
     fn unique_test_dir(tag: &str) -> PathBuf {
         let dir = env::temp_dir().join(format!(

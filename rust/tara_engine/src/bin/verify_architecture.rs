@@ -217,8 +217,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::process::exit(1);
         }
     }
+    let engine_lib_src = fs::read_to_string(rust_root.join("tara_engine/src/lib.rs"))?;
+    for private_mod in [
+        "cuda",
+        "model",
+        "model_expansion",
+        "safetensors",
+        "self_update",
+        "shard_manager",
+        "skills_evaluator",
+        "trainer",
+    ] {
+        let forbidden = format!("pub mod {private_mod};");
+        if engine_lib_src.lines().any(|l| l.trim() == forbidden) {
+            eprintln!(
+                "ERROR: Low-level Tier 3 module '{}' must be private (`mod {};`), not `pub mod` in tara_engine/src/lib.rs",
+                private_mod, private_mod
+            );
+            std::process::exit(1);
+        }
+    }
     println!(
-        "PASS: Single-owner module boundary verified ({} #[path] targets audited, 0 duplicate inclusions).",
+        "PASS: Single-owner module & private Tier 3 boundary verified ({} #[path] targets audited, 0 duplicate #[path] inclusions).",
         included_targets.len()
     );
 

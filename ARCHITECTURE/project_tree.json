@@ -16287,22 +16287,22 @@
                       "name": "expand_candidate.rs",
                       "rel_path": "rust/tara_engine/src/bin/expand_candidate.rs",
                       "entry_type": "file",
-                      "size_bytes": 30301,
-                      "sha256": "e7192ae55d996144339133dcfc0ca8b33e798714d3e76e3e6aa4dc560a737070"
+                      "size_bytes": 30228,
+                      "sha256": "160974a61269ed22f09340926c939bc501245e9f70b71d51efa9ec14e784cba7"
                     },
                     {
                       "name": "live_inference_proof.rs",
                       "rel_path": "rust/tara_engine/src/bin/live_inference_proof.rs",
                       "entry_type": "file",
-                      "size_bytes": 5354,
-                      "sha256": "d77fee4402acc9cf02cf5c0cceade67ae5be8c92c48e498b25142726a252b880"
+                      "size_bytes": 5341,
+                      "sha256": "987c832edb0b0c0cedada137058fcc47f03405bbd1942af704114789fdf2cc04"
                     },
                     {
                       "name": "manual_trainer.rs",
                       "rel_path": "rust/tara_engine/src/bin/manual_trainer.rs",
                       "entry_type": "file",
-                      "size_bytes": 68147,
-                      "sha256": "70c60d7a26aa447993b04b1d9b522057be6c8f46820d97f697b5480d3c351a25"
+                      "size_bytes": 68062,
+                      "sha256": "15f93dbaec059ccf9292cfd4bff980fb611bcbf5d8cdd7dab6d5b56099be33cb"
                     },
                     {
                       "name": "process_restart_proof.rs",
@@ -16322,8 +16322,8 @@
                       "name": "prove_self_update.rs",
                       "rel_path": "rust/tara_engine/src/bin/prove_self_update.rs",
                       "entry_type": "file",
-                      "size_bytes": 17274,
-                      "sha256": "288363ad8b636e66db506442a5ead6217bc4db783198a17555826fd9acf88956"
+                      "size_bytes": 17198,
+                      "sha256": "29b4acb5ef4457c83f1dfaee0ae482697743a16bec980b276898f8afadd9e2ee"
                     },
                     {
                       "name": "split_canonical_100.rs",
@@ -16371,15 +16371,15 @@
                       "name": "tara_training_stages.rs",
                       "rel_path": "rust/tara_engine/src/bin/tara_training_stages.rs",
                       "entry_type": "file",
-                      "size_bytes": 109508,
-                      "sha256": "2734782e98e2ce929632894e80547993997d68acb978fe2c2217f2243ec0e8c9"
+                      "size_bytes": 109430,
+                      "sha256": "28900e7b61be62e768669e6bc2cf8a3eebc078893578e5d49f4469f6094fd3a0"
                     },
                     {
                       "name": "trace_22layer_gpu_execution.rs",
                       "rel_path": "rust/tara_engine/src/bin/trace_22layer_gpu_execution.rs",
                       "entry_type": "file",
-                      "size_bytes": 12413,
-                      "sha256": "0560e78860e88e682a20c371590b0bf8d84ac7780a449539ffce13e755cbe9a7"
+                      "size_bytes": 12407,
+                      "sha256": "ec6f46da4dced00d3caedf8be2743c2d439f50e83a41789b03f3311e0bf19f00"
                     },
                     {
                       "name": "train_candidate.rs",
@@ -16392,22 +16392,22 @@
                       "name": "training_proof.rs",
                       "rel_path": "rust/tara_engine/src/bin/training_proof.rs",
                       "entry_type": "file",
-                      "size_bytes": 9902,
-                      "sha256": "0fc13ad1f034cfeb251ae044601983e0e9110c522958675f4f806f92a613268b"
+                      "size_bytes": 9880,
+                      "sha256": "f68c6ebccc4f344db06a26e88ec3e53e521008fa3269a2289da4062e39d2eb9e"
                     },
                     {
                       "name": "verify_1b_hardware_step.rs",
                       "rel_path": "rust/tara_engine/src/bin/verify_1b_hardware_step.rs",
                       "entry_type": "file",
-                      "size_bytes": 6466,
-                      "sha256": "8ec326db0bc2e56391a8963212dbe519c0853959e09b5b7a7c441de815f8c381"
+                      "size_bytes": 6460,
+                      "sha256": "0bfea48fba30eafbfb180cbca91e335137c0dd90a52e3cbe2642729f9dd5178e"
                     },
                     {
                       "name": "verify_architecture.rs",
                       "rel_path": "rust/tara_engine/src/bin/verify_architecture.rs",
                       "entry_type": "file",
-                      "size_bytes": 10279,
-                      "sha256": "4c0c8f829eac3fac9e639066c730943cc13ee008f2dbd12fc8ba68681d0f6f44"
+                      "size_bytes": 10983,
+                      "sha256": "f92004ea1dd24ea51db5168c330b5d63825301d8c1e43115ccdc90c6c9a053ca"
                     },
                     {
                       "name": "verify_dataset_and_curriculum_engine.rs",
@@ -16555,8 +16555,8 @@
                       "name": "mod.rs",
                       "rel_path": "rust/tara_engine/src/cuda/mod.rs",
                       "entry_type": "file",
-                      "size_bytes": 365,
-                      "sha256": "228f092b4e10d88bc9da102f84dc9ff6c6f182af20b9d3782d39b3ce8c934a99"
+                      "size_bytes": 474,
+                      "sha256": "df523f513ff228b92ab7b411b6f8677d7a58733d59dd1c2451019dcd929c073c"
                     }
                   ]
                 },
@@ -16713,8 +16713,8 @@
                   "name": "lib.rs",
                   "rel_path": "rust/tara_engine/src/lib.rs",
                   "entry_type": "file",
-                  "size_bytes": 10947,
-                  "sha256": "d9d635e69469a28551182aaa5cb735b1c9389bcf9c8c37cad3a39413f70b223c"
+                  "size_bytes": 11806,
+                  "sha256": "729d108e771ad957eaafe80cb4aa029ffa36fd48e7c1555b3ba141838c5f5c6d"
                 },
                 {
                   "name": "loading_policy.rs",
@@ -17687,8 +17687,8 @@
                   "name": "ability.rs",
                   "rel_path": "rust/tara_server/src/ability.rs",
                   "entry_type": "file",
-                  "size_bytes": 19585,
-                  "sha256": "317bbde9af7698ff946f602f8eb6fdcb543cb268f602ff4de56ca5a92d98f82c"
+                  "size_bytes": 19513,
+                  "sha256": "92ab4ddf56f02d4f99508b04fb3837bf155da7a7da1417b478ee906d0cd635c0"
                 },
                 {
                   "name": "auto_connect.rs",
@@ -17701,15 +17701,15 @@
                   "name": "brain.rs",
                   "rel_path": "rust/tara_server/src/brain.rs",
                   "entry_type": "file",
-                  "size_bytes": 76829,
-                  "sha256": "c7aab6e248b4856b72282a99437132df0fbd41b9446cfa68055b5f9c048e8d6e"
+                  "size_bytes": 76794,
+                  "sha256": "3b9d34aafcbea80e5db5a95fa995b032f8810f9fc37a0c1d50f7eee81cfd8cc5"
                 },
                 {
                   "name": "bridge.rs",
                   "rel_path": "rust/tara_server/src/bridge.rs",
                   "entry_type": "file",
-                  "size_bytes": 4029,
-                  "sha256": "59596ec29cffcc90dfad0b86381d6e8c56e90705434fb870f3d123c9ee846e0b"
+                  "size_bytes": 4016,
+                  "sha256": "9df3e19c62a098aeb9462d6a09743e599092c3ae6110e9ff594d8f4ff09516b1"
                 },
                 {
                   "name": "code_evolution.rs",
@@ -17771,8 +17771,8 @@
                   "name": "model_registry.rs",
                   "rel_path": "rust/tara_server/src/model_registry.rs",
                   "entry_type": "file",
-                  "size_bytes": 17763,
-                  "sha256": "78efb7f79184d7c89c2271ee3cacb3b78271922a916a46737c261cc345e88227"
+                  "size_bytes": 17724,
+                  "sha256": "d21510b497a723d0198a2017cae5abc95dbaa33a18353ba4baf4d53b0a61f1d9"
                 },
                 {
                   "name": "nlu.rs",

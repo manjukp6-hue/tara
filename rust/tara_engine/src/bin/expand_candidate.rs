@@ -23,10 +23,9 @@ use std::path::PathBuf;
 use std::process::exit;
 
 use tara_engine::config::TaraConfig;
-use tara_engine::cuda::{CudaTrainer, TrainingPrecision};
-use tara_engine::model::causal_lm::TaraForCausalLM;
-use tara_engine::model_expansion::{
-    ArchitectureConstraints, ArchitectureScaler, GrowthType, ModelExpansionEngine,
+use tara_engine::{
+    ArchitectureConstraints, ArchitectureScaler, CudaTrainer, GrowthType, ModelExpansionEngine,
+    TaraForCausalLM, TrainingPrecision,
 };
 
 fn print_usage() {

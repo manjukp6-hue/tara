@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::time::Instant;
-use tara_engine::cuda::{CudaTrainer, TrainingPrecision};
+use tara_engine::{CudaTrainer, TrainingPrecision};
 
 fn main() {
     println!("==================================================================");

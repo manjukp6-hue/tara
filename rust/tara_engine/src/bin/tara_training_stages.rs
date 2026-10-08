@@ -28,11 +28,12 @@ use std::path::{Component, Path, PathBuf};
 
 use tara_engine::config::TaraConfig;
 use tara_engine::dataset::{ExpandableDatasetReader, ShardStreamingMode};
-use tara_engine::model::causal_lm::TaraForCausalLM;
-use tara_engine::safetensors::{load_model_weights_with_shapes, load_safetensors_with_shapes};
 use tara_engine::tokenizer::TaraTokenizer;
 use tara_engine::train_candidate::{run_controlled_training_with_options, TrainingOptions};
-use tara_engine::trainer::{promote_directory_atomically, recover_interrupted_promotion};
+use tara_engine::{
+    load_model_weights_with_shapes, load_safetensors_with_shapes, promote_directory_atomically,
+    recover_interrupted_promotion, TaraForCausalLM,
+};
 
 /// Extensible specification for a single training stage in the pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2337,7 +2338,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tara_engine::safetensors::write_safetensors_with_shapes;
+    use tara_engine::write_safetensors_with_shapes;
 
     fn unique_test_dir(tag: &str) -> PathBuf {
         let dir = env::temp_dir().join(format!(

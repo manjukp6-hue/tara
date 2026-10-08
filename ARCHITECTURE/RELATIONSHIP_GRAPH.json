@@ -15288,9 +15288,28 @@
       "rel_path": "rust/tara_engine/src/dataset/compiler.rs"
     },
     "rust/tara_engine/src/dataset/mod.rs": {
-      "call_references": [],
+      "call_references": [
+        "add_shard",
+        "as_nanos",
+        "check_leakage",
+        "create",
+        "create_dir_all",
+        "default",
+        "id",
+        "join",
+        "lifecycle",
+        "new",
+        "next_sample",
+        "now",
+        "remove_dir_all",
+        "split",
+        "telemetry",
+        "temp_dir",
+        "test_dataset_mod_public_reexports_and_splitter_to_reader_pipeline",
+        "unwrap"
+      ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "d2913ab35afdb28fd070112edd5e0ffb4e35e02f3dcec166cbfe29f4732172b1",
+      "dynamic_sha256": "e624a872812813e6875ab56462f71ac55a11de22b34b5428c70d5bacbe966f0f",
       "exports": [],
       "imports": [
         {
@@ -15309,34 +15328,51 @@
           "raw_path": "reader::{"
         },
         {
-          "imported_symbols": [
-            "compute_file_sha256",
-            "DatasetSplitter",
-            "LeakageChecker",
-            "SplitRatio",
-            "SplitReport"
-          ],
+          "imported_symbols": [],
           "is_public_reexport": true,
           "line_number": 22,
-          "raw_path": "splitter::{compute_file_sha256, DatasetSplitter, LeakageChecker, SplitRatio, SplitReport}"
+          "raw_path": "splitter::{"
         },
         {
           "imported_symbols": [
-            "TokenizerStage",
-            "TrainingFormat",
+            "self",
+            "File"
+          ],
+          "is_public_reexport": false,
+          "line_number": 31,
+          "raw_path": "std::fs::{self, File}"
+        },
+        {
+          "imported_symbols": [
+            "Write"
+          ],
+          "is_public_reexport": false,
+          "line_number": 32,
+          "raw_path": "std::io::Write"
+        },
+        {
+          "imported_symbols": [],
+          "is_public_reexport": false,
+          "line_number": 30,
+          "raw_path": "super::*"
+        },
+        {
+          "imported_symbols": [
             "TokenizationManifest",
-            "TokenizedRecord"
+            "TokenizedRecord",
+            "TokenizerStage",
+            "TrainingFormat"
           ],
           "is_public_reexport": true,
-          "line_number": 23,
-          "raw_path": "tokenizer_stage::{TokenizerStage, TrainingFormat, TokenizationManifest, TokenizedRecord}"
+          "line_number": 25,
+          "raw_path": "tokenizer_stage::{TokenizationManifest, TokenizedRecord, TokenizerStage, TrainingFormat}"
         },
         {
           "imported_symbols": [
             "VocabBuilder"
           ],
           "is_public_reexport": true,
-          "line_number": 24,
+          "line_number": 26,
           "raw_path": "vocab_builder::VocabBuilder"
         }
       ],
@@ -15351,9 +15387,16 @@
         "rust/tara_engine/src/self_update.rs",
         "rust/tara_training_system/shared_training_infrastructure/trainer.rs"
       ],
-      "internal_symbols": [],
-      "is_test": false,
-      "lines": 24,
+      "internal_symbols": [
+        {
+          "kind": "Function",
+          "line_number": 35,
+          "name": "test_dataset_mod_public_reexports_and_splitter_to_reader_pipeline",
+          "visibility": "Private"
+        }
+      ],
+      "is_test": true,
+      "lines": 105,
       "module_path": "tara_engine::dataset",
       "modules_declared": [
         {
@@ -15376,6 +15419,12 @@
         },
         {
           "custom_path": null,
+          "is_public": false,
+          "line_number": 29,
+          "name": "tests"
+        },
+        {
+          "custom_path": null,
           "is_public": true,
           "line_number": 14,
           "name": "tokenizer_stage"
@@ -15392,6 +15441,7 @@
         "rust/tara_engine/src/dataset/splitter.rs",
         "rust/tara_engine/src/dataset/tokenizer_stage.rs",
         "rust/tara_engine/src/dataset/vocab_builder.rs",
+        "rust/tara_engine/src/lib.rs",
         "rust/tara_training_system/shared_training_infrastructure/reader.rs"
       ],
       "rel_path": "rust/tara_engine/src/dataset/mod.rs"
@@ -20169,6 +20219,7 @@
         "rust/tara_engine/src/auto_loader.rs",
         "rust/tara_engine/src/computation/mod.rs",
         "rust/tara_engine/src/config.rs",
+        "rust/tara_engine/src/dataset/mod.rs",
         "rust/tara_engine/src/inference/mod.rs",
         "rust/tara_engine/src/loading_policy.rs",
         "rust/tara_engine/src/model_expansion.rs",
@@ -49656,6 +49707,7 @@
         "add_shards_from_dir",
         "add_shards_from_manifest",
         "and_then",
+        "any",
         "as_array",
         "as_mut",
         "as_nanos",
@@ -49664,6 +49716,7 @@
         "as_ref",
         "as_str",
         "as_u64",
+        "can_auto_rewind",
         "canonicalize",
         "capacity",
         "clear",
@@ -49677,6 +49730,7 @@
         "create",
         "create_dir_all",
         "display",
+        "ends_with",
         "ensure_open",
         "enumerate",
         "epoch_yielded",
@@ -49705,6 +49759,7 @@
         "join",
         "keys",
         "len",
+        "lifecycle",
         "lifetime_yielded",
         "load_manifest_entries",
         "map",
@@ -49731,9 +49786,11 @@
         "refresh_dynamic_sources",
         "remove_dir_all",
         "remove_file",
+        "rename",
         "reset",
         "reset_all",
         "scan_dir_entries",
+        "set_lifecycle",
         "shard_count",
         "sort",
         "starts_with",
@@ -49748,7 +49805,12 @@
         "test_expandable_reader_interleaved",
         "test_expandable_reader_tokenized_and_chatml_format",
         "test_growing_shard_after_eof_and_dynamic_dir_expansion",
+        "test_large_100kib_single_record_and_line_buf_shrinking",
+        "test_live_open_shard_vs_finite_auto_rewind_policy",
         "test_manifest_validation_and_path_traversal_rejection",
+        "test_new_shard_discovered_while_producer_writing_tmp_and_partial",
+        "test_partial_final_jsonl_line_append_completion_yields_exact_record",
+        "test_truncated_or_replaced_watched_shard_detected",
         "test_zero_shard_reader_returns_no_shards_error_and_bounded_fd_pool",
         "to_lowercase",
         "to_path_buf",
@@ -49759,156 +49821,182 @@
         "trim",
         "unique_test_dir",
         "unwrap",
+        "unwrap_err",
         "unwrap_or",
         "unwrap_or_default",
         "unwrap_or_else",
         "vec",
+        "verify_not_truncated",
         "write"
       ],
       "crate_name": "tara_training_system",
-      "dynamic_sha256": "c9349f6532d2e99e1c3937d56ec4f95ae9bb4d80753c1a88ac87f9d5f61987d7",
+      "dynamic_sha256": "5237d8ab51347f49ab990fb45f59770ff112a30ea628820f2f7a06eb9dca7682",
       "exports": [
         {
+          "kind": "Enum",
+          "line_number": 79,
+          "name": "DatasetStreamLifecycle",
+          "visibility": "Public"
+        },
+        {
           "kind": "Struct",
-          "line_number": 411,
+          "line_number": 465,
           "name": "ExpandableDatasetReader",
           "visibility": "Public"
         },
         {
           "kind": "Enum",
-          "line_number": 65,
+          "line_number": 91,
           "name": "MalformedRecordPolicy",
           "visibility": "Public"
         },
         {
           "kind": "Enum",
-          "line_number": 29,
+          "line_number": 37,
           "name": "ReaderError",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 74,
+          "line_number": 100,
           "name": "ReaderTelemetry",
           "visibility": "Public"
         },
         {
           "kind": "Enum",
-          "line_number": 54,
+          "line_number": 68,
           "name": "ShardAvailability",
           "visibility": "Public"
         },
         {
           "kind": "Enum",
-          "line_number": 108,
+          "line_number": 134,
           "name": "ShardStreamingMode",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 88,
+          "line_number": 114,
           "name": "TrainingSample",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 467,
+          "line_number": 540,
           "name": "add_shard",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 474,
+          "line_number": 547,
           "name": "add_shard_with_policy",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 637,
+          "line_number": 710,
           "name": "add_shards_from_dir",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 502,
+          "line_number": 575,
           "name": "add_shards_from_manifest",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 731,
+          "line_number": 815,
           "name": "epoch_yielded",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 726,
+          "line_number": 522,
+          "name": "lifecycle",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 810,
           "name": "lifetime_yielded",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 429,
+          "line_number": 485,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 822,
+          "line_number": 923,
           "name": "next_sample",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 736,
+          "line_number": 820,
           "name": "open_handle_count",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 677,
+          "line_number": 761,
           "name": "refresh_dynamic_sources",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 776,
+          "line_number": 860,
           "name": "reset_all",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 716,
+          "line_number": 517,
+          "name": "set_lifecycle",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 800,
           "name": "shard_count",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 741,
+          "line_number": 825,
           "name": "telemetry",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 721,
+          "line_number": 805,
           "name": "total_yielded",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 448,
+          "line_number": 505,
           "name": "with_auto_rewind",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 454,
+          "line_number": 511,
+          "name": "with_lifecycle",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 527,
           "name": "with_malformed_policy",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 460,
+          "line_number": 533,
           "name": "with_max_open_files",
           "visibility": "Public"
         }
@@ -49920,7 +50008,7 @@
             "Serialize"
           ],
           "is_public_reexport": false,
-          "line_number": 13,
+          "line_number": 20,
           "raw_path": "serde::{Deserialize, Serialize}"
         },
         {
@@ -49928,7 +50016,7 @@
             "Value"
           ],
           "is_public_reexport": false,
-          "line_number": 14,
+          "line_number": 21,
           "raw_path": "serde_json::Value"
         },
         {
@@ -49936,7 +50024,7 @@
             "HashSet"
           ],
           "is_public_reexport": false,
-          "line_number": 15,
+          "line_number": 22,
           "raw_path": "std::collections::HashSet"
         },
         {
@@ -49944,7 +50032,7 @@
             "OpenOptions"
           ],
           "is_public_reexport": false,
-          "line_number": 950,
+          "line_number": 1051,
           "raw_path": "std::fs::OpenOptions"
         },
         {
@@ -49953,7 +50041,7 @@
             "File"
           ],
           "is_public_reexport": false,
-          "line_number": 16,
+          "line_number": 23,
           "raw_path": "std::fs::{self, File}"
         },
         {
@@ -49961,7 +50049,7 @@
             "Write"
           ],
           "is_public_reexport": false,
-          "line_number": 951,
+          "line_number": 1052,
           "raw_path": "std::io::Write"
         },
         {
@@ -49972,7 +50060,7 @@
             "SeekFrom"
           ],
           "is_public_reexport": false,
-          "line_number": 17,
+          "line_number": 24,
           "raw_path": "std::io::{BufRead, BufReader, Seek, SeekFrom}"
         },
         {
@@ -49982,13 +50070,13 @@
             "PathBuf"
           ],
           "is_public_reexport": false,
-          "line_number": 18,
+          "line_number": 25,
           "raw_path": "std::path::{Component, Path, PathBuf}"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 949,
+          "line_number": 1050,
           "raw_path": "super::*"
         },
         {
@@ -49996,7 +50084,7 @@
             "Error"
           ],
           "is_public_reexport": false,
-          "line_number": 19,
+          "line_number": 26,
           "raw_path": "thiserror::Error"
         }
       ],
@@ -50006,199 +50094,241 @@
       "internal_symbols": [
         {
           "kind": "Const",
-          "line_number": 24,
+          "line_number": 32,
           "name": "DEFAULT_MAX_OPEN_FILES",
           "visibility": "Private"
         },
         {
           "kind": "Const",
-          "line_number": 26,
+          "line_number": 34,
           "name": "MAX_RETAINED_LINE_CAPACITY",
           "visibility": "Private"
         },
         {
           "kind": "Const",
-          "line_number": 22,
+          "line_number": 29,
           "name": "READER_BUF_CAPACITY",
           "visibility": "Private"
         },
         {
           "kind": "Struct",
-          "line_number": 115,
+          "line_number": 141,
           "name": "ShardState",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 785,
+          "line_number": 869,
           "name": "acquire_shard_reader",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 159,
+          "line_number": 901,
+          "name": "can_auto_rewind",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 198,
           "name": "close_handle",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 147,
+          "line_number": 185,
           "name": "ensure_open",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 380,
+          "line_number": 434,
           "name": "infer_curriculum_order",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 522,
+          "line_number": 595,
           "name": "load_manifest_entries",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 811,
+          "line_number": 895,
           "name": "maybe_shrink_line_buf",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 130,
+          "line_number": 156,
           "name": "new",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 925,
+          "line_number": 1026,
           "name": "next_interleaved",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 190,
+          "line_number": 230,
           "name": "next_sample",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 868,
+          "line_number": 969,
           "name": "next_sequential",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 889,
+          "line_number": 990,
           "name": "poll_interleaved_pass",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 838,
+          "line_number": 939,
           "name": "poll_sequential_pass",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 175,
+          "line_number": 215,
           "name": "probe_growth",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 163,
+          "line_number": 202,
           "name": "reset",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 651,
+          "line_number": 724,
           "name": "scan_dir_entries",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1015,
+          "line_number": 1116,
           "name": "test_auto_rewind_empty_and_all_invalid_no_infinite_recursion",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1043,
+          "line_number": 1144,
           "name": "test_auto_rewind_restarts_non_empty_and_resets_epoch_counter",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1251,
+          "line_number": 1352,
           "name": "test_curriculum_knowledge_dataset_integration",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1175,
+          "line_number": 1276,
           "name": "test_curriculum_order_overflow_rejected_and_lenient_policy",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1110,
+          "line_number": 1211,
           "name": "test_duplicate_shard_registration_prevented",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 968,
+          "line_number": 1069,
           "name": "test_expandable_reader_interleaved",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1314,
+          "line_number": 1415,
           "name": "test_expandable_reader_tokenized_and_chatml_format",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1073,
+          "line_number": 1174,
           "name": "test_growing_shard_after_eof_and_dynamic_dir_expansion",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1129,
+          "line_number": 1499,
+          "name": "test_large_100kib_single_record_and_line_buf_shrinking",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1540,
+          "name": "test_live_open_shard_vs_finite_auto_rewind_policy",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1230,
           "name": "test_manifest_validation_and_path_traversal_rejection",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1212,
+          "line_number": 1582,
+          "name": "test_new_shard_discovered_while_producer_writing_tmp_and_partial",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1452,
+          "name": "test_partial_final_jsonl_line_append_completion_yields_exact_record",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1630,
+          "name": "test_truncated_or_replaced_watched_shard_detected",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1313,
           "name": "test_zero_shard_reader_returns_no_shards_error_and_bounded_fd_pool",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 953,
+          "line_number": 1054,
           "name": "unique_test_dir",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 394,
+          "line_number": 448,
           "name": "validate_relative_shard_path",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 173,
+          "name": "verify_not_truncated",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1349,
+      "lines": 1658,
       "module_path": "tara_training_system::shared_training_infrastructure::reader",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 948,
+          "line_number": 1049,
           "name": "tests"
         }
       ],
@@ -53017,5 +53147,5 @@
   "schema_version": "1.0.0",
   "total_files": 240,
   "total_modules": 583,
-  "total_symbols": 2366
+  "total_symbols": 2370
 }

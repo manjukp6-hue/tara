@@ -2,11 +2,18 @@
 //!
 //! Features:
 //! - Non-fixed count: handles expandable, growing, and unbounded JSONL shard datasets.
-//! - Genuine dynamic shard expansion: tracks byte offsets for unsealed shards so newly
-//!   appended records are read after EOF, and rescans watched directories/manifests.
-//! - Bounded reader buffer pool: caps concurrent open file handles (`max_open_files`,
-//!   default 8 x 64 KB = 512 KB total read buffer RAM) with lazy seek-on-reopen.
-//! - Multi-shard streaming modes: Sequential or deterministic round-robin Interleaved.
+//! - Genuine dynamic shard expansion: tracks committed byte offsets for unsealed shards so newly
+//!   appended records are read after EOF, retains incomplete partial final lines without
+//!   committing offset until a trailing newline (`\n`) arrives, detects truncated/replaced
+//!   shards, and rescans watched directories/manifests.
+//! - Bounded file-buffer pool: caps concurrent open file handles (`max_open_files`,
+//!   default 8 × 64 KiB = ≤512 KiB configured file-buffer budget, excluding per-record
+//!   parsing and metadata allocations) with lazy seek-on-reopen.
+//! - Producer publication contract: directory scans ignore hidden/temporary files (`.tmp`,
+//!   `.part`, leading `.`); producers should publish new shards via write `.tmp` → `fsync` →
+//!   atomic rename to `.jsonl`, or append newline-terminated JSONL records to unsealed shards.
+//! - Multi-shard streaming modes: Sequential or deterministic round-robin Interleaved, with
+//!   explicit `DatasetStreamLifecycle` (`Finite` vs `LiveAppendWait`).
 //! - Strict validation: path-containment checks on manifests, canonical path deduplication,
 //!   checked `curriculum_order` conversion, and configurable malformed-record policy.
 
@@ -18,11 +25,12 @@ use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 use thiserror::Error;
 
-/// Default per-handle buffer size (64 KB).
+/// Default per-handle buffer size (64 KiB).
 const READER_BUF_CAPACITY: usize = 64 * 1024;
-/// Default maximum concurrently open file handles (8 * 64 KB = 512 KB < 1 MB).
+/// Default maximum concurrently open file handles (8 × 64 KiB = ≤512 KiB configured file-buffer budget,
+/// excluding per-record JSON parsing and metadata allocations).
 const DEFAULT_MAX_OPEN_FILES: usize = 8;
-/// Maximum retained reusable line buffer capacity before shrinking (64 KB).
+/// Maximum retained reusable line buffer capacity before shrinking (64 KiB).
 const MAX_RETAINED_LINE_CAPACITY: usize = 64 * 1024;
 
 #[derive(Debug, Error)]
@@ -45,6 +53,12 @@ pub enum ReaderError {
     InvalidManifest { path: String, reason: String },
     #[error("path traversal rejected in manifest {manifest}: shard '{shard}' escapes base directory")]
     PathTraversal { manifest: String, shard: String },
+    #[error("shard {path} was truncated or replaced beneath active reader (committed offset {offset} > file length {file_len})")]
+    ShardTruncatedOrReplaced {
+        path: String,
+        offset: u64,
+        file_len: u64,
+    },
     #[error("no shards registered in expandable reader")]
     NoShards,
 }
@@ -58,6 +72,18 @@ pub enum ShardAvailability {
     TemporarilyAtEof,
     /// Shard is permanently sealed and reached EOF; will not be polled for growth unless reset.
     Sealed,
+}
+
+/// Policy governing how the reader behaves when all currently registered shards reach EOF.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DatasetStreamLifecycle {
+    /// Finite dataset mode: when all shards reach EOF, optionally rewind to start a new epoch
+    /// if `auto_rewind` is enabled.
+    Finite,
+    /// Live append-wait mode: unsealed shards in `TemporarilyAtEof` wait for newly appended
+    /// data on disk without rewinding already-consumed records. `auto_rewind` will not reset
+    /// shards while any unsealed shard is waiting in `TemporarilyAtEof`.
+    LiveAppendWait,
 }
 
 /// Policy controlling how malformed JSON records or invalid field values are handled.
@@ -144,8 +170,21 @@ impl ShardState {
         })
     }
 
-    fn ensure_open(&mut self, tick: u64) -> Result<(), std::io::Error> {
+    fn verify_not_truncated(&self) -> Result<u64, ReaderError> {
+        let file_len = fs::metadata(&self.path)?.len();
+        if file_len < self.current_offset {
+            return Err(ReaderError::ShardTruncatedOrReplaced {
+                path: self.path.display().to_string(),
+                offset: self.current_offset,
+                file_len,
+            });
+        }
+        Ok(file_len)
+    }
+
+    fn ensure_open(&mut self, tick: u64) -> Result<(), ReaderError> {
         self.last_used_tick = tick;
+        self.verify_not_truncated()?;
         if self.reader.is_none() {
             let mut file = File::open(&self.path)?;
             if self.current_offset > 0 {
@@ -171,12 +210,13 @@ impl ShardState {
         Ok(())
     }
 
-    /// Checks whether an unsealed shard at EOF has grown on disk since `current_offset`.
-    fn probe_growth(&mut self) -> Result<bool, std::io::Error> {
+    /// Checks whether an unsealed shard at EOF has grown on disk since `current_offset`,
+    /// and verifies that the underlying file was not truncated or replaced.
+    fn probe_growth(&mut self) -> Result<bool, ReaderError> {
+        let file_len = self.verify_not_truncated()?;
         if self.availability != ShardAvailability::TemporarilyAtEof || self.sealed_by_policy {
             return Ok(false);
         }
-        let file_len = fs::metadata(&self.path)?.len();
         if file_len > self.current_offset {
             self.availability = ShardAvailability::Active;
             if let Some(ref mut reader) = self.reader {
@@ -199,20 +239,34 @@ impl ShardState {
             return Ok(None);
         }
 
-        let reader = self
-            .reader
-            .as_mut()
-            .expect("ShardState::ensure_open must be called before next_sample");
-
         loop {
             line_buf.clear();
-            let bytes_read = reader.read_line(line_buf)?;
+            let bytes_read = {
+                let reader = self
+                    .reader
+                    .as_mut()
+                    .expect("ShardState::ensure_open must be called before next_sample");
+                reader.read_line(line_buf)?
+            };
             if bytes_read == 0 {
+                self.verify_not_truncated()?;
                 self.availability = if self.sealed_by_policy {
                     ShardAvailability::Sealed
                 } else {
                     ShardAvailability::TemporarilyAtEof
                 };
+                return Ok(None);
+            }
+
+            // Invariant for unsealed growing shards:
+            // An incomplete final line (missing trailing '\n') must NEVER be committed as a consumed
+            // record or rejected as malformed JSON. Rewind the reader to `current_offset` and wait
+            // in `TemporarilyAtEof` until the producer finishes writing the line.
+            if !self.sealed_by_policy && !line_buf.ends_with('\n') {
+                if let Some(ref mut reader) = self.reader {
+                    reader.seek(SeekFrom::Start(self.current_offset))?;
+                }
+                self.availability = ShardAvailability::TemporarilyAtEof;
                 return Ok(None);
             }
 
@@ -414,6 +468,7 @@ pub struct ExpandableDatasetReader {
     watched_dirs: Vec<PathBuf>,
     watched_manifests: Vec<PathBuf>,
     mode: ShardStreamingMode,
+    lifecycle: DatasetStreamLifecycle,
     malformed_policy: MalformedRecordPolicy,
     max_open_files: usize,
     access_tick: u64,
@@ -425,7 +480,8 @@ pub struct ExpandableDatasetReader {
 }
 
 impl ExpandableDatasetReader {
-    /// Create a new empty expandable reader with bounded file-handle pooling.
+    /// Create a new empty expandable reader with bounded file-handle pooling
+    /// (≤512 KiB configured file-buffer budget at default `max_open_files = 8`).
     pub fn new(mode: ShardStreamingMode) -> Self {
         Self {
             shards: Vec::new(),
@@ -433,6 +489,7 @@ impl ExpandableDatasetReader {
             watched_dirs: Vec::new(),
             watched_manifests: Vec::new(),
             mode,
+            lifecycle: DatasetStreamLifecycle::Finite,
             malformed_policy: MalformedRecordPolicy::Strict,
             max_open_files: DEFAULT_MAX_OPEN_FILES,
             access_tick: 0,
@@ -448,6 +505,22 @@ impl ExpandableDatasetReader {
     pub fn with_auto_rewind(mut self, auto_rewind: bool) -> Self {
         self.auto_rewind = auto_rewind;
         self
+    }
+
+    /// Configure the stream lifecycle mode (`Finite` vs `LiveAppendWait`).
+    pub fn with_lifecycle(mut self, lifecycle: DatasetStreamLifecycle) -> Self {
+        self.lifecycle = lifecycle;
+        self
+    }
+
+    /// Update the stream lifecycle mode dynamically at runtime.
+    pub fn set_lifecycle(&mut self, lifecycle: DatasetStreamLifecycle) {
+        self.lifecycle = lifecycle;
+    }
+
+    /// Returns the configured stream lifecycle mode.
+    pub fn lifecycle(&self) -> DatasetStreamLifecycle {
+        self.lifecycle
     }
 
     /// Configure how malformed JSON lines or out-of-range fields are handled.
@@ -656,7 +729,18 @@ impl ExpandableDatasetReader {
 
         let mut entries: Vec<PathBuf> = fs::read_dir(dir_path)?
             .filter_map(|e| e.ok().map(|entry| entry.path()))
-            .filter(|p| p.is_file() && p.extension().and_then(|ext| ext.to_str()) == Some("jsonl"))
+            .filter(|p| {
+                if !p.is_file() || p.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+                    return false;
+                }
+                if let Some(fname) = p.file_name().and_then(|n| n.to_str()) {
+                    // Ignore hidden or in-flight temporary producer files
+                    if fname.starts_with('.') || fname.contains(".tmp") || fname.contains(".part") {
+                        return false;
+                    }
+                }
+                true
+            })
             .collect();
         entries.sort();
 
@@ -814,6 +898,23 @@ impl ExpandableDatasetReader {
         }
     }
 
+    fn can_auto_rewind(&self) -> bool {
+        if !self.auto_rewind || self.shards.is_empty() || self.epoch_yielded == 0 {
+            return false;
+        }
+        if self.lifecycle == DatasetStreamLifecycle::LiveAppendWait {
+            // In LiveAppendWait mode, do not rewind while any unsealed shard is waiting at TemporarilyAtEof
+            let any_unsealed_waiting = self
+                .shards
+                .iter()
+                .any(|s| s.availability == ShardAvailability::TemporarilyAtEof && !s.sealed_by_policy);
+            if any_unsealed_waiting {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Pull the next training sample.
     ///
     /// Depending on `mode`:
@@ -877,8 +978,8 @@ impl ExpandableDatasetReader {
             }
         }
 
-        // Iterative single-rewind guard: only rewind if the completed pass yielded at least 1 valid sample.
-        if self.auto_rewind && !self.shards.is_empty() && self.epoch_yielded > 0 {
+        // Iterative single-rewind guard: only rewind if allowed by lifecycle policy and epoch yielded > 0.
+        if self.can_auto_rewind() {
             self.reset_all()?;
             return self.poll_sequential_pass();
         }
@@ -934,8 +1035,8 @@ impl ExpandableDatasetReader {
             }
         }
 
-        // Iterative single-rewind guard: only rewind if the completed pass yielded at least 1 valid sample.
-        if self.auto_rewind && !self.shards.is_empty() && self.epoch_yielded > 0 {
+        // Iterative single-rewind guard: only rewind if allowed by lifecycle policy and epoch yielded > 0.
+        if self.can_auto_rewind() {
             self.reset_all()?;
             return self.poll_interleaved_pass();
         }
@@ -1315,11 +1416,11 @@ mod tests {
         let temp_dir = unique_test_dir("tokenized_chatml");
         let shard_path = temp_dir.join("tokenized_shard.jsonl");
 
-        let content = [
+        let content = format!(
+            "{}\n{}\n",
             r#"{"id":"rec_tok","formatted_input":"<|im_start|>user\nSolve 2+2<|im_end|>\n<|im_start|>assistant\n","formatted_target":"4<|im_end|>","metadata":{"input":"Solve 2+2","output":"4","domain":"mathematics","curriculum_tier":"primary","license_spdx":"CC-BY-4.0"}}"#,
             r#"{"id":"rec_inst","instruction":"Summarize text","response":"Summary here","metadata":{"domain":"science","curriculum_tier":"college"}}"#,
-        ]
-        .join("\n");
+        );
 
         std::fs::write(&shard_path, content).unwrap();
 
@@ -1345,5 +1446,213 @@ mod tests {
         assert_eq!(s2.curriculum_tier, "college");
 
         let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_partial_final_jsonl_line_append_completion_yields_exact_record() {
+        let dir = unique_test_dir("partial_line_append");
+        let shard = dir.join("growing.jsonl");
+
+        // Write 1 complete line + 1 partial incomplete JSON line (no trailing '\n')
+        {
+            let mut f = File::create(&shard).unwrap();
+            write!(
+                f,
+                "{{\"id\":\"full_1\",\"input\":\"hello\",\"output\":\"world\"}}\n{{\"id\":\"partial_2\",\"input\":\"half\",\"out"
+            )
+            .unwrap();
+            f.flush().unwrap();
+        }
+
+        // Even in Strict mode, reader must NOT fail on the incomplete final line or advance offset past it
+        let mut reader = ExpandableDatasetReader::new(ShardStreamingMode::Sequential)
+            .with_malformed_policy(MalformedRecordPolicy::Strict);
+        reader.add_shard(&shard).unwrap();
+
+        let s1 = reader.next_sample().unwrap().unwrap();
+        assert_eq!(s1.id, "full_1");
+
+        // Next read hits the incomplete final line -> returns Ok(None) and enters TemporarilyAtEof
+        assert!(reader.next_sample().unwrap().is_none());
+        assert_eq!(reader.telemetry().temporarily_eof_shards, 1);
+        assert_eq!(reader.lifetime_yielded(), 1);
+
+        // Producer now finishes writing the second half of the JSONL line + '\n'
+        {
+            let mut f = OpenOptions::new().append(true).open(&shard).unwrap();
+            write!(f, "put\":\"completed value\"}}\n").unwrap();
+            f.flush().unwrap();
+        }
+
+        // Reader resumes from the exact uncommitted start offset of line 2 and yields the complete record
+        let s2 = reader.next_sample().unwrap().unwrap();
+        assert_eq!(s2.id, "partial_2");
+        assert_eq!(s2.input, "half");
+        assert_eq!(s2.output, "completed value");
+        assert_eq!(reader.lifetime_yielded(), 2);
+        assert!(reader.next_sample().unwrap().is_none());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_large_100kib_single_record_and_line_buf_shrinking() {
+        let dir = unique_test_dir("large_100kib");
+        let shard = dir.join("large.jsonl");
+
+        let large_payload = "x".repeat(120 * 1024); // 120 KiB > 64 KiB buffer capacity
+        {
+            let mut f = File::create(&shard).unwrap();
+            writeln!(
+                f,
+                "{{\"id\":\"big_rec\",\"input\":\"prompt\",\"output\":\"{}\"}}",
+                large_payload
+            )
+            .unwrap();
+            writeln!(
+                f,
+                "{{\"id\":\"small_rec\",\"input\":\"p2\",\"output\":\"o2\"}}"
+            )
+            .unwrap();
+        }
+
+        let mut reader = ExpandableDatasetReader::new(ShardStreamingMode::Sequential);
+        reader.add_shard(&shard).unwrap();
+
+        let s1 = reader.next_sample().unwrap().unwrap();
+        assert_eq!(s1.id, "big_rec");
+        assert_eq!(s1.output.len(), 120 * 1024);
+        // After yielding a >64 KiB line, maybe_shrink_line_buf() must reclaim the oversized buffer
+        assert!(
+            reader.line_buf.capacity() <= MAX_RETAINED_LINE_CAPACITY,
+            "Expected line_buf capacity ({}) <= {}",
+            reader.line_buf.capacity(),
+            MAX_RETAINED_LINE_CAPACITY
+        );
+
+        let s2 = reader.next_sample().unwrap().unwrap();
+        assert_eq!(s2.id, "small_rec");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_live_open_shard_vs_finite_auto_rewind_policy() {
+        let dir = unique_test_dir("live_vs_finite");
+        let shard = dir.join("live.jsonl");
+        fs::write(
+            &shard,
+            "{\"id\":\"rec1\",\"input\":\"q1\",\"output\":\"a1\"}\n",
+        )
+        .unwrap();
+
+        // In LiveAppendWait mode, even if auto_rewind is true, reaching TemporarilyAtEof on an
+        // unsealed shard MUST NOT rewind and replay rec1; it must wait for new appends.
+        let mut live_reader = ExpandableDatasetReader::new(ShardStreamingMode::Sequential)
+            .with_auto_rewind(true)
+            .with_lifecycle(DatasetStreamLifecycle::LiveAppendWait);
+        live_reader.add_shard(&shard).unwrap();
+
+        let first = live_reader.next_sample().unwrap().unwrap();
+        assert_eq!(first.id, "rec1");
+        assert!(
+            live_reader.next_sample().unwrap().is_none(),
+            "LiveAppendWait mode must return None at TemporarilyAtEof instead of replaying old epoch"
+        );
+
+        // Append rec2 and verify live_reader yields rec2 without replaying rec1
+        {
+            let mut f = OpenOptions::new().append(true).open(&shard).unwrap();
+            writeln!(f, "{{\"id\":\"rec2\",\"input\":\"q2\",\"output\":\"a2\"}}").unwrap();
+            f.flush().unwrap();
+        }
+        let second = live_reader.next_sample().unwrap().unwrap();
+        assert_eq!(second.id, "rec2");
+        assert_eq!(live_reader.lifetime_yielded(), 2);
+
+        // Switching lifecycle to Finite allows epoch rewind once all current records are consumed
+        live_reader.set_lifecycle(DatasetStreamLifecycle::Finite);
+        let rewound = live_reader.next_sample().unwrap().unwrap();
+        assert_eq!(rewound.id, "rec1");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_new_shard_discovered_while_producer_writing_tmp_and_partial() {
+        let dir = unique_test_dir("producer_race");
+        let shard1 = dir.join("shard_01.jsonl");
+        fs::write(
+            &shard1,
+            "{\"id\":\"s1\",\"input\":\"in1\",\"output\":\"out1\"}\n",
+        )
+        .unwrap();
+
+        let mut reader = ExpandableDatasetReader::new(ShardStreamingMode::Sequential);
+        assert_eq!(reader.add_shards_from_dir(&dir).unwrap(), 1);
+        assert_eq!(reader.next_sample().unwrap().unwrap().id, "s1");
+
+        // Producer creates a temporary file (.tmp.jsonl) and a newly visible shard_02.jsonl with a partial line
+        let tmp_file = dir.join(".tmp_shard_03.jsonl");
+        fs::write(&tmp_file, "{corrupt in-flight tmp").unwrap();
+        let shard2 = dir.join("shard_02.jsonl");
+        fs::write(&shard2, "{\"id\":\"s2\",\"input\":\"in2\"").unwrap(); // No newline yet!
+
+        // Reader scans directory: ignores .tmp_shard_03.jsonl, registers shard_02.jsonl,
+        // and holds back the incomplete line without erroring
+        assert!(reader.next_sample().unwrap().is_none());
+        assert_eq!(reader.shard_count(), 2);
+
+        // Producer completes shard_02.jsonl and atomically renames .tmp_shard_03.jsonl -> shard_03.jsonl
+        {
+            let mut f = OpenOptions::new().append(true).open(&shard2).unwrap();
+            write!(f, ",\"output\":\"out2\"}}\n").unwrap();
+            f.flush().unwrap();
+        }
+        let shard3 = dir.join("shard_03.jsonl");
+        fs::write(
+            &tmp_file,
+            "{\"id\":\"s3\",\"input\":\"in3\",\"output\":\"out3\"}\n",
+        )
+        .unwrap();
+        fs::rename(&tmp_file, &shard3).unwrap();
+
+        let a = reader.next_sample().unwrap().unwrap();
+        let b = reader.next_sample().unwrap().unwrap();
+        assert_eq!(a.id, "s2");
+        assert_eq!(b.id, "s3");
+        assert!(reader.next_sample().unwrap().is_none());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_truncated_or_replaced_watched_shard_detected() {
+        let dir = unique_test_dir("truncated_shard");
+        let shard = dir.join("shard.jsonl");
+        fs::write(
+            &shard,
+            "{\"id\":\"s1\",\"input\":\"long_input_string_1\",\"output\":\"long_output_string_1\"}\n{\"id\":\"s2\",\"input\":\"long_input_string_2\",\"output\":\"long_output_string_2\"}\n",
+        )
+        .unwrap();
+
+        let mut reader = ExpandableDatasetReader::new(ShardStreamingMode::Sequential);
+        reader.add_shard(&shard).unwrap();
+
+        assert_eq!(reader.next_sample().unwrap().unwrap().id, "s1");
+        assert_eq!(reader.next_sample().unwrap().unwrap().id, "s2");
+        assert!(reader.next_sample().unwrap().is_none());
+
+        // Producer accidentally truncates the file to a smaller size than current_offset
+        fs::write(&shard, "{\"id\":\"short\"}\n").unwrap();
+
+        let err = reader.next_sample().unwrap_err();
+        assert!(
+            matches!(err, ReaderError::ShardTruncatedOrReplaced { .. }),
+            "Expected ShardTruncatedOrReplaced error, got: {:?}",
+            err
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

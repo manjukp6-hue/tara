@@ -16577,8 +16577,8 @@
                       "name": "mod.rs",
                       "rel_path": "rust/tara_engine/src/dataset/mod.rs",
                       "entry_type": "file",
-                      "size_bytes": 1073,
-                      "sha256": "d2913ab35afdb28fd070112edd5e0ffb4e35e02f3dcec166cbfe29f4732172b1"
+                      "size_bytes": 4363,
+                      "sha256": "e624a872812813e6875ab56462f71ac55a11de22b34b5428c70d5bacbe966f0f"
                     },
                     {
                       "name": "splitter.rs",
@@ -18129,8 +18129,8 @@
                   "name": "reader.rs",
                   "rel_path": "rust/tara_training_system/shared_training_infrastructure/reader.rs",
                   "entry_type": "file",
-                  "size_bytes": 50099,
-                  "sha256": "c9349f6532d2e99e1c3937d56ec4f95ae9bb4d80753c1a88ac87f9d5f61987d7"
+                  "size_bytes": 63129,
+                  "sha256": "5237d8ab51347f49ab990fb45f59770ff112a30ea628820f2f7a06eb9dca7682"
                 },
                 {
                   "name": "safetensors.rs",

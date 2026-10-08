@@ -2137,14 +2137,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        // Two distinct input identities:
+        // 1. `input_model_digest`: weights-only SHA-256 ("same model weights", used when warm-starting with --init-from)
+        // 2. `input_full_digest`: full checkpoint SHA-256 ("same resumable checkpoint", covering weights + config + tokenizer + optimizer state)
         let input_model_digest = compute_model_weights_digest(input_path)?
             .ok_or_else(|| format!("Input checkpoint '{}' has no model weights digest", input_cp))?;
         let input_full_digest = compute_full_checkpoint_digest(input_path)?
             .unwrap_or_else(|| input_model_digest.clone());
+        let effective_input_digest = if force_init_only {
+            &input_model_digest
+        } else {
+            &input_full_digest
+        };
         let ds_insp = inspect_dataset(Path::new(&stage.dataset_path))?;
         let expected_fingerprint = compute_stage_config_fingerprint(
             &stage,
-            &input_full_digest,
+            effective_input_digest,
             &ds_insp.dataset_fingerprint,
             &precision,
         );
@@ -2279,6 +2287,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "completed_at_utc": completed_at,
             "input_checkpoint": input_cp,
             "input_model_weights_sha256": input_model_digest,
+            "input_full_checkpoint_sha256": input_full_digest,
             "output_checkpoint": stage.output_checkpoint,
             "intermediate_checkpoints_dir": intermediate_cp_dir.to_string_lossy(),
             "dynamic_checkpoint_sha256": full_checkpoint_sha,

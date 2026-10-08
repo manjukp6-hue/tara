@@ -173,9 +173,74 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let total_folders = state_val.get("total_folders").and_then(Value::as_u64).unwrap_or(0);
     println!("PASS: Architecture Sync Engine registries verified (status: SYNCED, files: {total_files}, folders: {total_folders}).");
 
+    println!("\n=== 5. Verifying Crate Module Ownership & Single-Compilation Invariant ===");
+    let rust_root = workspace_root.join("rust");
+    let mut rs_files = Vec::new();
+    collect_rs_files(&rust_root, &mut rs_files)?;
+    let mut included_targets: std::collections::HashMap<PathBuf, PathBuf> =
+        std::collections::HashMap::new();
+    for rs_file in &rs_files {
+        let src = fs::read_to_string(rs_file)?;
+        let parent_dir = rs_file.parent().unwrap_or(&rust_root);
+        for line in src.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("#[path = \"") {
+                if let Some(rel_target) = rest.strip_suffix("\"]") {
+                    let joined = parent_dir.join(rel_target);
+                    let canon = fs::canonicalize(&joined).map_err(|e| {
+                        format!(
+                            "Broken #[path = \"{rel_target}\"] in '{}': {e}",
+                            rs_file.display()
+                        )
+                    })?;
+                    if let Some(prev_owner) = included_targets.insert(canon.clone(), rs_file.clone())
+                    {
+                        eprintln!(
+                            "ERROR: Duplicate #[path] compilation detected for '{}': included by both '{}' and '{}'",
+                            canon.display(),
+                            prev_owner.display(),
+                            rs_file.display()
+                        );
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+    }
+    for owned_rel in tara_engine::OWNED_TRAINING_SYSTEM_MODULES {
+        let full = workspace_root.join(owned_rel);
+        if !full.exists() {
+            eprintln!(
+                "ERROR: Declared OWNED_TRAINING_SYSTEM_MODULES file missing: {}",
+                owned_rel
+            );
+            std::process::exit(1);
+        }
+    }
+    println!(
+        "PASS: Single-owner module boundary verified ({} #[path] targets audited, 0 duplicate inclusions).",
+        included_targets.len()
+    );
+
     println!("--------------------------------------------------------------------------------");
     println!("SUCCESS: Whole-system architecture verified compliant with all directives.");
     println!("================================================================================");
 
+    Ok(())
+}
+
+fn collect_rs_files(dir: & std::path::Path, out: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let p = entry.path();
+        if p.is_dir() {
+            collect_rs_files(&p, out)?;
+        } else if p.extension().and_then(|e| e.to_str()) == Some("rs") {
+            out.push(p);
+        }
+    }
     Ok(())
 }

@@ -17503,12 +17503,12 @@
     "rust/tara_engine/src/bin/tara_training_stages.rs": {
       "extension": "rs",
       "file_id": 3940649674300748,
-      "line_count": 2703,
-      "modified_epoch": 1791429630,
+      "line_count": 2712,
+      "modified_epoch": 1791430471,
       "name": "tara_training_stages.rs",
       "rel_path": "rust/tara_engine/src/bin/tara_training_stages.rs",
-      "sha256": "f4f081e6d1937e1c8179241fa0f62f3012e9195072a8803c74299975a5b87e14",
-      "size_bytes": 108982
+      "sha256": "2734782e98e2ce929632894e80547993997d68acb978fe2c2217f2243ec0e8c9",
+      "size_bytes": 109508
     },
     "rust/tara_engine/src/bin/trace_22layer_gpu_execution.rs": {
       "extension": "rs",
@@ -17553,12 +17553,12 @@
     "rust/tara_engine/src/bin/verify_architecture.rs": {
       "extension": "rs",
       "file_id": 3377699720879231,
-      "line_count": 181,
-      "modified_epoch": 1791220765,
+      "line_count": 246,
+      "modified_epoch": 1791430396,
       "name": "verify_architecture.rs",
       "rel_path": "rust/tara_engine/src/bin/verify_architecture.rs",
-      "sha256": "5a649d5477e55d0a9607b8633004345cda022754de4559ab468bd95fc4f83357",
-      "size_bytes": 7729
+      "sha256": "4c0c8f829eac3fac9e639066c730943cc13ee008f2dbd12fc8ba68681d0f6f44",
+      "size_bytes": 10279
     },
     "rust/tara_engine/src/bin/verify_dataset_and_curriculum_engine.rs": {
       "extension": "rs",
@@ -17933,12 +17933,12 @@
     "rust/tara_engine/src/lib.rs": {
       "extension": "rs",
       "file_id": 2533274790844440,
-      "line_count": 105,
-      "modified_epoch": 1791266938,
+      "line_count": 246,
+      "modified_epoch": 1791430612,
       "name": "lib.rs",
       "rel_path": "rust/tara_engine/src/lib.rs",
-      "sha256": "ac5628f65bb7261a5cdbd15e6bab2cc5788bf8f7eb6b6b0ae499114f2495e734",
-      "size_bytes": 4236
+      "sha256": "d9d635e69469a28551182aaa5cb735b1c9389bcf9c8c37cad3a39413f70b223c",
+      "size_bytes": 10947
     },
     "rust/tara_engine/src/loading_policy.rs": {
       "extension": "rs",
@@ -19531,7 +19531,7 @@
       "size_bytes": 1242
     }
   },
-  "generated_at_utc": "1791429821",
+  "generated_at_utc": "1791430614",
   "schema_version": "1.0.0",
   "total_files": 1953
 }

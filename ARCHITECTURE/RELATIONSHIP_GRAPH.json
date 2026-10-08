@@ -9533,7 +9533,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "f4f081e6d1937e1c8179241fa0f62f3012e9195072a8803c74299975a5b87e14",
+      "dynamic_sha256": "2734782e98e2ce929632894e80547993997d68acb978fe2c2217f2243ec0e8c9",
       "exports": [
         {
           "kind": "Struct",
@@ -9740,7 +9740,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 2330,
+          "line_number": 2339,
           "raw_path": "super::*"
         },
         {
@@ -9773,7 +9773,7 @@
             "write_safetensors_with_shapes"
           ],
           "is_public_reexport": false,
-          "line_number": 2331,
+          "line_number": 2340,
           "raw_path": "tara_engine::safetensors::write_safetensors_with_shapes"
         },
         {
@@ -9918,31 +9918,31 @@
         },
         {
           "kind": "Function",
-          "line_number": 2550,
+          "line_number": 2559,
           "name": "test_continuation_verification_and_fingerprint_idempotence",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 2625,
+          "line_number": 2634,
           "name": "test_crash_recovery_lock_guard_and_cli_exclusivity",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 2436,
+          "line_number": 2445,
           "name": "test_dag_cycle_detection_and_topological_sort",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 2491,
+          "line_number": 2500,
           "name": "test_validate_stage_definitions_rejects_duplicate_nested_and_unsafe_paths",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 2333,
+          "line_number": 2342,
           "name": "unique_test_dir",
           "visibility": "Private"
         },
@@ -9954,19 +9954,19 @@
         },
         {
           "kind": "Function",
-          "line_number": 2347,
+          "line_number": 2356,
           "name": "write_minimal_working_model",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 2703,
+      "lines": 2712,
       "module_path": "tara_engine::bin::tara_training_stages",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 2329,
+          "line_number": 2338,
           "name": "tests"
         }
       ],
@@ -10281,20 +10281,27 @@
     "rust/tara_engine/src/bin/verify_architecture.rs": {
       "call_references": [
         "Err",
+        "Some",
+        "and_then",
         "args",
         "as_str",
+        "canonicalize",
         "clone",
+        "collect_rs_files",
         "contains",
         "current_dir",
         "display",
         "exists",
+        "extension",
         "find_workspace_root",
         "from_str",
         "from_utf8_lossy",
         "get",
+        "is_dir",
         "is_empty",
         "join",
         "len",
+        "lines",
         "main",
         "map_err",
         "missing",
@@ -10302,15 +10309,19 @@
         "ok_or",
         "output",
         "parent",
+        "path",
         "read_to_string",
+        "strip_suffix",
         "success",
         "to_path_buf",
+        "to_str",
         "to_string",
+        "trim",
         "trim_start_matches",
         "unwrap_or"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "5a649d5477e55d0a9607b8633004345cda022754de4559ab468bd95fc4f83357",
+      "dynamic_sha256": "4c0c8f829eac3fac9e639066c730943cc13ee008f2dbd12fc8ba68681d0f6f44",
       "exports": [],
       "imports": [
         {
@@ -10350,6 +10361,12 @@
       "internal_symbols": [
         {
           "kind": "Function",
+          "line_number": 232,
+          "name": "collect_rs_files",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
           "line_number": 14,
           "name": "find_workspace_root",
           "visibility": "Private"
@@ -10362,7 +10379,7 @@
         }
       ],
       "is_test": false,
-      "lines": 181,
+      "lines": 246,
       "module_path": "tara_engine::bin::verify_architecture",
       "modules_declared": [],
       "out_links": [],
@@ -20194,16 +20211,41 @@
     "rust/tara_engine/src/lib.rs": {
       "call_references": [
         "as_secs",
+        "contract_name",
+        "ends_with",
+        "insert",
+        "len",
+        "new",
         "now",
         "now_iso",
+        "test_now_iso_and_gregorian_civil_date_boundaries",
+        "test_root_facade_and_single_owner_training_system_contract",
         "unwrap_or_default"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "ac5628f65bb7261a5cdbd15e6bab2cc5788bf8f7eb6b6b0ae499114f2495e734",
+      "dynamic_sha256": "d9d635e69469a28551182aaa5cb735b1c9389bcf9c8c37cad3a39413f70b223c",
       "exports": [
         {
+          "kind": "Const",
+          "line_number": 68,
+          "name": "OWNED_TRAINING_SYSTEM_MODULES",
+          "visibility": "Public"
+        },
+        {
           "kind": "Function",
-          "line_number": 82,
+          "line_number": 158,
+          "name": "format_system_time_iso",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 134,
+          "name": "format_unix_seconds_iso",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 168,
           "name": "now_iso",
           "visibility": "Public"
         }
@@ -20215,13 +20257,13 @@
             "LoadedTaraModel"
           ],
           "is_public_reexport": true,
-          "line_number": 44,
+          "line_number": 81,
           "raw_path": "auto_loader::{AutoTaraModelLoader, LoadedTaraModel}"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": true,
-          "line_number": 45,
+          "line_number": 82,
           "raw_path": "computation::{"
         },
         {
@@ -20229,7 +20271,7 @@
             "TaraConfig"
           ],
           "is_public_reexport": true,
-          "line_number": 51,
+          "line_number": 88,
           "raw_path": "config::TaraConfig"
         },
         {
@@ -20238,19 +20280,19 @@
             "ControlTokenActionParser"
           ],
           "is_public_reexport": true,
-          "line_number": 52,
+          "line_number": 89,
           "raw_path": "control_tokens::{ControlTokenAction, ControlTokenActionParser}"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": true,
-          "line_number": 53,
+          "line_number": 90,
           "raw_path": "curriculum_engine::{"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": true,
-          "line_number": 57,
+          "line_number": 94,
           "raw_path": "dataset_engine::{"
         },
         {
@@ -20260,7 +20302,7 @@
             "GpuInfo"
           ],
           "is_public_reexport": true,
-          "line_number": 61,
+          "line_number": 98,
           "raw_path": "device_detector::{DeviceCapabilityDetector, DeviceProfile, GpuInfo}"
         },
         {
@@ -20271,19 +20313,25 @@
             "GenerateResult"
           ],
           "is_public_reexport": true,
-          "line_number": 62,
+          "line_number": 99,
           "raw_path": "generate::{generate_response, generate_stream, GenerateOptions, GenerateResult}"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": true,
-          "line_number": 63,
+          "line_number": 100,
           "raw_path": "github_adapter::{"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": true,
-          "line_number": 69,
+          "line_number": 106,
+          "raw_path": "inference::{"
+        },
+        {
+          "imported_symbols": [],
+          "is_public_reexport": true,
+          "line_number": 110,
           "raw_path": "loading_policy::{"
         },
         {
@@ -20291,19 +20339,19 @@
             "TaraForCausalLM"
           ],
           "is_public_reexport": true,
-          "line_number": 73,
+          "line_number": 114,
           "raw_path": "model::causal_lm::TaraForCausalLM"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": true,
-          "line_number": 74,
+          "line_number": 115,
           "raw_path": "model_expansion::{"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": true,
-          "line_number": 39,
+          "line_number": 118,
           "raw_path": "project_link_engine::{"
         },
         {
@@ -20314,7 +20362,7 @@
             "UpdateState"
           ],
           "is_public_reexport": true,
-          "line_number": 77,
+          "line_number": 123,
           "raw_path": "self_update::{ExpansionDecision, SelfUpdateController, SelfUpdateReport, UpdateState}"
         },
         {
@@ -20323,25 +20371,45 @@
             "TensorMetadata"
           ],
           "is_public_reexport": true,
-          "line_number": 78,
+          "line_number": 124,
           "raw_path": "shard_manager::{ShardedSafeTensorsManager, TensorMetadata}"
         },
         {
           "imported_symbols": [
-            "SystemTime",
             "UNIX_EPOCH"
           ],
           "is_public_reexport": false,
-          "line_number": 83,
-          "raw_path": "std::time::{SystemTime, UNIX_EPOCH}"
+          "line_number": 159,
+          "raw_path": "std::time::UNIX_EPOCH"
+        },
+        {
+          "imported_symbols": [
+            "Duration",
+            "UNIX_EPOCH"
+          ],
+          "is_public_reexport": false,
+          "line_number": 175,
+          "raw_path": "std::time::{Duration, UNIX_EPOCH}"
+        },
+        {
+          "imported_symbols": [],
+          "is_public_reexport": false,
+          "line_number": 174,
+          "raw_path": "super::*"
         },
         {
           "imported_symbols": [
             "TaraTokenizer"
           ],
           "is_public_reexport": true,
-          "line_number": 79,
+          "line_number": 125,
           "raw_path": "tokenizer::TaraTokenizer"
+        },
+        {
+          "imported_symbols": [],
+          "is_public_reexport": true,
+          "line_number": 126,
+          "raw_path": "train_candidate::{"
         }
       ],
       "in_links": [
@@ -20359,153 +20427,172 @@
         "rust/tara_engine/src/train_candidate.rs",
         "rust/tara_server/src/brain.rs"
       ],
-      "internal_symbols": [],
-      "is_test": false,
-      "lines": 105,
+      "internal_symbols": [
+        {
+          "kind": "Function",
+          "line_number": 178,
+          "name": "test_now_iso_and_gregorian_civil_date_boundaries",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 228,
+          "name": "test_root_facade_and_single_owner_training_system_contract",
+          "visibility": "Private"
+        }
+      ],
+      "is_test": true,
+      "lines": 246,
       "module_path": "tara_engine",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 8,
+          "line_number": 38,
           "name": "auto_loader"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 9,
+          "line_number": 27,
           "name": "computation"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 10,
+          "line_number": 28,
           "name": "config"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 11,
+          "line_number": 39,
           "name": "control_tokens"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 12,
+          "line_number": 53,
           "name": "cuda"
         },
         {
           "custom_path": "../../tara_training_system/curriculum_engine/curriculum_engine.rs",
           "is_public": true,
-          "line_number": 18,
+          "line_number": 41,
           "name": "curriculum_engine"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 13,
+          "line_number": 29,
           "name": "dataset"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 14,
+          "line_number": 42,
           "name": "dataset_classifier"
         },
         {
           "custom_path": "../../tara_training_system/dataset_engine/dataset_engine.rs",
           "is_public": true,
-          "line_number": 16,
+          "line_number": 44,
           "name": "dataset_engine"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 19,
+          "line_number": 45,
           "name": "device_detector"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 20,
+          "line_number": 30,
           "name": "generate"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 21,
+          "line_number": 46,
           "name": "github_adapter"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 22,
+          "line_number": 31,
           "name": "inference"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 23,
+          "line_number": 47,
           "name": "loading_policy"
         },
         {
           "custom_path": "../../tara_training_system/neural_model/model/mod.rs",
           "is_public": true,
-          "line_number": 25,
+          "line_number": 55,
           "name": "model"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 26,
+          "line_number": 56,
           "name": "model_expansion"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 27,
+          "line_number": 48,
           "name": "project_link_engine"
         },
         {
           "custom_path": "../../tara_training_system/shared_training_infrastructure/safetensors.rs",
           "is_public": true,
-          "line_number": 29,
+          "line_number": 58,
           "name": "safetensors"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 30,
+          "line_number": 59,
           "name": "self_update"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 31,
+          "line_number": 60,
           "name": "shard_manager"
         },
         {
           "custom_path": "../../tara_training_system/shared_training_infrastructure/skills_evaluator.rs",
           "is_public": true,
-          "line_number": 33,
+          "line_number": 62,
           "name": "skills_evaluator"
         },
         {
           "custom_path": null,
+          "is_public": false,
+          "line_number": 173,
+          "name": "tests"
+        },
+        {
+          "custom_path": null,
           "is_public": true,
-          "line_number": 34,
+          "line_number": 32,
           "name": "tokenizer"
         },
         {
           "custom_path": null,
           "is_public": true,
-          "line_number": 35,
+          "line_number": 33,
           "name": "train_candidate"
         },
         {
           "custom_path": "../../tara_training_system/shared_training_infrastructure/trainer.rs",
           "is_public": true,
-          "line_number": 37,
+          "line_number": 64,
           "name": "trainer"
         }
       ],
@@ -53282,5 +53369,5 @@
   "schema_version": "1.0.0",
   "total_files": 240,
   "total_modules": 583,
-  "total_symbols": 2375
+  "total_symbols": 2378
 }

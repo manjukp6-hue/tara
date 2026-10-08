@@ -2806,7 +2806,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "f4f081e6d1937e1c8179241fa0f62f3012e9195072a8803c74299975a5b87e14",
+      "dynamic_sha256": "2734782e98e2ce929632894e80547993997d68acb978fe2c2217f2243ec0e8c9",
       "enums": [],
       "functions": [
         "CloseHandle",
@@ -2850,7 +2850,7 @@
       ],
       "in_links": [],
       "is_test": true,
-      "lines": 2703,
+      "lines": 2712,
       "module": "tara_engine::bin::tara_training_stages",
       "out_links": [
         "rust/tara_engine/src/config.rs",
@@ -3045,20 +3045,27 @@
     "rust/tara_engine/src/bin/verify_architecture.rs": {
       "calls": [
         "Err",
+        "Some",
+        "and_then",
         "args",
         "as_str",
+        "canonicalize",
         "clone",
+        "collect_rs_files",
         "contains",
         "current_dir",
         "display",
         "exists",
+        "extension",
         "find_workspace_root",
         "from_str",
         "from_utf8_lossy",
         "get",
+        "is_dir",
         "is_empty",
         "join",
         "len",
+        "lines",
         "main",
         "map_err",
         "missing",
@@ -3066,23 +3073,28 @@
         "ok_or",
         "output",
         "parent",
+        "path",
         "read_to_string",
+        "strip_suffix",
         "success",
         "to_path_buf",
+        "to_str",
         "to_string",
+        "trim",
         "trim_start_matches",
         "unwrap_or"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "5a649d5477e55d0a9607b8633004345cda022754de4559ab468bd95fc4f83357",
+      "dynamic_sha256": "4c0c8f829eac3fac9e639066c730943cc13ee008f2dbd12fc8ba68681d0f6f44",
       "enums": [],
       "functions": [
+        "collect_rs_files",
         "find_workspace_root",
         "main"
       ],
       "in_links": [],
       "is_test": false,
-      "lines": 181,
+      "lines": 246,
       "module": "tara_engine::bin::verify_architecture",
       "out_links": [],
       "rel_path": "rust/tara_engine/src/bin/verify_architecture.rs",
@@ -6473,15 +6485,26 @@
     "rust/tara_engine/src/lib.rs": {
       "calls": [
         "as_secs",
+        "contract_name",
+        "ends_with",
+        "insert",
+        "len",
+        "new",
         "now",
         "now_iso",
+        "test_now_iso_and_gregorian_civil_date_boundaries",
+        "test_root_facade_and_single_owner_training_system_contract",
         "unwrap_or_default"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "ac5628f65bb7261a5cdbd15e6bab2cc5788bf8f7eb6b6b0ae499114f2495e734",
+      "dynamic_sha256": "d9d635e69469a28551182aaa5cb735b1c9389bcf9c8c37cad3a39413f70b223c",
       "enums": [],
       "functions": [
-        "now_iso"
+        "format_system_time_iso",
+        "format_unix_seconds_iso",
+        "now_iso",
+        "test_now_iso_and_gregorian_civil_date_boundaries",
+        "test_root_facade_and_single_owner_training_system_contract"
       ],
       "in_links": [
         "rust/tara_engine/src/auto_loader.rs",
@@ -6498,8 +6521,8 @@
         "rust/tara_engine/src/train_candidate.rs",
         "rust/tara_server/src/brain.rs"
       ],
-      "is_test": false,
-      "lines": 105,
+      "is_test": true,
+      "lines": 246,
       "module": "tara_engine",
       "out_links": [
         "rust/tara_engine/src/auto_loader.rs",

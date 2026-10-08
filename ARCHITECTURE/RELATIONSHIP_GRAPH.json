@@ -8929,6 +8929,7 @@
         "canonicalize",
         "capture_input_snapshot",
         "check_leakage",
+        "clone",
         "collect",
         "compute_file_sha256",
         "compute_input_multiset",
@@ -8939,7 +8940,6 @@
         "decontaminate",
         "display",
         "elapsed",
-        "entry",
         "execution",
         "exists",
         "extension",
@@ -8952,6 +8952,7 @@
         "from",
         "from_str",
         "get",
+        "id",
         "into",
         "is_dir",
         "is_disjoint",
@@ -8997,14 +8998,15 @@
         "unwrap_or",
         "unwrap_or_default",
         "unwrap_or_else",
-        "vec"
+        "vec",
+        "verify_committed_split"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "b47048f518e32c10632b802196708489f86d157457126e57fbc6c7af685efc44",
+      "dynamic_sha256": "a467181503bbbe848dc2d469543ad3806378f760aecb6c4300c47deb925ca86d",
       "exports": [
         {
           "kind": "Function",
-          "line_number": 159,
+          "line_number": 165,
           "name": "run_splitter_cli",
           "visibility": "Public"
         }
@@ -9086,7 +9088,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 586,
+          "line_number": 604,
           "raw_path": "super::*"
         },
         {
@@ -9107,6 +9109,12 @@
       "in_links": [],
       "internal_symbols": [
         {
+          "kind": "TypeAlias",
+          "line_number": 117,
+          "name": "SemanticKey",
+          "visibility": "Private"
+        },
+        {
           "kind": "Struct",
           "line_number": 47,
           "name": "ShardSnapshot",
@@ -9120,25 +9128,25 @@
         },
         {
           "kind": "Function",
-          "line_number": 144,
+          "line_number": 150,
           "name": "compute_input_multiset",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 117,
+          "line_number": 121,
           "name": "compute_semantic_fingerprints",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 579,
+          "line_number": 597,
           "name": "main",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 588,
+          "line_number": 606,
           "name": "make_temp_dir",
           "visibility": "Private"
         },
@@ -9156,31 +9164,31 @@
         },
         {
           "kind": "Function",
-          "line_number": 630,
+          "line_number": 648,
           "name": "test_cli_empty_dataset_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 650,
+          "line_number": 668,
           "name": "test_cli_path_overlap_rejected_and_default_output_safe",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 599,
+          "line_number": 617,
           "name": "test_cli_skip_leakage_fails_gate",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 699,
+      "lines": 717,
       "module_path": "tara_engine::bin::tara_dataset_splitter",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 585,
+          "line_number": 603,
           "name": "tests"
         }
       ],
@@ -9377,6 +9385,7 @@
     "rust/tara_engine/src/bin/tara_training_stages.rs": {
       "call_references": [
         "Err",
+        "OpenProcess",
         "Some",
         "acquire",
         "all",
@@ -9418,6 +9427,7 @@
         "evaluate_checkpoint_model",
         "exists",
         "exp",
+        "expect",
         "extension",
         "file_name",
         "file_type",
@@ -9441,6 +9451,7 @@
         "is_file",
         "is_finite",
         "is_none",
+        "is_null",
         "is_ok",
         "is_some",
         "is_symlink",
@@ -9522,7 +9533,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "55a2920de4a4318bd4f7aa74dd0d81d53cc3f0d9f2daf47b477fb9c49f445589",
+      "dynamic_sha256": "f4f081e6d1937e1c8179241fa0f62f3012e9195072a8803c74299975a5b87e14",
       "exports": [
         {
           "kind": "Struct",
@@ -9532,7 +9543,7 @@
         },
         {
           "kind": "Struct",
-          "line_number": 90,
+          "line_number": 132,
           "name": "OrchestratorLockGuard",
           "visibility": "Public"
         },
@@ -9550,97 +9561,97 @@
         },
         {
           "kind": "Function",
-          "line_number": 95,
+          "line_number": 137,
           "name": "acquire",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1242,
+          "line_number": 1302,
           "name": "build_default_stages",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 209,
+          "line_number": 269,
           "name": "compute_full_checkpoint_digest",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 162,
+          "line_number": 222,
           "name": "compute_model_weights_digest",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 393,
+          "line_number": 453,
           "name": "compute_stage_config_fingerprint",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1066,
+          "line_number": 1126,
           "name": "evaluate_checkpoint_model",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 267,
+          "line_number": 327,
           "name": "inspect_dataset",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 661,
+          "line_number": 721,
           "name": "normalize_for_comparison",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 466,
+          "line_number": 526,
           "name": "read_stage_completed_timestamp",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 423,
+          "line_number": 483,
           "name": "should_skip_completed_stage",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 878,
+          "line_number": 938,
           "name": "validate_and_sort_stage_dag",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 694,
+          "line_number": 754,
           "name": "validate_device_and_precision",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 718,
+          "line_number": 778,
           "name": "validate_stage_definitions",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 583,
+          "line_number": 643,
           "name": "verify_continuation_ready",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 513,
+          "line_number": 573,
           "name": "verify_working_model",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 477,
+          "line_number": 537,
           "name": "write_json_atomically",
           "visibility": "Public"
         }
@@ -9695,7 +9706,7 @@
             "Write"
           ],
           "is_public_reexport": false,
-          "line_number": 116,
+          "line_number": 159,
           "raw_path": "std::io::Write"
         },
         {
@@ -9703,7 +9714,7 @@
             "Write"
           ],
           "is_public_reexport": false,
-          "line_number": 492,
+          "line_number": 552,
           "raw_path": "std::io::Write"
         },
         {
@@ -9729,7 +9740,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 2268,
+          "line_number": 2330,
           "raw_path": "super::*"
         },
         {
@@ -9762,7 +9773,7 @@
             "write_safetensors_with_shapes"
           ],
           "is_public_reexport": false,
-          "line_number": 2269,
+          "line_number": 2331,
           "raw_path": "tara_engine::safetensors::write_safetensors_with_shapes"
         },
         {
@@ -9805,121 +9816,157 @@
       "internal_symbols": [
         {
           "kind": "Function",
-          "line_number": 236,
+          "line_number": 108,
+          "name": "CloseHandle",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 107,
+          "name": "GetExitCodeProcess",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 102,
+          "name": "OpenProcess",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Const",
+          "line_number": 99,
+          "name": "PROCESS_QUERY_LIMITED_INFORMATION",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Const",
+          "line_number": 100,
+          "name": "STILL_ACTIVE",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 296,
           "name": "collect_jsonl_files_recursive",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1019,
+          "line_number": 1079,
           "name": "compute_causal_sequence_loss",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 143,
+          "line_number": 203,
           "name": "compute_file_sha256",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 969,
+          "line_number": 1029,
           "name": "dfs",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 138,
+          "line_number": 198,
           "name": "drop",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 655,
+          "line_number": 715,
           "name": "has_parent_dir_traversal",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 648,
+          "line_number": 90,
+          "name": "is_process_alive",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 708,
           "name": "is_safe_stage_id",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1443,
+          "line_number": 1503,
           "name": "main",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 688,
+          "line_number": 748,
           "name": "paths_overlap",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1377,
+          "line_number": 1437,
           "name": "print_usage",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1362,
+          "line_number": 1422,
           "name": "require_arg_value",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 2488,
+          "line_number": 2550,
           "name": "test_continuation_verification_and_fingerprint_idempotence",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 2563,
+          "line_number": 2625,
           "name": "test_crash_recovery_lock_guard_and_cli_exclusivity",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 2374,
+          "line_number": 2436,
           "name": "test_dag_cycle_detection_and_topological_sort",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 2429,
+          "line_number": 2491,
           "name": "test_validate_stage_definitions_rejects_duplicate_nested_and_unsafe_paths",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 2271,
+          "line_number": 2333,
           "name": "unique_test_dir",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1409,
+          "line_number": 1469,
           "name": "validate_cli_mode_exclusivity",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 2285,
+          "line_number": 2347,
           "name": "write_minimal_working_model",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 2609,
+      "lines": 2703,
       "module_path": "tara_engine::bin::tara_training_stages",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 2267,
+          "line_number": 2329,
           "name": "tests"
         }
       ],
@@ -15504,6 +15551,7 @@
         "from_str",
         "get",
         "get_ref",
+        "id",
         "intersection",
         "into_iter",
         "is_absolute",
@@ -15514,7 +15562,6 @@
         "is_finite",
         "is_ok",
         "is_some",
-        "is_valid_committed_split_dir",
         "iter",
         "join",
         "keys",
@@ -15528,6 +15575,7 @@
         "normalize_text",
         "now",
         "ok",
+        "ok_or_else",
         "open",
         "or_default",
         "parent",
@@ -15554,6 +15602,7 @@
         "temp_dir",
         "test_13gram_boundary_and_normalization_semantics",
         "test_bidirectional_path_containment_rejected",
+        "test_corrupted_committed_manifest_hash_mismatch_fails_closed",
         "test_cross_split_zero_leakage_and_isolation",
         "test_dataset_split_deterministic",
         "test_empty_dataset_rejected",
@@ -15585,20 +15634,21 @@
         "unwrap_or_else",
         "update",
         "vec",
+        "verify_committed_split",
         "write"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "c165a88606e94758c4f3273b0daada3d26e0f8c88f1d5371da81a87164977e36",
+      "dynamic_sha256": "c9b79f7c70d384a7a2779c6df2936f44814987ec9d2c3db0608a5a2ad655577d",
       "exports": [
         {
           "kind": "Struct",
-          "line_number": 212,
+          "line_number": 214,
           "name": "CanonicalSample",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 472,
+          "line_number": 474,
           "name": "DatasetSplitter",
           "visibility": "Public"
         },
@@ -15610,37 +15660,37 @@
         },
         {
           "kind": "Struct",
-          "line_number": 1081,
+          "line_number": 1193,
           "name": "LeakageChecker",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 291,
+          "line_number": 293,
           "name": "LeakageIndex",
           "visibility": "Public"
         },
         {
           "kind": "Enum",
-          "line_number": 278,
+          "line_number": 280,
           "name": "LeakageKind",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 106,
+          "line_number": 108,
           "name": "LeakageReport",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 55,
+          "line_number": 57,
           "name": "SplitRatio",
           "visibility": "Public"
         },
         {
           "kind": "Struct",
-          "line_number": 92,
+          "line_number": 94,
           "name": "SplitReport",
           "visibility": "Public"
         },
@@ -15652,92 +15702,104 @@
         },
         {
           "kind": "Function",
-          "line_number": 1092,
+          "line_number": 1204,
           "name": "check_leakage",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 175,
+          "line_number": 177,
           "name": "clean_substantive_prefix",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 192,
+          "line_number": 194,
           "name": "compute_13gram_hashes",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1237,
+          "line_number": 1349,
           "name": "compute_file_sha256",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1168,
+          "line_number": 1280,
           "name": "decontaminate",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 226,
+          "line_number": 228,
           "name": "extract_canonical_sample",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 132,
+          "line_number": 134,
           "name": "extract_prompt_field",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 154,
+          "line_number": 156,
           "name": "extract_target_field",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 347,
+          "line_number": 349,
           "name": "find_leakage",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 117,
+          "line_number": 119,
           "name": "fnv1a_hash",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 72,
+          "line_number": 74,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 301,
+          "line_number": 303,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 127,
+          "line_number": 129,
           "name": "normalize_text",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 514,
+          "line_number": 626,
           "name": "recover_or_purge_stale_artifacts",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 678,
+          "line_number": 560,
+          "name": "resolve_active_release_dir",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 784,
           "name": "split",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 485,
+          "name": "verify_committed_split",
           "visibility": "Public"
         }
       ],
@@ -15765,7 +15827,7 @@
             "Sha256"
           ],
           "is_public_reexport": false,
-          "line_number": 1238,
+          "line_number": 1350,
           "raw_path": "sha2::{Digest, Sha256}"
         },
         {
@@ -15791,7 +15853,7 @@
             "Read"
           ],
           "is_public_reexport": false,
-          "line_number": 1239,
+          "line_number": 1351,
           "raw_path": "std::io::Read"
         },
         {
@@ -15799,7 +15861,7 @@
             "Write"
           ],
           "is_public_reexport": false,
-          "line_number": 1258,
+          "line_number": 1370,
           "raw_path": "std::io::Write"
         },
         {
@@ -15834,7 +15896,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 1257,
+          "line_number": 1369,
           "raw_path": "super::*"
         },
         {
@@ -15853,175 +15915,187 @@
       "internal_symbols": [
         {
           "kind": "Struct",
-          "line_number": 437,
+          "line_number": 439,
           "name": "DisjointSet",
           "visibility": "Private"
         },
         {
+          "kind": "Static",
+          "line_number": 997,
+          "name": "RELEASE_SEQ",
+          "visibility": "Private"
+        },
+        {
           "kind": "Function",
-          "line_number": 62,
+          "line_number": 64,
           "name": "default",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 448,
+          "line_number": 450,
           "name": "find",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 477,
+          "line_number": 553,
           "name": "is_valid_committed_split_dir",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1260,
+          "line_number": 1372,
           "name": "make_test_dir",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 442,
+          "line_number": 444,
           "name": "new",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1570,
+          "line_number": 1682,
           "name": "read_canonical_samples_from_file",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 629,
+          "line_number": 735,
           "name": "resolve_comparable_path",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1771,
+          "line_number": 1883,
           "name": "test_13gram_boundary_and_normalization_semantics",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1696,
+          "line_number": 1808,
           "name": "test_bidirectional_path_containment_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1353,
+          "line_number": 2061,
+          "name": "test_corrupted_committed_manifest_hash_mismatch_fails_closed",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1465,
           "name": "test_cross_split_zero_leakage_and_isolation",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1271,
+          "line_number": 1383,
           "name": "test_dataset_split_deterministic",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1677,
+          "line_number": 1789,
           "name": "test_empty_dataset_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1607,
+          "line_number": 1719,
           "name": "test_end_to_end_split_contaminate_decontaminate_verify_clean",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1298,
+          "line_number": 1410,
           "name": "test_leakage_detection_and_decontamination",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1869,
+          "line_number": 1981,
           "name": "test_mid_publish_crash_restores_previous_valid_release",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1586,
+          "line_number": 1698,
           "name": "test_nan_split_ratio_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1449,
+          "line_number": 1561,
           "name": "test_near_duplicate_decontaminated",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1415,
+          "line_number": 1527,
           "name": "test_near_duplicate_overlap_detected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1554,
+          "line_number": 1666,
           "name": "test_no_trailing_newline_counted",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1916,
+          "line_number": 2028,
           "name": "test_nonexistent_nested_output_inside_source_rejected_without_creating_dirs",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1809,
+          "line_number": 1921,
           "name": "test_repeated_split_idempotent_and_different_ratio",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1522,
+          "line_number": 1634,
           "name": "test_same_target_different_prompt_detected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1598,
+          "line_number": 1710,
           "name": "test_source_equals_output_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1730,
+          "line_number": 1842,
           "name": "test_stale_artifact_recovery_and_audit_manifest",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1491,
+          "line_number": 1603,
           "name": "test_tara_schema_fields_detected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 459,
+          "line_number": 461,
           "name": "union",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1947,
+      "lines": 2090,
       "module_path": "tara_engine::dataset::splitter",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1256,
+          "line_number": 1368,
           "name": "tests"
         }
       ],
@@ -18701,11 +18775,14 @@
         "evictions_ram_to_disk",
         "evictions_vram_to_disk",
         "evictions_vram_to_ram",
+        "expect",
         "fetch_update",
         "filter",
         "floor",
+        "generation",
         "get",
         "hit_rate",
+        "into_inner",
         "is_empty",
         "is_enabled",
         "is_finite",
@@ -18730,6 +18807,7 @@
         "promotions",
         "ram_hit_rate",
         "ram_hits",
+        "read",
         "record",
         "record_eviction",
         "record_eviction_route",
@@ -18762,14 +18840,17 @@
         "try_record_lookup",
         "unwrap",
         "unwrap_or_default",
+        "unwrap_or_else",
         "values",
         "verify_invariants",
         "vram_hit_rate",
         "vram_hits",
-        "vram_transfer_mib_per_sec"
+        "vram_transfer_mib_per_sec",
+        "was_disabled_during_capture",
+        "write"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "86e208ec5ac8ba2d20114d5b6538f8fef6c4a58f6299c043afe65911e0d1017d",
+      "dynamic_sha256": "c510466eb5c52bf5ab8f818dfb309d3df0b081ab20ca0542b6670cda2e27e82b",
       "exports": [
         {
           "kind": "Const",
@@ -18809,7 +18890,7 @@
         },
         {
           "kind": "Struct",
-          "line_number": 270,
+          "line_number": 276,
           "name": "TelemetryMonitor",
           "visibility": "Public"
         },
@@ -18827,103 +18908,103 @@
         },
         {
           "kind": "Function",
-          "line_number": 751,
+          "line_number": 790,
           "name": "average_transfer_latency_ms",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 637,
+          "line_number": 664,
           "name": "bytes_demoted_vram_to_ram",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 645,
+          "line_number": 672,
           "name": "bytes_evicted_ram_to_disk",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 641,
+          "line_number": 668,
           "name": "bytes_evicted_vram_to_disk",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 629,
+          "line_number": 656,
           "name": "bytes_read_disk",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 633,
+          "line_number": 660,
           "name": "bytes_transferred_vram",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 655,
+          "line_number": 682,
           "name": "cache_hit_rate",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 355,
+          "line_number": 374,
           "name": "disabled_transitions",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 687,
+          "line_number": 714,
           "name": "disk_load_rate",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 588,
+          "line_number": 615,
           "name": "disk_loads",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 726,
+          "line_number": 757,
           "name": "disk_mib_per_sec",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 593,
+          "line_number": 620,
           "name": "disk_misses",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 710,
+          "line_number": 737,
           "name": "elapsed_secs",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 613,
+          "line_number": 640,
           "name": "evictions",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 625,
+          "line_number": 652,
           "name": "evictions_ram_to_disk",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 621,
+          "line_number": 648,
           "name": "evictions_vram_to_disk",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 617,
+          "line_number": 644,
           "name": "evictions_vram_to_ram",
           "visibility": "Public"
         },
@@ -18935,235 +19016,247 @@
         },
         {
           "kind": "Function",
-          "line_number": 665,
+          "line_number": 348,
+          "name": "generation",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 692,
           "name": "hit_rate",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 338,
+          "line_number": 352,
           "name": "is_enabled",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 351,
+          "line_number": 370,
           "name": "is_partial_capture",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 305,
+          "line_number": 313,
           "name": "new",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 597,
+          "line_number": 624,
           "name": "not_found_misses",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 766,
+          "line_number": 805,
           "name": "p50_transfer_latency_ms",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 770,
+          "line_number": 809,
           "name": "p95_transfer_latency_ms",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 774,
+          "line_number": 813,
           "name": "p99_transfer_latency_ms",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 697,
+          "line_number": 724,
           "name": "prefetch_hit_rate",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 605,
+          "line_number": 632,
           "name": "prefetch_hits",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 601,
+          "line_number": 628,
           "name": "prefetched",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 609,
+          "line_number": 636,
           "name": "promotions",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 678,
+          "line_number": 705,
           "name": "ram_hit_rate",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 584,
+          "line_number": 611,
           "name": "ram_hits",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 513,
+          "line_number": 537,
           "name": "record_eviction",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 475,
+          "line_number": 498,
           "name": "record_eviction_route",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 470,
+          "line_number": 493,
           "name": "record_lookup",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 396,
+          "line_number": 418,
           "name": "record_lookup_outcome",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 535,
+          "line_number": 560,
           "name": "record_prefetch",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 531,
+          "line_number": 556,
           "name": "record_promotion",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 518,
+          "line_number": 542,
           "name": "record_promotion_with_duration",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 563,
+          "line_number": 590,
           "name": "record_transfer",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 543,
+          "line_number": 569,
           "name": "record_transfer_route",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 576,
+          "line_number": 603,
           "name": "requests",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 717,
+          "line_number": 744,
           "name": "requests_per_sec",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 360,
+          "line_number": 380,
           "name": "reset",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 778,
+          "line_number": 817,
           "name": "route_stats",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 344,
+          "line_number": 358,
           "name": "set_enabled",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 827,
+          "line_number": 867,
           "name": "snapshot",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 649,
+          "line_number": 676,
           "name": "total_hits",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 744,
+          "line_number": 783,
           "name": "total_transfer_time_ms",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 761,
+          "line_number": 800,
           "name": "transfer_latency_percentile_ms",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 500,
+          "line_number": 524,
           "name": "try_record_eviction",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 436,
+          "line_number": 459,
           "name": "try_record_lookup",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 790,
+          "line_number": 829,
           "name": "verify_invariants",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 669,
+          "line_number": 696,
           "name": "vram_hit_rate",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 580,
+          "line_number": 607,
           "name": "vram_hits",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 735,
+          "line_number": 770,
           "name": "vram_transfer_mib_per_sec",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 309,
+          "line_number": 366,
+          "name": "was_disabled_during_capture",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
+          "line_number": 317,
           "name": "with_reservoir_capacity",
           "visibility": "Public"
         }
@@ -19190,7 +19283,7 @@
             "Arc"
           ],
           "is_public_reexport": false,
-          "line_number": 862,
+          "line_number": 905,
           "raw_path": "std::sync::Arc"
         },
         {
@@ -19222,7 +19315,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 861,
+          "line_number": 904,
           "raw_path": "super::*"
         },
         {
@@ -19265,7 +19358,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 299,
+          "line_number": 307,
           "name": "default",
           "visibility": "Private"
         },
@@ -19307,37 +19400,37 @@
         },
         {
           "kind": "Function",
-          "line_number": 957,
+          "line_number": 1007,
           "name": "test_concurrent_multithreaded_telemetry_and_enable_reset_lifecycle",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 920,
+          "line_number": 963,
           "name": "test_directional_evictions_promotions_routes_and_percentiles",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 888,
+          "line_number": 931,
           "name": "test_lookup_outcomes_prefetch_semantics_and_invariants",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 865,
+          "line_number": 908,
           "name": "test_unknown_tier_rejected_and_never_counted_as_disk_miss",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 997,
+      "lines": 1073,
       "module_path": "tara_engine::inference::telemetry",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 860,
+          "line_number": 903,
           "name": "tests"
         }
       ],
@@ -19352,6 +19445,7 @@
         "InvalidHeader",
         "Some",
         "acquire_key_lock",
+        "active_key_lock_count",
         "admit_to_ram",
         "allocate_tensor",
         "and_then",
@@ -19449,6 +19543,7 @@
         "record_transfer_route",
         "recover_disk_cache",
         "register_disk_key",
+        "release_key_lock_if_idle",
         "remove",
         "remove_dir_all",
         "remove_file",
@@ -19497,7 +19592,7 @@
         "write_safetensors_sharded"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "be5c81994d94f9c902f4aaa9066e8d7ab3aa4a163ddd897a0f1057304f13c6a6",
+      "dynamic_sha256": "0e379e0303d97301183f72d19120b4a4ca94f3dab8846603c5de9f1bf2dc66bb",
       "exports": [
         {
           "kind": "Struct",
@@ -19549,13 +19644,19 @@
         },
         {
           "kind": "Function",
+          "line_number": 1213,
+          "name": "active_key_lock_count",
+          "visibility": "Public"
+        },
+        {
+          "kind": "Function",
           "line_number": 695,
           "name": "admit_to_ram",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 1236,
+          "line_number": 1262,
           "name": "admit_to_ram",
           "visibility": "Public"
         },
@@ -19579,7 +19680,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 1229,
+          "line_number": 1251,
           "name": "evict_to_disk",
           "visibility": "Public"
         },
@@ -19603,7 +19704,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 1243,
+          "line_number": 1273,
           "name": "locate_tier",
           "visibility": "Public"
         },
@@ -19615,7 +19716,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 1207,
+          "line_number": 1221,
           "name": "lookup",
           "visibility": "Public"
         },
@@ -19699,7 +19800,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 1222,
+          "line_number": 1240,
           "name": "try_promote_to_vram",
           "visibility": "Public"
         },
@@ -19711,7 +19812,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 1248,
+          "line_number": 1278,
           "name": "verify_invariants",
           "visibility": "Public"
         },
@@ -19747,7 +19848,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 1253,
+          "line_number": 1283,
           "name": "with_store",
           "visibility": "Public"
         }
@@ -19758,7 +19859,7 @@
             "CudaError"
           ],
           "is_public_reexport": false,
-          "line_number": 1267,
+          "line_number": 1297,
           "raw_path": "crate::cuda::driver::CudaError"
         },
         {
@@ -19773,7 +19874,7 @@
             "CUDABackend"
           ],
           "is_public_reexport": false,
-          "line_number": 1268,
+          "line_number": 1298,
           "raw_path": "crate::inference::backend::{CPUBackend, CUDABackend}"
         },
         {
@@ -19781,7 +19882,7 @@
             "LRUCachePolicy"
           ],
           "is_public_reexport": false,
-          "line_number": 1269,
+          "line_number": 1299,
           "raw_path": "crate::inference::cache_policy::LRUCachePolicy"
         },
         {
@@ -19809,7 +19910,7 @@
             "write_safetensors_sharded"
           ],
           "is_public_reexport": false,
-          "line_number": 1270,
+          "line_number": 1300,
           "raw_path": "crate::safetensors::write_safetensors_sharded"
         },
         {
@@ -19870,7 +19971,7 @@
             "Barrier"
           ],
           "is_public_reexport": false,
-          "line_number": 1266,
+          "line_number": 1296,
           "raw_path": "std::sync::Barrier"
         },
         {
@@ -19880,7 +19981,7 @@
             "Ordering"
           ],
           "is_public_reexport": false,
-          "line_number": 1265,
+          "line_number": 1295,
           "raw_path": "std::sync::atomic::{AtomicBool, AtomicUsize, Ordering}"
         },
         {
@@ -19903,7 +20004,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 1264,
+          "line_number": 1294,
           "raw_path": "super::*"
         }
       ],
@@ -19919,7 +20020,7 @@
         },
         {
           "kind": "Struct",
-          "line_number": 1276,
+          "line_number": 1306,
           "name": "InstrumentedCudaBackend",
           "visibility": "Private"
         },
@@ -19931,19 +20032,19 @@
         },
         {
           "kind": "Function",
-          "line_number": 1312,
+          "line_number": 1342,
           "name": "allocate_tensor",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1308,
+          "line_number": 1338,
           "name": "is_available",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1304,
+          "line_number": 1334,
           "name": "kind",
           "visibility": "Private"
         },
@@ -19955,13 +20056,13 @@
         },
         {
           "kind": "Function",
-          "line_number": 1300,
+          "line_number": 1330,
           "name": "name",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1284,
+          "line_number": 1314,
           "name": "new",
           "visibility": "Private"
         },
@@ -19973,103 +20074,109 @@
         },
         {
           "kind": "Function",
+          "line_number": 1203,
+          "name": "release_key_lock_if_idle",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
           "line_number": 107,
           "name": "sanitize_key_for_filename",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1641,
+          "line_number": 1671,
           "name": "test_admit_to_ram_and_lru_eviction",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1843,
+          "line_number": 1873,
           "name": "test_atomic_disk_persistence_write_failure_corruption_rejection_and_crash_recovery",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1777,
+          "line_number": 1807,
           "name": "test_boundary_capacities_asymmetric_oversized_and_idempotent_promote_evict",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1974,
+          "line_number": 2004,
           "name": "test_concurrent_single_flight_lookup_promotion_and_eviction",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1543,
+          "line_number": 1573,
           "name": "test_cuda_oom_during_promotion_rolls_back_cleanly",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1684,
+          "line_number": 1714,
           "name": "test_hysteresis_blocks_cold_admission",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1673,
+          "line_number": 1703,
           "name": "test_oversized_tensor_rejected_from_ram",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1584,
+          "line_number": 1614,
           "name": "test_oversized_tensor_streaming_and_prefetch_hysteresis_enforcement",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1376,
+          "line_number": 1406,
           "name": "test_ram_to_vram_promotion_single_residency_and_zero_dtoh_on_vram_lookup",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1707,
+          "line_number": 1737,
           "name": "test_single_residency_and_lookup_with_shards",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1352,
+          "line_number": 1382,
           "name": "test_tiered_store_initialization_and_capacities",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1462,
+          "line_number": 1492,
           "name": "test_vram_to_ram_eviction_and_ram_capacity_enforcement",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1326,
+          "line_number": 1356,
           "name": "transfer_to_device",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1341,
+          "line_number": 1371,
           "name": "transfer_to_host",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 2076,
+      "lines": 2112,
       "module_path": "tara_engine::inference::tiered_store",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1263,
+          "line_number": 1293,
           "name": "tests"
         }
       ],
@@ -22585,7 +22692,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "2b24ce958d24f7ab820c92f1f1bd08003708389ef1a9aa9629872a503f5703f4",
+      "dynamic_sha256": "6d175b12079b0a3fff28623c8e2b0d19a27509d48b3d74a0b54552a22d4fb4e0",
       "exports": [
         {
           "kind": "Enum",
@@ -22601,7 +22708,7 @@
         },
         {
           "kind": "Struct",
-          "line_number": 102,
+          "line_number": 104,
           "name": "TrainingOptions",
           "visibility": "Public"
         },
@@ -22619,37 +22726,37 @@
         },
         {
           "kind": "Function",
-          "line_number": 648,
+          "line_number": 650,
           "name": "run_controlled_training",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 663,
+          "line_number": 665,
           "name": "run_controlled_training_with_options",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 369,
+          "line_number": 371,
           "name": "validate",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 467,
+          "line_number": 469,
           "name": "validate_for_execution",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 278,
+          "line_number": 280,
           "name": "verify_continuation_checkpoint_dir",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 224,
+          "line_number": 226,
           "name": "verify_working_model_dir",
           "visibility": "Public"
         }
@@ -22676,7 +22783,7 @@
             "write_safetensors_with_shapes"
           ],
           "is_public_reexport": false,
-          "line_number": 888,
+          "line_number": 890,
           "raw_path": "crate::safetensors::write_safetensors_with_shapes"
         },
         {
@@ -22715,7 +22822,7 @@
             "HashMap"
           ],
           "is_public_reexport": false,
-          "line_number": 889,
+          "line_number": 891,
           "raw_path": "std::collections::HashMap"
         },
         {
@@ -22756,7 +22863,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 887,
+          "line_number": 889,
           "raw_path": "super::*"
         },
         {
@@ -22777,85 +22884,85 @@
       "internal_symbols": [
         {
           "kind": "Function",
-          "line_number": 124,
+          "line_number": 126,
           "name": "has_parent_traversal",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 162,
+          "line_number": 164,
           "name": "is_recognized_checkpoint_artifact",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 130,
+          "line_number": 132,
           "name": "normalize_path_for_comparison",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 156,
+          "line_number": 158,
           "name": "paths_overlap",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 554,
+          "line_number": 556,
           "name": "resolve_and_validate_resume_source",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1064,
+          "line_number": 1066,
           "name": "test_candidate_path_isolation_and_ambiguous_resume_rejection",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1108,
+          "line_number": 1110,
           "name": "test_end_to_end_controlled_training_gate_and_stopping_contract",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 993,
+          "line_number": 995,
           "name": "test_training_options_validate_rejects_invalid_hyperparameters_and_options",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 891,
+          "line_number": 893,
           "name": "unique_test_dir",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 178,
+          "line_number": 180,
           "name": "validate_existing_candidate_dir_safe",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 618,
+          "line_number": 620,
           "name": "verify_staged_candidate_and_probe",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 905,
+          "line_number": 907,
           "name": "write_minimal_model",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 1151,
+      "lines": 1190,
       "module_path": "tara_engine::train_candidate",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 886,
+          "line_number": 888,
           "name": "tests"
         }
       ],
@@ -50895,7 +51002,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate_name": "tara_training_system",
-      "dynamic_sha256": "d3f1781d5e806f9ca5b528c957d57b9e776eb1196f160c8cb6b7856f0c8ba007",
+      "dynamic_sha256": "2ed0bdb158d49a42d795a868641772acca8e9ba438d3cb8ae21e23d8e95ef094",
       "exports": [
         {
           "kind": "Struct",
@@ -50989,7 +51096,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 1675,
+          "line_number": 1687,
           "name": "promote_directory_atomically",
           "visibility": "Public"
         },
@@ -51128,7 +51235,7 @@
             "TaraConfig"
           ],
           "is_public_reexport": false,
-          "line_number": 1776,
+          "line_number": 1788,
           "raw_path": "crate::config::TaraConfig"
         },
         {
@@ -51160,7 +51267,7 @@
             "write_safetensors_with_shapes"
           ],
           "is_public_reexport": false,
-          "line_number": 1777,
+          "line_number": 1789,
           "raw_path": "crate::safetensors::{load_model_weights, write_safetensors_with_shapes}"
         },
         {
@@ -51193,7 +51300,7 @@
             "HashMap"
           ],
           "is_public_reexport": false,
-          "line_number": 1778,
+          "line_number": 1790,
           "raw_path": "std::collections::HashMap"
         },
         {
@@ -51238,7 +51345,7 @@
             "StreamingDatasetReader"
           ],
           "is_public_reexport": false,
-          "line_number": 1775,
+          "line_number": 1787,
           "raw_path": "super::{NativeSelfTrainer, StreamingDatasetReader}"
         },
         {
@@ -51269,7 +51376,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 1745,
+          "line_number": 1757,
           "name": "compute_model_loss",
           "visibility": "Private"
         },
@@ -51288,42 +51395,48 @@
         {
           "kind": "Function",
           "line_number": 1598,
+          "name": "is_promoted_directory_intact",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1612,
           "name": "recover_interrupted_promotion_inner",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1733,
+          "line_number": 1745,
           "name": "softmax",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1781,
+          "line_number": 1793,
           "name": "supervised_cycle_updates_real_model_parameters_and_reduces_loss",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1890,
+          "line_number": 1902,
           "name": "test_single_sample_held_out_validation_cleanly_unavailable",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1983,
+          "line_number": 1995,
           "name": "test_streaming_dataset_reader_format_compatibility",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 2027,
+      "lines": 2039,
       "module_path": "tara_training_system::shared_training_infrastructure::trainer",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1774,
+          "line_number": 1786,
           "name": "tests"
         }
       ],
@@ -53169,5 +53282,5 @@
   "schema_version": "1.0.0",
   "total_files": 240,
   "total_modules": 583,
-  "total_symbols": 2370
+  "total_symbols": 2375
 }

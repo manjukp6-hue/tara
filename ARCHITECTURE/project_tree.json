@@ -16350,8 +16350,8 @@
                       "name": "tara_dataset_splitter.rs",
                       "rel_path": "rust/tara_engine/src/bin/tara_dataset_splitter.rs",
                       "entry_type": "file",
-                      "size_bytes": 28978,
-                      "sha256": "b47048f518e32c10632b802196708489f86d157457126e57fbc6c7af685efc44"
+                      "size_bytes": 29751,
+                      "sha256": "a467181503bbbe848dc2d469543ad3806378f760aecb6c4300c47deb925ca86d"
                     },
                     {
                       "name": "tara_github_sync.rs",
@@ -16371,8 +16371,8 @@
                       "name": "tara_training_stages.rs",
                       "rel_path": "rust/tara_engine/src/bin/tara_training_stages.rs",
                       "entry_type": "file",
-                      "size_bytes": 105221,
-                      "sha256": "55a2920de4a4318bd4f7aa74dd0d81d53cc3f0d9f2daf47b477fb9c49f445589"
+                      "size_bytes": 108982,
+                      "sha256": "f4f081e6d1937e1c8179241fa0f62f3012e9195072a8803c74299975a5b87e14"
                     },
                     {
                       "name": "trace_22layer_gpu_execution.rs",
@@ -16584,8 +16584,8 @@
                       "name": "splitter.rs",
                       "rel_path": "rust/tara_engine/src/dataset/splitter.rs",
                       "entry_type": "file",
-                      "size_bytes": 75513,
-                      "sha256": "c165a88606e94758c4f3273b0daada3d26e0f8c88f1d5371da81a87164977e36"
+                      "size_bytes": 82406,
+                      "sha256": "c9b79f7c70d384a7a2779c6df2936f44814987ec9d2c3db0608a5a2ad655577d"
                     },
                     {
                       "name": "tokenizer_stage.rs",
@@ -16648,15 +16648,15 @@
                       "name": "telemetry.rs",
                       "rel_path": "rust/tara_engine/src/inference/telemetry.rs",
                       "entry_type": "file",
-                      "size_bytes": 36943,
-                      "sha256": "86e208ec5ac8ba2d20114d5b6538f8fef6c4a58f6299c043afe65911e0d1017d"
+                      "size_bytes": 40666,
+                      "sha256": "c510466eb5c52bf5ab8f818dfb309d3df0b081ab20ca0542b6670cda2e27e82b"
                     },
                     {
                       "name": "tiered_store.rs",
                       "rel_path": "rust/tara_engine/src/inference/tiered_store.rs",
                       "entry_type": "file",
-                      "size_bytes": 89787,
-                      "sha256": "be5c81994d94f9c902f4aaa9066e8d7ab3aa4a163ddd897a0f1057304f13c6a6"
+                      "size_bytes": 90851,
+                      "sha256": "0e379e0303d97301183f72d19120b4a4ca94f3dab8846603c5de9f1bf2dc66bb"
                     }
                   ]
                 },
@@ -16762,8 +16762,8 @@
                   "name": "train_candidate.rs",
                   "rel_path": "rust/tara_engine/src/train_candidate.rs",
                   "entry_type": "file",
-                  "size_bytes": 44261,
-                  "sha256": "2b24ce958d24f7ab820c92f1f1bd08003708389ef1a9aa9629872a503f5703f4"
+                  "size_bytes": 46131,
+                  "sha256": "6d175b12079b0a3fff28623c8e2b0d19a27509d48b3d74a0b54552a22d4fb4e0"
                 }
               ]
             },
@@ -18150,8 +18150,8 @@
                   "name": "trainer.rs",
                   "rel_path": "rust/tara_training_system/shared_training_infrastructure/trainer.rs",
                   "entry_type": "file",
-                  "size_bytes": 86977,
-                  "sha256": "d3f1781d5e806f9ca5b528c957d57b9e776eb1196f160c8cb6b7856f0c8ba007"
+                  "size_bytes": 87347,
+                  "sha256": "2ed0bdb158d49a42d795a868641772acca8e9ba438d3cb8ae21e23d8e95ef094"
                 }
               ]
             },

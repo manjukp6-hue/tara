@@ -44,6 +44,8 @@ pub enum SplitterError {
     EmptyDataset(String),
     #[error("Source directory cannot be identical to or contain output directory: {0}")]
     SourceEqualsOutput(String),
+    #[error("Committed split manifest or partition corruption detected in {0}")]
+    ManifestCorrupted(String),
 }
 
 /// Ratio specification for train, validation, and test splits.
@@ -472,16 +474,37 @@ impl DisjointSet {
 pub struct DatasetSplitter;
 
 impl DatasetSplitter {
-    /// Checks whether a directory contains a complete, cryptographically consistent split
-    /// (`split_manifest.json` + `train.jsonl`, `val.jsonl`, `test.jsonl` matching manifest SHA-256s).
-    fn is_valid_committed_split_dir(dir: &Path) -> bool {
+    /// Enforces the 3-state manifest commit contract on an output split directory:
+    /// 1. `split_manifest.json` exists AND all listed partition SHA-256 digests (`train_sha256`,
+    ///    `val_sha256`, `test_sha256`) are non-empty and match on-disk `train.jsonl`, `val.jsonl`,
+    ///    `test.jsonl` -> **Committed** (`Ok(())`).
+    /// 2. `split_manifest.json` is missing -> **Uncommitted** (`Err(SplitterError::Io(NotFound))`).
+    /// 3. `split_manifest.json` exists, but JSON is malformed, a partition file is missing, or any
+    ///    partition file's SHA-256 mismatches the manifest -> **Corrupted / Fail Closed**
+    ///    (`Err(SplitterError::ManifestCorrupted)`).
+    pub fn verify_committed_split<P: AsRef<Path>>(output_dir: P) -> Result<(), SplitterError> {
+        let dir = output_dir.as_ref();
         let manifest_path = dir.join("split_manifest.json");
-        let Ok(manifest_str) = fs::read_to_string(&manifest_path) else {
-            return false;
-        };
-        let Ok(manifest) = serde_json::from_str::<Value>(&manifest_str) else {
-            return false;
-        };
+        if !manifest_path.exists() {
+            return Err(SplitterError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("split_manifest.json missing in {}", dir.display()),
+            )));
+        }
+        let manifest_str = fs::read_to_string(&manifest_path).map_err(|e| {
+            SplitterError::ManifestCorrupted(format!(
+                "Failed to read {}: {}",
+                manifest_path.display(),
+                e
+            ))
+        })?;
+        let manifest: Value = serde_json::from_str(&manifest_str).map_err(|e| {
+            SplitterError::ManifestCorrupted(format!(
+                "Malformed JSON in {}: {}",
+                manifest_path.display(),
+                e
+            ))
+        })?;
         for (file_name, sha_key) in [
             ("train.jsonl", "train_sha256"),
             ("val.jsonl", "val_sha256"),
@@ -489,28 +512,117 @@ impl DatasetSplitter {
         ] {
             let file_path = dir.join(file_name);
             if !file_path.exists() {
-                return false;
+                return Err(SplitterError::ManifestCorrupted(format!(
+                    "Committed manifest exists in {}, but partition file {} is missing",
+                    dir.display(),
+                    file_name
+                )));
             }
-            if let Some(expected_sha) = manifest.get(sha_key).and_then(Value::as_str) {
-                if !expected_sha.is_empty() {
-                    let Ok(actual_sha) = compute_file_sha256(&file_path) else {
-                        return false;
-                    };
-                    if actual_sha != expected_sha {
-                        return false;
-                    }
-                }
+            let expected_sha = manifest
+                .get(sha_key)
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    SplitterError::ManifestCorrupted(format!(
+                        "Missing or empty '{}' in {}",
+                        sha_key,
+                        manifest_path.display()
+                    ))
+                })?;
+            let actual_sha = compute_file_sha256(&file_path).map_err(|e| {
+                SplitterError::ManifestCorrupted(format!(
+                    "Failed to compute SHA-256 for {}: {}",
+                    file_path.display(),
+                    e
+                ))
+            })?;
+            if actual_sha != expected_sha {
+                return Err(SplitterError::ManifestCorrupted(format!(
+                    "SHA-256 mismatch for {}: manifest expected {}, actual on-disk {}",
+                    file_path.display(),
+                    expected_sha,
+                    actual_sha
+                )));
             }
         }
-        true
+        Ok(())
+    }
+
+    /// Checks whether a directory contains a complete, cryptographically consistent split
+    /// (`split_manifest.json` + `train.jsonl`, `val.jsonl`, `test.jsonl` matching manifest SHA-256s).
+    fn is_valid_committed_split_dir(dir: &Path) -> bool {
+        Self::verify_committed_split(dir).is_ok()
+    }
+
+    /// Resolves the active immutable release directory from `current_release.json` (`releases/<release_id>`)
+    /// and verifies both 3-state manifest/partition SHA-256 integrity and `manifest.release_id == pointer.release_id`
+    /// cross-link integrity. Consumers resolving splits through this method obtain true single-pointer atomic visibility.
+    pub fn resolve_active_release_dir<P: AsRef<Path>>(
+        split_dir: P,
+    ) -> Result<PathBuf, SplitterError> {
+        let out_dir = split_dir.as_ref();
+        let current_ptr = out_dir.join("current_release.json");
+        if !current_ptr.exists() {
+            return Err(SplitterError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("current_release.json missing in {}", out_dir.display()),
+            )));
+        }
+        let ptr_str = fs::read_to_string(&current_ptr).map_err(|e| {
+            SplitterError::ManifestCorrupted(format!(
+                "Failed to read {}: {}",
+                current_ptr.display(),
+                e
+            ))
+        })?;
+        let ptr_val: Value = serde_json::from_str(&ptr_str).map_err(|e| {
+            SplitterError::ManifestCorrupted(format!(
+                "Malformed JSON in {}: {}",
+                current_ptr.display(),
+                e
+            ))
+        })?;
+        let rel_id = ptr_val
+            .get("current_release")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty() && !s.contains("..") && !s.contains('/') && !s.contains('\\'))
+            .ok_or_else(|| {
+                SplitterError::ManifestCorrupted(format!(
+                    "Invalid or missing 'current_release' in {}",
+                    current_ptr.display()
+                ))
+            })?;
+
+        let rel_dir = out_dir.join("releases").join(rel_id);
+        Self::verify_committed_split(&rel_dir)?;
+
+        let rel_manifest_str = fs::read_to_string(rel_dir.join("split_manifest.json"))?;
+        let rel_manifest: Value = serde_json::from_str(&rel_manifest_str)?;
+        let manifest_rel_id = rel_manifest
+            .get("release_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if manifest_rel_id != rel_id {
+            return Err(SplitterError::ManifestCorrupted(format!(
+                "Release ID cross-link mismatch: current_release.json points to '{}', but release split_manifest.json has '{}'",
+                rel_id, manifest_rel_id
+            )));
+        }
+
+        Ok(rel_dir)
     }
 
     /// Scans an output directory for incomplete split artifacts (`.tmp_*` files or un-manifested /
     /// partially overwritten `train.jsonl` / `val.jsonl` / `test.jsonl` left behind by an interrupted split).
     ///
-    /// - If a previous valid release backup (`split_manifest.json.bak` + `.bak_*.jsonl` or `current_release.json`)
-    ///   exists when an interrupted overwrite is detected, restores the previous valid split intact.
-    /// - Otherwise (first-run interruption with no prior valid release), purges the uncommitted artifacts.
+    /// Enforces the 3-state manifest commit contract and explicit recovery precedence:
+    /// - **Committed (`manifest exists + hashes match`)**: Cleans up any leftover `.tmp_*` or `.bak_*` files and keeps split intact.
+    /// - **Uncommitted (`manifest missing`)**:
+    ///   1. First tries restoring from the authoritative `current_release.json` target (`resolve_active_release_dir`).
+    ///   2. Otherwise, if a legacy `.bak` bundle (`split_manifest.json.bak` + `.bak_*.jsonl`) exists, restores from `.bak`.
+    ///   3. Otherwise (first-run interruption with no prior valid release), purges the uncommitted partial artifacts.
+    /// - **Corrupted (`manifest exists + hashes mismatch` with no active `.bak` rollback)**:
+    ///   Fails closed with `Err(SplitterError::ManifestCorrupted(...))` rather than silently deleting or ignoring corrupted data.
     pub fn recover_or_purge_stale_artifacts<P: AsRef<Path>>(
         output_dir: P,
     ) -> Result<usize, SplitterError> {
@@ -550,46 +662,40 @@ impl DatasetSplitter {
             }
         }
 
-        // Check if top-level split is complete and matches its manifest SHA-256s
-        if !Self::is_valid_committed_split_dir(out_dir) {
-            let bak_manifest = out_dir.join("split_manifest.json.bak");
-            let bak_train = out_dir.join(".bak_train.jsonl");
-            let bak_val = out_dir.join(".bak_val.jsonl");
-            let bak_test = out_dir.join(".bak_test.jsonl");
+        let bak_manifest = out_dir.join("split_manifest.json.bak");
+        let bak_train = out_dir.join(".bak_train.jsonl");
+        let bak_val = out_dir.join(".bak_val.jsonl");
+        let bak_test = out_dir.join(".bak_test.jsonl");
+        let has_bak_bundle =
+            bak_manifest.exists() && bak_train.exists() && bak_val.exists() && bak_test.exists();
 
-            if bak_manifest.exists() && bak_train.exists() && bak_val.exists() && bak_test.exists() {
-                // Restore previous valid split from backup files
-                fs::rename(&bak_train, out_dir.join("train.jsonl"))?;
-                fs::rename(&bak_val, out_dir.join("val.jsonl"))?;
-                fs::rename(&bak_test, out_dir.join("test.jsonl"))?;
-                fs::rename(&bak_manifest, out_dir.join("split_manifest.json"))?;
-                purged_or_recovered += 1;
-            } else {
-                // Or try restoring from current_release.json if present and valid
-                let current_ptr = out_dir.join("current_release.json");
-                let mut restored_from_release = false;
-                if let Ok(ptr_str) = fs::read_to_string(&current_ptr) {
-                    if let Ok(ptr_val) = serde_json::from_str::<Value>(&ptr_str) {
-                        if let Some(rel_id) = ptr_val.get("current_release").and_then(Value::as_str)
-                        {
-                            let rel_dir = releases_dir.join(rel_id);
-                            if Self::is_valid_committed_split_dir(&rel_dir) {
-                                fs::copy(rel_dir.join("train.jsonl"), out_dir.join("train.jsonl"))?;
-                                fs::copy(rel_dir.join("val.jsonl"), out_dir.join("val.jsonl"))?;
-                                fs::copy(rel_dir.join("test.jsonl"), out_dir.join("test.jsonl"))?;
-                                fs::copy(
-                                    rel_dir.join("split_manifest.json"),
-                                    out_dir.join("split_manifest.json"),
-                                )?;
-                                restored_from_release = true;
-                                purged_or_recovered += 1;
-                            }
-                        }
-                    }
-                }
-
-                if !restored_from_release {
-                    // First-run interruption with no prior valid release: purge uncommitted partial files
+        match Self::verify_committed_split(out_dir) {
+            Ok(()) => {}
+            Err(SplitterError::ManifestCorrupted(msg)) if !has_bak_bundle => {
+                // Manifest exists on disk, no mid-overwrite .bak rollback is active, and hashes mismatch:
+                // fail closed on post-commit corruption!
+                return Err(SplitterError::ManifestCorrupted(msg));
+            }
+            Err(_) => {
+                // Precedence 1: Authoritative valid current_release.json target
+                if let Ok(rel_dir) = Self::resolve_active_release_dir(out_dir) {
+                    fs::copy(rel_dir.join("train.jsonl"), out_dir.join("train.jsonl"))?;
+                    fs::copy(rel_dir.join("val.jsonl"), out_dir.join("val.jsonl"))?;
+                    fs::copy(rel_dir.join("test.jsonl"), out_dir.join("test.jsonl"))?;
+                    fs::copy(
+                        rel_dir.join("split_manifest.json"),
+                        out_dir.join("split_manifest.json"),
+                    )?;
+                    purged_or_recovered += 1;
+                } else if has_bak_bundle {
+                    // Precedence 2: Legacy .bak rollback bundle
+                    fs::rename(&bak_train, out_dir.join("train.jsonl"))?;
+                    fs::rename(&bak_val, out_dir.join("val.jsonl"))?;
+                    fs::rename(&bak_test, out_dir.join("test.jsonl"))?;
+                    fs::rename(&bak_manifest, out_dir.join("split_manifest.json"))?;
+                    purged_or_recovered += 1;
+                } else {
+                    // Precedence 3: First-run interruption with no prior valid release -> purge uncommitted partial files
                     for split_file in [
                         "train.jsonl",
                         "val.jsonl",
@@ -888,11 +994,13 @@ impl DatasetSplitter {
             cluster_members.entry(root).or_default().push(i);
         }
 
+        static RELEASE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let now_stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let release_id = format!("run_{now_stamp}");
+        let seq = RELEASE_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let release_id = format!("run_{now_stamp}_{}_{seq}", std::process::id());
 
         let train_path = out_dir.join("train.jsonl");
         let val_path = out_dir.join("val.jsonl");
@@ -971,6 +1079,7 @@ impl DatasetSplitter {
             "timestamp_ns": now_stamp,
             "splitter_version": env!("CARGO_PKG_VERSION"),
             "split_algorithm_version": "fnv1a_dsu_13gram_v2",
+            "source_canonical_path": s_canon.to_string_lossy(),
             "train_ratio": ratio.train,
             "val_ratio": ratio.val,
             "test_ratio": ratio.test,
@@ -1029,14 +1138,17 @@ impl DatasetSplitter {
         fs::rename(&tmp_ptr, &current_ptr)?;
 
         // 2. Rollback-safe top-level publication:
-        //    If a valid top-level split already exists, preserve .bak backups BEFORE modifying top-level files
-        //    so a crash mid-promotion restores the previous valid split instead of purging it.
+        //    If a valid top-level split already exists, preserve .bak backups and atomically rename
+        //    split_manifest.json -> split_manifest.json.bak BEFORE modifying top-level partition files,
+        //    so a crash mid-promotion leaves split_manifest.json absent + .bak present (restoring the
+        //    previous valid split on recovery), whereas split_manifest.json present + mismatched hashes
+        //    unambiguously signals post-commit corruption.
         let manifest_file = out_dir.join("split_manifest.json");
         if Self::is_valid_committed_split_dir(out_dir) {
             let _ = fs::copy(&train_path, out_dir.join(".bak_train.jsonl"));
             let _ = fs::copy(&val_path, out_dir.join(".bak_val.jsonl"));
             let _ = fs::copy(&test_path, out_dir.join(".bak_test.jsonl"));
-            let _ = fs::copy(&manifest_file, out_dir.join("split_manifest.json.bak"));
+            let _ = fs::rename(&manifest_file, out_dir.join("split_manifest.json.bak"));
         }
 
         let tmp_manifest_file = out_dir.join(format!(".tmp_manifest_{now_stamp}.json"));
@@ -1944,4 +2056,35 @@ mod tests {
 
         let _ = fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn test_corrupted_committed_manifest_hash_mismatch_fails_closed() {
+        let dir = make_test_dir();
+        let src_file = dir.join("source.jsonl");
+        {
+            let mut f = File::create(&src_file).unwrap();
+            for i in 0..40 {
+                writeln!(f, r#"{{"input":"item_q_{i}","output":"item_a_{i}"}}"#).unwrap();
+            }
+        }
+
+        let out_dir = dir.join("splits");
+        let ratio = SplitRatio::new(0.80, 0.10, 0.10).unwrap();
+        let rep = DatasetSplitter::split(&src_file, &out_dir, ratio).unwrap();
+
+        // State 1: manifest exists + all listed hashes match -> committed (Ok)
+        assert!(DatasetSplitter::verify_committed_split(&out_dir).is_ok());
+
+        // State 3: manifest exists + partition file mutated post-commit (no .bak active) -> fail closed!
+        fs::write(&rep.val_path, b"{\"input\":\"tampered\",\"output\":\"corrupted\"}\n").unwrap();
+
+        let verify_res = DatasetSplitter::verify_committed_split(&out_dir);
+        assert!(matches!(verify_res, Err(SplitterError::ManifestCorrupted(_))));
+
+        let recover_res = DatasetSplitter::recover_or_purge_stale_artifacts(&out_dir);
+        assert!(matches!(recover_res, Err(SplitterError::ManifestCorrupted(_))));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
+

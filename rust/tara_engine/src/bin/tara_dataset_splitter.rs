@@ -112,15 +112,19 @@ fn sha256_bytes(data: &[u8]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-/// Computes multiset of 256-bit cryptographic SHA-256 canonical line digests and set of
-/// 256-bit canonical combined digests for a JSONL file.
+/// Two-stage semantic identity key combining a 256-bit cryptographic SHA-256 digest
+/// with exact canonical string equality (mirroring `LeakageIndex`'s collision-free discipline).
+type SemanticKey = ([u8; 32], String);
+
+/// Computes multiset of two-stage `(SHA-256, raw_line)` canonical line keys and set of
+/// two-stage `(SHA-256, combined_text)` canonical sample keys for a JSONL file.
 fn compute_semantic_fingerprints(
     jsonl_path: &Path,
-) -> Result<(HashMap<[u8; 32], usize>, HashSet<[u8; 32]>, usize), Box<dyn std::error::Error>> {
+) -> Result<(HashMap<SemanticKey, usize>, HashSet<SemanticKey>, usize), Box<dyn std::error::Error>> {
     let file = File::open(jsonl_path)?;
     let reader = BufReader::with_capacity(128 * 1024, file);
-    let mut line_multiset: HashMap<[u8; 32], usize> = HashMap::new();
-    let mut combined_set: HashSet<[u8; 32]> = HashSet::new();
+    let mut line_multiset: HashMap<SemanticKey, usize> = HashMap::new();
+    let mut combined_set: HashSet<SemanticKey> = HashSet::new();
     let mut count = 0usize;
 
     for line_res in reader.lines() {
@@ -132,19 +136,21 @@ fn compute_semantic_fingerprints(
         let sample = extract_canonical_sample(trimmed);
         let raw_digest = sha256_bytes(sample.raw_line.as_bytes());
         let comb_digest = sha256_bytes(sample.combined_text.as_bytes());
-        *line_multiset.entry(raw_digest).or_insert(0) += 1;
-        combined_set.insert(comb_digest);
+        *line_multiset
+            .entry((raw_digest, sample.raw_line))
+            .or_insert(0) += 1;
+        combined_set.insert((comb_digest, sample.combined_text));
         count += 1;
     }
 
     Ok((line_multiset, combined_set, count))
 }
 
-/// Computes the union multiset of 256-bit SHA-256 canonical line digests across all input shards.
+/// Computes the union multiset of two-stage `(SHA-256, raw_line)` canonical keys across all input shards.
 fn compute_input_multiset(
     shards: &[ShardSnapshot],
-) -> Result<(HashMap<[u8; 32], usize>, usize), Box<dyn std::error::Error>> {
-    let mut total_multiset: HashMap<[u8; 32], usize> = HashMap::new();
+) -> Result<(HashMap<SemanticKey, usize>, usize), Box<dyn std::error::Error>> {
+    let mut total_multiset: HashMap<SemanticKey, usize> = HashMap::new();
     let mut total_count = 0usize;
     for shard in shards {
         let (ms, _, cnt) = compute_semantic_fingerprints(&shard.path)?;
@@ -342,14 +348,15 @@ pub fn run_splitter_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error
     let sum_parts = report.train_samples + report.val_samples + report.test_samples;
     let count_conservation_pass = sum_parts == report.total_samples && report.total_samples == input_record_count;
 
-    // 4. Verify 256-bit SHA-256 semantic record multiset conservation and cross-partition disjointness
+    // 4. Verify two-stage (256-bit SHA-256 + exact canonical string equality) semantic record multiset
+    //    conservation and cross-partition disjointness
     let (train_ms, train_comb, _) = compute_semantic_fingerprints(Path::new(&report.train_path))?;
     let (val_ms, val_comb, _) = compute_semantic_fingerprints(Path::new(&report.val_path))?;
     let (test_ms, test_comb, _) = compute_semantic_fingerprints(Path::new(&report.test_path))?;
 
-    let mut union_ms: HashMap<[u8; 32], usize> = HashMap::new();
+    let mut union_ms: HashMap<SemanticKey, usize> = HashMap::new();
     for (k, v) in train_ms.iter().chain(val_ms.iter()).chain(test_ms.iter()) {
-        *union_ms.entry(*k).or_insert(0) += *v;
+        *union_ms.entry(k.clone()).or_insert(0) += *v;
     }
     let semantic_conservation_pass = union_ms == input_multiset;
 
@@ -469,7 +476,13 @@ pub fn run_splitter_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error
         .ok()
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
         .and_then(|v| v.get("current_release").and_then(Value::as_str).map(String::from))
-        .unwrap_or_else(|| format!("run_{now_stamp}"));
+        .unwrap_or_else(|| format!("run_{now_stamp}_{}", std::process::id()));
+
+    let source_canon_str = input_dir
+        .canonicalize()
+        .unwrap_or_else(|_| input_dir.clone())
+        .to_string_lossy()
+        .to_string();
 
     let tmp_manifest = output_dir.join(format!(".tmp_audit_manifest_{now_stamp}.json"));
     let shard_json: Vec<Value> = pre_shards
@@ -488,6 +501,7 @@ pub fn run_splitter_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error
         "timestamp_ns": now_stamp,
         "splitter_version": env!("CARGO_PKG_VERSION"),
         "split_algorithm_version": "fnv1a_dsu_13gram_v2",
+        "source_canonical_path": source_canon_str,
         "input_manifest_sha256": input_manifest_sha,
         "input_shards": shard_json,
         "train_ratio": train_ratio,
@@ -560,6 +574,10 @@ pub fn run_splitter_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error
             }
         }
     }
+
+    // Verify 3-state committed split integrity before concluding Gate 13
+    DatasetSplitter::verify_committed_split(&output_dir)?;
+
     println!("  Audit Manifest : {}", manifest_path.display());
     println!("--------------------------------------------------------------------------------");
 

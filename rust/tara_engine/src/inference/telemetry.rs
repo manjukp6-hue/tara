@@ -238,8 +238,10 @@ impl LatencyAndRouteState {
 /// Immutable point-in-time snapshot of all telemetry counters and derived rates.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TelemetrySnapshot {
+    pub generation: u64,
     pub enabled: bool,
     pub is_partial_capture: bool,
+    pub was_disabled_during_capture: bool,
     pub disabled_transitions: u64,
     pub requests: u64,
     pub vram_hits: u64,
@@ -267,7 +269,13 @@ pub struct TelemetrySnapshot {
 }
 
 /// Thread-safe, atomic telemetry monitor for three-tier inference and transfer profiling.
+///
+/// Uses a shared/exclusive `event_lock` (`RwLock<()>`) so concurrent event recorders execute in
+/// parallel under shared read locks, while `snapshot()`, `verify_invariants()`, and `reset()`
+/// acquire an exclusive write lock to guarantee point-in-time cross-counter consistency.
 pub struct TelemetryMonitor {
+    event_lock: std::sync::RwLock<()>,
+    generation: AtomicU64,
     enabled: AtomicBool,
     disabled_transitions: AtomicU64,
 
@@ -308,6 +316,8 @@ impl TelemetryMonitor {
 
     pub fn with_reservoir_capacity(enabled: bool, reservoir_capacity: usize) -> Self {
         Self {
+            event_lock: std::sync::RwLock::new(()),
+            generation: AtomicU64::new(0),
             enabled: AtomicBool::new(enabled),
             disabled_transitions: AtomicU64::new(if enabled { 0 } else { 1 }),
             requests: AtomicU64::new(0),
@@ -335,29 +345,41 @@ impl TelemetryMonitor {
     // Lifecycle & State Control
     // ─────────────────────────────────────────────────────────────────────────
 
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
+    }
+
     pub fn is_enabled(&self) -> bool {
         self.enabled.load(Ordering::SeqCst)
     }
 
     /// Enables or disables telemetry collection. Tracks `disabled_transitions` so downstream
-    /// consumers know if counters represent a partial interval (`is_partial_capture() == true`).
+    /// consumers know if counters represent a partial interval (`was_disabled_during_capture() == true`).
     pub fn set_enabled(&self, enable: bool) {
+        let _guard = self.event_lock.write().unwrap_or_else(|e| e.into_inner());
         let prev = self.enabled.swap(enable, Ordering::SeqCst);
         if prev && !enable {
             self.disabled_transitions.fetch_add(1, Ordering::SeqCst);
         }
     }
 
-    pub fn is_partial_capture(&self) -> bool {
+    pub fn was_disabled_during_capture(&self) -> bool {
         self.disabled_transitions.load(Ordering::SeqCst) > 0
+    }
+
+    pub fn is_partial_capture(&self) -> bool {
+        self.was_disabled_during_capture()
     }
 
     pub fn disabled_transitions(&self) -> u64 {
         self.disabled_transitions.load(Ordering::SeqCst)
     }
 
-    /// Resets all counters, route accumulators, latency reservoirs, and restarts `start_time`.
+    /// Resets all counters, route accumulators, latency reservoirs, increments `generation`,
+    /// and restarts `start_time` under an exclusive write barrier.
     pub fn reset(&self) {
+        let _guard = self.event_lock.write().unwrap_or_else(|e| e.into_inner());
+        self.generation.fetch_add(1, Ordering::SeqCst);
         let currently_enabled = self.is_enabled();
         self.disabled_transitions.store(
             if currently_enabled { 0 } else { 1 },
@@ -386,7 +408,7 @@ impl TelemetryMonitor {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Strongly-Typed Event Recording APIs (Lock-Free Hot Path)
+    // Strongly-Typed Event Recording APIs
     // ─────────────────────────────────────────────────────────────────────────
 
     /// Primary strongly-typed lookup recorder with zero string allocation.
@@ -394,6 +416,7 @@ impl TelemetryMonitor {
     /// - `requests == vram_hits + ram_hits + disk_loads + not_found_misses`
     /// - `prefetch_hits` only increments on `RamHit { from_prefetch: true }` when `prefetch_hits < prefetched`.
     pub fn record_lookup_outcome(&self, outcome: LookupOutcome, size_bytes: u64) {
+        let _guard = self.event_lock.read().unwrap_or_else(|e| e.into_inner());
         if !self.is_enabled() {
             return;
         }
@@ -473,6 +496,7 @@ impl TelemetryMonitor {
 
     /// Records a directional eviction event with full route and byte volume accounting.
     pub fn record_eviction_route(&self, route: EvictionRoute, size_bytes: u64) {
+        let _guard = self.event_lock.read().unwrap_or_else(|e| e.into_inner());
         if !self.is_enabled() {
             return;
         }
@@ -516,6 +540,7 @@ impl TelemetryMonitor {
 
     /// Records a RAM -> VRAM promotion along with its transfer duration in milliseconds.
     pub fn record_promotion_with_duration(&self, size_bytes: usize, duration_ms: f64) {
+        let _guard = self.event_lock.read().unwrap_or_else(|e| e.into_inner());
         if !self.is_enabled() {
             return;
         }
@@ -533,6 +558,7 @@ impl TelemetryMonitor {
     }
 
     pub fn record_prefetch(&self, count: usize) {
+        let _guard = self.event_lock.read().unwrap_or_else(|e| e.into_inner());
         if !self.is_enabled() {
             return;
         }
@@ -541,6 +567,7 @@ impl TelemetryMonitor {
 
     /// Records a directional transfer across tiers with byte volume and latency in milliseconds.
     pub fn record_transfer_route(&self, route: TransferRoute, bytes_count: u64, duration_ms: f64) {
+        let _guard = self.event_lock.read().unwrap_or_else(|e| e.into_inner());
         if !self.is_enabled() {
             return;
         }
@@ -716,28 +743,40 @@ impl TelemetryMonitor {
 
     pub fn requests_per_sec(&self) -> f64 {
         let secs = self.elapsed_secs();
-        if secs <= 1e-9 {
-            0.0
+        if !secs.is_finite() || secs <= 1e-9 {
+            return 0.0;
+        }
+        let rate = self.requests() as f64 / secs;
+        if rate.is_finite() {
+            rate
         } else {
-            self.requests() as f64 / secs
+            0.0
         }
     }
 
     pub fn disk_mib_per_sec(&self) -> f64 {
         let secs = self.elapsed_secs();
-        if secs <= 1e-9 {
-            0.0
+        if !secs.is_finite() || secs <= 1e-9 {
+            return 0.0;
+        }
+        let rate = (self.bytes_read_disk() as f64 / (1024.0 * 1024.0)) / secs;
+        if rate.is_finite() {
+            rate
         } else {
-            (self.bytes_read_disk() as f64 / (1024.0 * 1024.0)) / secs
+            0.0
         }
     }
 
     pub fn vram_transfer_mib_per_sec(&self) -> f64 {
         let secs = self.elapsed_secs();
-        if secs <= 1e-9 {
-            0.0
+        if !secs.is_finite() || secs <= 1e-9 {
+            return 0.0;
+        }
+        let rate = (self.bytes_transferred_vram() as f64 / (1024.0 * 1024.0)) / secs;
+        if rate.is_finite() {
+            rate
         } else {
-            (self.bytes_transferred_vram() as f64 / (1024.0 * 1024.0)) / secs
+            0.0
         }
     }
 
@@ -783,11 +822,12 @@ impl TelemetryMonitor {
             .unwrap_or_default()
     }
 
-    /// Verifies mathematical accounting invariants across all counters:
+    /// Verifies mathematical accounting invariants across all counters under an exclusive write barrier:
     /// 1. `requests == vram_hits + ram_hits + disk_loads + not_found_misses`
     /// 2. `prefetch_hits <= ram_hits + vram_hits` and `prefetch_hits <= prefetched`
     /// 3. `evictions == evictions_vram_to_ram + evictions_vram_to_disk + evictions_ram_to_disk`
     pub fn verify_invariants(&self) -> Result<(), TelemetryError> {
+        let _guard = self.event_lock.write().unwrap_or_else(|e| e.into_inner());
         let reqs = self.requests();
         let sum_outcomes =
             self.vram_hits() + self.ram_hits() + self.disk_loads() + self.not_found_misses();
@@ -825,9 +865,12 @@ impl TelemetryMonitor {
     }
 
     pub fn snapshot(&self) -> TelemetrySnapshot {
+        let _guard = self.event_lock.write().unwrap_or_else(|e| e.into_inner());
         TelemetrySnapshot {
+            generation: self.generation(),
             enabled: self.is_enabled(),
             is_partial_capture: self.is_partial_capture(),
+            was_disabled_during_capture: self.was_disabled_during_capture(),
             disabled_transitions: self.disabled_transitions(),
             requests: self.requests(),
             vram_hits: self.vram_hits(),
@@ -932,7 +975,7 @@ mod tests {
         assert_eq!(tm.bytes_evicted_vram_to_disk(), 200);
         assert_eq!(tm.bytes_evicted_ram_to_disk(), 300);
 
-        // Record 99 fast transfers (1.0 ms) and 1 slow tail transfer (5000.0 ms)
+        // Record 99 fast transfers (1.0 ms) on DiskToRam and 1 slow tail transfer (5000.0 ms) on RamToVram
         for _ in 0..99 {
             tm.record_transfer_route(TransferRoute::DiskToRam, 1024, 1.0);
         }
@@ -942,28 +985,57 @@ mod tests {
         assert_eq!(tm.p95_transfer_latency_ms(), Some(1.0));
         assert_eq!(tm.p99_transfer_latency_ms(), Some(5000.0));
 
+        // Verify per-route reservoirs are isolated from each other
         let disk_route = tm.route_stats(TransferRoute::DiskToRam);
         assert_eq!(disk_route.count, 99);
         assert_eq!(disk_route.bytes, 99 * 1024);
+        assert_eq!(disk_route.p50_duration_ms, Some(1.0));
+        assert_eq!(disk_route.p95_duration_ms, Some(1.0));
+        assert_eq!(disk_route.p99_duration_ms, Some(1.0));
 
         let vram_route = tm.route_stats(TransferRoute::RamToVram);
         assert_eq!(vram_route.count, 1);
         assert_eq!(vram_route.bytes, 2048);
         assert_eq!(vram_route.max_duration_ms, 5000.0);
+        assert_eq!(vram_route.p50_duration_ms, Some(5000.0));
+        assert_eq!(vram_route.p95_duration_ms, Some(5000.0));
+        assert_eq!(vram_route.p99_duration_ms, Some(5000.0));
         assert!(tm.verify_invariants().is_ok());
     }
 
     #[test]
     fn test_concurrent_multithreaded_telemetry_and_enable_reset_lifecycle() {
         let tm = Arc::new(TelemetryMonitor::new(true));
-        let mut handles = Vec::new();
+        assert_eq!(tm.generation(), 0);
+        assert!(tm.requests_per_sec().is_finite());
 
-        for _ in 0..4 {
+        let mut handles = Vec::new();
+        for _ in 0..8 {
             let tm_clone = Arc::clone(&tm);
             handles.push(std::thread::spawn(move || {
-                for _ in 0..250 {
+                for i in 0..500 {
                     tm_clone.record_lookup_outcome(LookupOutcome::VramHit, 16);
                     tm_clone.record_eviction_route(EvictionRoute::RamToDisk, 16);
+                    if i % 25 == 0 {
+                        // Concurrent snapshot and invariant checks must ALWAYS observe cross-counter consistency
+                        tm_clone
+                            .verify_invariants()
+                            .expect("point-in-time invariant check under concurrency must succeed");
+                        let snap = tm_clone.snapshot();
+                        assert_eq!(
+                            snap.requests,
+                            snap.vram_hits
+                                + snap.ram_hits
+                                + snap.disk_loads
+                                + snap.not_found_misses
+                        );
+                        assert_eq!(
+                            snap.evictions,
+                            snap.evictions_vram_to_ram
+                                + snap.evictions_vram_to_disk
+                                + snap.evictions_ram_to_disk
+                        );
+                    }
                 }
             }));
         }
@@ -972,26 +1044,30 @@ mod tests {
             h.join().unwrap();
         }
 
-        assert_eq!(tm.requests(), 1000);
-        assert_eq!(tm.vram_hits(), 1000);
-        assert_eq!(tm.evictions(), 1000);
-        assert_eq!(tm.evictions_ram_to_disk(), 1000);
+        assert_eq!(tm.requests(), 4000);
+        assert_eq!(tm.vram_hits(), 4000);
+        assert_eq!(tm.evictions(), 4000);
+        assert_eq!(tm.evictions_ram_to_disk(), 4000);
         assert!(!tm.is_partial_capture());
+        assert!(!tm.was_disabled_during_capture());
         assert!(tm.verify_invariants().is_ok());
 
         // Disable -> verify partial capture flag -> re-enable -> reset
         tm.set_enabled(false);
         assert!(tm.is_partial_capture());
+        assert!(tm.was_disabled_during_capture());
         tm.record_lookup_outcome(LookupOutcome::VramHit, 16);
-        assert_eq!(tm.requests(), 1000);
+        assert_eq!(tm.requests(), 4000);
 
         tm.set_enabled(true);
         assert!(tm.is_partial_capture());
 
         tm.reset();
+        assert_eq!(tm.generation(), 1);
         assert_eq!(tm.requests(), 0);
         assert!(!tm.is_partial_capture());
         assert_eq!(tm.cache_hit_rate(), None);
         assert!(tm.verify_invariants().is_ok());
     }
 }
+

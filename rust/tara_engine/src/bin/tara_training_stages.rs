@@ -86,6 +86,48 @@ pub struct StageMetadata {
     pub is_continuation_ready: bool,
 }
 
+/// Checks whether an OS process with `pid` is currently alive.
+fn is_process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    if pid == std::process::id() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+        const STILL_ACTIVE: u32 = 259;
+        extern "system" {
+            fn OpenProcess(
+                dwDesiredAccess: u32,
+                bInheritHandle: i32,
+                dwProcessId: u32,
+            ) -> *mut std::ffi::c_void;
+            fn GetExitCodeProcess(hProcess: *mut std::ffi::c_void, lpExitCode: *mut u32) -> i32;
+            fn CloseHandle(hObject: *mut std::ffi::c_void) -> i32;
+        }
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                return false;
+            }
+            let mut exit_code: u32 = 0;
+            let ok = GetExitCodeProcess(handle, &mut exit_code);
+            let _ = CloseHandle(handle);
+            ok != 0 && exit_code == STILL_ACTIVE
+        }
+    }
+    #[cfg(unix)]
+    {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        true
+    }
+}
+
 /// Exclusive process lock guard preventing concurrent orchestrator runs against the same checkpoints root.
 pub struct OrchestratorLockGuard {
     lock_path: PathBuf,
@@ -107,30 +149,48 @@ impl OrchestratorLockGuard {
             "acquired_at_utc": now_iso,
         });
 
-        match fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)
-        {
-            Ok(mut f) => {
-                use std::io::Write;
-                let _ = f.write_all(payload.to_string().as_bytes());
-                let _ = f.sync_all();
-                Ok(Self { lock_path })
+        for attempt in 0..2 {
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+            {
+                Ok(mut f) => {
+                    use std::io::Write;
+                    let _ = f.write_all(payload.to_string().as_bytes());
+                    let _ = f.sync_all();
+                    return Ok(Self { lock_path });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let existing = fs::read_to_string(&lock_path).unwrap_or_default();
+                    let stale_owner = serde_json::from_str::<serde_json::Value>(&existing)
+                        .ok()
+                        .and_then(|v| v.get("pid").and_then(|p| p.as_u64()))
+                        .map(|owner_pid| !is_process_alive(owner_pid as u32))
+                        .unwrap_or(false);
+
+                    if attempt == 0 && stale_owner {
+                        let _ = fs::remove_file(&lock_path);
+                        continue;
+                    }
+                    return Err(format!(
+                        "Concurrent execution rejected: lock file '{}' already exists ({}). Another tara_training_stages process is active.",
+                        lock_path.display(),
+                        existing.trim()
+                    ));
+                }
+                Err(e) => {
+                    return Err(format!(
+                        "Failed to acquire orchestrator lock '{}': {e}",
+                        lock_path.display()
+                    ));
+                }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                let existing = fs::read_to_string(&lock_path).unwrap_or_default();
-                Err(format!(
-                    "Concurrent execution rejected: lock file '{}' already exists ({}). Another tara_training_stages process is active or crashed without releasing its lock.",
-                    lock_path.display(),
-                    existing.trim()
-                ))
-            }
-            Err(e) => Err(format!(
-                "Failed to acquire orchestrator lock '{}': {e}",
-                lock_path.display()
-            )),
         }
+        Err(format!(
+            "Failed to acquire orchestrator lock '{}'",
+            lock_path.display()
+        ))
     }
 }
 
@@ -1847,7 +1907,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let (is_model, _, _) = verify_working_model(&out_path);
         let (is_cont, _, _) = verify_continuation_ready(&out_path);
-        let in_digest = match compute_model_weights_digest(Path::new(&s.input_checkpoint))? {
+        let in_digest = match compute_full_checkpoint_digest(Path::new(&s.input_checkpoint))? {
             Some(d) => d,
             None => "pending".to_string(),
         };
@@ -2079,10 +2139,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let input_model_digest = compute_model_weights_digest(input_path)?
             .ok_or_else(|| format!("Input checkpoint '{}' has no model weights digest", input_cp))?;
+        let input_full_digest = compute_full_checkpoint_digest(input_path)?
+            .unwrap_or_else(|| input_model_digest.clone());
         let ds_insp = inspect_dataset(Path::new(&stage.dataset_path))?;
         let expected_fingerprint = compute_stage_config_fingerprint(
             &stage,
-            &input_model_digest,
+            &input_full_digest,
             &ds_insp.dataset_fingerprint,
             &precision,
         );
@@ -2566,7 +2628,7 @@ mod tests {
         let backup = dir.join("stage1_out.bak_12345");
         let orphan_staging = dir.join("stage1_out.staging_12345");
 
-        // Simulate crash right after renaming target -> backup, before staging -> target completed
+        // Crash Window 1: Crash right after renaming target -> backup, before staging -> target completed
         write_minimal_working_model(&backup, true, false);
         fs::create_dir_all(&orphan_staging).unwrap();
 
@@ -2576,6 +2638,25 @@ mod tests {
         assert!(!backup.exists());
         assert!(!orphan_staging.exists());
 
+        // Crash Window 2: Crash AFTER staging -> target rename succeeded, BEFORE backup deletion completed.
+        // Recovery MUST preserve the newly committed target and remove the superseded backup!
+        fs::write(target.join("STAGE_METADATA.json"), r#"{"commit":"NEW"}"#).unwrap();
+        let stale_backup = dir.join("stage1_out.bak_55555");
+        write_minimal_working_model(&stale_backup, true, false);
+        fs::write(stale_backup.join("STAGE_METADATA.json"), r#"{"commit":"OLD"}"#).unwrap();
+
+        let rolled_back = recover_interrupted_promotion(&target).unwrap();
+        assert!(
+            !rolled_back,
+            "Must NOT roll back when newly promoted target is already intact"
+        );
+        assert!(!stale_backup.exists(), "Stale backup must be cleaned up");
+        let preserved_meta = fs::read_to_string(target.join("STAGE_METADATA.json")).unwrap();
+        assert!(
+            preserved_meta.contains("NEW"),
+            "Newly committed target must be preserved, got: {preserved_meta}"
+        );
+
         // Now test full atomic promotion replacing target with new staging
         let new_staging = dir.join("stage1_out.staging_99999");
         write_minimal_working_model(&new_staging, true, false);
@@ -2583,12 +2664,25 @@ mod tests {
         assert!(target.exists() && verify_working_model(&target).0);
         assert!(!new_staging.exists());
 
-        // Test OrchestratorLockGuard prevents concurrent lock acquisition and cleans up on drop
+        // Test OrchestratorLockGuard prevents concurrent lock acquisition by live process and cleans up on drop
         {
             let _guard = OrchestratorLockGuard::acquire(&dir).unwrap();
             assert!(OrchestratorLockGuard::acquire(&dir).is_err());
         }
         assert!(OrchestratorLockGuard::acquire(&dir).is_ok());
+
+        // Test OrchestratorLockGuard automatically recovers stale lock left by dead PID
+        let lock_file = dir.join(".orchestrator.lock");
+        fs::write(
+            &lock_file,
+            r#"{"pid":0,"acquired_at_utc":"2026-01-01T00:00:00Z"}"#,
+        )
+        .unwrap();
+        {
+            let _recovered_guard = OrchestratorLockGuard::acquire(&dir)
+                .expect("Stale lock from dead PID must be recovered automatically");
+            assert!(OrchestratorLockGuard::acquire(&dir).is_err());
+        }
 
         // Test CLI mutual exclusion
         assert!(validate_cli_mode_exclusivity(Some(1), Some("s1"), false, None, None, None).is_err());

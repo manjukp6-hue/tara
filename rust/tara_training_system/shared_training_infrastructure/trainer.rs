@@ -1595,6 +1595,20 @@ pub fn recover_interrupted_promotion(target_dir: &Path) -> Result<bool, TrainerE
     recover_interrupted_promotion_inner(target_dir, None)
 }
 
+fn is_promoted_directory_intact(dir: &Path) -> bool {
+    if !dir.exists() || !dir.is_dir() {
+        return false;
+    }
+    if dir.join("world_model_state.json").exists() {
+        return true;
+    }
+    let has_config = dir.join("config.json").exists();
+    let has_tokenizer = dir.join("tokenizer.json").exists();
+    let has_weights = dir.join("model.safetensors").exists()
+        || dir.join("model.safetensors.index.json").exists();
+    has_config && has_tokenizer && has_weights
+}
+
 fn recover_interrupted_promotion_inner(
     target_dir: &Path,
     active_staging: Option<&Path>,
@@ -1636,16 +1650,14 @@ fn recover_interrupted_promotion_inner(
     }
 
     backups.sort();
-    let target_intact = target_dir.exists()
-        && (target_dir.join("config.json").exists()
-            || target_dir.join("world_model_state.json").exists());
+    let target_intact = is_promoted_directory_intact(target_dir);
     let mut recovered = false;
 
     if !target_intact {
         if let Some(valid_bak) = backups
             .iter()
             .rev()
-            .find(|b| b.join("config.json").exists() || b.join("world_model_state.json").exists())
+            .find(|b| is_promoted_directory_intact(b))
             .cloned()
         {
             if target_dir.exists() {
@@ -1658,7 +1670,7 @@ fn recover_interrupted_promotion_inner(
     }
 
     // If target is now intact, clean up stale backups and orphan staging dirs (excluding active_staging)
-    if target_dir.exists() {
+    if is_promoted_directory_intact(target_dir) {
         for b in backups {
             let _ = fs::remove_dir_all(b);
         }

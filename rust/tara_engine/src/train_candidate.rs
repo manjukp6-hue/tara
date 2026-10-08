@@ -6,10 +6,10 @@
 //!    zero `batch_size`, `max_steps`, `checkpoint_interval`, out-of-range `weight_decay`,
 //!    and invalid `device`/`precision` strings with dedicated `TrainCandidateError::InvalidOption`.
 //! 2. **Explicit Stopping Contract (`max_epochs` vs `max_steps`)**:
-//!    Enforces `1 <= max_epochs <= 100` and `max_steps >= 1` (when set), documenting and
-//!    recording the bounded stopping policy (`FullEpochs` vs `StepBoundedEpochs` where
-//!    `effective_stop = min(max_epochs, max_steps)`) and the exact `effective_stop_reason`
-//!    (`"max_steps_reached"` vs `"max_epochs_reached"`).
+//!    Enforces `1 <= max_epochs <= 100` and `max_steps >= 1` (when set) as two orthogonal
+//!    stopping constraints (`completed_epochs >= max_epochs || optimizer_steps >= max_steps`),
+//!    recording the stopping policy (`FullEpochs` vs `StepBoundedEpochs`) and the exact
+//!    `effective_stop_reason` (`"max_steps_reached"` vs `"max_epochs_reached"`).
 //! 3. **Deterministic & Verified Resume Source Resolution**:
 //!    Resolves a single canonical continuation source (`resume_from` -> `checkpoint_dir` -> `model_dir`),
 //!    rejects ambiguous dual-checkpoint state when `resume_from` is omitted, and verifies
@@ -55,13 +55,13 @@ pub enum TrainCandidateError {
     Trainer(#[from] TrainerError),
 }
 
-/// Explicit stopping budget contract governing how `max_epochs` and `max_steps` interact.
+/// Explicit stopping budget contract governing how orthogonal `max_epochs` and `max_steps` constraints interact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoppingContract {
-    /// Run for `max_epochs` full dataset pass(es) with no step cap.
+    /// Run until `completed_epochs >= max_epochs` with no optimizer-step ceiling.
     FullEpochs { max_epochs: usize },
-    /// Run for at most `max_epochs` pass(es), terminating early as soon as `max_steps`
-    /// optimizer updates are completed (`effective_stop = min(max_epochs, max_steps)`).
+    /// Run with both constraints active, stopping as soon as either
+    /// `completed_epochs >= max_epochs` OR `optimizer_steps >= max_steps` is reached.
     StepBoundedEpochs {
         max_epochs: usize,
         max_steps: usize,
@@ -93,7 +93,9 @@ impl StoppingContract {
     pub fn contract_name(&self) -> &'static str {
         match self {
             Self::FullEpochs { .. } => "full_epochs",
-            Self::StepBoundedEpochs { .. } => "min(max_epochs, max_steps)",
+            Self::StepBoundedEpochs { .. } => {
+                "first_reached(completed_epochs >= max_epochs, optimizer_steps >= max_steps)"
+            }
         }
     }
 }
@@ -1108,7 +1110,8 @@ mod tests {
     fn test_end_to_end_controlled_training_gate_and_stopping_contract() {
         let root = unique_test_dir("e2e_controlled");
         let model_dir = root.join("base_model");
-        let cand_dir = root.join("published_candidate");
+        let cand_dir = root.join("published_candidate_step_bound");
+        let cand_dir_epoch_bound = root.join("published_candidate_epoch_bound");
         let ds_dir = root.join("dataset");
         fs::create_dir_all(&ds_dir).unwrap();
         write_minimal_model(&model_dir, false);
@@ -1119,12 +1122,13 @@ mod tests {
         )
         .unwrap();
 
-        let opts = TrainingOptions {
+        // Case 1: max_epochs = 100, max_steps = 3 -> stops at exactly 3 optimizer steps (during epoch 1, not 3 epochs)
+        let opts_step_bound = TrainingOptions {
             dataset_dir: Some(ds_dir.to_string_lossy().to_string()),
             candidate_dir: Some(cand_dir.to_string_lossy().to_string()),
             learning_rate: Some(1e-3),
             batch_size: Some(1),
-            max_steps: Some(2),
+            max_steps: Some(3),
             device: Some("cpu".to_string()),
             precision: Some("fp32".to_string()),
             ..Default::default()
@@ -1133,19 +1137,54 @@ mod tests {
         let report = run_controlled_training_with_options(
             &model_dir.to_string_lossy(),
             &root.to_string_lossy(),
-            5,
-            opts,
+            100,
+            opts_step_bound,
         )
-        .expect("controlled training should pass gate");
+        .expect("step-bounded controlled training should pass gate");
 
         assert_eq!(report["status"], "COMPLETED");
         assert_eq!(report["controlled_gate_status"], "PASSED");
-        assert_eq!(report["stopping_contract"], "min(max_epochs, max_steps)");
+        assert_eq!(
+            report["stopping_contract"],
+            "first_reached(completed_epochs >= max_epochs, optimizer_steps >= max_steps)"
+        );
         assert_eq!(report["effective_stop_reason"], "max_steps_reached");
-        assert_eq!(report["steps"].as_u64(), Some(2));
+        assert_eq!(report["steps"].as_u64(), Some(3));
         assert!(verify_continuation_checkpoint_dir(&cand_dir).is_ok());
+
+        // Case 2: max_epochs = 2, max_steps = 1000 -> stops after completing 2 epochs (8 optimizer steps)
+        let opts_epoch_bound = TrainingOptions {
+            dataset_dir: Some(ds_dir.to_string_lossy().to_string()),
+            candidate_dir: Some(cand_dir_epoch_bound.to_string_lossy().to_string()),
+            learning_rate: Some(1e-3),
+            batch_size: Some(1),
+            max_steps: Some(1000),
+            device: Some("cpu".to_string()),
+            precision: Some("fp32".to_string()),
+            ..Default::default()
+        };
+
+        let report_epoch = run_controlled_training_with_options(
+            &model_dir.to_string_lossy(),
+            &root.to_string_lossy(),
+            2,
+            opts_epoch_bound,
+        )
+        .expect("epoch-bounded controlled training should pass gate");
+
+        assert_eq!(report_epoch["status"], "COMPLETED");
+        assert_eq!(report_epoch["controlled_gate_status"], "PASSED");
+        assert_eq!(
+            report_epoch["stopping_contract"],
+            "first_reached(completed_epochs >= max_epochs, optimizer_steps >= max_steps)"
+        );
+        assert_eq!(report_epoch["effective_stop_reason"], "max_epochs_reached");
+        assert_eq!(report_epoch["epochs"].as_u64(), Some(2));
+        assert_eq!(report_epoch["steps"].as_u64(), Some(6));
+        assert!(verify_continuation_checkpoint_dir(&cand_dir_epoch_bound).is_ok());
 
         let _ = fs::remove_dir_all(&root);
     }
 }
+
 

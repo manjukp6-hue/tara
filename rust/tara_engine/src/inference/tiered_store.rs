@@ -1200,44 +1200,74 @@ impl ConcurrentTieredTensorStore {
         )
     }
 
+    fn release_key_lock_if_idle(&self, key: &str) {
+        let mut map = self.key_locks.lock().unwrap();
+        if let Some(arc) = map.get(key) {
+            if Arc::strong_count(arc) == 1 {
+                map.remove(key);
+            }
+        }
+    }
+
+    /// Returns the number of currently active in-flight key lock entries.
+    pub fn active_key_lock_count(&self) -> usize {
+        self.key_locks.lock().unwrap().len()
+    }
+
     /// Concurrent single-flight lookup across `VRAM -> RAM -> Disk`.
     /// When $N$ threads simultaneously request the same uncached `key`, the per-key single-flight
     /// lock serializes the miss so only the first thread loads `key` from disk and admits it to
     /// RAM/VRAM, while the remaining $N-1$ threads hit the admitted in-memory entry in $O(1)$.
     pub fn lookup(&self, key: &str) -> Result<DeviceTensor, SafeTensorsError> {
-        let key_mutex = self.acquire_key_lock(key);
-        let _key_guard = key_mutex.lock().unwrap();
+        let res = {
+            let key_mutex = self.acquire_key_lock(key);
+            let _key_guard = key_mutex.lock().unwrap();
 
-        let mut store_guard = self.store.lock().unwrap();
-        // Fast check in VRAM or RAM before locking shard_manager
-        if store_guard.vram_pool.contains_key(key) || store_guard.ram_pool.contains_key(key) {
-            let mut dummy_mgr = self.shard_manager.lock().unwrap();
-            return store_guard.lookup_device(key, &mut dummy_mgr);
-        }
-
-        let mut shard_guard = self.shard_manager.lock().unwrap();
-        store_guard.lookup_device(key, &mut shard_guard)
+            let mut store_guard = self.store.lock().unwrap();
+            // Fast check in VRAM or RAM before locking shard_manager
+            if store_guard.vram_pool.contains_key(key) || store_guard.ram_pool.contains_key(key) {
+                let mut dummy_mgr = self.shard_manager.lock().unwrap();
+                store_guard.lookup_device(key, &mut dummy_mgr)
+            } else {
+                let mut shard_guard = self.shard_manager.lock().unwrap();
+                store_guard.lookup_device(key, &mut shard_guard)
+            }
+        };
+        self.release_key_lock_if_idle(key);
+        res
     }
 
     pub fn try_promote_to_vram(&self, key: &str) -> bool {
-        let key_mutex = self.acquire_key_lock(key);
-        let _key_guard = key_mutex.lock().unwrap();
-        let mut store_guard = self.store.lock().unwrap();
-        store_guard.try_promote_to_vram(key)
+        let res = {
+            let key_mutex = self.acquire_key_lock(key);
+            let _key_guard = key_mutex.lock().unwrap();
+            let mut store_guard = self.store.lock().unwrap();
+            store_guard.try_promote_to_vram(key)
+        };
+        self.release_key_lock_if_idle(key);
+        res
     }
 
     pub fn evict_to_disk(&self, key: &str) -> Result<bool, SafeTensorsError> {
-        let key_mutex = self.acquire_key_lock(key);
-        let _key_guard = key_mutex.lock().unwrap();
-        let mut store_guard = self.store.lock().unwrap();
-        store_guard.evict_to_disk(key)
+        let res = {
+            let key_mutex = self.acquire_key_lock(key);
+            let _key_guard = key_mutex.lock().unwrap();
+            let mut store_guard = self.store.lock().unwrap();
+            store_guard.evict_to_disk(key)
+        };
+        self.release_key_lock_if_idle(key);
+        res
     }
 
     pub fn admit_to_ram(&self, key: &str, tensor: Arc<Vec<f32>>) -> bool {
-        let key_mutex = self.acquire_key_lock(key);
-        let _key_guard = key_mutex.lock().unwrap();
-        let mut store_guard = self.store.lock().unwrap();
-        store_guard.admit_to_ram(key, tensor)
+        let res = {
+            let key_mutex = self.acquire_key_lock(key);
+            let _key_guard = key_mutex.lock().unwrap();
+            let mut store_guard = self.store.lock().unwrap();
+            store_guard.admit_to_ram(key, tensor)
+        };
+        self.release_key_lock_if_idle(key);
+        res
     }
 
     pub fn locate_tier(&self, key: &str) -> TierLocation {
@@ -2070,7 +2100,13 @@ mod tests {
             h.join().unwrap();
         }
 
+        assert_eq!(
+            concurrent_store.active_key_lock_count(),
+            0,
+            "Idle per-key locks must be pruned after operations finish"
+        );
         assert!(concurrent_store.verify_invariants().is_ok());
         let _ = fs::remove_dir_all(&test_dir);
     }
 }
+

@@ -2456,6 +2456,7 @@
         "canonicalize",
         "capture_input_snapshot",
         "check_leakage",
+        "clone",
         "collect",
         "compute_file_sha256",
         "compute_input_multiset",
@@ -2466,7 +2467,6 @@
         "decontaminate",
         "display",
         "elapsed",
-        "entry",
         "execution",
         "exists",
         "extension",
@@ -2479,6 +2479,7 @@
         "from",
         "from_str",
         "get",
+        "id",
         "into",
         "is_dir",
         "is_disjoint",
@@ -2524,10 +2525,11 @@
         "unwrap_or",
         "unwrap_or_default",
         "unwrap_or_else",
-        "vec"
+        "vec",
+        "verify_committed_split"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "b47048f518e32c10632b802196708489f86d157457126e57fbc6c7af685efc44",
+      "dynamic_sha256": "a467181503bbbe848dc2d469543ad3806378f760aecb6c4300c47deb925ca86d",
       "enums": [],
       "functions": [
         "capture_input_snapshot",
@@ -2544,7 +2546,7 @@
       ],
       "in_links": [],
       "is_test": true,
-      "lines": 699,
+      "lines": 717,
       "module": "tara_engine::bin::tara_dataset_splitter",
       "out_links": [
         "rust/tara_engine/src/dataset/mod.rs",
@@ -2656,6 +2658,7 @@
     "rust/tara_engine/src/bin/tara_training_stages.rs": {
       "calls": [
         "Err",
+        "OpenProcess",
         "Some",
         "acquire",
         "all",
@@ -2697,6 +2700,7 @@
         "evaluate_checkpoint_model",
         "exists",
         "exp",
+        "expect",
         "extension",
         "file_name",
         "file_type",
@@ -2720,6 +2724,7 @@
         "is_file",
         "is_finite",
         "is_none",
+        "is_null",
         "is_ok",
         "is_some",
         "is_symlink",
@@ -2801,9 +2806,12 @@
         "write_safetensors_with_shapes"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "55a2920de4a4318bd4f7aa74dd0d81d53cc3f0d9f2daf47b477fb9c49f445589",
+      "dynamic_sha256": "f4f081e6d1937e1c8179241fa0f62f3012e9195072a8803c74299975a5b87e14",
       "enums": [],
       "functions": [
+        "CloseHandle",
+        "GetExitCodeProcess",
+        "OpenProcess",
         "acquire",
         "build_default_stages",
         "collect_jsonl_files_recursive",
@@ -2817,6 +2825,7 @@
         "evaluate_checkpoint_model",
         "has_parent_dir_traversal",
         "inspect_dataset",
+        "is_process_alive",
         "is_safe_stage_id",
         "main",
         "normalize_for_comparison",
@@ -2841,7 +2850,7 @@
       ],
       "in_links": [],
       "is_test": true,
-      "lines": 2609,
+      "lines": 2703,
       "module": "tara_engine::bin::tara_training_stages",
       "out_links": [
         "rust/tara_engine/src/config.rs",
@@ -4950,6 +4959,7 @@
         "from_str",
         "get",
         "get_ref",
+        "id",
         "intersection",
         "into_iter",
         "is_absolute",
@@ -4960,7 +4970,6 @@
         "is_finite",
         "is_ok",
         "is_some",
-        "is_valid_committed_split_dir",
         "iter",
         "join",
         "keys",
@@ -4974,6 +4983,7 @@
         "normalize_text",
         "now",
         "ok",
+        "ok_or_else",
         "open",
         "or_default",
         "parent",
@@ -5000,6 +5010,7 @@
         "temp_dir",
         "test_13gram_boundary_and_normalization_semantics",
         "test_bidirectional_path_containment_rejected",
+        "test_corrupted_committed_manifest_hash_mismatch_fails_closed",
         "test_cross_split_zero_leakage_and_isolation",
         "test_dataset_split_deterministic",
         "test_empty_dataset_rejected",
@@ -5031,10 +5042,11 @@
         "unwrap_or_else",
         "update",
         "vec",
+        "verify_committed_split",
         "write"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "c165a88606e94758c4f3273b0daada3d26e0f8c88f1d5371da81a87164977e36",
+      "dynamic_sha256": "c9b79f7c70d384a7a2779c6df2936f44814987ec9d2c3db0608a5a2ad655577d",
       "enums": [
         "LeakageKind",
         "SplitterError"
@@ -5058,10 +5070,12 @@
         "normalize_text",
         "read_canonical_samples_from_file",
         "recover_or_purge_stale_artifacts",
+        "resolve_active_release_dir",
         "resolve_comparable_path",
         "split",
         "test_13gram_boundary_and_normalization_semantics",
         "test_bidirectional_path_containment_rejected",
+        "test_corrupted_committed_manifest_hash_mismatch_fails_closed",
         "test_cross_split_zero_leakage_and_isolation",
         "test_dataset_split_deterministic",
         "test_empty_dataset_rejected",
@@ -5078,14 +5092,15 @@
         "test_source_equals_output_rejected",
         "test_stale_artifact_recovery_and_audit_manifest",
         "test_tara_schema_fields_detected",
-        "union"
+        "union",
+        "verify_committed_split"
       ],
       "in_links": [
         "rust/tara_engine/src/bin/tara_dataset_splitter.rs",
         "rust/tara_engine/src/dataset/mod.rs"
       ],
       "is_test": true,
-      "lines": 1947,
+      "lines": 2090,
       "module": "tara_engine::dataset::splitter",
       "out_links": [
         "rust/tara_engine/src/dataset/mod.rs"
@@ -6047,11 +6062,14 @@
         "evictions_ram_to_disk",
         "evictions_vram_to_disk",
         "evictions_vram_to_ram",
+        "expect",
         "fetch_update",
         "filter",
         "floor",
+        "generation",
         "get",
         "hit_rate",
+        "into_inner",
         "is_empty",
         "is_enabled",
         "is_finite",
@@ -6076,6 +6094,7 @@
         "promotions",
         "ram_hit_rate",
         "ram_hits",
+        "read",
         "record",
         "record_eviction",
         "record_eviction_route",
@@ -6108,14 +6127,17 @@
         "try_record_lookup",
         "unwrap",
         "unwrap_or_default",
+        "unwrap_or_else",
         "values",
         "verify_invariants",
         "vram_hit_rate",
         "vram_hits",
-        "vram_transfer_mib_per_sec"
+        "vram_transfer_mib_per_sec",
+        "was_disabled_during_capture",
+        "write"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "86e208ec5ac8ba2d20114d5b6538f8fef6c4a58f6299c043afe65911e0d1017d",
+      "dynamic_sha256": "c510466eb5c52bf5ab8f818dfb309d3df0b081ab20ca0542b6670cda2e27e82b",
       "enums": [
         "EvictionRoute",
         "LookupOutcome",
@@ -6145,6 +6167,7 @@
         "evictions_vram_to_ram",
         "from_str",
         "from_tiers",
+        "generation",
         "hit_rate",
         "is_enabled",
         "is_partial_capture",
@@ -6188,6 +6211,7 @@
         "vram_hit_rate",
         "vram_hits",
         "vram_transfer_mib_per_sec",
+        "was_disabled_during_capture",
         "with_reservoir_capacity"
       ],
       "in_links": [
@@ -6195,7 +6219,7 @@
         "rust/tara_engine/src/inference/tiered_store.rs"
       ],
       "is_test": true,
-      "lines": 997,
+      "lines": 1073,
       "module": "tara_engine::inference::telemetry",
       "out_links": [
         "rust/tara_engine/src/inference/mod.rs"
@@ -6216,6 +6240,7 @@
         "InvalidHeader",
         "Some",
         "acquire_key_lock",
+        "active_key_lock_count",
         "admit_to_ram",
         "allocate_tensor",
         "and_then",
@@ -6313,6 +6338,7 @@
         "record_transfer_route",
         "recover_disk_cache",
         "register_disk_key",
+        "release_key_lock_if_idle",
         "remove",
         "remove_dir_all",
         "remove_file",
@@ -6361,12 +6387,13 @@
         "write_safetensors_sharded"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "be5c81994d94f9c902f4aaa9066e8d7ab3aa4a163ddd897a0f1057304f13c6a6",
+      "dynamic_sha256": "0e379e0303d97301183f72d19120b4a4ca94f3dab8846603c5de9f1bf2dc66bb",
       "enums": [
         "TierLocation"
       ],
       "functions": [
         "acquire_key_lock",
+        "active_key_lock_count",
         "admit_to_ram",
         "align_up_bytes",
         "allocate_tensor",
@@ -6390,6 +6417,7 @@
         "read_and_verify_disk_artifact",
         "recover_disk_cache",
         "register_disk_key",
+        "release_key_lock_if_idle",
         "sanitize_key_for_filename",
         "sync_disk_catalog",
         "test_admit_to_ram_and_lru_eviction",
@@ -6420,7 +6448,7 @@
         "rust/tara_engine/src/inference/mod.rs"
       ],
       "is_test": true,
-      "lines": 2076,
+      "lines": 2112,
       "module": "tara_engine::inference::tiered_store",
       "out_links": [
         "rust/tara_engine/src/cuda/driver.rs",
@@ -7337,7 +7365,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "2b24ce958d24f7ab820c92f1f1bd08003708389ef1a9aa9629872a503f5703f4",
+      "dynamic_sha256": "6d175b12079b0a3fff28623c8e2b0d19a27509d48b3d74a0b54552a22d4fb4e0",
       "enums": [
         "StoppingContract",
         "TrainCandidateError"
@@ -7371,7 +7399,7 @@
         "rust/tara_engine/src/lib.rs"
       ],
       "is_test": true,
-      "lines": 1151,
+      "lines": 1190,
       "module": "tara_engine::train_candidate",
       "out_links": [
         "rust/tara_engine/src/config.rs",
@@ -17505,7 +17533,7 @@
         "write_safetensors_with_shapes"
       ],
       "crate": "tara_training_system",
-      "dynamic_sha256": "d3f1781d5e806f9ca5b528c957d57b9e776eb1196f160c8cb6b7856f0c8ba007",
+      "dynamic_sha256": "2ed0bdb158d49a42d795a868641772acca8e9ba438d3cb8ae21e23d8e95ef094",
       "enums": [
         "TrainerError",
         "TrainingDevice"
@@ -17518,6 +17546,7 @@
         "from_str",
         "get_status",
         "get_step",
+        "is_promoted_directory_intact",
         "load_state",
         "new",
         "next_sample",
@@ -17560,7 +17589,7 @@
         "rust/tara_server/src/brain.rs"
       ],
       "is_test": true,
-      "lines": 2027,
+      "lines": 2039,
       "module": "tara_training_system::shared_training_infrastructure::trainer",
       "out_links": [
         "rust/tara_engine/src/config.rs",

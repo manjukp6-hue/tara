@@ -472,8 +472,45 @@ impl DisjointSet {
 pub struct DatasetSplitter;
 
 impl DatasetSplitter {
-    /// Scans an output directory for incomplete split artifacts (`.tmp_*` files or un-manifested
-    /// `train.jsonl` / `val.jsonl` / `test.jsonl` left behind by an interrupted split) and purges them.
+    /// Checks whether a directory contains a complete, cryptographically consistent split
+    /// (`split_manifest.json` + `train.jsonl`, `val.jsonl`, `test.jsonl` matching manifest SHA-256s).
+    fn is_valid_committed_split_dir(dir: &Path) -> bool {
+        let manifest_path = dir.join("split_manifest.json");
+        let Ok(manifest_str) = fs::read_to_string(&manifest_path) else {
+            return false;
+        };
+        let Ok(manifest) = serde_json::from_str::<Value>(&manifest_str) else {
+            return false;
+        };
+        for (file_name, sha_key) in [
+            ("train.jsonl", "train_sha256"),
+            ("val.jsonl", "val_sha256"),
+            ("test.jsonl", "test_sha256"),
+        ] {
+            let file_path = dir.join(file_name);
+            if !file_path.exists() {
+                return false;
+            }
+            if let Some(expected_sha) = manifest.get(sha_key).and_then(Value::as_str) {
+                if !expected_sha.is_empty() {
+                    let Ok(actual_sha) = compute_file_sha256(&file_path) else {
+                        return false;
+                    };
+                    if actual_sha != expected_sha {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// Scans an output directory for incomplete split artifacts (`.tmp_*` files or un-manifested /
+    /// partially overwritten `train.jsonl` / `val.jsonl` / `test.jsonl` left behind by an interrupted split).
+    ///
+    /// - If a previous valid release backup (`split_manifest.json.bak` + `.bak_*.jsonl` or `current_release.json`)
+    ///   exists when an interrupted overwrite is detected, restores the previous valid split intact.
+    /// - Otherwise (first-run interruption with no prior valid release), purges the uncommitted artifacts.
     pub fn recover_or_purge_stale_artifacts<P: AsRef<Path>>(
         output_dir: P,
     ) -> Result<usize, SplitterError> {
@@ -482,31 +519,109 @@ impl DatasetSplitter {
             return Ok(0);
         }
 
-        let mut purged = 0usize;
+        let mut purged_or_recovered = 0usize;
         for entry in fs::read_dir(out_dir)? {
             let entry = entry?;
             let path = entry.path();
             if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
-                if fname.starts_with(".tmp_") && path.is_file() {
-                    fs::remove_file(&path)?;
-                    purged += 1;
+                if fname.starts_with(".tmp_") {
+                    if path.is_file() {
+                        fs::remove_file(&path)?;
+                        purged_or_recovered += 1;
+                    } else if path.is_dir() {
+                        fs::remove_dir_all(&path)?;
+                        purged_or_recovered += 1;
+                    }
                 }
             }
         }
 
-        // If split_manifest.json is absent, any partial train/val/test.jsonl files are uncommitted and stale
-        let manifest_path = out_dir.join("split_manifest.json");
-        if !manifest_path.exists() {
-            for split_file in ["train.jsonl", "val.jsonl", "test.jsonl"] {
-                let p = out_dir.join(split_file);
+        let releases_dir = out_dir.join("releases");
+        if releases_dir.exists() && releases_dir.is_dir() {
+            for entry in fs::read_dir(&releases_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if let Some(fname) = path.file_name().and_then(|n| n.to_str()) {
+                    if fname.starts_with(".tmp_") && path.is_dir() {
+                        fs::remove_dir_all(&path)?;
+                        purged_or_recovered += 1;
+                    }
+                }
+            }
+        }
+
+        // Check if top-level split is complete and matches its manifest SHA-256s
+        if !Self::is_valid_committed_split_dir(out_dir) {
+            let bak_manifest = out_dir.join("split_manifest.json.bak");
+            let bak_train = out_dir.join(".bak_train.jsonl");
+            let bak_val = out_dir.join(".bak_val.jsonl");
+            let bak_test = out_dir.join(".bak_test.jsonl");
+
+            if bak_manifest.exists() && bak_train.exists() && bak_val.exists() && bak_test.exists() {
+                // Restore previous valid split from backup files
+                fs::rename(&bak_train, out_dir.join("train.jsonl"))?;
+                fs::rename(&bak_val, out_dir.join("val.jsonl"))?;
+                fs::rename(&bak_test, out_dir.join("test.jsonl"))?;
+                fs::rename(&bak_manifest, out_dir.join("split_manifest.json"))?;
+                purged_or_recovered += 1;
+            } else {
+                // Or try restoring from current_release.json if present and valid
+                let current_ptr = out_dir.join("current_release.json");
+                let mut restored_from_release = false;
+                if let Ok(ptr_str) = fs::read_to_string(&current_ptr) {
+                    if let Ok(ptr_val) = serde_json::from_str::<Value>(&ptr_str) {
+                        if let Some(rel_id) = ptr_val.get("current_release").and_then(Value::as_str)
+                        {
+                            let rel_dir = releases_dir.join(rel_id);
+                            if Self::is_valid_committed_split_dir(&rel_dir) {
+                                fs::copy(rel_dir.join("train.jsonl"), out_dir.join("train.jsonl"))?;
+                                fs::copy(rel_dir.join("val.jsonl"), out_dir.join("val.jsonl"))?;
+                                fs::copy(rel_dir.join("test.jsonl"), out_dir.join("test.jsonl"))?;
+                                fs::copy(
+                                    rel_dir.join("split_manifest.json"),
+                                    out_dir.join("split_manifest.json"),
+                                )?;
+                                restored_from_release = true;
+                                purged_or_recovered += 1;
+                            }
+                        }
+                    }
+                }
+
+                if !restored_from_release {
+                    // First-run interruption with no prior valid release: purge uncommitted partial files
+                    for split_file in [
+                        "train.jsonl",
+                        "val.jsonl",
+                        "test.jsonl",
+                        "split_manifest.json",
+                    ] {
+                        let p = out_dir.join(split_file);
+                        if p.exists() {
+                            fs::remove_file(&p)?;
+                            purged_or_recovered += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Clean up any leftover .bak files if top-level split is now valid
+        if Self::is_valid_committed_split_dir(out_dir) {
+            for bak in [
+                "split_manifest.json.bak",
+                ".bak_train.jsonl",
+                ".bak_val.jsonl",
+                ".bak_test.jsonl",
+            ] {
+                let p = out_dir.join(bak);
                 if p.exists() {
-                    fs::remove_file(&p)?;
-                    purged += 1;
+                    let _ = fs::remove_file(&p);
                 }
             }
         }
 
-        Ok(purged)
+        Ok(purged_or_recovered)
     }
 
     /// Resolves a path (which may not yet exist on disk) into a canonicalized comparable `PathBuf`
@@ -776,7 +891,8 @@ impl DatasetSplitter {
         let now_stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_millis();
+            .as_nanos();
+        let release_id = format!("run_{now_stamp}");
 
         let train_path = out_dir.join("train.jsonl");
         let val_path = out_dir.join("val.jsonl");
@@ -845,26 +961,14 @@ impl DatasetSplitter {
         drop(val_w);
         drop(test_w);
 
-        let manifest_file = out_dir.join("split_manifest.json");
-        // Manifest-committed crash-safe publication:
-        // 1. Remove any prior manifest before replacing split files so the output directory is marked in-flight
-        if manifest_file.exists() {
-            let _ = fs::remove_file(&manifest_file);
-        }
+        // Compute SHA-256 digests on the staged temporary files BEFORE touching any live files
+        let train_sha256 = compute_file_sha256(&tmp_train_path).unwrap_or_default();
+        let val_sha256 = compute_file_sha256(&tmp_val_path).unwrap_or_default();
+        let test_sha256 = compute_file_sha256(&tmp_test_path).unwrap_or_default();
 
-        // 2. Promote fsynced temporary split files into place
-        fs::rename(&tmp_train_path, &train_path)?;
-        fs::rename(&tmp_val_path, &val_path)?;
-        fs::rename(&tmp_test_path, &test_path)?;
-
-        let train_sha256 = compute_file_sha256(&train_path).unwrap_or_default();
-        let val_sha256 = compute_file_sha256(&val_path).unwrap_or_default();
-        let test_sha256 = compute_file_sha256(&test_path).unwrap_or_default();
-
-        // 3. Finalize publication by writing, fsyncing, and renaming the commit manifest marker with full audit provenance
-        let tmp_manifest_file = out_dir.join(format!(".tmp_manifest_{now_stamp}.json"));
         let manifest_content = serde_json::json!({
-            "timestamp_ms": now_stamp,
+            "release_id": release_id,
+            "timestamp_ns": now_stamp,
             "splitter_version": env!("CARGO_PKG_VERSION"),
             "split_algorithm_version": "fnv1a_dsu_13gram_v2",
             "train_ratio": ratio.train,
@@ -887,13 +991,79 @@ impl DatasetSplitter {
             "overlap_threshold": LEAKAGE_OVERLAP_THRESHOLD,
             "leakage_status": "CLEAN"
         });
+        let manifest_pretty = serde_json::to_string_pretty(&manifest_content)?;
+
+        // 1. Versioned release directory transaction: stage all 4 files inside releases/.tmp_run_<stamp>
+        //    and atomically rename the directory to releases/run_<stamp>, then switch current_release.json.
+        let releases_dir = out_dir.join("releases");
+        fs::create_dir_all(&releases_dir)?;
+        let tmp_release_dir = releases_dir.join(format!(".tmp_{release_id}"));
+        let final_release_dir = releases_dir.join(&release_id);
+        fs::create_dir_all(&tmp_release_dir)?;
+        fs::copy(&tmp_train_path, tmp_release_dir.join("train.jsonl"))?;
+        fs::copy(&tmp_val_path, tmp_release_dir.join("val.jsonl"))?;
+        fs::copy(&tmp_test_path, tmp_release_dir.join("test.jsonl"))?;
+        {
+            let mut rmf = File::create(tmp_release_dir.join("split_manifest.json"))?;
+            rmf.write_all(manifest_pretty.as_bytes())?;
+            rmf.flush()?;
+            rmf.sync_all()?;
+        }
+        fs::rename(&tmp_release_dir, &final_release_dir)?;
+
+        let tmp_ptr = out_dir.join(format!(".tmp_current_release_{now_stamp}.json"));
+        let current_ptr = out_dir.join("current_release.json");
+        let ptr_json = serde_json::json!({
+            "current_release": release_id,
+            "release_dir": final_release_dir.to_string_lossy(),
+            "train_sha256": train_sha256,
+            "val_sha256": val_sha256,
+            "test_sha256": test_sha256
+        });
+        {
+            let mut pf = File::create(&tmp_ptr)?;
+            pf.write_all(serde_json::to_string_pretty(&ptr_json)?.as_bytes())?;
+            pf.flush()?;
+            pf.sync_all()?;
+        }
+        fs::rename(&tmp_ptr, &current_ptr)?;
+
+        // 2. Rollback-safe top-level publication:
+        //    If a valid top-level split already exists, preserve .bak backups BEFORE modifying top-level files
+        //    so a crash mid-promotion restores the previous valid split instead of purging it.
+        let manifest_file = out_dir.join("split_manifest.json");
+        if Self::is_valid_committed_split_dir(out_dir) {
+            let _ = fs::copy(&train_path, out_dir.join(".bak_train.jsonl"));
+            let _ = fs::copy(&val_path, out_dir.join(".bak_val.jsonl"));
+            let _ = fs::copy(&test_path, out_dir.join(".bak_test.jsonl"));
+            let _ = fs::copy(&manifest_file, out_dir.join("split_manifest.json.bak"));
+        }
+
+        let tmp_manifest_file = out_dir.join(format!(".tmp_manifest_{now_stamp}.json"));
         {
             let mut mf = File::create(&tmp_manifest_file)?;
-            mf.write_all(serde_json::to_string_pretty(&manifest_content)?.as_bytes())?;
+            mf.write_all(manifest_pretty.as_bytes())?;
             mf.flush()?;
             mf.sync_all()?;
         }
+
+        fs::rename(&tmp_train_path, &train_path)?;
+        fs::rename(&tmp_val_path, &val_path)?;
+        fs::rename(&tmp_test_path, &test_path)?;
         fs::rename(&tmp_manifest_file, &manifest_file)?;
+
+        // 3. Remove backup files once the new top-level split_manifest.json is committed
+        for bak in [
+            "split_manifest.json.bak",
+            ".bak_train.jsonl",
+            ".bak_val.jsonl",
+            ".bak_test.jsonl",
+        ] {
+            let p = out_dir.join(bak);
+            if p.exists() {
+                let _ = fs::remove_file(&p);
+            }
+        }
 
         Ok(SplitReport {
             total_samples: total,
@@ -1649,18 +1819,95 @@ mod tests {
         let out_dir = dir.join("splits");
         let r1 = SplitRatio::new(0.80, 0.10, 0.10).unwrap();
         let rep1 = DatasetSplitter::split(&src_file, &out_dir, r1).unwrap();
-        let rep2 = DatasetSplitter::split(&src_file, &out_dir, r1).unwrap();
+        let train_bytes_1 = fs::read(&rep1.train_path).unwrap();
+        let val_bytes_1 = fs::read(&rep1.val_path).unwrap();
+        let test_bytes_1 = fs::read(&rep1.test_path).unwrap();
+        let m1: Value = serde_json::from_str(
+            &fs::read_to_string(rep1.manifest_path.as_ref().unwrap()).unwrap(),
+        )
+        .unwrap();
 
-        // Repeated split with same ratio is 100% deterministic and idempotent
+        let rep2 = DatasetSplitter::split(&src_file, &out_dir, r1).unwrap();
+        let train_bytes_2 = fs::read(&rep2.train_path).unwrap();
+        let val_bytes_2 = fs::read(&rep2.val_path).unwrap();
+        let test_bytes_2 = fs::read(&rep2.test_path).unwrap();
+        let m2: Value = serde_json::from_str(
+            &fs::read_to_string(rep2.manifest_path.as_ref().unwrap()).unwrap(),
+        )
+        .unwrap();
+
+        // 1. Same input + same ratio -> exact same output bytes, same SHA-256 hashes, same manifest semantic fields
         assert_eq!(rep1.train_samples, rep2.train_samples);
         assert_eq!(rep1.val_samples, rep2.val_samples);
         assert_eq!(rep1.test_samples, rep2.test_samples);
+        assert_eq!(train_bytes_1, train_bytes_2);
+        assert_eq!(val_bytes_1, val_bytes_2);
+        assert_eq!(test_bytes_1, test_bytes_2);
+        assert_eq!(m1["train_sha256"], m2["train_sha256"]);
+        assert_eq!(m1["val_sha256"], m2["val_sha256"]);
+        assert_eq!(m1["test_sha256"], m2["test_sha256"]);
+        assert_eq!(m1["split_algorithm_version"], m2["split_algorithm_version"]);
 
-        // Split with different ratio overwrites cleanly and shifts partition distribution
+        // 2. Same input + different ratio -> old valid split not reused, new hashes, new manifest
         let r2 = SplitRatio::new(0.50, 0.25, 0.25).unwrap();
         let rep3 = DatasetSplitter::split(&src_file, &out_dir, r2).unwrap();
+        let m3: Value = serde_json::from_str(
+            &fs::read_to_string(rep3.manifest_path.as_ref().unwrap()).unwrap(),
+        )
+        .unwrap();
         assert_eq!(rep3.total_samples, 100);
         assert!(rep3.train_samples < rep1.train_samples);
+        assert_ne!(m1["train_sha256"], m3["train_sha256"]);
+        assert_ne!(m1["val_sha256"], m3["val_sha256"]);
+        assert_ne!(m1["release_id"], m3["release_id"]);
+        assert_eq!(m3["train_ratio"], 0.50);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_mid_publish_crash_restores_previous_valid_release() {
+        let dir = make_test_dir();
+        let src_file = dir.join("source.jsonl");
+        {
+            let mut f = File::create(&src_file).unwrap();
+            for i in 0..40 {
+                writeln!(f, r#"{{"input":"item_q_{i}","output":"item_a_{i}"}}"#).unwrap();
+            }
+        }
+
+        let out_dir = dir.join("splits");
+        let r1 = SplitRatio::new(0.80, 0.10, 0.10).unwrap();
+        let rep1 = DatasetSplitter::split(&src_file, &out_dir, r1).unwrap();
+
+        let valid_train_sha = compute_file_sha256(Path::new(&rep1.train_path)).unwrap();
+        let valid_val_sha = compute_file_sha256(Path::new(&rep1.val_path)).unwrap();
+        let valid_test_sha = compute_file_sha256(Path::new(&rep1.test_path)).unwrap();
+
+        // Simulate a crash mid-overwrite:
+        // train.jsonl was overwritten with partial/corrupted bytes and split_manifest.json was removed,
+        // while current_release.json / releases/<run_id> holds the last committed release!
+        fs::write(&rep1.train_path, b"corrupted partial overwrite").unwrap();
+        fs::remove_file(out_dir.join("split_manifest.json")).unwrap();
+        fs::write(out_dir.join(".tmp_train_interrupted.jsonl"), b"partial").unwrap();
+
+        // Startup recovery MUST restore the previous valid release instead of purging the valid split!
+        let recovered = DatasetSplitter::recover_or_purge_stale_artifacts(&out_dir).unwrap();
+        assert!(recovered >= 1);
+        assert!(!out_dir.join(".tmp_train_interrupted.jsonl").exists());
+        assert!(out_dir.join("split_manifest.json").exists());
+        assert_eq!(
+            compute_file_sha256(Path::new(&rep1.train_path)).unwrap(),
+            valid_train_sha
+        );
+        assert_eq!(
+            compute_file_sha256(Path::new(&rep1.val_path)).unwrap(),
+            valid_val_sha
+        );
+        assert_eq!(
+            compute_file_sha256(Path::new(&rep1.test_path)).unwrap(),
+            valid_test_sha
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

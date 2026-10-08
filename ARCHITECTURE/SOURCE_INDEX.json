@@ -2449,7 +2449,6 @@
         "args",
         "as_bool",
         "as_bytes",
-        "as_millis",
         "as_nanos",
         "as_os_str",
         "as_str",
@@ -2479,6 +2478,7 @@
         "flush",
         "from",
         "from_str",
+        "get",
         "into",
         "is_dir",
         "is_disjoint",
@@ -2527,7 +2527,7 @@
         "vec"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "76605137306535069715443907d8d2734c66d3017fe1cf2227ac23e09ec596cd",
+      "dynamic_sha256": "b47048f518e32c10632b802196708489f86d157457126e57fbc6c7af685efc44",
       "enums": [],
       "functions": [
         "capture_input_snapshot",
@@ -2537,13 +2537,14 @@
         "make_temp_dir",
         "print_usage",
         "run_splitter_cli",
+        "sha256_bytes",
         "test_cli_empty_dataset_rejected",
         "test_cli_path_overlap_rejected_and_default_output_safe",
         "test_cli_skip_leakage_fails_gate"
       ],
       "in_links": [],
       "is_test": true,
-      "lines": 666,
+      "lines": 699,
       "module": "tara_engine::bin::tara_dataset_splitter",
       "out_links": [
         "rust/tara_engine/src/dataset/mod.rs",
@@ -4959,6 +4960,7 @@
         "is_finite",
         "is_ok",
         "is_some",
+        "is_valid_committed_split_dir",
         "iter",
         "join",
         "keys",
@@ -4980,6 +4982,7 @@
         "qs",
         "read",
         "read_canonical_samples_from_file",
+        "read_dir",
         "read_to_string",
         "recover_or_purge_stale_artifacts",
         "remove_dir_all",
@@ -5002,6 +5005,7 @@
         "test_empty_dataset_rejected",
         "test_end_to_end_split_contaminate_decontaminate_verify_clean",
         "test_leakage_detection_and_decontamination",
+        "test_mid_publish_crash_restores_previous_valid_release",
         "test_nan_split_ratio_rejected",
         "test_near_duplicate_decontaminated",
         "test_near_duplicate_overlap_detected",
@@ -5026,10 +5030,11 @@
         "unwrap_or_default",
         "unwrap_or_else",
         "update",
-        "vec"
+        "vec",
+        "write"
       ],
       "crate": "tara_engine",
-      "dynamic_sha256": "4da7b68c2eb295d7f7a3f86467304694b2c75a1404c49eedd474a098dc550796",
+      "dynamic_sha256": "c165a88606e94758c4f3273b0daada3d26e0f8c88f1d5371da81a87164977e36",
       "enums": [
         "LeakageKind",
         "SplitterError"
@@ -5047,6 +5052,7 @@
         "find",
         "find_leakage",
         "fnv1a_hash",
+        "is_valid_committed_split_dir",
         "make_test_dir",
         "new",
         "normalize_text",
@@ -5061,6 +5067,7 @@
         "test_empty_dataset_rejected",
         "test_end_to_end_split_contaminate_decontaminate_verify_clean",
         "test_leakage_detection_and_decontamination",
+        "test_mid_publish_crash_restores_previous_valid_release",
         "test_nan_split_ratio_rejected",
         "test_near_duplicate_decontaminated",
         "test_near_duplicate_overlap_detected",
@@ -5078,7 +5085,7 @@
         "rust/tara_engine/src/dataset/mod.rs"
       ],
       "is_test": true,
-      "lines": 1700,
+      "lines": 1947,
       "module": "tara_engine::dataset::splitter",
       "out_links": [
         "rust/tara_engine/src/dataset/mod.rs"

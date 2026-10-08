@@ -8922,7 +8922,6 @@
         "args",
         "as_bool",
         "as_bytes",
-        "as_millis",
         "as_nanos",
         "as_os_str",
         "as_str",
@@ -8952,6 +8951,7 @@
         "flush",
         "from",
         "from_str",
+        "get",
         "into",
         "is_dir",
         "is_disjoint",
@@ -9000,11 +9000,11 @@
         "vec"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "76605137306535069715443907d8d2734c66d3017fe1cf2227ac23e09ec596cd",
+      "dynamic_sha256": "b47048f518e32c10632b802196708489f86d157457126e57fbc6c7af685efc44",
       "exports": [
         {
           "kind": "Function",
-          "line_number": 150,
+          "line_number": 159,
           "name": "run_splitter_cli",
           "visibility": "Public"
         }
@@ -9016,7 +9016,7 @@
             "Value"
           ],
           "is_public_reexport": false,
-          "line_number": 12,
+          "line_number": 13,
           "raw_path": "serde_json::{json, Value}"
         },
         {
@@ -9025,7 +9025,7 @@
             "Sha256"
           ],
           "is_public_reexport": false,
-          "line_number": 13,
+          "line_number": 14,
           "raw_path": "sha2::{Digest, Sha256}"
         },
         {
@@ -9034,7 +9034,7 @@
             "HashSet"
           ],
           "is_public_reexport": false,
-          "line_number": 14,
+          "line_number": 15,
           "raw_path": "std::collections::{HashMap, HashSet}"
         },
         {
@@ -9042,7 +9042,7 @@
             "env"
           ],
           "is_public_reexport": false,
-          "line_number": 15,
+          "line_number": 16,
           "raw_path": "std::env"
         },
         {
@@ -9051,7 +9051,7 @@
             "File"
           ],
           "is_public_reexport": false,
-          "line_number": 16,
+          "line_number": 17,
           "raw_path": "std::fs::{self, File}"
         },
         {
@@ -9061,7 +9061,7 @@
             "Write"
           ],
           "is_public_reexport": false,
-          "line_number": 17,
+          "line_number": 18,
           "raw_path": "std::io::{BufRead, BufReader, Write}"
         },
         {
@@ -9070,7 +9070,7 @@
             "PathBuf"
           ],
           "is_public_reexport": false,
-          "line_number": 18,
+          "line_number": 19,
           "raw_path": "std::path::{Path, PathBuf}"
         },
         {
@@ -9080,13 +9080,13 @@
             "UNIX_EPOCH"
           ],
           "is_public_reexport": false,
-          "line_number": 19,
+          "line_number": 20,
           "raw_path": "std::time::{Instant, SystemTime, UNIX_EPOCH}"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 553,
+          "line_number": 586,
           "raw_path": "super::*"
         },
         {
@@ -9094,13 +9094,13 @@
             "compute_file_sha256"
           ],
           "is_public_reexport": false,
-          "line_number": 20,
+          "line_number": 21,
           "raw_path": "tara_engine::dataset::compute_file_sha256"
         },
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 21,
+          "line_number": 22,
           "raw_path": "tara_engine::dataset::splitter::{"
         }
       ],
@@ -9108,73 +9108,79 @@
       "internal_symbols": [
         {
           "kind": "Struct",
-          "line_number": 46,
+          "line_number": 47,
           "name": "ShardSnapshot",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 53,
+          "line_number": 54,
           "name": "capture_input_snapshot",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 135,
+          "line_number": 144,
           "name": "compute_input_multiset",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 109,
+          "line_number": 117,
           "name": "compute_semantic_fingerprints",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 546,
+          "line_number": 579,
           "name": "main",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 555,
+          "line_number": 588,
           "name": "make_temp_dir",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 26,
+          "line_number": 27,
           "name": "print_usage",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 597,
+          "line_number": 109,
+          "name": "sha256_bytes",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 630,
           "name": "test_cli_empty_dataset_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 617,
+          "line_number": 650,
           "name": "test_cli_path_overlap_rejected_and_default_output_safe",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 566,
+          "line_number": 599,
           "name": "test_cli_skip_leakage_fails_gate",
           "visibility": "Private"
         }
       ],
       "is_test": true,
-      "lines": 666,
+      "lines": 699,
       "module_path": "tara_engine::bin::tara_dataset_splitter",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 552,
+          "line_number": 585,
           "name": "tests"
         }
       ],
@@ -15508,6 +15514,7 @@
         "is_finite",
         "is_ok",
         "is_some",
+        "is_valid_committed_split_dir",
         "iter",
         "join",
         "keys",
@@ -15529,6 +15536,7 @@
         "qs",
         "read",
         "read_canonical_samples_from_file",
+        "read_dir",
         "read_to_string",
         "recover_or_purge_stale_artifacts",
         "remove_dir_all",
@@ -15551,6 +15559,7 @@
         "test_empty_dataset_rejected",
         "test_end_to_end_split_contaminate_decontaminate_verify_clean",
         "test_leakage_detection_and_decontamination",
+        "test_mid_publish_crash_restores_previous_valid_release",
         "test_nan_split_ratio_rejected",
         "test_near_duplicate_decontaminated",
         "test_near_duplicate_overlap_detected",
@@ -15575,10 +15584,11 @@
         "unwrap_or_default",
         "unwrap_or_else",
         "update",
-        "vec"
+        "vec",
+        "write"
       ],
       "crate_name": "tara_engine",
-      "dynamic_sha256": "4da7b68c2eb295d7f7a3f86467304694b2c75a1404c49eedd474a098dc550796",
+      "dynamic_sha256": "c165a88606e94758c4f3273b0daada3d26e0f8c88f1d5371da81a87164977e36",
       "exports": [
         {
           "kind": "Struct",
@@ -15600,7 +15610,7 @@
         },
         {
           "kind": "Struct",
-          "line_number": 911,
+          "line_number": 1081,
           "name": "LeakageChecker",
           "visibility": "Public"
         },
@@ -15642,7 +15652,7 @@
         },
         {
           "kind": "Function",
-          "line_number": 922,
+          "line_number": 1092,
           "name": "check_leakage",
           "visibility": "Public"
         },
@@ -15660,13 +15670,13 @@
         },
         {
           "kind": "Function",
-          "line_number": 1067,
+          "line_number": 1237,
           "name": "compute_file_sha256",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 998,
+          "line_number": 1168,
           "name": "decontaminate",
           "visibility": "Public"
         },
@@ -15720,13 +15730,13 @@
         },
         {
           "kind": "Function",
-          "line_number": 477,
+          "line_number": 514,
           "name": "recover_or_purge_stale_artifacts",
           "visibility": "Public"
         },
         {
           "kind": "Function",
-          "line_number": 563,
+          "line_number": 678,
           "name": "split",
           "visibility": "Public"
         }
@@ -15755,7 +15765,7 @@
             "Sha256"
           ],
           "is_public_reexport": false,
-          "line_number": 1068,
+          "line_number": 1238,
           "raw_path": "sha2::{Digest, Sha256}"
         },
         {
@@ -15781,7 +15791,7 @@
             "Read"
           ],
           "is_public_reexport": false,
-          "line_number": 1069,
+          "line_number": 1239,
           "raw_path": "std::io::Read"
         },
         {
@@ -15789,7 +15799,7 @@
             "Write"
           ],
           "is_public_reexport": false,
-          "line_number": 1088,
+          "line_number": 1258,
           "raw_path": "std::io::Write"
         },
         {
@@ -15824,7 +15834,7 @@
         {
           "imported_symbols": [],
           "is_public_reexport": false,
-          "line_number": 1087,
+          "line_number": 1257,
           "raw_path": "super::*"
         },
         {
@@ -15861,7 +15871,13 @@
         },
         {
           "kind": "Function",
-          "line_number": 1090,
+          "line_number": 477,
+          "name": "is_valid_committed_split_dir",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1260,
           "name": "make_test_dir",
           "visibility": "Private"
         },
@@ -15873,115 +15889,121 @@
         },
         {
           "kind": "Function",
-          "line_number": 1400,
+          "line_number": 1570,
           "name": "read_canonical_samples_from_file",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 514,
+          "line_number": 629,
           "name": "resolve_comparable_path",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1601,
+          "line_number": 1771,
           "name": "test_13gram_boundary_and_normalization_semantics",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1526,
+          "line_number": 1696,
           "name": "test_bidirectional_path_containment_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1183,
+          "line_number": 1353,
           "name": "test_cross_split_zero_leakage_and_isolation",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1101,
+          "line_number": 1271,
           "name": "test_dataset_split_deterministic",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1507,
+          "line_number": 1677,
           "name": "test_empty_dataset_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1437,
+          "line_number": 1607,
           "name": "test_end_to_end_split_contaminate_decontaminate_verify_clean",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1128,
+          "line_number": 1298,
           "name": "test_leakage_detection_and_decontamination",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1416,
+          "line_number": 1869,
+          "name": "test_mid_publish_crash_restores_previous_valid_release",
+          "visibility": "Private"
+        },
+        {
+          "kind": "Function",
+          "line_number": 1586,
           "name": "test_nan_split_ratio_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1279,
+          "line_number": 1449,
           "name": "test_near_duplicate_decontaminated",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1245,
+          "line_number": 1415,
           "name": "test_near_duplicate_overlap_detected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1384,
+          "line_number": 1554,
           "name": "test_no_trailing_newline_counted",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1669,
+          "line_number": 1916,
           "name": "test_nonexistent_nested_output_inside_source_rejected_without_creating_dirs",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1639,
+          "line_number": 1809,
           "name": "test_repeated_split_idempotent_and_different_ratio",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1352,
+          "line_number": 1522,
           "name": "test_same_target_different_prompt_detected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1428,
+          "line_number": 1598,
           "name": "test_source_equals_output_rejected",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1560,
+          "line_number": 1730,
           "name": "test_stale_artifact_recovery_and_audit_manifest",
           "visibility": "Private"
         },
         {
           "kind": "Function",
-          "line_number": 1321,
+          "line_number": 1491,
           "name": "test_tara_schema_fields_detected",
           "visibility": "Private"
         },
@@ -15993,13 +16015,13 @@
         }
       ],
       "is_test": true,
-      "lines": 1700,
+      "lines": 1947,
       "module_path": "tara_engine::dataset::splitter",
       "modules_declared": [
         {
           "custom_path": null,
           "is_public": false,
-          "line_number": 1086,
+          "line_number": 1256,
           "name": "tests"
         }
       ],

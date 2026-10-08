@@ -2,12 +2,13 @@
 //!
 //! Provides deterministic partitioning of canonical datasets into train, val,
 //! and test splits, with:
-//! - Immutable input shard snapshot verification (pre/post split SHA-256 freeze)
-//! - Bidirectional input/output path isolation
-//! - Semantic record hash multiset conservation & cross-partition disjointness verification
+//! - Pre/post split SHA-256 shard snapshot mutation detection (aborts if input mutates during split)
+//! - Bidirectional input/output path isolation and sibling default output resolution
+//! - 256-bit cryptographic SHA-256 record multiset conservation & cross-partition disjointness verification
 //! - Full 3-way pairwise cross-split leakage audit (exact + 13-gram shingle overlap)
 //! - Fail-closed gate enforcement (`--skip-leakage` / `--unsafe-skip-leakage` cannot pass Gate 13)
-//! - Persisted audit-grade `split_manifest.json` with full provenance
+//! - Versioned release staging (`releases/run_<id>`) with atomic `current_release.json` pointer switch
+//!   and rollback-safe `split_manifest.json` publication
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -19,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tara_engine::dataset::compute_file_sha256;
 use tara_engine::dataset::splitter::{
-    extract_canonical_sample, fnv1a_hash, DatasetSplitter, LeakageChecker, SplitRatio,
+    extract_canonical_sample, DatasetSplitter, LeakageChecker, SplitRatio,
     LEAKAGE_OVERLAP_THRESHOLD,
 };
 
@@ -105,14 +106,21 @@ fn capture_input_snapshot(input_path: &Path) -> Result<(String, Vec<ShardSnapsho
     Ok((aggregate_sha, snapshots))
 }
 
-/// Computes multiset of canonical line hashes and set of canonical combined hashes for a JSONL file.
+fn sha256_bytes(data: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hasher.finalize().into()
+}
+
+/// Computes multiset of 256-bit cryptographic SHA-256 canonical line digests and set of
+/// 256-bit canonical combined digests for a JSONL file.
 fn compute_semantic_fingerprints(
     jsonl_path: &Path,
-) -> Result<(HashMap<u64, usize>, HashSet<u64>, usize), Box<dyn std::error::Error>> {
+) -> Result<(HashMap<[u8; 32], usize>, HashSet<[u8; 32]>, usize), Box<dyn std::error::Error>> {
     let file = File::open(jsonl_path)?;
     let reader = BufReader::with_capacity(128 * 1024, file);
-    let mut line_multiset: HashMap<u64, usize> = HashMap::new();
-    let mut combined_set: HashSet<u64> = HashSet::new();
+    let mut line_multiset: HashMap<[u8; 32], usize> = HashMap::new();
+    let mut combined_set: HashSet<[u8; 32]> = HashSet::new();
     let mut count = 0usize;
 
     for line_res in reader.lines() {
@@ -122,20 +130,21 @@ fn compute_semantic_fingerprints(
             continue;
         }
         let sample = extract_canonical_sample(trimmed);
-        let raw_hash = fnv1a_hash(sample.raw_line.as_bytes());
-        *line_multiset.entry(raw_hash).or_insert(0) += 1;
-        combined_set.insert(sample.combined_hash);
+        let raw_digest = sha256_bytes(sample.raw_line.as_bytes());
+        let comb_digest = sha256_bytes(sample.combined_text.as_bytes());
+        *line_multiset.entry(raw_digest).or_insert(0) += 1;
+        combined_set.insert(comb_digest);
         count += 1;
     }
 
     Ok((line_multiset, combined_set, count))
 }
 
-/// Computes the union multiset of canonical line hashes across all input shards.
+/// Computes the union multiset of 256-bit SHA-256 canonical line digests across all input shards.
 fn compute_input_multiset(
     shards: &[ShardSnapshot],
-) -> Result<(HashMap<u64, usize>, usize), Box<dyn std::error::Error>> {
-    let mut total_multiset: HashMap<u64, usize> = HashMap::new();
+) -> Result<(HashMap<[u8; 32], usize>, usize), Box<dyn std::error::Error>> {
+    let mut total_multiset: HashMap<[u8; 32], usize> = HashMap::new();
     let mut total_count = 0usize;
     for shard in shards {
         let (ms, _, cnt) = compute_semantic_fingerprints(&shard.path)?;
@@ -333,12 +342,12 @@ pub fn run_splitter_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error
     let sum_parts = report.train_samples + report.val_samples + report.test_samples;
     let count_conservation_pass = sum_parts == report.total_samples && report.total_samples == input_record_count;
 
-    // 4. Verify semantic record multiset conservation and cross-partition disjointness
+    // 4. Verify 256-bit SHA-256 semantic record multiset conservation and cross-partition disjointness
     let (train_ms, train_comb, _) = compute_semantic_fingerprints(Path::new(&report.train_path))?;
     let (val_ms, val_comb, _) = compute_semantic_fingerprints(Path::new(&report.val_path))?;
     let (test_ms, test_comb, _) = compute_semantic_fingerprints(Path::new(&report.test_path))?;
 
-    let mut union_ms: HashMap<u64, usize> = HashMap::new();
+    let mut union_ms: HashMap<[u8; 32], usize> = HashMap::new();
     for (k, v) in train_ms.iter().chain(val_ms.iter()).chain(test_ms.iter()) {
         *union_ms.entry(*k).or_insert(0) += *v;
     }
@@ -454,8 +463,14 @@ pub fn run_splitter_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error
     let now_stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_millis();
+        .as_nanos();
     let manifest_path = output_dir.join("split_manifest.json");
+    let active_release_id = fs::read_to_string(output_dir.join("current_release.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("current_release").and_then(Value::as_str).map(String::from))
+        .unwrap_or_else(|| format!("run_{now_stamp}"));
+
     let tmp_manifest = output_dir.join(format!(".tmp_audit_manifest_{now_stamp}.json"));
     let shard_json: Vec<Value> = pre_shards
         .iter()
@@ -469,7 +484,8 @@ pub fn run_splitter_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error
         .collect();
 
     let audit_manifest = json!({
-        "timestamp_ms": now_stamp,
+        "release_id": active_release_id,
+        "timestamp_ns": now_stamp,
         "splitter_version": env!("CARGO_PKG_VERSION"),
         "split_algorithm_version": "fnv1a_dsu_13gram_v2",
         "input_manifest_sha256": input_manifest_sha,
@@ -520,13 +536,30 @@ pub fn run_splitter_cli(args: &[String]) -> Result<(), Box<dyn std::error::Error
         }
     });
 
+    let audit_manifest_pretty = serde_json::to_string_pretty(&audit_manifest)?;
     {
         let mut mf = File::create(&tmp_manifest)?;
-        mf.write_all(serde_json::to_string_pretty(&audit_manifest)?.as_bytes())?;
+        mf.write_all(audit_manifest_pretty.as_bytes())?;
         mf.flush()?;
         mf.sync_all()?;
     }
     fs::rename(&tmp_manifest, &manifest_path)?;
+
+    let rel_manifest_path = output_dir
+        .join("releases")
+        .join(&active_release_id)
+        .join("split_manifest.json");
+    if let Some(rel_parent) = rel_manifest_path.parent() {
+        if rel_parent.exists() {
+            let tmp_rel_manifest = rel_parent.join(format!(".tmp_audit_manifest_{now_stamp}.json"));
+            if let Ok(mut rmf) = File::create(&tmp_rel_manifest) {
+                let _ = rmf.write_all(audit_manifest_pretty.as_bytes());
+                let _ = rmf.flush();
+                let _ = rmf.sync_all();
+                let _ = fs::rename(&tmp_rel_manifest, &rel_manifest_path);
+            }
+        }
+    }
     println!("  Audit Manifest : {}", manifest_path.display());
     println!("--------------------------------------------------------------------------------");
 

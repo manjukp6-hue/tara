@@ -15,15 +15,15 @@
     {
       "completed_at_utc": null,
       "dataset_inspection": {
-        "dataset_fingerprint": "571238e0074598e1094189c5b36b92bbe1c1b293cb9bb2eac96f72cfcd2f453c",
+        "dataset_fingerprint": "ad08a0a9f171f3e858edbeed62e9e1f5ce22a00bd5e40f730fbcce7e474d0a82",
         "empty_lines": 0,
-        "jsonl_files": 2,
+        "jsonl_files": 53,
         "malformed_records": 0,
-        "total_bytes": 1215999,
-        "total_lines": 176,
-        "valid_records": 176
+        "total_bytes": 27095573375,
+        "total_lines": 38578013,
+        "valid_records": 38578013
       },
-      "dataset_source": "storage/datasets/curriculum",
+      "dataset_source": "storage/datasets/main_dataset_v2",
       "depends_on": [],
       "description": "Large-scale foundational pretraining on verified canonical dataset shards.",
       "full_checkpoint_sha256": null,
@@ -32,7 +32,7 @@
       "is_working_model": false,
       "model_weights_sha256": null,
       "output_checkpoint": "storage/models/checkpoints\\stage0_pretraining",
-      "stage_config_fingerprint": "578d7e5d82f356b6559646c9f8877575c0fcf735d9bbecac05b26241c9cb39a0",
+      "stage_config_fingerprint": "3509ae58920de472a128f98f652aafff03362ab9488daba219ba9787e615986a",
       "stage_id": "stage0_pretraining",
       "stage_index": 0,
       "stage_name": "Stage 0: Foundational Pretraining",
@@ -41,13 +41,13 @@
     {
       "completed_at_utc": null,
       "dataset_inspection": {
-        "dataset_fingerprint": "bf2e76201eec0576a7b199c8c7642286498dee0201bf0f179ffb1a32a6124a30",
+        "dataset_fingerprint": "untargeted_stage",
         "empty_lines": 0,
-        "jsonl_files": 1,
+        "jsonl_files": 0,
         "malformed_records": 0,
-        "total_bytes": 983781,
-        "total_lines": 144,
-        "valid_records": 144
+        "total_bytes": 0,
+        "total_lines": 0,
+        "valid_records": 0
       },
       "dataset_source": "storage/datasets/curriculum/foundational_curriculum.jsonl",
       "depends_on": [
@@ -60,7 +60,7 @@
       "is_working_model": false,
       "model_weights_sha256": null,
       "output_checkpoint": "storage/models/checkpoints\\stage1_curriculum",
-      "stage_config_fingerprint": "81f863463bca4259aef96cf3338a1d73e5b6341f17dd0fcc5b448f86d852f9de",
+      "stage_config_fingerprint": "f0e98c34556c50f43ae7d4b920f70b762d71059fdddfc26b649711ceb9ba6c14",
       "stage_id": "stage1_curriculum",
       "stage_index": 1,
       "stage_name": "Stage 1: Foundational Academic Curriculum Pretraining",
@@ -69,13 +69,13 @@
     {
       "completed_at_utc": null,
       "dataset_inspection": {
-        "dataset_fingerprint": "8e0b043924c2e0c976b52f92b299bc0ca6b3589536f7be7250adb69374a41760",
+        "dataset_fingerprint": "untargeted_stage",
         "empty_lines": 0,
-        "jsonl_files": 1,
+        "jsonl_files": 0,
         "malformed_records": 0,
-        "total_bytes": 232218,
-        "total_lines": 32,
-        "valid_records": 32
+        "total_bytes": 0,
+        "total_lines": 0,
+        "valid_records": 0
       },
       "dataset_source": "storage/datasets/curriculum/ability_acquisition.jsonl",
       "depends_on": [
@@ -88,7 +88,7 @@
       "is_working_model": false,
       "model_weights_sha256": null,
       "output_checkpoint": "storage/models/checkpoints\\stage2_ability_training",
-      "stage_config_fingerprint": "86454a4e61fad4ee69554a6e5c440a6cad9cf4b46b90be2374bc02b1241713cc",
+      "stage_config_fingerprint": "0566832105bcf85c239e10f30641464ed0cbfc0d0f24b944d8db2bcaf0ca158e",
       "stage_id": "stage2_ability_training",
       "stage_index": 2,
       "stage_name": "Stage 2: Ability Training & Self-Evolution",
@@ -97,13 +97,13 @@
     {
       "completed_at_utc": null,
       "dataset_inspection": {
-        "dataset_fingerprint": "4b97b27c7d152f94bddd0517dfbdaff958dbd0403cb4f7b2ea7154f61ad9c94f",
+        "dataset_fingerprint": "untargeted_stage",
         "empty_lines": 0,
-        "jsonl_files": 1,
+        "jsonl_files": 0,
         "malformed_records": 0,
-        "total_bytes": 77502,
-        "total_lines": 213,
-        "valid_records": 213
+        "total_bytes": 0,
+        "total_lines": 0,
+        "valid_records": 0
       },
       "dataset_source": "storage/persistence/experiential_lessons.jsonl",
       "depends_on": [
@@ -116,7 +116,7 @@
       "is_working_model": false,
       "model_weights_sha256": null,
       "output_checkpoint": "storage/models/checkpoints\\stage3_continual_adaptation",
-      "stage_config_fingerprint": "b889d379596934ae792671705b4a2377f8a88948a61f8777520389509d56e90c",
+      "stage_config_fingerprint": "c75ad923837edfbae8934289196ad31321033654a6876a5d24dd6386cb64cb67",
       "stage_id": "stage3_continual_adaptation",
       "stage_index": 3,
       "stage_name": "Stage 3: Continual Adaptation & Experiential Specialization",
@@ -125,15 +125,15 @@
     {
       "completed_at_utc": null,
       "dataset_inspection": {
-        "dataset_fingerprint": "571238e0074598e1094189c5b36b92bbe1c1b293cb9bb2eac96f72cfcd2f453c",
+        "dataset_fingerprint": "untargeted_stage",
         "empty_lines": 0,
-        "jsonl_files": 2,
+        "jsonl_files": 0,
         "malformed_records": 0,
-        "total_bytes": 1215999,
-        "total_lines": 176,
-        "valid_records": 176
+        "total_bytes": 0,
+        "total_lines": 0,
+        "valid_records": 0
       },
-      "dataset_source": "storage/datasets/curriculum",
+      "dataset_source": "storage/datasets/main_dataset_v1",
       "depends_on": [
         "stage3_continual_adaptation"
       ],
@@ -144,7 +144,7 @@
       "is_working_model": false,
       "model_weights_sha256": null,
       "output_checkpoint": "storage/models/checkpoints\\stage4_main_dataset_v1",
-      "stage_config_fingerprint": "65fb3d519648849d61292f5471016c84114f822eb39441bc7d1534e62b287662",
+      "stage_config_fingerprint": "d2562f3b6866a1b0f830452d8706913c27ebc10ae3ee5c71d2213ee44b30adf2",
       "stage_id": "stage4_main_dataset_v1",
       "stage_index": 4,
       "stage_name": "Stage 4: Main Dataset V1 Pretraining",
@@ -153,15 +153,15 @@
     {
       "completed_at_utc": null,
       "dataset_inspection": {
-        "dataset_fingerprint": "571238e0074598e1094189c5b36b92bbe1c1b293cb9bb2eac96f72cfcd2f453c",
+        "dataset_fingerprint": "untargeted_stage",
         "empty_lines": 0,
-        "jsonl_files": 2,
+        "jsonl_files": 0,
         "malformed_records": 0,
-        "total_bytes": 1215999,
-        "total_lines": 176,
-        "valid_records": 176
+        "total_bytes": 0,
+        "total_lines": 0,
+        "valid_records": 0
       },
-      "dataset_source": "storage/datasets/curriculum",
+      "dataset_source": "storage/datasets/main_dataset_v1",
       "depends_on": [
         "stage4_main_dataset_v1"
       ],
@@ -172,7 +172,7 @@
       "is_working_model": false,
       "model_weights_sha256": null,
       "output_checkpoint": "storage/models/checkpoints\\stage5_scale_expansion",
-      "stage_config_fingerprint": "580149c72f30ba9c6386c55e092ef7dec7f0934af192504ba6df5698c4311672",
+      "stage_config_fingerprint": "1cb16bee4b100019a1f1a8b0388cec1f91e34c225c6a37a5b1f43ea79ae92d92",
       "stage_id": "stage5_scale_expansion",
       "stage_index": 5,
       "stage_name": "Stage 5: Extended Pretraining & Scale Expansion",

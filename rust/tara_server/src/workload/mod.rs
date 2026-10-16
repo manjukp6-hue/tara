@@ -93,14 +93,9 @@ pub mod workload_distributor {
         let workload_type = desc["workload_type"].as_str().unwrap_or("Inference");
 
         let channel = tara_hd::ComputeChannel::auto();
-        let (has_gpu, has_tpu) = if let Ok(ref ch) = channel {
-            (ch.is_gpu(), ch.is_tpu())
-        } else {
-            let env_gpu = std::env::var("TARA_CUDA_DEVICE")
-                .map(|v| !v.trim().is_empty())
-                .unwrap_or(false);
-            (env_gpu, false)
-        };
+        let (has_gpu, has_tpu) = channel
+            .map(|ch| (ch.is_gpu(), ch.is_tpu()))
+            .unwrap_or((false, false));
 
         let hybrid_requested = input_data
             .get("hybrid")

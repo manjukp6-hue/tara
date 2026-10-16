@@ -179,3 +179,39 @@ impl SelectionPolicy {
         }
     }
 }
+
+impl Default for SelectionPolicy {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+impl std::str::FromStr for SelectionPolicy {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return Err("Device selection string cannot be empty".to_string());
+        }
+        let core = trimmed
+            .strip_prefix("strict:")
+            .unwrap_or(trimmed)
+            .strip_suffix("!strict")
+            .unwrap_or(trimmed);
+        let base_kind = core.split(':').next().unwrap_or(core).trim().to_lowercase();
+        match base_kind.as_str() {
+            "auto" | "cpu" | "gpu" | "cuda" | "tpu" => Ok(SelectionPolicy::parse(trimmed)),
+            "custom" => {
+                let name = core.split_once(':').map(|(_, r)| r.trim()).unwrap_or("");
+                if name.is_empty() {
+                    Err("Custom device name cannot be empty".to_string())
+                } else {
+                    Ok(SelectionPolicy::parse(trimmed))
+                }
+            }
+            other => Err(format!(
+                "Unknown device '{other}'. Valid options: auto, cpu, gpu, cuda, tpu, custom:<name>"
+            )),
+        }
+    }
+}

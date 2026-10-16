@@ -270,52 +270,8 @@ impl StreamingDatasetReader {
     }
 }
 
-/// Execution device backend for TARA neural self-training.
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub enum TrainingDevice {
-    Cpu,
-    Gpu,
-    Tpu,
-    #[default]
-    Auto,
-    Custom(String),
-}
-
-impl std::str::FromStr for TrainingDevice {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let trimmed = s.trim();
-        match trimmed.to_lowercase().as_str() {
-            "cpu" => Ok(TrainingDevice::Cpu),
-            "gpu" | "cuda" => Ok(TrainingDevice::Gpu),
-            "tpu" => Ok(TrainingDevice::Tpu),
-            "auto" => Ok(TrainingDevice::Auto),
-            s if s.starts_with("custom:") => {
-                let name = s["custom:".len()..].trim();
-                if name.is_empty() {
-                    Err("Custom device name cannot be empty".to_string())
-                } else {
-                    Ok(TrainingDevice::Custom(name.to_string()))
-                }
-            }
-            other => Err(format!(
-                "Unknown device '{other}'. Valid options: cpu, gpu, cuda, tpu, auto, custom:<name>"
-            )),
-        }
-    }
-}
-
-impl TrainingDevice {
-    pub fn to_selection_policy(&self) -> tara_hd::SelectionPolicy {
-        match self {
-            Self::Auto => tara_hd::SelectionPolicy::Auto,
-            Self::Gpu => tara_hd::SelectionPolicy::ExplicitWithFallback(tara_hd::DeviceKind::Gpu, None),
-            Self::Tpu => tara_hd::SelectionPolicy::ExplicitWithFallback(tara_hd::DeviceKind::Tpu, None),
-            Self::Cpu => tara_hd::SelectionPolicy::Explicit(tara_hd::DeviceKind::Cpu, None),
-            Self::Custom(name) => tara_hd::SelectionPolicy::ExplicitWithFallback(tara_hd::DeviceKind::Custom(name.clone()), None),
-        }
-    }
-}
+/// Authoritative compute device selection policy directly from TARA-HD (Single Source of Truth).
+pub type TrainingDevice = tara_hd::SelectionPolicy;
 
 /// Configuration and state bundle for atomic checkpoint persistence.
 pub struct CheckpointBundleConfig<'a> {
@@ -972,18 +928,19 @@ impl NativeSelfTrainer {
             )));
         }
 
-        // 4. Memory footprint preflight check
+        // 4. Hardware discovery and memory footprint preflight check via TARA-HD
         let total_params: usize = weights.values().map(|v| v.len()).sum();
         let max_tensor_len = weights.values().map(|v| v.len()).max().unwrap_or(0);
-        let is_gpu = match self.device {
-            TrainingDevice::Gpu => true,
-            TrainingDevice::Cpu => false,
-            TrainingDevice::Auto => {
-                crate::cuda::is_cuda_available()
-                    || std::env::var("TARA_FORCE_GPU").map(|v| v == "1" || v == "true").unwrap_or(false)
-            }
-            TrainingDevice::Tpu | TrainingDevice::Custom(_) => false,
-        };
+        let hd_channel = tara_hd::ComputeChannel::with_options(
+            &self.device,
+            match self.precision {
+                crate::cuda::TrainingPrecision::Fp16 => tara_hd::PrecisionMode::Fp16,
+                crate::cuda::TrainingPrecision::Fp32 => tara_hd::PrecisionMode::Fp32,
+                crate::cuda::TrainingPrecision::Auto => tara_hd::PrecisionMode::Auto,
+            },
+        ).map_err(|e| TrainerError::Model(format!("TARA-HD hardware channel selection failed: {e}")))?;
+
+        let is_gpu = hd_channel.is_gpu();
         let is_f16 = match self.precision {
             crate::cuda::TrainingPrecision::Fp16 => true,
             crate::cuda::TrainingPrecision::Fp32 => false,
@@ -1084,95 +1041,75 @@ impl NativeSelfTrainer {
         }
 
         // 7. Full-Network Backpropagation with AdamW and Gradient Accumulation
-        // Initialize hardware acceleration device backend
-        let mut gpu_trainer_opt: Option<crate::cuda::CudaTrainer> = match self.device {
-            TrainingDevice::Cpu => {
-                println!("[Device] Selected: CPU Backend (explicitly requested)");
-                None
-            }
-            TrainingDevice::Gpu => {
-                println!("[Device] Initializing NVIDIA CUDA GPU (--device gpu)...");
-                match crate::cuda::CudaTrainer::new_with_precision(0, self.precision) {
-                    Ok(mut t) => {
-                        let dev = t.device().clone();
-                        let (free, total) = t.get_vram_info().unwrap_or((0, 0));
-                        println!("[Device] Selected: GPU Backend (NVIDIA {})", dev.name);
-                        println!(
-                            "         Compute Capability: {}.{}",
-                            dev.compute_capability.0, dev.compute_capability.1
-                        );
-                        println!("         Precision: {:?}", t.precision());
-                        println!(
-                            "         VRAM: {:.2} MB free / {:.2} MB total",
-                            free as f64 / (1024.0 * 1024.0),
-                            total as f64 / (1024.0 * 1024.0)
-                        );
-                        t.register_weights(&weights).map_err(|e| {
-                            TrainerError::Model(format!("Failed to upload weights to GPU: {e}"))
-                        })?;
-                        Some(t)
+        // Initialize hardware acceleration device backend via TARA-HD channel
+        let mut gpu_trainer_opt: Option<crate::cuda::CudaTrainer> = if hd_channel.is_gpu() {
+            let dev_id = hd_channel.device().info().device_id as i32;
+            match crate::cuda::CudaTrainer::new_with_precision(dev_id, self.precision) {
+                Ok(mut t) => {
+                    let dev = t.device().clone();
+                    let (free, total) = t.get_vram_info().unwrap_or((0, 0));
+                    println!("[Device] Selected: GPU Backend (NVIDIA {})", dev.name);
+                    println!(
+                        "         Compute Capability: {}.{}",
+                        dev.compute_capability.0, dev.compute_capability.1
+                    );
+                    println!("         Precision: {:?}", t.precision());
+                    println!(
+                        "         VRAM: {:.2} MB free / {:.2} MB total",
+                        free as f64 / (1024.0 * 1024.0),
+                        total as f64 / (1024.0 * 1024.0)
+                    );
+                    match t.register_weights(&weights) {
+                        Ok(()) => Some(t),
+                        Err(e) => {
+                            if matches!(self.device, tara_hd::SelectionPolicy::Explicit(..)) {
+                                return Err(TrainerError::Model(format!(
+                                    "GPU buffer allocation failed under explicit device policy: {e}"
+                                )));
+                            }
+                            if total_params >= 50_000_000 {
+                                return Err(TrainerError::Model(format!(
+                                    "GPU buffer allocation failed for large model ({total_params} params): {e}. \
+                                     Silent CPU fallback is disabled under --device auto to prevent host memory exhaustion (OOM). \
+                                     Explicitly specify --device cpu if CPU execution is genuinely intended."
+                                )));
+                            }
+                            println!("[Device] GPU buffer allocation failed ({e}); falling back to CPU.");
+                            None
+                        }
                     }
-                    Err(e) => {
+                }
+                Err(e) => {
+                    if matches!(self.device, tara_hd::SelectionPolicy::Explicit(..)) {
                         return Err(TrainerError::Model(format!(
-                            "CUDA initialization failed for --device gpu: {e}. GPU execution cannot proceed."
+                            "CUDA initialization failed for explicit device: {e}."
                         )));
                     }
+                    if total_params >= 50_000_000 {
+                        return Err(TrainerError::Model(format!(
+                            "CUDA initialization/compilation failed for large model ({total_params} params): {e}. \
+                             Silent CPU fallback is disabled under --device auto to prevent host memory exhaustion (OOM). \
+                             Explicitly specify --device cpu if CPU execution is genuinely intended."
+                        )));
+                    }
+                    println!(
+                        "[Device] CUDA GPU not available ({e}); safely falling back to CPU."
+                    );
+                    None
                 }
             }
-            TrainingDevice::Auto => {
-                println!("[Device] Auto-detecting hardware acceleration (--device auto)...");
-                match crate::cuda::CudaTrainer::new_with_precision(0, self.precision) {
-                    Ok(mut t) => {
-                        let dev = t.device().clone();
-                        let (free, total) = t.get_vram_info().unwrap_or((0, 0));
-                        println!("[Device] Detected NVIDIA CUDA GPU: {}", dev.name);
-                        println!(
-                            "         Compute Capability: {}.{}",
-                            dev.compute_capability.0, dev.compute_capability.1
-                        );
-                        println!("         Precision: {:?}", t.precision());
-                        println!(
-                            "         VRAM: {:.2} MB free / {:.2} MB total",
-                            free as f64 / (1024.0 * 1024.0),
-                            total as f64 / (1024.0 * 1024.0)
-                        );
-                        match t.register_weights(&weights) {
-                            Ok(()) => {
-                                println!("[Device] Selected: GPU Backend (NVIDIA {})", dev.name);
-                                Some(t)
-                            }
-                            Err(e) => {
-                                if total_params >= 50_000_000 {
-                                    return Err(TrainerError::Model(format!(
-                                        "GPU buffer allocation failed for large model ({total_params} params): {e}. \
-                                         Silent CPU fallback is disabled under --device auto to prevent host memory exhaustion (OOM). \
-                                         Explicitly specify --device cpu if CPU execution is genuinely intended."
-                                    )));
-                                }
-                                println!("[Device] GPU buffer allocation failed ({e}); falling back to CPU.");
-                                None
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        if total_params >= 50_000_000 {
-                            return Err(TrainerError::Model(format!(
-                                "CUDA initialization/compilation failed for large model ({total_params} params): {e}. \
-                                 Silent CPU fallback is disabled under --device auto to prevent host memory exhaustion (OOM). \
-                                 Explicitly specify --device cpu if CPU execution is genuinely intended."
-                            )));
-                        }
-                        println!(
-                            "[Device] CUDA GPU not available ({e}); safely falling back to CPU."
-                        );
-                        None
-                    }
-                }
-            }
-            TrainingDevice::Tpu | TrainingDevice::Custom(_) => {
-                println!("[Device] Hardware backend '{:?}' not yet accelerated in CUDA trainer; using CPU fallback.", self.device);
-                None
-            }
+        } else if hd_channel.is_tpu() {
+            println!(
+                "[Device] Hardware backend 'TPU' ({}) active in TARA-HD channel; using CPU fallback.",
+                hd_channel.device_name()
+            );
+            None
+        } else {
+            println!(
+                "[Device] Selected: CPU Backend via TARA-HD ({})",
+                hd_channel.device_name()
+            );
+            None
         };
 
         // Construct canonical in-memory model without duplicate weights map allocation
@@ -1228,27 +1165,18 @@ impl NativeSelfTrainer {
             Some(loss)
         };
 
-        let hd_channel = tara_hd::ComputeChannel::with_options(
-            &self.device.to_selection_policy(),
-            match self.precision {
-                crate::cuda::TrainingPrecision::Fp16 => tara_hd::PrecisionMode::Fp16,
-                crate::cuda::TrainingPrecision::Fp32 => tara_hd::PrecisionMode::Fp32,
-                crate::cuda::TrainingPrecision::Auto => tara_hd::PrecisionMode::Auto,
-            },
-        ).ok();
-
         let device_label = if let Some(ref t) = gpu_trainer_opt {
             format!("GPU ({})", t.device().name)
-        } else if let Some(ref ch) = hd_channel {
-            if ch.is_tpu() {
-                format!("TPU ({})", ch.device_name())
-            } else {
-                format!("CPU ({})", ch.device_name())
-            }
+        } else if hd_channel.is_tpu() {
+            format!("TPU ({})", hd_channel.device_name())
         } else {
-            "CPU (Rayon SIMD & On-Demand Chunked Streaming)".to_string()
+            format!("CPU ({})", hd_channel.device_name())
         };
-        let cpu_stream_helper = tara_hd::CpuStreamHelper::new();
+        let cpu_stream_helper = hd_channel
+            .device()
+            .stream_helper()
+            .cloned()
+            .unwrap_or_default();
         let is_gpu = gpu_trainer_opt.is_some();
         let precision_label = if let Some(ref t) = gpu_trainer_opt {
             format!("{:?}", t.precision())

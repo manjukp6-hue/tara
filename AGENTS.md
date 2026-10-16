@@ -551,6 +551,30 @@
           * **5. Parent Directory Auto-Ensurance (ಪೋಷಕ ಫೋಲ್ಡರ್ ಸ್ವಯಂ-ಸ್ಥಾಪನೆ)**: Always inspect target parent paths (`target_file.parent()`) and ensure non-empty parent directories are created via `fs::create_dir_all(parent)?` prior to attempting file creation, completely eliminating `ENOENT / NotFound` filesystem failures.
           * **6. In-Memory Fail-Fast Serialization Integrity (ಮೆಮೊರಿ-ಫಸ್ಟ್ ಸಿರಿಯಲೈಸೇಶನ್ ಸಮಗ್ರತೆ)**: Fully serialize JSON payloads into in-memory byte buffers (`serde_json::to_vec_pretty(val).map_err(std::io::Error::other)?`) before creating or opening files on disk, ensuring serialization errors fail fast with zero residual disk I/O, empty file creation, or dangling filesystem artifacts.
 
+26. **TARA-HD (`tara_hd`) — STRICT ARCHITECTURAL & AI AGENT RULES (ಡೈನಾಮಿಕ್ ಹಾರ್ಡ್‌ವೇರ್ ಆವಿಷ್ಕಾರ, ಯೂನಿವರ್ಸಲ್ ಕಂಪ್ಯೂಟ್ ಆರ್ಕೆಸ್ಟ್ರೇಶನ್ ಮತ್ತು ಸುರಕ್ಷಿತ CPU ಸ್ಟ್ರೀಮಿಂಗ್ ಏಕೈಕ ಸತ್ಯಾಂಶ)**:
+    - Any AI agent, code assistant, or automated refactoring tool working on `tara_hd` MUST strictly obey these architectural invariants. Violating any rule below is considered a critical regression.
+    - **1. Zero Hardcoding & Dynamic Hardware Discovery (`discovery.rs`)**:
+      * **Dynamic Probing Only**: NEVER hardcode specific GPU/TPU models, memory sizes, or device counts as static assumptions. ALWAYS probe host hardware dynamically at runtime (`GPU > TPU > Custom > CPU`).
+      * **GPU Capabilities**: Never assume all NVIDIA GPUs support `Bf16` or fused attention. Always gate `Bf16` and `supports_fused_attention` on SM compute capability (`major_cc >= 8`) when available.
+      * **Environment Awareness**: Always respect `CUDA_VISIBLE_DEVICES` (empty, `-1`, or `none`) and Cloud TPU environment/device nodes (`/dev/accel*`, `/dev/tpu*`, `/dev/vfio/*`).
+      * **RAM Probing**: Always query both `MemTotal` and `MemAvailable` from `/proc/meminfo` on Linux before falling back to nominal defaults.
+    - **2. Unified Hardware Abstraction (`device.rs` & `channel.rs`)**:
+      * **Single Dispatch Interface**: All hardware backends (`CudaDevice`, `TpuDevice`, `CpuDevice`, `CustomDevice`) MUST implement the `ComputeDevice` trait.
+      * **Downcasting & Stream Access**: `ComputeDevice` must always expose `as_any(&self)` and `stream_helper(&self) -> Option<&CpuStreamHelper>` so callers can access CPU streaming without breaking trait abstraction.
+      * **Case-Insensitive Operation Checks**: `supports_operation(op_name)` must always normalize/trim case (`to_ascii_lowercase` or `eq_ignore_ascii_case`).
+      * **Injectable Inventory**: Keep `ComputeChannel::with_inventory(...)` intact so unit tests and custom accelerator registrations (`register_custom_device`) are never bypassed by forced host probing.
+    - **3. OOM-Safe Bounded CPU Streaming (`streaming.rs`)**:
+      * **NEVER Load Full Sequences on CPU**: When executing on CPU, sequences MUST be processed in bounded windows via `CpuStreamHelper::stream_sequence_chunks`. Never compute full quadratic attention or allocate unbounded sequence buffers at once.
+      * **Dynamic Memory Budgeting**: `CpuDevice::new` and `CpuStreamHelper::recommend_chunk_size` MUST calculate chunk sizes using `config.memory_budget_mb` and `config.max_resident_layers`—never replace them with ignored constants.
+      * **Zero Allocator Churn**: Always preserve `StreamBufferPool` for reusable `Vec<f32>` buffers. Never introduce redundant double-zeroing in `acquire()`/`release()`.
+    - **4. Graceful Fallback vs. Strict Mode (`types.rs`)**:
+      * **Fail-Safe Default**: Unless explicitly requested via strict policy (`SelectionPolicy::Explicit` / `strict:` / `!strict`), unavailable hardware or unsupported precision (`Bf16`/`Fp16`) MUST log a warning (`log::warn!`) and safely fall back to `CPU` or `Fp32` without panicking.
+      * **No `unwrap()` or `panic!()` in Runtime Paths**: Hardware probing, parsing, and channel creation must never panic on missing binaries (like `nvidia-smi`), missing `/proc` files, or malformed user strings.
+    - **5. Public API Lock & Whole-Project Single Source of Truth (`lib.rs`)**:
+      * **Single Source of Truth for Whole Project**: `tara_hd` is the authoritative single source of truth for all compute hardware detection, channeling, selection, and streaming across the entire project (`tara_engine`, `tara_server`, `tara_training_system`, training scripts). Any hardware usage across the codebase must connect directly to `tara_hd`.
+      * **Do Not Remove Public Exports**: Always keep `ComputeChannel`, `ComputeDevice`, `CpuDevice`, `CudaDevice`, `CustomDevice`, `TpuDevice`, `DiscoveredInventory`, `CpuStreamHelper`, `SequenceChunkIterator`, `StreamBufferPool`, `StreamConfig`, `StreamWindow`, `DeviceCapability`, `DeviceKind`, `PrecisionMode`, `SelectionPolicy`, and `TaraError` re-exported at the crate root (`lib.rs`).
+      * **Mandatory Tests**: Any modification by an AI agent must keep all unit tests in `lib.rs` and `tests/` passing (`cargo test -p tara_hd`).
+
 ---
 
 ## RULE — EXISTING CODE FIRST

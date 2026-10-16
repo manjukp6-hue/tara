@@ -10,7 +10,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::process::Command;
 
 pub const GB: u64 = 1024 * 1024 * 1024;
 pub const MB: u64 = 1024 * 1024;
@@ -107,23 +106,8 @@ impl DeviceProfile {
 }
 
 #[cfg(windows)]
-#[repr(C)]
-struct MemoryStatusEx {
-    dw_length: u32,
-    dw_memory_load: u32,
-    ull_total_phys: u64,
-    ull_avail_phys: u64,
-    ull_total_page_file: u64,
-    ull_avail_page_file: u64,
-    ull_total_virtual: u64,
-    ull_avail_virtual: u64,
-    ull_avail_extended_virtual: u64,
-}
-
-#[cfg(windows)]
 #[link(name = "kernel32")]
 extern "system" {
-    fn GlobalMemoryStatusEx(lp_buffer: *mut MemoryStatusEx) -> i32;
     fn GetDiskFreeSpaceExW(
         lp_directory_name: *const u16,
         lp_free_bytes_available_to_caller: *mut u64,
@@ -135,61 +119,11 @@ extern "system" {
 pub struct DeviceCapabilityDetector;
 
 impl DeviceCapabilityDetector {
-    /// Detects total and available physical RAM in bytes.
+    /// Detects total and available physical RAM in bytes directly via TARA-HD authoritative discovery.
     pub fn get_ram_info() -> (u64, u64) {
-        #[cfg(windows)]
-        {
-            unsafe {
-                let mut status = MemoryStatusEx {
-                    dw_length: std::mem::size_of::<MemoryStatusEx>() as u32,
-                    dw_memory_load: 0,
-                    ull_total_phys: 0,
-                    ull_avail_phys: 0,
-                    ull_total_page_file: 0,
-                    ull_avail_page_file: 0,
-                    ull_total_virtual: 0,
-                    ull_avail_virtual: 0,
-                    ull_avail_extended_virtual: 0,
-                };
-                if GlobalMemoryStatusEx(&mut status) != 0 {
-                    return (status.ull_total_phys, status.ull_avail_phys);
-                }
-            }
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
-                let mut total = 0u64;
-                let mut avail = 0u64;
-                for line in content.lines() {
-                    if line.starts_with("MemTotal:") {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 2 {
-                            if let Ok(kb) = parts[1].parse::<u64>() {
-                                total = kb * 1024;
-                            }
-                        }
-                    } else if line.starts_with("MemAvailable:") {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 2 {
-                            if let Ok(kb) = parts[1].parse::<u64>() {
-                                avail = kb * 1024;
-                            }
-                        }
-                    }
-                }
-                if total > 0 {
-                    if avail == 0 {
-                        avail = total / 2;
-                    }
-                    return (total, avail);
-                }
-            }
-        }
-
-        // Fallback default safe estimation
-        (16 * GB, 8 * GB)
+        let (total, avail_opt) = tara_hd::discovery::query_system_ram_bytes();
+        let avail = avail_opt.unwrap_or(total / 2);
+        (total, avail)
     }
 
     /// Detects available disk storage in bytes for a given path.
@@ -235,38 +169,21 @@ impl DeviceCapabilityDetector {
         50 * GB
     }
 
-    /// Detects GPU availability, vendor, and free VRAM via system tools.
+    /// Detects GPU availability, vendor, and free VRAM via TARA-HD dynamic hardware discovery.
     pub fn get_gpu_info() -> GpuInfo {
-        // Probe via nvidia-smi
-        if let Ok(output) = Command::new("nvidia-smi")
-            .args([
-                "--query-gpu=name,memory.total,memory.free",
-                "--format=csv,noheader,nounits",
-            ])
-            .output()
-        {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if let Some(first_line) = stdout.lines().next() {
-                    let parts: Vec<&str> = first_line.split(',').map(|s| s.trim()).collect();
-                    if parts.len() >= 3 {
-                        let name = parts[0].to_string();
-                        let total_mb: u64 = parts[1].parse().unwrap_or(0);
-                        let free_mb: u64 = parts[2].parse().unwrap_or(0);
-                        let free_mb = free_mb.min(total_mb);
-
-                        return GpuInfo {
-                            available: true,
-                            vendor: "NVIDIA".into(),
-                            device_name: name,
-                            total_vram_bytes: total_mb * MB,
-                            free_vram_bytes: free_mb * MB,
-                            gpu_type: "CUDA".into(),
-                            device_index: 0,
-                        };
-                    }
-                }
-            }
+        let inventory = tara_hd::DiscoveredInventory::probe_host();
+        if let Some(gpu) = inventory.gpus.first() {
+            let total = gpu.total_memory_bytes;
+            let free = gpu.available_memory_bytes.unwrap_or(total).min(total);
+            return GpuInfo {
+                available: true,
+                vendor: "NVIDIA".into(),
+                device_name: gpu.name.clone(),
+                total_vram_bytes: total,
+                free_vram_bytes: free,
+                gpu_type: "CUDA".into(),
+                device_index: gpu.device_id as u32,
+            };
         }
 
         GpuInfo::default()

@@ -786,26 +786,16 @@ use tara_engine::train_candidate::{
 };
 
 pub fn validate_device_and_precision(device: &str, precision: &str) -> Result<(), String> {
-    match device.to_ascii_lowercase().as_str() {
-        "auto" | "cpu" | "gpu" | "cuda" | "tpu" => {}
-        custom if custom.contains(':') || !custom.is_empty() => {}
-        other => {
-            return Err(format!(
-                "Invalid --device '{}': must be one of 'auto', 'cpu', 'gpu', 'cuda', 'tpu', or '<backend>:<id>'",
-                other
-            ));
-        }
-    }
+    device
+        .parse::<tara_hd::SelectionPolicy>()
+        .map_err(|e| format!("Invalid --device: {e}"))?;
     match precision.to_ascii_lowercase().as_str() {
-        "auto" | "fp16" | "fp32" | "bf16" => {}
-        other => {
-            return Err(format!(
-                "Invalid --precision '{}': must be one of 'auto', 'fp16', 'fp32', 'bf16'",
-                other
-            ));
-        }
+        "auto" | "fp16" | "fp32" | "bf16" => Ok(()),
+        other => Err(format!(
+            "Invalid --precision '{}': must be one of 'auto', 'fp16', 'fp32', 'bf16'",
+            other
+        )),
     }
-    Ok(())
 }
 
 /// Validates stage definitions for hyperparameter validity, non-empty paths, traversal prohibition,

@@ -185,8 +185,11 @@ fn probe_cuda_gpus() -> Vec<DeviceCapability> {
         }
     }
 
-    // Fallback detection via Linux device node if nvidia-smi binary wasn't in PATH
-    if discovered.is_empty() && Path::new("/dev/nvidia0").exists() {
+    // Fallback detection via Linux device node or explicit CUDA device environment variable if nvidia-smi binary wasn't in PATH
+    if discovered.is_empty()
+        && (Path::new("/dev/nvidia0").exists()
+            || env::var("TARA_CUDA_DEVICE").map(|v| !v.trim().is_empty()).unwrap_or(false))
+    {
         discovered.push(DeviceCapability {
             kind: DeviceKind::Gpu,
             device_id: 0,
@@ -305,34 +308,77 @@ fn probe_host_cpu() -> DeviceCapability {
     }
 }
 
-/// Query total and available system RAM dynamically from the OS.
-fn query_system_ram_bytes() -> (u64, Option<u64>) {
-    if let Ok(meminfo) = fs::read_to_string("/proc/meminfo") {
-        let mut total_bytes: Option<u64> = None;
-        let mut avail_bytes: Option<u64> = None;
+#[cfg(windows)]
+#[repr(C)]
+struct MemoryStatusEx {
+    dw_length: u32,
+    dw_memory_load: u32,
+    ull_total_phys: u64,
+    ull_avail_phys: u64,
+    ull_total_page_file: u64,
+    ull_avail_page_file: u64,
+    ull_total_virtual: u64,
+    ull_avail_virtual: u64,
+    ull_avail_extended_virtual: u64,
+}
 
-        for line in meminfo.lines() {
-            if line.starts_with("MemTotal:") {
-                if let Some(kb) = line
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<u64>().ok())
-                {
-                    total_bytes = Some(kb.saturating_mul(1024));
-                }
-            } else if line.starts_with("MemAvailable:") {
-                if let Some(kb) = line
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse::<u64>().ok())
-                {
-                    avail_bytes = Some(kb.saturating_mul(1024));
-                }
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn GlobalMemoryStatusEx(lp_buffer: *mut MemoryStatusEx) -> i32;
+}
+
+/// Query total and available system RAM dynamically from the OS.
+pub fn query_system_ram_bytes() -> (u64, Option<u64>) {
+    #[cfg(windows)]
+    {
+        unsafe {
+            let mut status = MemoryStatusEx {
+                dw_length: std::mem::size_of::<MemoryStatusEx>() as u32,
+                dw_memory_load: 0,
+                ull_total_phys: 0,
+                ull_avail_phys: 0,
+                ull_total_page_file: 0,
+                ull_avail_page_file: 0,
+                ull_total_virtual: 0,
+                ull_avail_virtual: 0,
+                ull_avail_extended_virtual: 0,
+            };
+            if GlobalMemoryStatusEx(&mut status) != 0 {
+                return (status.ull_total_phys, Some(status.ull_avail_phys));
             }
         }
+    }
 
-        if let Some(total) = total_bytes {
-            return (total, avail_bytes);
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(meminfo) = fs::read_to_string("/proc/meminfo") {
+            let mut total_bytes: Option<u64> = None;
+            let mut avail_bytes: Option<u64> = None;
+
+            for line in meminfo.lines() {
+                if line.starts_with("MemTotal:") {
+                    if let Some(kb) = line
+                        .split_whitespace()
+                        .nth(1)
+                        .and_then(|s| s.parse::<u64>().ok())
+                    {
+                        total_bytes = Some(kb.saturating_mul(1024));
+                    }
+                } else if line.starts_with("MemAvailable:") {
+                    if let Some(kb) = line
+                        .split_whitespace()
+                        .nth(1)
+                        .and_then(|s| s.parse::<u64>().ok())
+                    {
+                        avail_bytes = Some(kb.saturating_mul(1024));
+                    }
+                }
+            }
+
+            if let Some(total) = total_bytes {
+                return (total, avail_bytes);
+            }
         }
     }
 

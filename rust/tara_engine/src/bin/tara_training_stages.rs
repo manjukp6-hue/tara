@@ -419,7 +419,16 @@ pub fn inspect_dataset(path: &Path) -> Result<DatasetInspection, String> {
         let mut total_bytes = 0u64;
         let mut combined_hasher = Sha256::new();
 
-        for ep in &files {
+        let total_files = files.len();
+        for (i, ep) in files.iter().enumerate() {
+            if total_files > 5 && (i == 0 || (i + 1) % 10 == 0 || i + 1 == total_files) {
+                println!(
+                    "  [Dataset Audit] Auditing shard {}/{} ({})...",
+                    i + 1,
+                    total_files,
+                    ep.file_name().unwrap_or_default().to_string_lossy()
+                );
+            }
             let insp = inspect_dataset(ep)?;
             total_lines += insp.total_lines;
             total_valid += insp.valid_records;
@@ -2143,13 +2152,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    let insp_by_stage_id: HashMap<String, DatasetInspection> = stage_metadata_list
+        .iter()
+        .map(|m| (m.stage_id.clone(), m.dataset_inspection.clone()))
+        .collect();
+
     // Full DAG Preflight Check across all targeted stages BEFORE dry-run exit so --dry-run is a strict verification gate!
     let mut scheduled_outputs: HashSet<PathBuf> = HashSet::new();
     for (idx, s) in stages_to_run.iter().enumerate() {
-        let ds_insp = inspect_dataset(Path::new(&s.dataset_path)).map_err(|e| {
+        let ds_insp = insp_by_stage_id.get(&s.stage_id).ok_or_else(|| {
             format!(
-                "DAG Preflight Failed: Stage '{}' dataset '{}' inspection error: {}",
-                s.stage_id, s.dataset_path, e
+                "DAG Preflight Failed: Stage '{}' dataset '{}' missing inspection",
+                s.stage_id, s.dataset_path
             )
         })?;
         if ds_insp.malformed_records > 0 {
@@ -2336,7 +2350,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             &input_full_digest
         };
-        let ds_insp = inspect_dataset(Path::new(&stage.dataset_path))?;
+        let ds_insp = insp_by_stage_id.get(&stage.stage_id).ok_or_else(|| {
+            format!(
+                "Execution Failed: Stage '{}' dataset '{}' missing inspection",
+                stage.stage_id, stage.dataset_path
+            )
+        })?;
         let expected_fingerprint = compute_stage_config_fingerprint(
             &stage,
             effective_input_digest,

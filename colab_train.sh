@@ -37,10 +37,42 @@ fi
 # Ensure NVIDIA driver and CUDA libraries are discoverable in Colab / Linux containers
 export LD_LIBRARY_PATH="/usr/lib64-nvidia:/usr/local/cuda/compat:/usr/local/cuda-12.8/compat:${LD_LIBRARY_PATH:-}"
 
+# Helper function for robust streaming downloads from Hugging Face
+download_hf() {
+    local repo_id="$1"
+    local repo_type="$2"
+    local pattern="$3"
+    local local_dir="$4"
+    python3 -c "
+import sys, os
+from huggingface_hub import snapshot_download
+token = os.environ.get('HF_TOKEN') or None
+try:
+    snapshot_download(
+        repo_id='$repo_id',
+        repo_type='$repo_type',
+        allow_patterns=['$pattern'],
+        local_dir='$local_dir',
+        token=token
+    )
+    sys.exit(0)
+except Exception as e:
+    print(f'Download error: {e}', file=sys.stderr)
+    sys.exit(1)
+"
+}
+
 # Authenticate upfront if HF_TOKEN is present
 if [ -n "${HF_TOKEN:-}" ]; then
     echo "[AUTH] Authenticating with Hugging Face Hub..."
-    huggingface-cli login --token "$HF_TOKEN" --add-to-git-credential
+    python3 -c "
+import huggingface_hub, os
+try:
+    huggingface_hub.login(token=os.environ['HF_TOKEN'], add_to_git_credential=True)
+    print('Hugging Face Authentication Successful!')
+except Exception as e:
+    print('Hugging Face Login Notice:', e)
+" || true
 fi
 
 # 2. Hardware Inspection & Upfront Binary Compilation
@@ -70,21 +102,19 @@ MAIN_DS_DIR="storage/datasets/main_dataset_v2"
 mkdir -p "$MAIN_DS_DIR"
 if [ ! -f "$MAIN_DS_DIR/tara_shard_001.jsonl" ]; then
     echo "=== [DATASET INGESTION: STREAMING PRETRAINING SHARDS] ==="
-    HF_DATASET_SOURCE="${HF_DATASET_REPO:-${HF_REPO:-}}"
+    HF_DATASET_SOURCE="${HF_DATASET_REPO:-${HF_REPO:-manjukp6/tara}}"
     if [ -n "$HF_DATASET_SOURCE" ]; then
-        huggingface-cli download "$HF_DATASET_SOURCE" \
-            --include "v2/*" \
-            --local-dir "$MAIN_DS_DIR" \
-            --repo-type dataset
-        if [ -d "$MAIN_DS_DIR/v2" ]; then
-            shopt -s nullglob
-            mv "$MAIN_DS_DIR/v2"/* "$MAIN_DS_DIR/"
-            shopt -u nullglob
-            rmdir "$MAIN_DS_DIR/v2"
+        if download_hf "$HF_DATASET_SOURCE" "dataset" "v2/*" "$MAIN_DS_DIR"; then
+            if [ -d "$MAIN_DS_DIR/v2" ]; then
+                shopt -s nullglob
+                mv "$MAIN_DS_DIR/v2"/* "$MAIN_DS_DIR/"
+                shopt -u nullglob
+                rmdir "$MAIN_DS_DIR/v2"
+            fi
+            echo "Pretraining Dataset Ingestion Verified!"
+        else
+            echo "[DATASET NOTICE] Remote dataset download failed or not found. Checking local datasets in $MAIN_DS_DIR."
         fi
-        echo "Pretraining Dataset Ingestion Verified!"
-    else
-        echo "[DATASET NOTICE] HF_REPO / HF_DATASET_REPO not set. Expecting local datasets in $MAIN_DS_DIR."
     fi
 fi
 
@@ -94,37 +124,26 @@ mkdir -p storage/models/tara_world_model
 
 HF_MODEL_SOURCE="${HF_MODEL_REPO:-${HF_REPO:-manjukp6/tara}}"
 
-HF_TOKEN_FLAG=()
-if [ -n "${HF_TOKEN:-}" ]; then
-    HF_TOKEN_FLAG=(--token "$HF_TOKEN")
-fi
-
 # Verify Neural Model Candidate weights exist on disk
 NEURAL_SHARDS=(storage/models/tara_candidate_v1/*.safetensors)
 if [ ! -e "${NEURAL_SHARDS[0]}" ]; then
     echo "=== [MODEL INGESTION: STREAMING NEURAL MODEL V1 FROM HUGGING FACE] ==="
-    HF_NEURAL_DOWNLOADED=0
-    if [ -n "$HF_MODEL_SOURCE" ]; then
-        echo "[HF DOWNLOAD] Downloading neural_model_v1/* from https://huggingface.co/$HF_MODEL_SOURCE..."
-        if huggingface-cli download "$HF_MODEL_SOURCE" \
-            "${HF_TOKEN_FLAG[@]}" \
-            --include "neural_model_v1/*" \
-            --local-dir storage/models \
-            --repo-type model; then
-            if [ -d "storage/models/neural_model_v1" ]; then
-                shopt -s nullglob
-                mv storage/models/neural_model_v1/* storage/models/tara_candidate_v1/
-                shopt -u nullglob
-                rmdir storage/models/neural_model_v1
-            fi
-            CHECK_SHARDS=(storage/models/tara_candidate_v1/*.safetensors)
-            if [ -e "${CHECK_SHARDS[0]}" ]; then
-                HF_NEURAL_DOWNLOADED=1
-                echo "Neural Model V1 Ingestion from Hugging Face Verified!"
-            fi
+    echo "[HF DOWNLOAD] Downloading neural_model_v1/* from https://huggingface.co/$HF_MODEL_SOURCE..."
+    if download_hf "$HF_MODEL_SOURCE" "model" "neural_model_v1/*" "storage/models"; then
+        if [ -d "storage/models/neural_model_v1" ]; then
+            shopt -s nullglob
+            mv storage/models/neural_model_v1/* storage/models/tara_candidate_v1/
+            shopt -u nullglob
+            rmdir storage/models/neural_model_v1
         fi
-    fi
-    if [ "$HF_NEURAL_DOWNLOADED" -eq 0 ]; then
+        CHECK_SHARDS=(storage/models/tara_candidate_v1/*.safetensors)
+        if [ -e "${CHECK_SHARDS[0]}" ]; then
+            echo "Neural Model V1 Ingestion from Hugging Face Verified!"
+        else
+            echo "=== [ERROR: NO SAFETENSORS SHARDS FOUND IN DOWNLOADED REPO] ==="
+            exit 1
+        fi
+    else
         echo "=== [ERROR: COULD NOT DOWNLOAD NEURAL MODEL V1 FROM HUGGING FACE] ==="
         echo "Please ensure HF_TOKEN is exported with read access to https://huggingface.co/$HF_MODEL_SOURCE"
         exit 1
@@ -135,28 +154,22 @@ fi
 WORLD_SHARDS=(storage/models/tara_world_model/*.safetensors)
 if [ ! -e "${WORLD_SHARDS[0]}" ]; then
     echo "=== [MODEL INGESTION: STREAMING WORLD MODEL V1 FROM HUGGING FACE] ==="
-    HF_WORLD_DOWNLOADED=0
-    if [ -n "$HF_MODEL_SOURCE" ]; then
-        echo "[HF DOWNLOAD] Downloading world_model_v1/* from https://huggingface.co/$HF_MODEL_SOURCE..."
-        if huggingface-cli download "$HF_MODEL_SOURCE" \
-            "${HF_TOKEN_FLAG[@]}" \
-            --include "world_model_v1/*" \
-            --local-dir storage/models \
-            --repo-type model; then
-            if [ -d "storage/models/world_model_v1" ]; then
-                shopt -s nullglob
-                mv storage/models/world_model_v1/* storage/models/tara_world_model/
-                shopt -u nullglob
-                rmdir storage/models/world_model_v1
-            fi
-            CHECK_WORLD=(storage/models/tara_world_model/*.safetensors)
-            if [ -e "${CHECK_WORLD[0]}" ]; then
-                HF_WORLD_DOWNLOADED=1
-                echo "World Model V1 Ingestion from Hugging Face Verified!"
-            fi
+    echo "[HF DOWNLOAD] Downloading world_model_v1/* from https://huggingface.co/$HF_MODEL_SOURCE..."
+    if download_hf "$HF_MODEL_SOURCE" "model" "world_model_v1/*" "storage/models"; then
+        if [ -d "storage/models/world_model_v1" ]; then
+            shopt -s nullglob
+            mv storage/models/world_model_v1/* storage/models/tara_world_model/
+            shopt -u nullglob
+            rmdir storage/models/world_model_v1
         fi
-    fi
-    if [ "$HF_WORLD_DOWNLOADED" -eq 0 ]; then
+        CHECK_WORLD=(storage/models/tara_world_model/*.safetensors)
+        if [ -e "${CHECK_WORLD[0]}" ]; then
+            echo "World Model V1 Ingestion from Hugging Face Verified!"
+        else
+            echo "=== [ERROR: NO WORLD MODEL SAFETENSORS SHARDS FOUND IN DOWNLOADED REPO] ==="
+            exit 1
+        fi
+    else
         echo "=== [ERROR: COULD NOT DOWNLOAD WORLD MODEL V1 FROM HUGGING FACE] ==="
         echo "Please ensure HF_TOKEN is exported with read access to https://huggingface.co/$HF_MODEL_SOURCE"
         exit 1

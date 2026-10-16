@@ -309,6 +309,8 @@ impl ShardState {
                 },
             };
 
+            let has_text = val.get("text").or_else(|| val.get("content")).and_then(Value::as_str);
+
             let input = val
                 .get("formatted_input")
                 .and_then(Value::as_str)
@@ -322,6 +324,21 @@ impl ShardState {
                         .and_then(Value::as_str)
                         .map(|s| s.trim().to_string())
                 })
+                .or_else(|| {
+                    if has_text.is_some() {
+                        let source = val.get("source").and_then(Value::as_str).unwrap_or("Knowledge");
+                        let book = val.get("book").and_then(Value::as_str).unwrap_or("");
+                        let chapter = val.get("chapter").and_then(|c| c.as_u64()).map(|c| format!(" Chapter {c}")).unwrap_or_default();
+                        let header = if !book.is_empty() {
+                            format!("{source}: {book}{chapter}")
+                        } else {
+                            source.to_string()
+                        };
+                        Some(format!("<|im_start|>user\n{header}\n<|im_end|>\n<|im_start|>assistant\n"))
+                    } else {
+                        None
+                    }
+                })
                 .unwrap_or_default();
 
             let output = val
@@ -334,6 +351,8 @@ impl ShardState {
                         .or_else(|| val.get("response"))
                         .or_else(|| val.get("recommendation"))
                         .or_else(|| val.get("metadata").and_then(|m| m.get("output")))
+                        .or_else(|| val.get("text"))
+                        .or_else(|| val.get("content"))
                         .and_then(Value::as_str)
                         .map(|s| s.trim().to_string())
                 })

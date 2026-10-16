@@ -350,6 +350,12 @@ pub fn inspect_dataset(path: &Path) -> Result<DatasetInspection, String> {
             }
             match serde_json::from_str::<serde_json::Value>(trimmed) {
                 Ok(val) => {
+                    let has_text = val
+                        .get("text")
+                        .or_else(|| val.get("content"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| !s.trim().is_empty())
+                        .unwrap_or(false);
                     let has_in = val
                         .get("formatted_input")
                         .or_else(|| val.get("input"))
@@ -359,7 +365,7 @@ pub fn inspect_dataset(path: &Path) -> Result<DatasetInspection, String> {
                         .or_else(|| val.get("metadata").and_then(|m| m.get("input")))
                         .and_then(|v| v.as_str())
                         .map(|s| !s.trim().is_empty())
-                        .unwrap_or(false);
+                        .unwrap_or(has_text);
                     let has_out = val
                         .get("formatted_target")
                         .or_else(|| val.get("output"))
@@ -367,10 +373,12 @@ pub fn inspect_dataset(path: &Path) -> Result<DatasetInspection, String> {
                         .or_else(|| val.get("response"))
                         .or_else(|| val.get("recommendation"))
                         .or_else(|| val.get("metadata").and_then(|m| m.get("output")))
+                        .or_else(|| val.get("text"))
+                        .or_else(|| val.get("content"))
                         .and_then(|v| v.as_str())
                         .map(|s| !s.trim().is_empty())
                         .unwrap_or(false);
-                    if has_in && has_out {
+                    if (has_in && has_out) || has_text {
                         valid_records += 1;
                     } else {
                         malformed_records += 1;

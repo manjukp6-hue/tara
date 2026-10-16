@@ -69,6 +69,142 @@ pub fn unpack_u32_to_f16(packed: &[u32], len: usize) -> Vec<f16> {
 
 pub type OptimizerStateMap = HashMap<String, (Vec<f32>, Vec<f32>)>;
 
+/// Diagnostic snapshot of host physical memory, cgroup allocations, and GPU VRAM.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MemorySnapshot {
+    pub process_rss_mb: f64,
+    pub process_hwm_mb: f64,
+    pub host_total_mb: f64,
+    pub host_avail_mb: f64,
+    pub cgroup_limit_mb: Option<f64>,
+    pub cgroup_current_mb: Option<f64>,
+    pub gpu_used_vram_mb: Option<f64>,
+    pub gpu_free_vram_mb: Option<f64>,
+    pub gpu_total_vram_mb: Option<f64>,
+}
+
+/// Capture live memory statistics across host /proc, cgroup filesystem, and CUDA session VRAM.
+pub fn capture_memory_snapshot(vram_info: Option<(usize, usize)>) -> MemorySnapshot {
+    #[cfg(target_os = "linux")]
+    let (process_rss_mb, process_hwm_mb, host_total_mb, host_avail_mb, cgroup_limit_mb, cgroup_current_mb) = {
+        let mut rss = 0.0f64;
+        let mut hwm = 0.0f64;
+        let mut tot = 0.0f64;
+        let mut avail = 0.0f64;
+        let mut limit = None;
+        let mut cur = None;
+
+        // 1. Process memory from /proc/self/status
+        if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+            for line in status.lines() {
+                if line.starts_with("VmRSS:") {
+                    if let Some(val_kb) = line.split_whitespace().nth(1).and_then(|s| s.parse::<f64>().ok()) {
+                        rss = val_kb / 1024.0;
+                    }
+                } else if line.starts_with("VmHWM:") {
+                    if let Some(val_kb) = line.split_whitespace().nth(1).and_then(|s| s.parse::<f64>().ok()) {
+                        hwm = val_kb / 1024.0;
+                    }
+                }
+            }
+        }
+
+        // 2. Host system memory from /proc/meminfo
+        if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
+            for line in meminfo.lines() {
+                if line.starts_with("MemTotal:") {
+                    if let Some(val_kb) = line.split_whitespace().nth(1).and_then(|s| s.parse::<f64>().ok()) {
+                        tot = val_kb / 1024.0;
+                    }
+                } else if line.starts_with("MemAvailable:") {
+                    if let Some(val_kb) = line.split_whitespace().nth(1).and_then(|s| s.parse::<f64>().ok()) {
+                        avail = val_kb / 1024.0;
+                    }
+                }
+            }
+        }
+
+        // 3. Cgroup memory limits (v2 or v1)
+        let cgroup_limit_paths = [
+            "/sys/fs/cgroup/memory.max",
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+        ];
+        for p in cgroup_limit_paths {
+            if let Ok(content) = std::fs::read_to_string(p) {
+                let trimmed = content.trim();
+                if trimmed != "max" {
+                    if let Ok(bytes) = trimmed.parse::<f64>() {
+                        if bytes < 1e15 {
+                            limit = Some(bytes / (1024.0 * 1024.0));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        let cgroup_cur_paths = [
+            "/sys/fs/cgroup/memory.current",
+            "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+        ];
+        for p in cgroup_cur_paths {
+            if let Ok(content) = std::fs::read_to_string(p) {
+                if let Ok(bytes) = content.trim().parse::<f64>() {
+                    cur = Some(bytes / (1024.0 * 1024.0));
+                    break;
+                }
+            }
+        }
+
+        (rss, hwm, tot, avail, limit, cur)
+    };
+
+    #[cfg(not(target_os = "linux"))]
+    let (process_rss_mb, process_hwm_mb, host_total_mb, host_avail_mb, cgroup_limit_mb, cgroup_current_mb) =
+        (0.0f64, 0.0f64, 0.0f64, 0.0f64, None, None);
+
+    let (gpu_used_vram_mb, gpu_free_vram_mb, gpu_total_vram_mb) = if let Some((free_b, total_b)) = vram_info {
+        let free_mb = free_b as f64 / (1024.0 * 1024.0);
+        let tot_mb = total_b as f64 / (1024.0 * 1024.0);
+        let used_mb = (tot_mb - free_mb).max(0.0);
+        (Some(used_mb), Some(free_mb), Some(tot_mb))
+    } else {
+        (None, None, None)
+    };
+
+    MemorySnapshot {
+        process_rss_mb,
+        process_hwm_mb,
+        host_total_mb,
+        host_avail_mb,
+        cgroup_limit_mb,
+        cgroup_current_mb,
+        gpu_used_vram_mb,
+        gpu_free_vram_mb,
+        gpu_total_vram_mb,
+    }
+}
+
+/// Log an atomic, flushed checkpoint message with full host and GPU telemetry.
+pub fn log_flushed_memory_checkpoint(op_name: &str, vram_info: Option<(usize, usize)>) {
+    let snap = capture_memory_snapshot(vram_info);
+    let mut msg = format!(
+        "[Step Diagnostics] Op: '{op_name}' | Host RSS: {:.1} MB (Peak HWM: {:.1} MB)",
+        snap.process_rss_mb, snap.process_hwm_mb
+    );
+    if snap.host_total_mb > 0.0 {
+        msg.push_str(&format!(" | Host Avail: {:.1} MB / {:.1} MB", snap.host_avail_mb, snap.host_total_mb));
+    }
+    if let (Some(cur), Some(lim)) = (snap.cgroup_current_mb, snap.cgroup_limit_mb) {
+        msg.push_str(&format!(" | cgroup: {:.1} MB / {:.1} MB", cur, lim));
+    }
+    if let (Some(used), Some(free), Some(tot)) = (snap.gpu_used_vram_mb, snap.gpu_free_vram_mb, snap.gpu_total_vram_mb) {
+        msg.push_str(&format!(" | GPU VRAM: {:.1} MB used / {:.1} MB free ({:.1} MB total)", used, free, tot));
+    }
+    println!("{msg}");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+}
+
 pub struct GpuParamState {
     pub d_weight: Option<CudaBuffer>, // FP32 master weights (None when streamed from host)
     pub d_weight_f16: Option<CudaBuffer>, // FP16 model weights (in FP16 mode)
@@ -82,10 +218,11 @@ pub struct CudaTrainer {
     // Parameter states resident on GPU (dropped first to free device buffers)
     params: HashMap<String, GpuParamState>,
     pub precision: TrainingPrecision,
-    // Streamed optimizer states on host (used for 1B model / VRAM-constrained environments)
+    // Streamed optimizer states on host (compact FP16 representation to prevent Host RAM exhaustion)
     h_weights: HashMap<String, Vec<f32>>,
-    h_m: HashMap<String, Vec<f32>>,
-    h_v: HashMap<String, Vec<f32>>,
+    h_m: HashMap<String, Vec<f16>>,
+    h_v: HashMap<String, Vec<f16>>,
+    temp_buf: Vec<f32>,
     d_chunk_w: Option<CudaBuffer>,
     d_chunk_m: Option<CudaBuffer>,
     d_chunk_v: Option<CudaBuffer>,
@@ -219,6 +356,7 @@ impl CudaTrainer {
             h_weights: HashMap::new(),
             h_m: HashMap::new(),
             h_v: HashMap::new(),
+            temp_buf: Vec::new(),
             d_chunk_w: None,
             d_chunk_m: None,
             d_chunk_v: None,
@@ -249,6 +387,10 @@ impl CudaTrainer {
         })
     }
 
+    pub fn session(&self) -> &CudaSession {
+        &self.session
+    }
+
     pub fn last_grad_norm(&self) -> f32 {
         self.last_grad_norm
     }
@@ -276,10 +418,8 @@ impl CudaTrainer {
         &mut self,
         weights: &HashMap<String, Vec<f32>>,
     ) -> Result<(), CudaError> {
+        log_flushed_memory_checkpoint("Before GPU Register Weights", self.session.get_memory_info().ok());
         let mut new_params = HashMap::new();
-        let mut new_h_weights = HashMap::new();
-        let mut new_h_m = HashMap::new();
-        let mut new_h_v = HashMap::new();
 
         let is_f16 = self.precision == TrainingPrecision::Fp16;
         let total_elements: usize = weights.values().map(|v| v.len()).sum();
@@ -289,9 +429,9 @@ impl CudaTrainer {
 
         // Stream optimizer states when VRAM would be overcommitted
         let stream_opt = naive_bytes_needed > (free_vram * 5) / 10;
+        let max_tensor_len = weights.values().map(|v| v.len()).max().unwrap_or(0);
 
         let (chunk_w, chunk_m, chunk_v) = if stream_opt {
-            let max_tensor_len = weights.values().map(|v| v.len()).max().unwrap_or(0);
             (
                 Some(self.session.allocate_f32(max_tensor_len)?),
                 Some(self.session.allocate_f32(max_tensor_len)?),
@@ -305,20 +445,17 @@ impl CudaTrainer {
             let len = vals.len();
 
             let (d_weight, d_m, d_v) = if is_f16 {
-                // In FP16 mode: master weights and moments can be streamed from host when memory-constrained
+                // In FP16 mode: master weights and moments are streamed from host when memory-constrained.
+                // Do NOT allocate duplicate master weights or moments on the host heap!
                 if stream_opt {
-                    new_h_weights.insert(name.clone(), vals.clone());
-                    new_h_m.insert(name.clone(), vec![0.0f32; len]);
-                    new_h_v.insert(name.clone(), vec![0.0f32; len]);
                     (None, None, None)
                 } else {
                     let dw = self.session.allocate_f32(len)?;
                     self.session.upload_f32(&dw, vals)?;
                     let dm = self.session.allocate_f32(len)?;
                     let dv = self.session.allocate_f32(len)?;
-                    let zeros = vec![0.0f32; len];
-                    self.session.upload_f32(&dm, &zeros)?;
-                    self.session.upload_f32(&dv, &zeros)?;
+                    self.session.zero_buffer(&dm)?;
+                    self.session.zero_buffer(&dv)?;
                     (Some(dw), Some(dm), Some(dv))
                 }
             } else {
@@ -327,16 +464,12 @@ impl CudaTrainer {
                 self.session.upload_f32(&dw, vals)?;
 
                 if stream_opt {
-                    new_h_weights.insert(name.clone(), vals.clone());
-                    new_h_m.insert(name.clone(), vec![0.0f32; len]);
-                    new_h_v.insert(name.clone(), vec![0.0f32; len]);
                     (Some(dw), None, None)
                 } else {
                     let dm = self.session.allocate_f32(len)?;
                     let dv = self.session.allocate_f32(len)?;
-                    let zeros = vec![0.0f32; len];
-                    self.session.upload_f32(&dm, &zeros)?;
-                    self.session.upload_f32(&dv, &zeros)?;
+                    self.session.zero_buffer(&dm)?;
+                    self.session.zero_buffer(&dv)?;
                     (Some(dw), Some(dm), Some(dv))
                 }
             };
@@ -352,15 +485,12 @@ impl CudaTrainer {
                 let h_f16: Vec<f16> = vals.iter().map(|&x| f16::from_f32(x)).collect();
                 let packed = pack_f16_to_u32(&h_f16);
                 self.session.upload_u32(&d_wf16, &packed)?;
-
-                let zeros = vec![0.0f32; len];
-                self.session.upload_f32(&d_g, &zeros)?;
+                self.session.zero_buffer(&d_g)?;
 
                 (Some(d_wf16), d_g)
             } else {
                 let d_g = self.session.allocate_f32(len)?;
-                let zeros = vec![0.0f32; len];
-                self.session.upload_f32(&d_g, &zeros)?;
+                self.session.zero_buffer(&d_g)?;
                 (None, d_g)
             };
 
@@ -381,14 +511,20 @@ impl CudaTrainer {
 
         // Atomic swap: only update trainer state once all GPU allocations succeed
         self.params = new_params;
-        self.h_weights = new_h_weights;
-        self.h_m = new_h_m;
-        self.h_v = new_h_v;
+        self.h_weights.clear();
+        self.h_m.clear();
+        self.h_v.clear();
+        self.temp_buf = if stream_opt {
+            vec![0.0f32; max_tensor_len]
+        } else {
+            Vec::new()
+        };
         self.d_chunk_w = chunk_w;
         self.d_chunk_m = chunk_m;
         self.d_chunk_v = chunk_v;
         self.stream_optimizer = stream_opt;
 
+        log_flushed_memory_checkpoint("After GPU Register Weights", self.session.get_memory_info().ok());
         Ok(())
     }
 
@@ -985,6 +1121,26 @@ impl CudaTrainer {
         weight_decay: f32,
         max_grad_norm: f32,
     ) -> Result<bool, CudaError> {
+        let mut h_weights = std::mem::take(&mut self.h_weights);
+        let res = self.step_adamw_with_weights(&mut h_weights, lr, beta1, beta2, eps, weight_decay, max_grad_norm);
+        self.h_weights = h_weights;
+        res
+    }
+
+    /// Execute AdamW optimization step across all parameters directly on GPU,
+    /// updating master weights in `weights` in-place without duplicate host allocations.
+    /// Returns Ok(true) if step was executed, Ok(false) if skipped due to non-finite gradients.
+    pub fn step_adamw_with_weights(
+        &mut self,
+        weights: &mut HashMap<String, Vec<f32>>,
+        lr: f32,
+        beta1: f32,
+        beta2: f32,
+        eps: f32,
+        weight_decay: f32,
+        max_grad_norm: f32,
+    ) -> Result<bool, CudaError> {
+        log_flushed_memory_checkpoint("Before GPU Optimizer Step", self.session.get_memory_info().ok());
         // High-performance GPU-side global norm reduction: sum of squares across all parameters
         // Explicitly zero accumulator on GPU before launching reduction kernels
         let zero_sq = [0.0f32];
@@ -1019,8 +1175,7 @@ impl CudaTrainer {
         if !total_norm.is_finite() {
             eprintln!("[CUDA AdamW] Non-finite global gradient norm ({total_norm}) detected. Skipping optimizer step.");
             for param in self.params.values() {
-                let zeros = vec![0.0f32; param.len];
-                self.session.upload_f32(&param.d_grad, &zeros)?;
+                self.session.zero_buffer(&param.d_grad)?;
             }
             return Ok(false);
         }
@@ -1037,8 +1192,6 @@ impl CudaTrainer {
             1.0f32
         };
 
-        let block_dim = 128u32;
-
         for (name, param) in &self.params {
             let grid_dim = (param.len as u32).div_ceil(block_dim);
 
@@ -1048,13 +1201,31 @@ impl CudaTrainer {
                     let d_cm = self.d_chunk_m.as_ref().unwrap();
                     let d_cv = self.d_chunk_v.as_ref().unwrap();
 
-                    let hw = self.h_weights.get(name).unwrap();
-                    let hm = self.h_m.get(name).unwrap();
-                    let hv = self.h_v.get(name).unwrap();
+                    let hw = if let Some(w) = weights.get_mut(name) {
+                        w
+                    } else if let Some(w) = self.h_weights.get_mut(name) {
+                        w
+                    } else {
+                        return Err(CudaError::KernelError(format!("Missing tensor '{name}' for optimizer step")));
+                    };
 
                     self.session.upload_f32_slice(d_cw, hw)?;
-                    self.session.upload_f32_slice(d_cm, hm)?;
-                    self.session.upload_f32_slice(d_cv, hv)?;
+                    if let Some(hm) = self.h_m.get(name) {
+                        for (i, &x) in hm.iter().enumerate().take(param.len) {
+                            self.temp_buf[i] = x.to_f32();
+                        }
+                        self.session.upload_f32_slice(d_cm, &self.temp_buf[..param.len])?;
+                    } else {
+                        self.session.zero_buffer(d_cm)?;
+                    }
+                    if let Some(hv) = self.h_v.get(name) {
+                        for (i, &x) in hv.iter().enumerate().take(param.len) {
+                            self.temp_buf[i] = x.to_f32();
+                        }
+                        self.session.upload_f32_slice(d_cv, &self.temp_buf[..param.len])?;
+                    } else {
+                        self.session.zero_buffer(d_cv)?;
+                    }
 
                     (d_cw.dptr, d_cm.dptr, d_cv.dptr)
                 } else {
@@ -1114,13 +1285,22 @@ impl CudaTrainer {
                     let d_cm = self.d_chunk_m.as_ref().unwrap();
                     let d_cv = self.d_chunk_v.as_ref().unwrap();
 
-                    let hw = self.h_weights.get_mut(name).unwrap();
-                    let hm = self.h_m.get_mut(name).unwrap();
-                    let hv = self.h_v.get_mut(name).unwrap();
+                    let hw = if let Some(w) = weights.get_mut(name) {
+                        w
+                    } else {
+                        self.h_weights.get_mut(name).unwrap()
+                    };
 
                     self.session.download_f32_slice(d_cw, hw)?;
-                    self.session.download_f32_slice(d_cm, hm)?;
-                    self.session.download_f32_slice(d_cv, hv)?;
+
+                    // Download updated moments and store compactly as FP16
+                    self.session.download_f32_slice(d_cm, &mut self.temp_buf[..param.len])?;
+                    let m_f16: Vec<f16> = self.temp_buf[..param.len].iter().map(|&x| f16::from_f32(x)).collect();
+                    self.h_m.insert(name.clone(), m_f16);
+
+                    self.session.download_f32_slice(d_cv, &mut self.temp_buf[..param.len])?;
+                    let v_f16: Vec<f16> = self.temp_buf[..param.len].iter().map(|&x| f16::from_f32(x)).collect();
+                    self.h_v.insert(name.clone(), v_f16);
                 }
             } else {
                 let (arg_w, arg_m, arg_v) = if self.stream_optimizer {
@@ -1128,13 +1308,31 @@ impl CudaTrainer {
                     let d_cm = self.d_chunk_m.as_ref().unwrap();
                     let d_cv = self.d_chunk_v.as_ref().unwrap();
 
-                    let hw = self.h_weights.get(name).unwrap();
-                    let hm = self.h_m.get(name).unwrap();
-                    let hv = self.h_v.get(name).unwrap();
+                    let hw = if let Some(w) = weights.get_mut(name) {
+                        w
+                    } else if let Some(w) = self.h_weights.get_mut(name) {
+                        w
+                    } else {
+                        return Err(CudaError::KernelError(format!("Missing tensor '{name}' for optimizer step")));
+                    };
 
                     self.session.upload_f32_slice(d_cw, hw)?;
-                    self.session.upload_f32_slice(d_cm, hm)?;
-                    self.session.upload_f32_slice(d_cv, hv)?;
+                    if let Some(hm) = self.h_m.get(name) {
+                        for (i, &x) in hm.iter().enumerate().take(param.len) {
+                            self.temp_buf[i] = x.to_f32();
+                        }
+                        self.session.upload_f32_slice(d_cm, &self.temp_buf[..param.len])?;
+                    } else {
+                        self.session.zero_buffer(d_cm)?;
+                    }
+                    if let Some(hv) = self.h_v.get(name) {
+                        for (i, &x) in hv.iter().enumerate().take(param.len) {
+                            self.temp_buf[i] = x.to_f32();
+                        }
+                        self.session.upload_f32_slice(d_cv, &self.temp_buf[..param.len])?;
+                    } else {
+                        self.session.zero_buffer(d_cv)?;
+                    }
 
                     (d_cw.dptr, d_cm.dptr, d_cv.dptr)
                 } else {
@@ -1184,13 +1382,21 @@ impl CudaTrainer {
                     let d_cm = self.d_chunk_m.as_ref().unwrap();
                     let d_cv = self.d_chunk_v.as_ref().unwrap();
 
-                    let hw = self.h_weights.get_mut(name).unwrap();
-                    let hm = self.h_m.get_mut(name).unwrap();
-                    let hv = self.h_v.get_mut(name).unwrap();
+                    let hw = if let Some(w) = weights.get_mut(name) {
+                        w
+                    } else {
+                        self.h_weights.get_mut(name).unwrap()
+                    };
 
                     self.session.download_f32_slice(d_cw, hw)?;
-                    self.session.download_f32_slice(d_cm, hm)?;
-                    self.session.download_f32_slice(d_cv, hv)?;
+
+                    self.session.download_f32_slice(d_cm, &mut self.temp_buf[..param.len])?;
+                    let m_f16: Vec<f16> = self.temp_buf[..param.len].iter().map(|&x| f16::from_f32(x)).collect();
+                    self.h_m.insert(name.clone(), m_f16);
+
+                    self.session.download_f32_slice(d_cv, &mut self.temp_buf[..param.len])?;
+                    let v_f16: Vec<f16> = self.temp_buf[..param.len].iter().map(|&x| f16::from_f32(x)).collect();
+                    self.h_v.insert(name.clone(), v_f16);
 
                     if let Some(ref dw) = param.d_weight {
                         self.session.upload_f32_slice(dw, hw)?;
@@ -1200,6 +1406,7 @@ impl CudaTrainer {
         }
 
         self.session.synchronize()?;
+        log_flushed_memory_checkpoint("After GPU Optimizer Step", self.session.get_memory_info().ok());
         Ok(true)
     }
 
@@ -1245,6 +1452,11 @@ impl CudaTrainer {
         Ok(())
     }
 
+    /// Check if trainer is running in streamed optimizer mode.
+    pub fn is_streaming(&self) -> bool {
+        self.stream_optimizer
+    }
+
     /// Direct reference to host master weights in streamed optimizer mode.
     pub fn streamed_weights(&self) -> Option<&HashMap<String, Vec<f32>>> {
         if self.stream_optimizer {
@@ -1258,13 +1470,14 @@ impl CudaTrainer {
     pub fn export_optimizer_state(&self) -> Result<OptimizerStateMap, CudaError> {
         let mut out = HashMap::new();
         if self.stream_optimizer {
-            for (name, m) in &self.h_m {
-                let v = self
-                    .h_v
-                    .get(name)
-                    .cloned()
-                    .unwrap_or_else(|| vec![0.0f32; m.len()]);
-                out.insert(name.clone(), (m.clone(), v));
+            for (name, m_f16) in &self.h_m {
+                let m: Vec<f32> = m_f16.iter().map(|&x| x.to_f32()).collect();
+                let v: Vec<f32> = if let Some(v_f16) = self.h_v.get(name) {
+                    v_f16.iter().map(|&x| x.to_f32()).collect()
+                } else {
+                    vec![0.0f32; m.len()]
+                };
+                out.insert(name.clone(), (m, v));
             }
         } else {
             for (name, param) in &self.params {
@@ -1298,12 +1511,10 @@ impl CudaTrainer {
             }
 
             if self.stream_optimizer {
-                if let Some(hm) = self.h_m.get_mut(name) {
-                    *hm = m.clone();
-                }
-                if let Some(hv) = self.h_v.get_mut(name) {
-                    *hv = v.clone();
-                }
+                let m_f16: Vec<f16> = m.iter().map(|&x| f16::from_f32(x)).collect();
+                let v_f16: Vec<f16> = v.iter().map(|&x| f16::from_f32(x)).collect();
+                self.h_m.insert(name.clone(), m_f16);
+                self.h_v.insert(name.clone(), v_f16);
             } else if let (Some(ref dm), Some(ref dv)) = (&param.d_m, &param.d_v) {
                 self.session.upload_f32(dm, m)?;
                 self.session.upload_f32(dv, v)?;

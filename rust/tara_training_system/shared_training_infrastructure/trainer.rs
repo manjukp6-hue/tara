@@ -1112,10 +1112,10 @@ impl NativeSelfTrainer {
             }
         };
 
-        // Construct canonical in-memory model
-        let mut model = TaraForCausalLM::from_weights_and_config(
-            weights.clone(),
-            config.clone(),
+        // Construct canonical in-memory model without duplicate weights map allocation
+        let mut model = TaraForCausalLM::from_weights_ref(
+            &weights,
+            &config,
             &self.model_dir,
         )
         .map_err(|e| TrainerError::Model(e.to_string()))?;
@@ -1552,7 +1552,8 @@ impl NativeSelfTrainer {
                                     TrainerError::Model(format!("GPU gradient scaling failed: {e}"))
                                 })?;
                             let stepped = gpu_trainer
-                                .step_adamw(
+                                .step_adamw_with_weights(
+                                    &mut weights,
                                     effective_lr,
                                     beta1,
                                     beta2,
@@ -1567,13 +1568,7 @@ impl NativeSelfTrainer {
                                 step_taken = true;
                             }
 
-                            if let Some(ref_w) = gpu_trainer.streamed_weights() {
-                                for (name, hw) in ref_w {
-                                    if let Some(dest) = weights.get_mut(name) {
-                                        dest.copy_from_slice(hw);
-                                    }
-                                }
-                            } else {
+                            if !gpu_trainer.is_streaming() {
                                 gpu_trainer.download_weights_into(&mut weights).map_err(|e| {
                                     TrainerError::Model(format!("GPU weights download failed: {e}"))
                                 })?;
@@ -1875,12 +1870,7 @@ impl NativeSelfTrainer {
                     device_label
                 );
 
-                model = TaraForCausalLM::from_weights_and_config(
-                    weights.clone(),
-                    config.clone(),
-                    &self.model_dir,
-                )
-                .map_err(|e| TrainerError::Model(e.to_string()))?;
+                model.update_weights(&weights).map_err(|e| TrainerError::Model(e.to_string()))?;
 
                 // Checkpoint at epoch boundary flush
                 if let Some(ref cp_dir) = self.checkpoint_dir {

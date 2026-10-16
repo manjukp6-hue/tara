@@ -102,21 +102,21 @@ impl TaraForCausalLM {
         Self::from_weights_and_config(weights, config, model_dir)
     }
 
-    /// Construct a model directly from a weights map and config.
-    pub fn from_weights_and_config(
-        weights: HashMap<String, Vec<f32>>,
-        config: TaraConfig,
+    /// Construct a model directly from a borrowed weights map and config.
+    pub fn from_weights_ref(
+        weights: &HashMap<String, Vec<f32>>,
+        config: &TaraConfig,
         model_dir: &str,
     ) -> Result<Self, ModelError> {
         validate_weight_len(
-            &weights,
+            weights,
             "model.embed_tokens.weight",
             config.vocab_size * config.hidden_size,
         )?;
-        validate_weight_len(&weights, "model.norm.weight", config.hidden_size)?;
+        validate_weight_len(weights, "model.norm.weight", config.hidden_size)?;
         if weights.contains_key("lm_head.weight") {
             validate_weight_len(
-                &weights,
+                weights,
                 "lm_head.weight",
                 config.vocab_size * config.hidden_size,
             )?;
@@ -148,7 +148,7 @@ impl TaraForCausalLM {
                 ("mlp.up_proj.weight", config.intermediate_size * hs),
                 ("mlp.down_proj.weight", hs * config.intermediate_size),
             ] {
-                validate_weight_len(&weights, &format!("{prefix}.{suffix}"), count)?;
+                validate_weight_len(weights, &format!("{prefix}.{suffix}"), count)?;
             }
         }
 
@@ -161,7 +161,7 @@ impl TaraForCausalLM {
         // Decoder layers
         let mut layers = Vec::with_capacity(config.num_hidden_layers);
         for i in 0..config.num_hidden_layers {
-            layers.push(TaraDecoderLayer::from_weights(&weights, i, &config)?);
+            layers.push(TaraDecoderLayer::from_weights(weights, i, config)?);
         }
 
         // Final norm
@@ -182,10 +182,20 @@ impl TaraForCausalLM {
             layers,
             norm,
             lm_head,
-            config,
+            config: config.clone(),
             model_dir: model_dir.to_string(),
         })
     }
+
+    /// Construct a model directly from a weights map and config.
+    pub fn from_weights_and_config(
+        weights: HashMap<String, Vec<f32>>,
+        config: TaraConfig,
+        model_dir: &str,
+    ) -> Result<Self, ModelError> {
+        Self::from_weights_ref(&weights, &config, model_dir)
+    }
+
 
     /// Validate all required model tensor shapes against the config without loading float weights into memory.
     pub fn validate_architecture_shapes(

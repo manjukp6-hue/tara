@@ -90,6 +90,7 @@ echo "--------------------------------------------------------------------------
 echo "[BUILD] Compiling TARA Native Rust Binaries (Release Mode)..."
 cargo build --release \
     --bin tara_pretraining_gate \
+    --bin tara_gpu_step_test \
     --bin tara_training_stages \
     --bin manual_trainer \
     --bin train_candidate \
@@ -225,6 +226,21 @@ if [ -f "storage/models/checkpoints/pretraining_authorization.json" ] && [ "$ACT
     cp "storage/models/checkpoints/pretraining_authorization.json" "$ACTIVE_CP_DIR/pretraining_authorization.json"
 fi
 echo "Pre-Training Authorization Gate Passed!"
+
+# 5b. Production-Model GPU 1-Step Execution & Memory Diagnostic Gate
+echo "=== [PRODUCTION-MODEL GPU 1-STEP EXECUTION & MEMORY DIAGNOSTIC GATE] ==="
+/usr/bin/time -v ./target/release/tara_gpu_step_test \
+    --model storage/models/tara_candidate_v1 \
+    --device auto \
+    --precision auto
+
+GPU_STEP_STATUS=$?
+if [ $GPU_STEP_STATUS -ne 0 ]; then
+    echo "=== [FATAL: GPU 1-STEP VERIFICATION FAILED (EXIT CODE: $GPU_STEP_STATUS)] ==="
+    echo "Full multi-stage training run is strictly prohibited until 1-step GPU test passes."
+    exit 1
+fi
+echo "[GPU GATE] One-step GPU forward pass, backward pass, AdamW update, and checkpoint parity PASSED!"
 
 # 6. Execute Autonomous Extensible Multi-Stage Training Pipeline (Stages 0..5)
 # Fallback scale_dir to MAIN_DS_DIR if storage/datasets/main_dataset_v1 is not present

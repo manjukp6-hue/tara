@@ -294,6 +294,7 @@ pub struct CudaDriverInner {
     ) -> c_int,
     fn_get_error_name: Option<extern "system" fn(c_int, *mut *const c_char) -> c_int>,
     fn_get_error_string: Option<extern "system" fn(c_int, *mut *const c_char) -> c_int>,
+    fn_memset_d8: Option<extern "system" fn(u64, u8, usize) -> c_int>,
 }
 
 unsafe impl Send for CudaDriverInner {}
@@ -343,6 +344,9 @@ impl CudaDriverInner {
             let fn_launch_kernel = get_proc_fn(guard.0, "cuLaunchKernel")?;
             let fn_get_error_name = get_proc_fn(guard.0, "cuGetErrorName").ok();
             let fn_get_error_string = get_proc_fn(guard.0, "cuGetErrorString").ok();
+            let fn_memset_d8 = get_proc_fn(guard.0, "cuMemsetD8_v2")
+                .or_else(|_| get_proc_fn(guard.0, "cuMemsetD8"))
+                .ok();
 
             let lib_handle = guard.disarm();
 
@@ -374,6 +378,7 @@ impl CudaDriverInner {
                 fn_launch_kernel,
                 fn_get_error_name,
                 fn_get_error_string,
+                fn_memset_d8,
             };
 
             // Process-wide global initialization
@@ -839,6 +844,38 @@ impl CudaSession {
                 )
             );
             Ok(())
+        })
+    }
+
+    /// Zero out device memory buffer directly on device without host memory allocations.
+    pub fn zero_buffer(&self, buffer: &CudaBuffer) -> Result<(), CudaError> {
+        if buffer.bytes == 0 {
+            return Ok(());
+        }
+        self.context.with_context(|| {
+            if let Some(fn_memset) = self.context.driver.fn_memset_d8 {
+                check_cu!(
+                    self.context.driver,
+                    (fn_memset)(buffer.dptr, 0, buffer.bytes)
+                );
+                Ok(())
+            } else {
+                let zero_chunk = [0u8; 65536];
+                let mut offset = 0usize;
+                while offset < buffer.bytes {
+                    let chunk_size = (buffer.bytes - offset).min(zero_chunk.len());
+                    check_cu!(
+                        self.context.driver,
+                        (self.context.driver.fn_memcpy_htod)(
+                            buffer.dptr + offset as u64,
+                            zero_chunk.as_ptr() as *const c_void,
+                            chunk_size
+                        )
+                    );
+                    offset += chunk_size;
+                }
+                Ok(())
+            }
         })
     }
 
@@ -1638,6 +1675,7 @@ mod tests {
                 fn_launch_kernel: mock_cu_launch_kernel,
                 fn_get_error_name: None,
                 fn_get_error_string: None,
+                fn_memset_d8: None,
             }),
         }
     }

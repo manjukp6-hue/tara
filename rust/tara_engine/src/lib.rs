@@ -50,7 +50,7 @@ pub use inference::loading_policy as loading_policy;
 // Tier 3: Private Low-Level Engine & Training Implementation Modules
 // (Enforced as private `mod` so external callers must use curated root/facade contracts)
 // ============================================================================
-mod cuda;
+pub mod cuda;
 #[path = "../../tara_training_system/neural_model/model/mod.rs"]
 mod model;
 pub use inference::model_expansion as model_expansion;
@@ -88,8 +88,9 @@ pub use computation::{
 pub use config::TaraConfig;
 pub use control_tokens::{ControlTokenAction, ControlTokenActionParser};
 pub use cuda::{
-    is_cuda_required, is_cuda_required_value, validate_ptx_registers, CudaDeviceInfo, CudaError,
-    TrainingPrecision,
+    capture_memory_snapshot, is_cuda_available, is_cuda_required, is_cuda_required_value,
+    log_flushed_memory_checkpoint, validate_ptx_registers, CudaDeviceInfo, CudaError,
+    CudaTrainer, MemorySnapshot, TrainingPrecision,
 };
 pub use curriculum_engine::{
     CurriculumBatch, CurriculumConfig, CurriculumEngine, CurriculumReport, CurriculumStage,

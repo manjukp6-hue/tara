@@ -34,54 +34,52 @@ fn print_usage() {
 /// Small deterministic numerical finite-difference test for cross-entropy gradients.
 fn verify_cross_entropy_finite_differences() {
     println!("[GPU Step Test] Running Deterministic Finite-Difference Gradient Verification...");
-    let test_logits = vec![
-        1.2f32, -0.5, 2.1, 0.0, -1.8,
+    let test_logits: Vec<f64> = vec![
+        1.2, -0.5, 2.1, 0.0, -1.8,
         -0.2, 0.8, -1.1, 2.5, 0.4,
     ];
     let vs = 5usize;
     let seq_len = 2usize;
     let targets = [2usize, 3usize];
-    let eps = 1e-4f64;
+    let eps = 1e-5f64;
 
-    let compute_loss_for_logits = |l_vec: &[f32]| -> f64 {
+    let compute_loss_for_logits = |l_vec: &[f64]| -> f64 {
         let mut loss = 0.0f64;
         for t in 0..seq_len {
             let row = &l_vec[t * vs..(t + 1) * vs];
-            let max_val = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-            let sum_exp: f64 = row.iter().map(|&x| ((x - max_val) as f64).exp()).sum();
-            let p_target = ((row[targets[t]] - max_val) as f64).exp() / sum_exp;
+            let max_val = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            let sum_exp: f64 = row.iter().map(|&x| (x - max_val).exp()).sum();
+            let p_target = (row[targets[t]] - max_val).exp() / sum_exp;
             loss += -p_target.ln();
         }
         loss / seq_len as f64
     };
 
-    let _base_loss = compute_loss_for_logits(&test_logits);
-
-    let mut analytical_grad = vec![0.0f32; seq_len * vs];
+    let mut analytical_grad = vec![0.0f64; seq_len * vs];
     for t in 0..seq_len {
         let row = &test_logits[t * vs..(t + 1) * vs];
-        let max_val = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-        let sum_exp: f64 = row.iter().map(|&x| ((x - max_val) as f64).exp()).sum();
+        let max_val = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let sum_exp: f64 = row.iter().map(|&x| (x - max_val).exp()).sum();
         for v in 0..vs {
-            let p = ((row[v] - max_val) as f64).exp() / sum_exp;
+            let p = (row[v] - max_val).exp() / sum_exp;
             let target_indicator = if v == targets[t] { 1.0 } else { 0.0 };
-            analytical_grad[t * vs + v] = ((p - target_indicator) / seq_len as f64) as f32;
+            analytical_grad[t * vs + v] = (p - target_indicator) / seq_len as f64;
         }
     }
 
     for idx in 0..test_logits.len() {
         let mut perturbed_plus = test_logits.clone();
         let mut perturbed_minus = test_logits.clone();
-        perturbed_plus[idx] += eps as f32;
-        perturbed_minus[idx] -= eps as f32;
+        perturbed_plus[idx] += eps;
+        perturbed_minus[idx] -= eps;
 
         let loss_plus = compute_loss_for_logits(&perturbed_plus);
         let loss_minus = compute_loss_for_logits(&perturbed_minus);
 
         let num_grad = (loss_plus - loss_minus) / (2.0 * eps);
-        let ana_grad = analytical_grad[idx] as f64;
+        let ana_grad = analytical_grad[idx];
         let diff = (num_grad - ana_grad).abs();
-        let rel_err = diff / (ana_grad.abs().max(1e-5));
+        let rel_err = diff / ana_grad.abs().max(1e-5);
 
         assert!(
             rel_err < 1e-3,

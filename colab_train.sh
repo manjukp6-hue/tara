@@ -118,6 +118,26 @@ if [ ! -f "$MAIN_DS_DIR/tara_shard_001.jsonl" ]; then
         else
             echo "[DATASET NOTICE] Remote dataset download failed or not found. Checking local datasets in $MAIN_DS_DIR."
         fi
+fi
+
+# 3b. Ingest Main Dataset V1 for Stage 4 (Scale Expansion)
+SCALE_DS_DIR="storage/datasets/main_dataset_v1"
+mkdir -p "$SCALE_DS_DIR"
+if [ ! -f "$SCALE_DS_DIR/tara_canonical_shard_000.jsonl" ]; then
+    echo "=== [DATASET INGESTION: STREAMING MAIN DATASET V1 (STAGE 4) SHARDS] ==="
+    HF_DATASET_SOURCE="${HF_DATASET_REPO:-${HF_REPO:-manjukp6/tara}}"
+    if [ -n "$HF_DATASET_SOURCE" ]; then
+        if download_hf "$HF_DATASET_SOURCE" "dataset" "v1/*" "$SCALE_DS_DIR"; then
+            if [ -d "$SCALE_DS_DIR/v1" ]; then
+                shopt -s nullglob
+                mv "$SCALE_DS_DIR/v1"/* "$SCALE_DS_DIR/"
+                shopt -u nullglob
+                rmdir "$SCALE_DS_DIR/v1"
+            fi
+            echo "Main Dataset V1 (Stage 4) Ingestion Verified!"
+        else
+            echo "[DATASET NOTICE] Remote v1 dataset download failed or not found. Checking local datasets."
+        fi
     fi
 fi
 

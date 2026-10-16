@@ -271,24 +271,48 @@ impl StreamingDatasetReader {
 }
 
 /// Execution device backend for TARA neural self-training.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum TrainingDevice {
     Cpu,
     Gpu,
+    Tpu,
     #[default]
     Auto,
+    Custom(String),
 }
 
 impl std::str::FromStr for TrainingDevice {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim().to_lowercase().as_str() {
+        let trimmed = s.trim();
+        match trimmed.to_lowercase().as_str() {
             "cpu" => Ok(TrainingDevice::Cpu),
             "gpu" | "cuda" => Ok(TrainingDevice::Gpu),
+            "tpu" => Ok(TrainingDevice::Tpu),
             "auto" => Ok(TrainingDevice::Auto),
+            s if s.starts_with("custom:") => {
+                let name = s["custom:".len()..].trim();
+                if name.is_empty() {
+                    Err("Custom device name cannot be empty".to_string())
+                } else {
+                    Ok(TrainingDevice::Custom(name.to_string()))
+                }
+            }
             other => Err(format!(
-                "Unknown device '{other}'. Valid options: cpu, gpu, cuda, auto"
+                "Unknown device '{other}'. Valid options: cpu, gpu, cuda, tpu, auto, custom:<name>"
             )),
+        }
+    }
+}
+
+impl TrainingDevice {
+    pub fn to_selection_policy(&self) -> tara_hd::SelectionPolicy {
+        match self {
+            Self::Auto => tara_hd::SelectionPolicy::Auto,
+            Self::Gpu => tara_hd::SelectionPolicy::ExplicitWithFallback(tara_hd::DeviceKind::Gpu, None),
+            Self::Tpu => tara_hd::SelectionPolicy::ExplicitWithFallback(tara_hd::DeviceKind::Tpu, None),
+            Self::Cpu => tara_hd::SelectionPolicy::Explicit(tara_hd::DeviceKind::Cpu, None),
+            Self::Custom(name) => tara_hd::SelectionPolicy::ExplicitWithFallback(tara_hd::DeviceKind::Custom(name.clone()), None),
         }
     }
 }
@@ -328,6 +352,7 @@ pub struct NativeSelfTrainer {
     pub checkpoint_interval: Option<usize>,
     pub resume: bool,
     pub resume_from: Option<String>,
+    pub stage_name: Option<String>,
     pub anchor_weights: Option<HashMap<String, Vec<f32>>>,
     pub ewc_importance: Option<HashMap<String, Vec<f32>>>,
     pub ewc_lambda: f32,
@@ -354,10 +379,17 @@ impl NativeSelfTrainer {
             checkpoint_interval: None,
             resume: false,
             resume_from: None,
+            stage_name: None,
             anchor_weights: None,
             ewc_importance: None,
             ewc_lambda: 100.0,
         }
+    }
+
+    /// Set an explicit stage label for live telemetry and training progress logs.
+    pub fn with_stage_name(mut self, name: &str) -> Self {
+        self.stage_name = Some(name.to_string());
+        self
     }
 
     /// Configure Elastic Weight Consolidation (EWC) anchor weights and Fisher importance matrix.
@@ -576,6 +608,19 @@ impl NativeSelfTrainer {
             }
         }
         Ok(())
+    }
+
+    /// Formats seconds into human-readable HH:MM:SS or MM:SS format.
+    pub fn format_duration_hhmmss(total_seconds: f64) -> String {
+        let total_secs = total_seconds.max(0.0) as u64;
+        let hours = total_secs / 3600;
+        let minutes = (total_secs % 3600) / 60;
+        let seconds = total_secs % 60;
+        if hours > 0 {
+            format!("{hours}h {minutes:02}m {seconds:02}s")
+        } else {
+            format!("{minutes}m {seconds:02}s")
+        }
     }
 
     /// Automatically synchronize checkpoint milestones to Google Drive if present.
@@ -937,6 +982,7 @@ impl NativeSelfTrainer {
                 crate::cuda::is_cuda_available()
                     || std::env::var("TARA_FORCE_GPU").map(|v| v == "1" || v == "true").unwrap_or(false)
             }
+            TrainingDevice::Tpu | TrainingDevice::Custom(_) => false,
         };
         let is_f16 = match self.precision {
             crate::cuda::TrainingPrecision::Fp16 => true,
@@ -1123,6 +1169,10 @@ impl NativeSelfTrainer {
                     }
                 }
             }
+            TrainingDevice::Tpu | TrainingDevice::Custom(_) => {
+                println!("[Device] Hardware backend '{:?}' not yet accelerated in CUDA trainer; using CPU fallback.", self.device);
+                None
+            }
         };
 
         // Construct canonical in-memory model without duplicate weights map allocation
@@ -1178,11 +1228,27 @@ impl NativeSelfTrainer {
             Some(loss)
         };
 
+        let hd_channel = tara_hd::ComputeChannel::with_options(
+            &self.device.to_selection_policy(),
+            match self.precision {
+                crate::cuda::TrainingPrecision::Fp16 => tara_hd::PrecisionMode::Fp16,
+                crate::cuda::TrainingPrecision::Fp32 => tara_hd::PrecisionMode::Fp32,
+                crate::cuda::TrainingPrecision::Auto => tara_hd::PrecisionMode::Auto,
+            },
+        ).ok();
+
         let device_label = if let Some(ref t) = gpu_trainer_opt {
             format!("GPU ({})", t.device().name)
+        } else if let Some(ref ch) = hd_channel {
+            if ch.is_tpu() {
+                format!("TPU ({})", ch.device_name())
+            } else {
+                format!("CPU ({})", ch.device_name())
+            }
         } else {
-            "CPU".to_string()
+            "CPU (Rayon SIMD & On-Demand Chunked Streaming)".to_string()
         };
+        let cpu_stream_helper = tara_hd::CpuStreamHelper::new();
         let is_gpu = gpu_trainer_opt.is_some();
         let precision_label = if let Some(ref t) = gpu_trainer_opt {
             format!("{:?}", t.precision())
@@ -1380,6 +1446,17 @@ impl NativeSelfTrainer {
             0
         };
 
+        let train_start_instant = std::time::Instant::now();
+        let mut running_avg_loss: Option<f32> = None;
+        let mut ema_step_duration: Option<f64> = None;
+        let stage_env = std::env::var("STAGE_NAME").ok();
+        let stage_label = self
+            .stage_name
+            .as_deref()
+            .or(stage_env.as_deref())
+            .unwrap_or("Stage")
+            .to_string();
+
         let start_epoch = epochs_completed;
         for epoch_idx in start_epoch..max_epochs {
             let mut accum_grads: HashMap<String, Vec<f32>> = HashMap::new();
@@ -1393,7 +1470,7 @@ impl NativeSelfTrainer {
             initial_sample_skip = 0;
 
             println!(
-                "[Train] Starting Epoch {}/{} ({} samples in pool, accumulation: {} micro-steps/optimizer step, device: {})...",
+                "[{stage_label}] Starting Epoch {}/{} ({} samples in pool, accumulation: {} micro-steps/optimizer step, device: {})...",
                 epoch_idx + 1,
                 max_epochs,
                 train_tokens.len(),
@@ -1402,19 +1479,34 @@ impl NativeSelfTrainer {
             );
             let _ = std::io::stdout().flush();
 
-            for (tokens, target_start) in train_tokens.iter().skip(skip_count) {
+            for (sample_offset, (tokens, target_start)) in train_tokens.iter().skip(skip_count).enumerate() {
                 if let Some(max_s) = self.max_steps {
                     if optimizer_steps >= max_s {
                         break;
                     }
                 }
+                let sample_idx_in_epoch = skip_count + sample_offset;
+                let sample_in_epoch = sample_idx_in_epoch + 1;
                 let sample_start = std::time::Instant::now();
-                let seq_len = tokens.len();
+                let (active_tokens, raw_target_start) = if gpu_trainer_opt.is_none() && tokens.len() > 512 {
+                    let chunk_size = cpu_stream_helper.recommend_chunk_size(tokens.len(), config.hidden_size);
+                    println!(
+                        "[{stage_label} | On-Demand Stream] Bound long sequence ({} tokens) to {} tokens on CPU to preserve RAM",
+                        tokens.len(), chunk_size
+                    );
+                    (&tokens[..chunk_size], (*target_start).min(chunk_size))
+                } else {
+                    (&tokens[..], *target_start)
+                };
+                let seq_len = active_tokens.len();
+                let sample_pct = (sample_in_epoch as f64 / train_tokens.len() as f64 * 100.0).min(100.0);
                 println!(
-                    "[Train Epoch {}] Processing sample {}/{} (seq_len: {}, micro-step {}/{})...",
+                    "[{stage_label} | Epoch {}/{} | Sample {}/{} ({:.1}%)] Starting forward/backward (seq_len: {}, micro-step {}/{})...",
                     epoch_idx + 1,
-                    samples_seen + 1,
+                    max_epochs,
+                    sample_in_epoch,
                     train_tokens.len(),
+                    sample_pct,
                     seq_len,
                     accum_count + 1,
                     accumulation_steps
@@ -1422,7 +1514,7 @@ impl NativeSelfTrainer {
                 let _ = std::io::stdout().flush();
 
                 let (layer_inputs, final_normed, logits) = if let Some(ref gpu_trainer) = gpu_trainer_opt {
-                    let (inputs, fnorm) = model.forward_activations(tokens);
+                    let (inputs, fnorm) = model.forward_activations(active_tokens);
                     let lgs = gpu_trainer
                         .forward_lm_head(
                             &fnorm,
@@ -1433,13 +1525,13 @@ impl NativeSelfTrainer {
                         .map_err(|e| TrainerError::Model(format!("GPU forward failed: {e}")))?;
                     (inputs, fnorm, lgs)
                 } else {
-                    let (inputs, fnorm, lgs) = model.forward_with_cache(tokens);
+                    let (inputs, fnorm, lgs) = model.forward_with_cache(active_tokens);
                     (inputs, fnorm, lgs)
                 };
 
                 // Compute d_logits for supervised causal cross-entropy (Rayon-parallelized across token positions)
                 let vs = config.vocab_size;
-                let eff_target_start = (*target_start).max(1);
+                let eff_target_start = raw_target_start.max(1);
                 let mut d_logits = vec![0.0f32; seq_len * vs];
 
                 let (unnorm_sample_loss, valid_targets) = d_logits
@@ -1475,11 +1567,14 @@ impl NativeSelfTrainer {
                     })
                     .reduce(|| (0.0f32, 0usize), |a, b| (a.0 + b.0, a.1 + b.1));
 
+                // Drop large forward logits buffer immediately — reclaims ~570 MB host RAM
+                drop(logits);
+
                 if valid_targets > 0 {
                     let sample_loss = unnorm_sample_loss / valid_targets as f32;
                     batch_loss_sum += sample_loss;
                     batch_tokens_count += valid_targets;
-                    let target_bytes: usize = tokens[*target_start..]
+                    let target_bytes: usize = active_tokens[eff_target_start..]
                         .iter()
                         .map(|id| tokenizer.id_to_token.get(id).map(|s| s.len()).unwrap_or(1))
                         .sum();
@@ -1491,22 +1586,8 @@ impl NativeSelfTrainer {
                         *g *= norm_factor;
                     }
 
-                    let sample_time = sample_start.elapsed().as_secs_f32();
-                    println!(
-                        "[Train Epoch {}] Sample {}/{} (seq_len: {}, micro-step {}/{}) | Loss: {:.4} | Time: {:.2}s | Device: {}",
-                        epoch_idx + 1,
-                        samples_seen + 1,
-                        train_tokens.len(),
-                        seq_len,
-                        accum_count + 1,
-                        accumulation_steps,
-                        sample_loss,
-                        sample_time,
-                        device_label
-                    );
-                    let _ = std::io::stdout().flush();
-
-                    let grad_map = if let Some(ref gpu_trainer) = gpu_trainer_opt {
+                    // Stream gradients directly to GPU or CPU accumulator without keeping intermediate buffers
+                    if let Some(ref gpu_trainer) = gpu_trainer_opt {
                         // GPU-accelerated LM Head backward projection
                         let (gpu_dlm, gpu_dnorm) = gpu_trainer
                             .backward_lm_head(
@@ -1520,57 +1601,99 @@ impl NativeSelfTrainer {
                                 TrainerError::Model(format!("GPU backward failed: {e}"))
                             })?;
 
-                        // Backward through decoder layers with GPU-computed d_final_normed
+                        // Drop logits and norm activation buffers immediately
+                        drop(d_logits);
+                        drop(final_normed);
+
+                        // Accumulate LM Head gradient on GPU and drop host buffer immediately
+                        gpu_trainer
+                            .accumulate_gradient("lm_head.weight", &gpu_dlm)
+                            .map_err(|e| {
+                                TrainerError::Model(format!("GPU gradient accumulation failed: {e}"))
+                            })?;
+                        drop(gpu_dlm);
+
+                        // Backward through RMSNorm with GPU-computed d_final_normed
                         let (mut dx, d_norm) = model.norm.backward(
                             &gpu_dnorm,
                             layer_inputs.last().unwrap(),
                             seq_len,
                             config.hidden_size,
                         );
+                        drop(gpu_dnorm);
 
-                        let mut layer_gradients = Vec::with_capacity(model.layers.len());
+                        // Accumulate Norm gradient on GPU and drop host buffer immediately
+                        gpu_trainer
+                            .accumulate_gradient("model.norm.weight", &d_norm)
+                            .map_err(|e| {
+                                TrainerError::Model(format!("GPU gradient accumulation failed: {e}"))
+                            })?;
+                        drop(d_norm);
+
+                        // Backward through decoder layers in reverse order:
+                        // Each layer's gradient is uploaded to GPU and dropped immediately,
+                        // keeping only ONE layer gradient (~180 MB) in RAM at a time instead of all 13 (~2.34 GB).
                         for l in (0..model.layers.len()).rev() {
                             let l_grads = model.layers[l].backward(&dx, &layer_inputs[l], seq_len);
-                            dx = l_grads.dx.clone();
-                            layer_gradients.push(l_grads);
-                        }
-                        layer_gradients.reverse();
 
+                            let prefix = format!("model.layers.{}", l);
+                            gpu_trainer
+                                .accumulate_gradient(&format!("{}.input_layernorm.weight", prefix), &l_grads.d_input_layernorm)
+                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
+                            gpu_trainer
+                                .accumulate_gradient(&format!("{}.self_attn.q_proj.weight", prefix), &l_grads.d_q_proj)
+                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
+                            gpu_trainer
+                                .accumulate_gradient(&format!("{}.self_attn.k_proj.weight", prefix), &l_grads.d_k_proj)
+                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
+                            gpu_trainer
+                                .accumulate_gradient(&format!("{}.self_attn.v_proj.weight", prefix), &l_grads.d_v_proj)
+                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
+                            gpu_trainer
+                                .accumulate_gradient(&format!("{}.self_attn.o_proj.weight", prefix), &l_grads.d_o_proj)
+                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
+                            gpu_trainer
+                                .accumulate_gradient(&format!("{}.post_attention_layernorm.weight", prefix), &l_grads.d_post_attention_layernorm)
+                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
+                            gpu_trainer
+                                .accumulate_gradient(&format!("{}.mlp.gate_proj.weight", prefix), &l_grads.d_gate_proj)
+                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
+                            gpu_trainer
+                                .accumulate_gradient(&format!("{}.mlp.up_proj.weight", prefix), &l_grads.d_up_proj)
+                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
+                            gpu_trainer
+                                .accumulate_gradient(&format!("{}.mlp.down_proj.weight", prefix), &l_grads.d_down_proj)
+                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
+                            dx = l_grads.dx;
+                        }
+                        drop(layer_inputs);
+
+                        // Accumulate token embeddings gradient on GPU and drop host buffer immediately
                         let mut d_embed_tokens =
                             vec![0.0f32; config.vocab_size * config.hidden_size];
-                        for (t, &id) in tokens.iter().enumerate() {
+                        for (t, &id) in active_tokens.iter().enumerate() {
                             let id = (id as usize).min(config.vocab_size.saturating_sub(1));
                             let dx_row = &dx[t * config.hidden_size..(t + 1) * config.hidden_size];
                             for h in 0..config.hidden_size {
                                 d_embed_tokens[id * config.hidden_size + h] += dx_row[h];
                             }
                         }
+                        drop(dx);
 
-                        let model_grads = crate::model::causal_lm::ModelGradients {
-                            embed_tokens: d_embed_tokens,
-                            layers: layer_gradients,
-                            norm: d_norm,
-                            lm_head: gpu_dlm,
-                        };
-                        model_grads.to_map()
-                    } else {
-                        // Full-network CPU analytical backward pass
-                        let model_grads =
-                            model.backward(tokens, &layer_inputs, &final_normed, &d_logits);
-                        model_grads.to_map()
-                    };
-
-                    // Accumulate gradients (on GPU if active, otherwise host map)
-                    if let Some(ref gpu_trainer) = gpu_trainer_opt {
-                        for (k, v) in &grad_map {
-                            gpu_trainer.accumulate_gradient(k, v).map_err(|e| {
-                                TrainerError::Model(format!(
-                                    "GPU gradient accumulation failed: {e}"
-                                ))
+                        gpu_trainer
+                            .accumulate_gradient("model.embed_tokens.weight", &d_embed_tokens)
+                            .map_err(|e| {
+                                TrainerError::Model(format!("GPU gradient accumulation failed: {e}"))
                             })?;
-                        }
+                        drop(d_embed_tokens);
                     } else {
-                        for (k, v) in grad_map {
+                        // Full-network CPU analytical backward pass: into_map() moves buffers with zero cloning
+                        let model_grads =
+                            model.backward(active_tokens, &layer_inputs, &final_normed, &d_logits);
+                        drop(d_logits);
+                        drop(final_normed);
+                        drop(layer_inputs);
+                        for (k, v) in model_grads.into_map() {
                             let entry = accum_grads
                                 .entry(k)
                                 .or_insert_with(|| vec![0.0f32; v.len()]);
@@ -1579,8 +1702,50 @@ impl NativeSelfTrainer {
                             }
                         }
                     }
+
                     accum_count += 1;
                     samples_seen += 1;
+
+                    // Update running average loss
+                    running_avg_loss = Some(match running_avg_loss {
+                        None => sample_loss,
+                        Some(prev) => 0.95 * prev + 0.05 * sample_loss,
+                    });
+                    let running_loss_display = running_avg_loss.unwrap_or(sample_loss);
+
+                    let sample_time = sample_start.elapsed().as_secs_f32();
+                    let sample_throughput = (valid_targets as f32) / sample_time.max(1e-4);
+
+                    let snap = crate::cuda::gpu_trainer::capture_memory_snapshot(
+                        gpu_trainer_opt.as_ref().and_then(|g| g.get_vram_info().ok()),
+                    );
+                    let vram_str = match (snap.gpu_used_vram_mb, snap.gpu_total_vram_mb) {
+                        (Some(u), Some(t)) => format!(" | GPU VRAM: {:.1}/{:.1} MB", u, t),
+                        _ => String::new(),
+                    };
+
+                    println!(
+                        "[{stage_label} | Epoch {}/{} | Sample {}/{} ({:.1}%)] Micro-step {}/{} | Loss: {:.4} (Running: {:.4}) | Tok/s: {:.1} | Time: {:.2}s | Host RSS: {:.1} MB{}",
+                        epoch_idx + 1,
+                        max_epochs,
+                        sample_in_epoch,
+                        train_tokens.len(),
+                        sample_pct,
+                        accum_count,
+                        accumulation_steps,
+                        sample_loss,
+                        running_loss_display,
+                        sample_throughput,
+                        sample_time,
+                        snap.process_rss_mb,
+                        vram_str
+                    );
+                    let _ = std::io::stdout().flush();
+                } else {
+                    drop(d_logits);
+                    drop(final_normed);
+                    drop(layer_inputs);
+                }
 
                     if accum_count >= accumulation_steps {
                         let mut step_taken = false;
@@ -1707,7 +1872,7 @@ impl NativeSelfTrainer {
                         let batch_lm_loss = if accum_count > 0 {
                             batch_loss_sum / accum_count as f32
                         } else {
-                            sample_loss
+                            0.0f32
                         };
                         let total_step_loss = batch_lm_loss + ewc_loss;
                         let ppl = (batch_lm_loss as f64).min(50.0).exp();
@@ -1724,18 +1889,50 @@ impl NativeSelfTrainer {
                         let step_duration = step_start_instant.elapsed();
                         let batch_time_sec = step_duration.as_secs_f32().max(1e-6);
                         let throughput = batch_tokens_count as f32 / batch_time_sec;
+                        let step_duration_secs = step_duration.as_secs_f64();
+
+                        ema_step_duration = Some(match ema_step_duration {
+                            None => step_duration_secs,
+                            Some(prev) => 0.8 * prev + 0.2 * step_duration_secs,
+                        });
+
+                        let step_pct_str = if let Some(max_s) = self.max_steps {
+                            format!(" ({:.1}%)", (optimizer_steps as f64 / max_s as f64 * 100.0).min(100.0))
+                        } else {
+                            String::new()
+                        };
+
+                        let eta_str = if let (Some(max_s), Some(ema_sec)) = (self.max_steps, ema_step_duration) {
+                            let rem_steps = max_s.saturating_sub(optimizer_steps);
+                            let eta_sec = rem_steps as f64 * ema_sec;
+                            format!(" | ETA: {}", Self::format_duration_hhmmss(eta_sec))
+                        } else {
+                            String::new()
+                        };
+                        let elapsed_str = Self::format_duration_hhmmss(train_start_instant.elapsed().as_secs_f64());
+
+                        let snap = crate::cuda::gpu_trainer::capture_memory_snapshot(
+                            gpu_trainer_opt.as_ref().and_then(|g| g.get_vram_info().ok()),
+                        );
+                        let vram_str = match (snap.gpu_used_vram_mb, snap.gpu_total_vram_mb) {
+                            (Some(u), Some(t)) => format!(" | GPU VRAM: {:.1}/{:.1} MB", u, t),
+                            _ => String::new(),
+                        };
 
                         let max_str = self
                             .max_steps
                             .map(|m| m.to_string())
                             .unwrap_or_else(|| "∞".to_string());
+                        let running_loss_display = running_avg_loss.unwrap_or(batch_lm_loss);
+
                         println!(
-                            "[Train] Step {:>4}/{} (samples: {}) | Total Loss: {:.4} | LM Loss: {:.4} | PPL: {:.2} | BPB: {:.4} | Aux/EWC Loss: {:.4} | Grad Norm: {:.4} | LR: {:.6} | Throughput: {:.1} tok/s | Time: {:.3}s | Device: {}",
+                            "[{stage_label} | Step {:>4}/{}{}] Total Loss: {:.4} | LM Loss: {:.4} (Running: {:.4}) | PPL: {:.2} | BPB: {:.4} | Aux/EWC: {:.4} | Grad Norm: {:.4} | LR: {:.6} | Throughput: {:.1} tok/s | Step Time: {:.2}s | Elapsed: {}{}{} | Host RSS: {:.1} MB{}",
                             optimizer_steps,
                             max_str,
-                            samples_seen,
+                            step_pct_str,
                             total_step_loss,
                             batch_lm_loss,
+                            running_loss_display,
                             ppl,
                             bpb,
                             ewc_loss,
@@ -1743,8 +1940,13 @@ impl NativeSelfTrainer {
                             effective_lr,
                             throughput,
                             batch_time_sec,
-                            device_label
+                            elapsed_str,
+                            eta_str,
+                            vram_str,
+                            snap.process_rss_mb,
+                            vram_str
                         );
+                        let _ = std::io::stdout().flush();
 
                         // Reset step accumulator counters
                         accum_count = 0;
@@ -1803,11 +2005,27 @@ impl NativeSelfTrainer {
                                     is_best,
                                     val_tokens_empty: val_tokens.is_empty(),
                                 })?;
+                                let eval_str = current_eval_loss
+                                    .map(|l| format!("{:.4}", l))
+                                    .unwrap_or_else(|| "N/A".to_string());
+                                let best_str = if val_tokens.is_empty() {
+                                    "N/A".to_string()
+                                } else {
+                                    format!("{:.4}", best_loss)
+                                };
+                                println!(
+                                    "[{stage_label} | Checkpoint Saved] Step {} (Epoch {}) | Eval Loss: {} | Best Loss: {} | Path: {} | Sync: GDrive",
+                                    optimizer_steps,
+                                    epoch_idx + 1,
+                                    eval_str,
+                                    best_str,
+                                    cp_dir
+                                );
+                                let _ = std::io::stdout().flush();
                             }
                         }
                     }
                 }
-            }
 
             // Flush remaining accumulated gradients at epoch boundary
             if accum_count > 0 {
@@ -1940,17 +2158,49 @@ impl NativeSelfTrainer {
                 let batch_time_sec = step_duration.as_secs_f32().max(1e-6);
                 let throughput = batch_tokens_count as f32 / batch_time_sec;
 
+                let step_duration_secs = step_duration.as_secs_f64();
+                ema_step_duration = Some(match ema_step_duration {
+                    None => step_duration_secs,
+                    Some(prev) => 0.8 * prev + 0.2 * step_duration_secs,
+                });
+
+                let step_pct_str = if let Some(max_s) = self.max_steps {
+                    format!(" ({:.1}%)", (optimizer_steps as f64 / max_s as f64 * 100.0).min(100.0))
+                } else {
+                    String::new()
+                };
+
+                let eta_str = if let (Some(max_s), Some(ema_sec)) = (self.max_steps, ema_step_duration) {
+                    let rem_steps = max_s.saturating_sub(optimizer_steps);
+                    let eta_sec = rem_steps as f64 * ema_sec;
+                    format!(" | ETA: {}", Self::format_duration_hhmmss(eta_sec))
+                } else {
+                    String::new()
+                };
+                let elapsed_str = Self::format_duration_hhmmss(train_start_instant.elapsed().as_secs_f64());
+
+                let snap = crate::cuda::gpu_trainer::capture_memory_snapshot(
+                    gpu_trainer_opt.as_ref().and_then(|g| g.get_vram_info().ok()),
+                );
+                let vram_str = match (snap.gpu_used_vram_mb, snap.gpu_total_vram_mb) {
+                    (Some(u), Some(t)) => format!(" | GPU VRAM: {:.1}/{:.1} MB", u, t),
+                    _ => String::new(),
+                };
+
                 let max_str = self
                     .max_steps
                     .map(|m| m.to_string())
                     .unwrap_or_else(|| "∞".to_string());
+                let running_loss_display = running_avg_loss.unwrap_or(batch_lm_loss);
+
                 println!(
-                    "[Train] Step {:>4}/{} (samples: {}) | Total Loss: {:.4} | LM Loss: {:.4} | PPL: {:.2} | BPB: {:.4} | Aux/EWC Loss: {:.4} | Grad Norm: {:.4} | LR: {:.6} | Throughput: {:.1} tok/s | Time: {:.3}s | Device: {} [Epoch Flush]",
+                    "[{stage_label} | Step {:>4}/{}{} (Epoch Flush)] Total Loss: {:.4} | LM Loss: {:.4} (Running: {:.4}) | PPL: {:.2} | BPB: {:.4} | Aux/EWC: {:.4} | Grad Norm: {:.4} | LR: {:.6} | Throughput: {:.1} tok/s | Step Time: {:.2}s | Elapsed: {}{}{} | Host RSS: {:.1} MB{}",
                     optimizer_steps,
                     max_str,
-                    samples_seen,
+                    step_pct_str,
                     total_step_loss,
                     batch_lm_loss,
+                    running_loss_display,
                     ppl,
                     bpb,
                     ewc_loss,
@@ -1958,8 +2208,13 @@ impl NativeSelfTrainer {
                     effective_lr,
                     throughput,
                     batch_time_sec,
-                    device_label
+                    elapsed_str,
+                    eta_str,
+                    vram_str,
+                    snap.process_rss_mb,
+                    vram_str
                 );
+                let _ = std::io::stdout().flush();
 
                 model.update_weights(&weights).map_err(|e| TrainerError::Model(e.to_string()))?;
 
@@ -2002,6 +2257,23 @@ impl NativeSelfTrainer {
                         is_best,
                         val_tokens_empty: val_tokens.is_empty(),
                     })?;
+                    let eval_str = current_eval_loss
+                        .map(|l| format!("{:.4}", l))
+                        .unwrap_or_else(|| "N/A".to_string());
+                    let best_str = if val_tokens.is_empty() {
+                        "N/A".to_string()
+                    } else {
+                        format!("{:.4}", best_loss)
+                    };
+                    println!(
+                        "[{stage_label} | Checkpoint Saved] Step {} (Epoch {}) | Eval Loss: {} | Best Loss: {} | Path: {} | Sync: GDrive",
+                        optimizer_steps,
+                        epoch_idx + 1,
+                        eval_str,
+                        best_str,
+                        cp_dir
+                    );
+                    let _ = std::io::stdout().flush();
                 }
             }
 

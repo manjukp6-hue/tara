@@ -21,6 +21,7 @@ rayon = "1.10"
 
 # Shared workspace crate
 tara_core = { path = "../tara_core" }
+tara_hd = { path = "../tara_hd" }
 tara_security = { path = "../tara_security" }
 parquet = { version = "60.0.0", default-features = false, features = ["flate2", "flate2-rust_backend", "snap"] }
 

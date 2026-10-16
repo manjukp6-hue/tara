@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "rust/tara_core",
     "rust/tara_engine",
+    "rust/tara_hd",
     "rust/tara_security",
     "rust/tara_server",
 ]

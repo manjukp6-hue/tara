@@ -41,6 +41,7 @@ regex = "1.10"
 # Internal crates
 tara_core = { path = "../tara_core" }
 tara_engine = { path = "../tara_engine" }
+tara_hd = { path = "../tara_hd" }
 tara_security = { path = "../tara_security" }
 
 [dev-dependencies]

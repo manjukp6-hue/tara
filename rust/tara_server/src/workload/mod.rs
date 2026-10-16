@@ -10,6 +10,7 @@ pub mod workload_distributor {
         CpuDistributed,
         GpuSingle,
         CpuGpuHybrid,
+        TpuAccelerated,
     }
 
     impl ExecutionMode {
@@ -19,6 +20,7 @@ pub mod workload_distributor {
                 ExecutionMode::CpuDistributed => "CpuDistributed",
                 ExecutionMode::GpuSingle => "GpuSingle",
                 ExecutionMode::CpuGpuHybrid => "CpuGpuHybrid",
+                ExecutionMode::TpuAccelerated => "TpuAccelerated",
             }
         }
     }
@@ -82,43 +84,39 @@ pub mod workload_distributor {
 
     /// Detect the workload characteristics and select the appropriate execution mode.
     ///
-    /// Decision matrix:
-    ///  - Hybrid mode: CpuGpuHybrid when CUDA is available and hybrid execution is requested.
-    ///  - Training workloads (large payloads >100 KB or explicit training task):
-    ///    route to GpuSingle if CUDA available, otherwise CpuDistributed.
-    ///  - Inference workloads: GpuSingle if CUDA available, otherwise CpuSingle.
+    /// Decision matrix via TARA-HD dynamic compute channel:
+    ///  - GPU available: GpuSingle (or CpuGpuHybrid if requested).
+    ///  - TPU available: TpuAccelerated.
+    ///  - CPU fallback: CpuDistributed for large training payloads, CpuSingle for inference.
     pub fn route(input_data: &Value) -> (String, Vec<String>) {
         let desc = detect_workload(input_data);
         let workload_type = desc["workload_type"].as_str().unwrap_or("Inference");
 
-        let cuda_available = std::env::var("TARA_CUDA_DEVICE")
-            .map(|v| !v.trim().is_empty())
-            .unwrap_or(false);
+        let channel = tara_hd::ComputeChannel::auto();
+        let (has_gpu, has_tpu) = if let Ok(ref ch) = channel {
+            (ch.is_gpu(), ch.is_tpu())
+        } else {
+            let env_gpu = std::env::var("TARA_CUDA_DEVICE")
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false);
+            (env_gpu, false)
+        };
 
         let hybrid_requested = input_data
             .get("hybrid")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let mode = if cuda_available && hybrid_requested {
+        let mode = if has_gpu && hybrid_requested {
             ExecutionMode::CpuGpuHybrid
+        } else if has_gpu {
+            ExecutionMode::GpuSingle
+        } else if has_tpu {
+            ExecutionMode::TpuAccelerated
         } else {
             match workload_type {
-                "Training" => {
-                    if cuda_available {
-                        ExecutionMode::GpuSingle
-                    } else {
-                        ExecutionMode::CpuDistributed
-                    }
-                }
-                _ => {
-                    // Inference
-                    if cuda_available {
-                        ExecutionMode::GpuSingle
-                    } else {
-                        ExecutionMode::CpuSingle
-                    }
-                }
+                "Training" => ExecutionMode::CpuDistributed,
+                _ => ExecutionMode::CpuSingle,
             }
         };
 

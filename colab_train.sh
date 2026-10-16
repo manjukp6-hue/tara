@@ -308,6 +308,7 @@ if [ ! -d "$SCALE_DS_DIR" ] || [ -z "$(ls -A "$SCALE_DS_DIR" 2>/dev/null)" ]; th
 fi
 
 echo "=== [AUTONOMOUS EXTENSIBLE MULTI-STAGE TRAINING PIPELINE] ==="
+set +e
 ./target/release/tara_training_stages \
     --all-stages \
     --checkpoints-dir "$ACTIVE_CP_DIR" \
@@ -317,6 +318,19 @@ echo "=== [AUTONOMOUS EXTENSIBLE MULTI-STAGE TRAINING PIPELINE] ==="
     --precision auto \
     --batch-size "$TRAIN_BATCH_SIZE" \
     --max-steps "$STAGE_MAX_STEPS"
+PIPELINE_EXIT=$?
+set -e
+
+if [ $PIPELINE_EXIT -ne 0 ]; then
+    echo "=============================================================================="
+    echo "[PIPELINE FAILURE] tara_training_stages exited with status: $PIPELINE_EXIT"
+    echo "Host memory state at termination:"
+    free -h || true
+    echo "Kernel termination logs (dmesg):"
+    dmesg -T | grep -i -E "oom|killed process|out of memory" | tail -20 || true
+    echo "=============================================================================="
+    exit $PIPELINE_EXIT
+fi
 
 echo "Autonomous Multi-Stage Training Pipeline Completed Successfully!"
 

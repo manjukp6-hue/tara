@@ -1363,7 +1363,20 @@ dependencies = [
  "serde_json",
  "sha2",
  "tara_core",
+ "tara_hd",
  "tara_security",
+ "thiserror",
+]
+
+[[package]]
+name = "tara_hd"
+version = "1.0.0"
+dependencies = [
+ "half",
+ "log",
+ "rayon",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -1408,6 +1421,7 @@ dependencies = [
  "sha2",
  "tara_core",
  "tara_engine",
+ "tara_hd",
  "tara_security",
  "thiserror",
  "tiny_http",

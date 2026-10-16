@@ -118,6 +118,7 @@ pub struct TrainingOptions {
     pub checkpoint_interval: Option<usize>,
     pub resume: bool,
     pub resume_from: Option<String>,
+    pub stage_name: Option<String>,
     pub max_memory_mb: Option<f64>,
     /// Maximum allowed validation loss ratio (`loss_after / loss_before`) before candidate rejection.
     /// Defaults to `1.5` when `None`.
@@ -931,6 +932,9 @@ pub fn run_controlled_training_with_options(
     }
     if let Some(ref resolved_rf) = canonical_resume_from {
         trainer = trainer.with_resume_from(resolved_rf);
+    }
+    if let Some(ref st) = options.stage_name {
+        trainer = trainer.with_stage_name(st);
     }
 
     let staging_str = staging_candidate_dir.to_string_lossy().to_string();

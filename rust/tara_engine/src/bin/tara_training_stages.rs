@@ -787,19 +787,20 @@ use tara_engine::train_candidate::{
 
 pub fn validate_device_and_precision(device: &str, precision: &str) -> Result<(), String> {
     match device.to_ascii_lowercase().as_str() {
-        "auto" | "cpu" | "gpu" | "cuda" => {}
+        "auto" | "cpu" | "gpu" | "cuda" | "tpu" => {}
+        custom if custom.contains(':') || !custom.is_empty() => {}
         other => {
             return Err(format!(
-                "Invalid --device '{}': must be one of 'auto', 'cpu', 'gpu', 'cuda'",
+                "Invalid --device '{}': must be one of 'auto', 'cpu', 'gpu', 'cuda', 'tpu', or '<backend>:<id>'",
                 other
             ));
         }
     }
     match precision.to_ascii_lowercase().as_str() {
-        "auto" | "fp16" | "fp32" => {}
+        "auto" | "fp16" | "fp32" | "bf16" => {}
         other => {
             return Err(format!(
-                "Invalid --precision '{}': must be one of 'auto', 'fp16', 'fp32'",
+                "Invalid --precision '{}': must be one of 'auto', 'fp16', 'fp32', 'bf16'",
                 other
             ));
         }
@@ -2597,6 +2598,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             checkpoint_interval: Some(stage.checkpoint_interval),
             resume: should_resume,
             resume_from: resume_source,
+            stage_name: Some(format!("Stage {:02} ({})", stage.stage_index, stage.stage_id)),
             max_memory_mb: Some(max_mem_mb),
             ..Default::default()
         };

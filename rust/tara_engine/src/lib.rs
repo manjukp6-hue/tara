@@ -31,6 +31,7 @@ pub mod inference;
 pub use inference::generate as generate;
 pub mod tokenizer;
 pub mod train_candidate;
+pub use tara_hd;
 
 // ============================================================================
 // Tier 2: Domain & Verification Subsystems

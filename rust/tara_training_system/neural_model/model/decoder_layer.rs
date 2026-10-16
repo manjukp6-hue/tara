@@ -79,6 +79,58 @@ impl TaraDecoderLayer {
         })
     }
 
+    /// Load a decoder layer from the mutable weight map, moving ownership without cloning.
+    pub fn from_weights_move(
+        weights: &mut HashMap<String, Vec<f32>>,
+        layer_idx: usize,
+        config: &TaraConfig,
+    ) -> Result<Self, DecoderLayerError> {
+        let prefix = format!("model.layers.{}", layer_idx);
+        let eps = config.rms_norm_eps as f32;
+
+        let input_ln_w = weights
+            .remove(&format!("{}.input_layernorm.weight", prefix))
+            .ok_or_else(|| {
+                DecoderLayerError::MissingWeight(format!("{}.input_layernorm.weight", prefix))
+            })?;
+        let post_ln_w = weights
+            .remove(&format!("{}.post_attention_layernorm.weight", prefix))
+            .ok_or_else(|| {
+                DecoderLayerError::MissingWeight(format!(
+                    "{}.post_attention_layernorm.weight",
+                    prefix
+                ))
+            })?;
+
+        let self_attn = TaraAttention::from_weights_move(weights, layer_idx, config)?;
+        let mlp = TaraMlp::from_weights_move(weights, layer_idx)?;
+        let input_layernorm = RmsNorm::new(input_ln_w, eps);
+        let post_attention_layernorm = RmsNorm::new(post_ln_w, eps);
+
+        Ok(Self {
+            self_attn,
+            mlp,
+            input_layernorm,
+            post_attention_layernorm,
+            hidden_size: config.hidden_size,
+            intermediate_size: config.intermediate_size,
+        })
+    }
+
+    /// Deconstruct this layer and return its weight tensors into `out` without cloning.
+    pub fn into_weights(self, layer_idx: usize, out: &mut HashMap<String, Vec<f32>>) {
+        let prefix = format!("model.layers.{}", layer_idx);
+        out.insert(format!("{}.input_layernorm.weight", prefix), self.input_layernorm.weight);
+        out.insert(format!("{}.post_attention_layernorm.weight", prefix), self.post_attention_layernorm.weight);
+        out.insert(format!("{}.self_attn.q_proj.weight", prefix), self.self_attn.q_proj);
+        out.insert(format!("{}.self_attn.k_proj.weight", prefix), self.self_attn.k_proj);
+        out.insert(format!("{}.self_attn.v_proj.weight", prefix), self.self_attn.v_proj);
+        out.insert(format!("{}.self_attn.o_proj.weight", prefix), self.self_attn.o_proj);
+        out.insert(format!("{}.mlp.gate_proj.weight", prefix), self.mlp.gate_proj);
+        out.insert(format!("{}.mlp.up_proj.weight", prefix), self.mlp.up_proj);
+        out.insert(format!("{}.mlp.down_proj.weight", prefix), self.mlp.down_proj);
+    }
+
     /// Run the decoder layer forward pass.
     ///
     /// `x` is a flat `[seq_len, hidden_size]` buffer.

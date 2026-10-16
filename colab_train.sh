@@ -239,17 +239,59 @@ elif command -v apt-get >/dev/null 2>&1; then
     fi
 fi
 
-$TIME_CMD ./target/release/tara_gpu_step_test \
-    --model storage/models/tara_candidate_v1 \
-    --device auto \
-    --precision auto
+COMPLETION_MARKER="storage/checkpoints/gpu_step_test_complete.json"
+GPU_LOG="/tmp/tara_gpu_step_test.log"
+rm -f "$COMPLETION_MARKER"
+rm -f "$GPU_LOG"
 
-GPU_STEP_STATUS=$?
-if [ $GPU_STEP_STATUS -ne 0 ]; then
+set +e
+if [ -n "$TIME_CMD" ]; then
+    $TIME_CMD ./target/release/tara_gpu_step_test \
+        --model storage/models/tara_candidate_v1 \
+        --device auto \
+        --precision auto 2>&1 | tee "$GPU_LOG"
+    GPU_STEP_STATUS="${PIPESTATUS[0]}"
+else
+    ./target/release/tara_gpu_step_test \
+        --model storage/models/tara_candidate_v1 \
+        --device auto \
+        --precision auto 2>&1 | tee "$GPU_LOG"
+    GPU_STEP_STATUS="${PIPESTATUS[0]}"
+fi
+set -e
+
+if [ "$GPU_STEP_STATUS" -ne 0 ]; then
     echo "=== [FATAL: GPU 1-STEP VERIFICATION FAILED (EXIT CODE: $GPU_STEP_STATUS)] ==="
+    if [ "$GPU_STEP_STATUS" -ge 128 ]; then
+        SIG_NUM=$(( GPU_STEP_STATUS - 128 ))
+        echo "=== [PROCESS TERMINATED BY SIGNAL $SIG_NUM (SIGKILL / OOM KILLER DETECTED)] ==="
+    fi
+    if [ -f "/sys/fs/cgroup/memory.events" ]; then
+        echo "[CGROUP EVENTS AT FAILURE]"
+        cat /sys/fs/cgroup/memory.events
+    elif [ -f "/sys/fs/cgroup/memory/memory.oom_control" ]; then
+        echo "[CGROUP OOM CONTROL AT FAILURE]"
+        cat /sys/fs/cgroup/memory/memory.oom_control
+    fi
     echo "Full multi-stage training run is strictly prohibited until 1-step GPU test passes."
     exit 1
 fi
+
+if [ ! -f "$COMPLETION_MARKER" ]; then
+    echo "=== [FATAL: GPU 1-STEP VERIFICATION MISSING COMPLETION MARKER ($COMPLETION_MARKER)] ==="
+    echo "The test process exited without confirming all verification checkpoints."
+    if [ -f "/sys/fs/cgroup/memory.events" ]; then
+        echo "[CGROUP EVENTS]"
+        cat /sys/fs/cgroup/memory.events
+    fi
+    exit 1
+fi
+
+if ! grep -q "ALL ONE-STEP VERIFICATION CHECKS PASSED" "$GPU_LOG"; then
+    echo "=== [FATAL: GPU 1-STEP LOG MISSING VERIFICATION SUCCESS CONFIRMATION] ==="
+    exit 1
+fi
+
 echo "[GPU GATE] One-step GPU forward pass, backward pass, AdamW update, and checkpoint parity PASSED!"
 
 # 6. Execute Autonomous Extensible Multi-Stage Training Pipeline (Stages 0..5)

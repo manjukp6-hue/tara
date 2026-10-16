@@ -89,7 +89,7 @@ pub use config::TaraConfig;
 pub use control_tokens::{ControlTokenAction, ControlTokenActionParser};
 pub use cuda::{
     capture_memory_snapshot, is_cuda_available, is_cuda_required, is_cuda_required_value,
-    log_flushed_memory_checkpoint, validate_ptx_registers, CudaDeviceInfo, CudaError,
+    log_flushed_memory_checkpoint, validate_ptx_registers, AdamWMemoryAudit, CudaDeviceInfo, CudaError,
     CudaTrainer, MemorySnapshot, TrainingPrecision,
 };
 pub use curriculum_engine::{

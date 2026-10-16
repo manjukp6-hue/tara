@@ -122,6 +122,46 @@ impl TaraAttention {
         })
     }
 
+    /// Build a [`TaraAttention`] from the mutable weight map, moving ownership of vectors without cloning.
+    pub fn from_weights_move(
+        weights: &mut HashMap<String, Vec<f32>>,
+        layer_idx: usize,
+        config: &TaraConfig,
+    ) -> Result<Self, AttentionError> {
+        let prefix = format!("model.layers.{}.self_attn", layer_idx);
+
+        let q_proj = weights
+            .remove(&format!("{}.q_proj.weight", prefix))
+            .ok_or_else(|| AttentionError::MissingWeight(format!("{}.q_proj.weight", prefix)))?;
+        let k_proj = weights
+            .remove(&format!("{}.k_proj.weight", prefix))
+            .ok_or_else(|| AttentionError::MissingWeight(format!("{}.k_proj.weight", prefix)))?;
+        let v_proj = weights
+            .remove(&format!("{}.v_proj.weight", prefix))
+            .ok_or_else(|| AttentionError::MissingWeight(format!("{}.v_proj.weight", prefix)))?;
+        let o_proj = weights
+            .remove(&format!("{}.o_proj.weight", prefix))
+            .ok_or_else(|| AttentionError::MissingWeight(format!("{}.o_proj.weight", prefix)))?;
+
+        let rotary_emb = RotaryEmbedding::new(
+            config.effective_head_dim(),
+            config.max_position_embeddings,
+            config.rope_theta as f32,
+        );
+
+        Ok(Self {
+            q_proj,
+            k_proj,
+            v_proj,
+            o_proj,
+            num_heads: config.num_attention_heads,
+            num_kv_heads: config.num_key_value_heads,
+            head_dim: config.effective_head_dim(),
+            hidden_size: config.hidden_size,
+            rotary_emb,
+        })
+    }
+
     /// Run the attention forward pass.
     ///
     /// `hidden_states`: flat `[seq_len, hidden_size]` buffer.

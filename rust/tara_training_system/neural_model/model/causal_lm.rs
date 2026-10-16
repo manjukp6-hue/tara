@@ -187,13 +187,59 @@ impl TaraForCausalLM {
         })
     }
 
-    /// Construct a model directly from a weights map and config.
+    /// Construct a model by moving ownership of tensors from a mutable weights map without cloning.
+    pub fn from_weights_move(
+        mut weights: HashMap<String, Vec<f32>>,
+        config: &TaraConfig,
+        model_dir: &str,
+    ) -> Result<Self, ModelError> {
+        let embed_tokens = weights
+            .remove("model.embed_tokens.weight")
+            .ok_or_else(|| ModelError::MissingWeight("model.embed_tokens.weight".into()))?;
+
+        let mut layers = Vec::with_capacity(config.num_hidden_layers);
+        for i in 0..config.num_hidden_layers {
+            layers.push(super::decoder_layer::TaraDecoderLayer::from_weights_move(&mut weights, i, config)?);
+        }
+
+        let norm_w = weights
+            .remove("model.norm.weight")
+            .ok_or_else(|| ModelError::MissingWeight("model.norm.weight".into()))?;
+        let norm = RmsNorm::new(norm_w, config.rms_norm_eps as f32);
+
+        let lm_head = weights
+            .remove("lm_head.weight")
+            .unwrap_or_else(|| embed_tokens.clone());
+
+        Ok(Self {
+            embed_tokens,
+            layers,
+            norm,
+            lm_head,
+            config: config.clone(),
+            model_dir: model_dir.to_string(),
+        })
+    }
+
+    /// Deconstruct this model into a map of canonical tensor_name -> Vec<f32> without cloning memory.
+    pub fn into_weights_map(self) -> HashMap<String, Vec<f32>> {
+        let mut map = HashMap::new();
+        map.insert("model.embed_tokens.weight".to_string(), self.embed_tokens);
+        map.insert("model.norm.weight".to_string(), self.norm.weight);
+        map.insert("lm_head.weight".to_string(), self.lm_head);
+        for (i, layer) in self.layers.into_iter().enumerate() {
+            layer.into_weights(i, &mut map);
+        }
+        map
+    }
+
+    /// Construct a model directly from a weights map and config by moving tensors without duplicate copies.
     pub fn from_weights_and_config(
         weights: HashMap<String, Vec<f32>>,
         config: TaraConfig,
         model_dir: &str,
     ) -> Result<Self, ModelError> {
-        Self::from_weights_ref(&weights, &config, model_dir)
+        Self::from_weights_move(weights, &config, model_dir)
     }
 
 
@@ -675,6 +721,59 @@ impl ModelGradients {
 
         map
     }
+
+    /// Flatten all gradients into an owned map of canonical tensor_name -> Vec<f32> without cloning.
+    pub fn into_map(self) -> HashMap<String, Vec<f32>> {
+        let mut map = HashMap::new();
+        map.insert(
+            "model.embed_tokens.weight".to_string(),
+            self.embed_tokens,
+        );
+        map.insert("model.norm.weight".to_string(), self.norm);
+        map.insert("lm_head.weight".to_string(), self.lm_head);
+
+        for (i, layer) in self.layers.into_iter().enumerate() {
+            let prefix = format!("model.layers.{}", i);
+            map.insert(
+                format!("{}.input_layernorm.weight", prefix),
+                layer.d_input_layernorm,
+            );
+            map.insert(
+                format!("{}.self_attn.q_proj.weight", prefix),
+                layer.d_q_proj,
+            );
+            map.insert(
+                format!("{}.self_attn.k_proj.weight", prefix),
+                layer.d_k_proj,
+            );
+            map.insert(
+                format!("{}.self_attn.v_proj.weight", prefix),
+                layer.d_v_proj,
+            );
+            map.insert(
+                format!("{}.self_attn.o_proj.weight", prefix),
+                layer.d_o_proj,
+            );
+            map.insert(
+                format!("{}.post_attention_layernorm.weight", prefix),
+                layer.d_post_attention_layernorm,
+            );
+            map.insert(
+                format!("{}.mlp.gate_proj.weight", prefix),
+                layer.d_gate_proj,
+            );
+            map.insert(
+                format!("{}.mlp.up_proj.weight", prefix),
+                layer.d_up_proj,
+            );
+            map.insert(
+                format!("{}.mlp.down_proj.weight", prefix),
+                layer.d_down_proj,
+            );
+        }
+
+        map
+    }
 }
 
 #[cfg(test)]
@@ -872,5 +971,48 @@ mod tests {
         assert!(cached_layers.is_empty());
         assert!(cached_normed.is_empty());
         assert!(cached_logits.is_empty());
+    }
+
+    #[test]
+    fn test_causal_lm_from_weights_move_and_into_weights_map() {
+        let config = TaraConfig {
+            vocab_size: 4,
+            hidden_size: 4,
+            intermediate_size: 4,
+            num_hidden_layers: 1,
+            num_attention_heads: 1,
+            num_key_value_heads: 1,
+            head_dim: 4,
+            max_position_embeddings: 8,
+            rope_theta: 10000.0,
+            rms_norm_eps: 1e-5,
+            initializer_range: 0.02,
+            version: "test".into(),
+            model_type: "tara".into(),
+        };
+
+        let mut weights = HashMap::<String, Vec<f32>>::new();
+        weights.insert("model.embed_tokens.weight".into(), vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6]);
+        weights.insert("model.norm.weight".into(), vec![1.0, 1.0, 1.0, 1.0]);
+        weights.insert("lm_head.weight".into(), vec![0.5; 16]);
+        weights.insert("model.layers.0.input_layernorm.weight".into(), vec![1.0; 4]);
+        weights.insert("model.layers.0.post_attention_layernorm.weight".into(), vec![1.0; 4]);
+        weights.insert("model.layers.0.self_attn.q_proj.weight".into(), vec![0.2; 16]);
+        weights.insert("model.layers.0.self_attn.k_proj.weight".into(), vec![0.3; 16]);
+        weights.insert("model.layers.0.self_attn.v_proj.weight".into(), vec![0.4; 16]);
+        weights.insert("model.layers.0.self_attn.o_proj.weight".into(), vec![0.1; 16]);
+        weights.insert("model.layers.0.mlp.gate_proj.weight".into(), vec![0.6; 16]);
+        weights.insert("model.layers.0.mlp.up_proj.weight".into(), vec![0.7; 16]);
+        weights.insert("model.layers.0.mlp.down_proj.weight".into(), vec![0.8; 16]);
+
+        let orig_weights = weights.clone();
+        let model = TaraForCausalLM::from_weights_move(weights, &config, "test_dir").expect("from_weights_move");
+        assert_eq!(model.layers.len(), 1);
+
+        let reconstructed = model.into_weights_map();
+        assert_eq!(reconstructed.len(), orig_weights.len());
+        for (k, v) in &orig_weights {
+            assert_eq!(reconstructed.get(k), Some(v), "Tensor '{k}' mismatch after into_weights_map");
+        }
     }
 }

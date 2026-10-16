@@ -10,6 +10,6 @@ pub mod kernels;
 pub use driver::{CudaDeviceInfo, CudaError};
 pub use gpu_trainer::{
     capture_memory_snapshot, is_cuda_available, is_cuda_required, is_cuda_required_value,
-    log_flushed_memory_checkpoint, CudaTrainer, MemorySnapshot, TrainingPrecision,
+    log_flushed_memory_checkpoint, AdamWMemoryAudit, CudaTrainer, MemorySnapshot, TrainingPrecision,
 };
 pub use kernels::validate_ptx_registers;

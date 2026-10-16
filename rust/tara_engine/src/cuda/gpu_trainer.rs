@@ -78,21 +78,62 @@ pub struct MemorySnapshot {
     pub host_avail_mb: f64,
     pub cgroup_limit_mb: Option<f64>,
     pub cgroup_current_mb: Option<f64>,
+    pub cgroup_oom_kills: Option<u64>,
+    pub cgroup_events_summary: Option<String>,
     pub gpu_used_vram_mb: Option<f64>,
     pub gpu_free_vram_mb: Option<f64>,
     pub gpu_total_vram_mb: Option<f64>,
 }
 
+/// Explicit audit of AdamW optimizer memory requirements across host and GPU.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AdamWMemoryAudit {
+    pub total_parameters: usize,
+    pub master_weights_bytes: usize,
+    pub master_weights_device: &'static str,
+    pub gradients_bytes: usize,
+    pub gradients_device: &'static str,
+    pub moment1_bytes: usize,
+    pub moment1_device: &'static str,
+    pub moment2_bytes: usize,
+    pub moment2_device: &'static str,
+    pub chunk_buffers_gpu_bytes: usize,
+    pub total_host_bytes: usize,
+    pub total_gpu_bytes: usize,
+    pub is_streamed: bool,
+}
+
+impl AdamWMemoryAudit {
+    pub fn display_summary(&self) -> String {
+        format!(
+            "[AdamW Audit] Params: {} | Master Weights: {:.2} MB ({}) | Gradients: {:.2} MB ({}) | Moments (m+v): {:.2} MB ({}) | GPU Chunks: {:.2} MB | Total Host: {:.2} MB | Total GPU: {:.2} MB | Mode: {}",
+            self.total_parameters,
+            self.master_weights_bytes as f64 / (1024.0 * 1024.0),
+            self.master_weights_device,
+            self.gradients_bytes as f64 / (1024.0 * 1024.0),
+            self.gradients_device,
+            (self.moment1_bytes + self.moment2_bytes) as f64 / (1024.0 * 1024.0),
+            self.moment1_device,
+            self.chunk_buffers_gpu_bytes as f64 / (1024.0 * 1024.0),
+            self.total_host_bytes as f64 / (1024.0 * 1024.0),
+            self.total_gpu_bytes as f64 / (1024.0 * 1024.0),
+            if self.is_streamed { "STREAMED" } else { "GPU_RESIDENT" }
+        )
+    }
+}
+
 /// Capture live memory statistics across host /proc, cgroup filesystem, and CUDA session VRAM.
 pub fn capture_memory_snapshot(vram_info: Option<(usize, usize)>) -> MemorySnapshot {
     #[cfg(target_os = "linux")]
-    let (process_rss_mb, process_hwm_mb, host_total_mb, host_avail_mb, cgroup_limit_mb, cgroup_current_mb) = {
+    let (process_rss_mb, process_hwm_mb, host_total_mb, host_avail_mb, cgroup_limit_mb, cgroup_current_mb, cgroup_oom_kills, cgroup_events_summary) = {
         let mut rss = 0.0f64;
         let mut hwm = 0.0f64;
         let mut tot = 0.0f64;
         let mut avail = 0.0f64;
         let mut limit = None;
         let mut cur = None;
+        let mut oom_kills = None;
+        let mut events_summary = None;
 
         // 1. Process memory from /proc/self/status
         if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
@@ -156,12 +197,51 @@ pub fn capture_memory_snapshot(vram_info: Option<(usize, usize)>) -> MemorySnaps
             }
         }
 
-        (rss, hwm, tot, avail, limit, cur)
+        // 4. Cgroup memory events (v2: memory.events, v1: memory.oom_control)
+        if let Ok(content) = std::fs::read_to_string("/sys/fs/cgroup/memory.events") {
+            let mut summary_parts = Vec::new();
+            for line in content.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() == 2 {
+                    if parts[0] == "oom_kill" {
+                        if let Ok(k) = parts[1].parse::<u64>() {
+                            oom_kills = Some(k);
+                            summary_parts.push(format!("oom_kill={k}"));
+                        }
+                    } else if parts[0] == "oom" || parts[0] == "max" || parts[0] == "high" {
+                        summary_parts.push(format!("{}={}", parts[0], parts[1]));
+                    }
+                }
+            }
+            if !summary_parts.is_empty() {
+                events_summary = Some(summary_parts.join(" "));
+            }
+        } else if let Ok(content) = std::fs::read_to_string("/sys/fs/cgroup/memory/memory.oom_control") {
+            let mut summary_parts = Vec::new();
+            for line in content.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() == 2 {
+                    if parts[0] == "oom_kill" {
+                        if let Ok(k) = parts[1].parse::<u64>() {
+                            oom_kills = Some(k);
+                            summary_parts.push(format!("oom_kill={k}"));
+                        }
+                    } else if parts[0] == "under_oom" {
+                        summary_parts.push(format!("under_oom={}", parts[1]));
+                    }
+                }
+            }
+            if !summary_parts.is_empty() {
+                events_summary = Some(summary_parts.join(" "));
+            }
+        }
+
+        (rss, hwm, tot, avail, limit, cur, oom_kills, events_summary)
     };
 
     #[cfg(not(target_os = "linux"))]
-    let (process_rss_mb, process_hwm_mb, host_total_mb, host_avail_mb, cgroup_limit_mb, cgroup_current_mb) =
-        (0.0f64, 0.0f64, 0.0f64, 0.0f64, None, None);
+    let (process_rss_mb, process_hwm_mb, host_total_mb, host_avail_mb, cgroup_limit_mb, cgroup_current_mb, cgroup_oom_kills, cgroup_events_summary) =
+        (0.0f64, 0.0f64, 0.0f64, 0.0f64, None, None, None, None);
 
     let (gpu_used_vram_mb, gpu_free_vram_mb, gpu_total_vram_mb) = if let Some((free_b, total_b)) = vram_info {
         let free_mb = free_b as f64 / (1024.0 * 1024.0);
@@ -179,6 +259,8 @@ pub fn capture_memory_snapshot(vram_info: Option<(usize, usize)>) -> MemorySnaps
         host_avail_mb,
         cgroup_limit_mb,
         cgroup_current_mb,
+        cgroup_oom_kills,
+        cgroup_events_summary,
         gpu_used_vram_mb,
         gpu_free_vram_mb,
         gpu_total_vram_mb,
@@ -197,6 +279,14 @@ pub fn log_flushed_memory_checkpoint(op_name: &str, vram_info: Option<(usize, us
     }
     if let (Some(cur), Some(lim)) = (snap.cgroup_current_mb, snap.cgroup_limit_mb) {
         msg.push_str(&format!(" | cgroup: {:.1} MB / {:.1} MB", cur, lim));
+    }
+    if let Some(ref ev) = snap.cgroup_events_summary {
+        msg.push_str(&format!(" | cgroup.events: [{ev}]"));
+    }
+    if let Some(kills) = snap.cgroup_oom_kills {
+        if kills > 0 {
+            msg.push_str(&format!(" | *** OOM KILLS DETECTED: {kills} ***"));
+        }
     }
     if let (Some(used), Some(free), Some(tot)) = (snap.gpu_used_vram_mb, snap.gpu_free_vram_mb, snap.gpu_total_vram_mb) {
         msg.push_str(&format!(" | GPU VRAM: {:.1} MB used / {:.1} MB free ({:.1} MB total)", used, free, tot));
@@ -1462,6 +1552,82 @@ impl CudaTrainer {
         self.stream_optimizer
     }
 
+    /// Explicitly audit full AdamW optimizer-state memory requirements.
+    /// Accounts for master weights, gradients, and both first and second moments (m and v),
+    /// whether resident on GPU or streamed on host.
+    pub fn audit_optimizer_memory(&self, weights: &HashMap<String, Vec<f32>>) -> AdamWMemoryAudit {
+        let total_parameters: usize = if !self.params.is_empty() {
+            self.params.values().map(|p| p.len).sum()
+        } else {
+            weights.values().map(|v| v.len()).sum()
+        };
+
+        let max_tensor_len = if !self.params.is_empty() {
+            self.params.values().map(|p| p.len).max().unwrap_or(0)
+        } else {
+            weights.values().map(|v| v.len()).max().unwrap_or(0)
+        };
+
+        if self.stream_optimizer {
+            let master_weights_bytes = total_parameters * std::mem::size_of::<f32>();
+            let master_weights_device = "Host RAM";
+            let gradients_bytes = total_parameters * std::mem::size_of::<f32>();
+            let gradients_device = "GPU VRAM";
+            // Moments are compactly streamed as FP16 (2 bytes each) on host
+            let moment1_bytes = total_parameters * std::mem::size_of::<half::f16>();
+            let moment1_device = "Host RAM (FP16)";
+            let moment2_bytes = total_parameters * std::mem::size_of::<half::f16>();
+            let moment2_device = "Host RAM (FP16)";
+            let chunk_buffers_gpu_bytes = 3 * max_tensor_len * std::mem::size_of::<f32>();
+            let total_host_bytes = master_weights_bytes + moment1_bytes + moment2_bytes;
+            let total_gpu_bytes = gradients_bytes + chunk_buffers_gpu_bytes;
+
+            AdamWMemoryAudit {
+                total_parameters,
+                master_weights_bytes,
+                master_weights_device,
+                gradients_bytes,
+                gradients_device,
+                moment1_bytes,
+                moment1_device,
+                moment2_bytes,
+                moment2_device,
+                chunk_buffers_gpu_bytes,
+                total_host_bytes,
+                total_gpu_bytes,
+                is_streamed: true,
+            }
+        } else {
+            let master_weights_bytes = total_parameters * std::mem::size_of::<f32>();
+            let master_weights_device = "GPU VRAM";
+            let gradients_bytes = total_parameters * std::mem::size_of::<f32>();
+            let gradients_device = "GPU VRAM";
+            let moment1_bytes = total_parameters * std::mem::size_of::<f32>();
+            let moment1_device = "GPU VRAM (FP32)";
+            let moment2_bytes = total_parameters * std::mem::size_of::<f32>();
+            let moment2_device = "GPU VRAM (FP32)";
+            let chunk_buffers_gpu_bytes = 0;
+            let total_host_bytes = 0;
+            let total_gpu_bytes = master_weights_bytes + gradients_bytes + moment1_bytes + moment2_bytes;
+
+            AdamWMemoryAudit {
+                total_parameters,
+                master_weights_bytes,
+                master_weights_device,
+                gradients_bytes,
+                gradients_device,
+                moment1_bytes,
+                moment1_device,
+                moment2_bytes,
+                moment2_device,
+                chunk_buffers_gpu_bytes,
+                total_host_bytes,
+                total_gpu_bytes,
+                is_streamed: false,
+            }
+        }
+    }
+
     /// Direct reference to host master weights in streamed optimizer mode.
     pub fn streamed_weights(&self) -> Option<&HashMap<String, Vec<f32>>> {
         if self.stream_optimizer {
@@ -2400,5 +2566,36 @@ mod tests {
                 "Relative error {max_rel_err:e} exceeded bound {expected_rel_bound:e} at eps={eps}"
             );
         }
+    }
+
+    #[test]
+    fn test_adamw_memory_audit_non_zero() {
+        let audit = AdamWMemoryAudit {
+            total_parameters: 3000,
+            master_weights_bytes: 3000 * 4,
+            master_weights_device: "Host RAM",
+            gradients_bytes: 3000 * 4,
+            gradients_device: "GPU VRAM",
+            moment1_bytes: 3000 * 2,
+            moment1_device: "Host RAM (FP16)",
+            moment2_bytes: 3000 * 2,
+            moment2_device: "Host RAM (FP16)",
+            chunk_buffers_gpu_bytes: 3 * 2000 * 4,
+            total_host_bytes: 3000 * 4 + 3000 * 2 + 3000 * 2,
+            total_gpu_bytes: 3000 * 4 + 3 * 2000 * 4,
+            is_streamed: true,
+        };
+
+        assert_eq!(audit.total_parameters, 3000);
+        assert!(audit.master_weights_bytes > 0);
+        assert!(audit.gradients_bytes > 0);
+        assert!(audit.moment1_bytes > 0);
+        assert!(audit.moment2_bytes > 0);
+        assert!(audit.total_host_bytes > 0);
+        assert!(audit.total_gpu_bytes > 0);
+
+        let summary = audit.display_summary();
+        assert!(summary.contains("Params: 3000"));
+        assert!(summary.contains("STREAMED"));
     }
 }

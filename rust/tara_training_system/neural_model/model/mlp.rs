@@ -112,6 +112,24 @@ impl TaraMlp {
         Ok(Self::new(gate_proj, up_proj, down_proj))
     }
 
+    /// Load from the mutable weight map for `layer_idx`, moving ownership without cloning.
+    pub fn from_weights_move(
+        weights: &mut HashMap<String, Vec<f32>>,
+        layer_idx: usize,
+    ) -> Result<Self, MlpError> {
+        let prefix = format!("model.layers.{}.mlp", layer_idx);
+        let gate_proj = weights
+            .remove(&format!("{}.gate_proj.weight", prefix))
+            .ok_or_else(|| MlpError::MissingWeight(format!("{}.gate_proj.weight", prefix)))?;
+        let up_proj = weights
+            .remove(&format!("{}.up_proj.weight", prefix))
+            .ok_or_else(|| MlpError::MissingWeight(format!("{}.up_proj.weight", prefix)))?;
+        let down_proj = weights
+            .remove(&format!("{}.down_proj.weight", prefix))
+            .ok_or_else(|| MlpError::MissingWeight(format!("{}.down_proj.weight", prefix)))?;
+        Ok(Self::new(gate_proj, up_proj, down_proj))
+    }
+
     /// Apply the SwiGLU MLP to `x`.
     ///
     /// `x` is a flat buffer of shape `[seq_len, hidden_size]`.

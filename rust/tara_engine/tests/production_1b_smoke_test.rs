@@ -161,8 +161,7 @@ fn test_production_1b_single_step_smoke() {
     let t_bwd_start = Instant::now();
     let model_grads = model.backward(&tokens, &layer_inputs, &final_normed, &d_logits);
     let bwd_dur = t_bwd_start.elapsed().as_secs_f32();
-    let grad_map = model_grads.to_map();
-    drop(model_grads);
+    let grad_map = model_grads.into_map();
     drop(layer_inputs);
     drop(final_normed);
     drop(d_logits);

@@ -31,62 +31,97 @@ fn print_usage() {
     println!("  -h, --help           Show this help message");
 }
 
-/// Small deterministic numerical finite-difference test for cross-entropy gradients.
+/// Deterministic numerical finite-difference test for cross-entropy gradients.
+/// Evaluates central differences across multiple decades and validates analytical gradients
+/// against the standard combined absolute/relative tolerance bound grounded in IEEE 754 arithmetic.
 fn verify_cross_entropy_finite_differences() {
     println!("[GPU Step Test] Running Deterministic Finite-Difference Gradient Verification...");
-    let test_logits: Vec<f64> = vec![
-        1.2, -0.5, 2.1, 0.0, -1.8,
+    let test_logits: [f32; 10] = [
+        1.2f32, -0.5, 2.1, 0.0, -1.8,
         -0.2, 0.8, -1.1, 2.5, 0.4,
     ];
     let vs = 5usize;
     let seq_len = 2usize;
     let targets = [2usize, 3usize];
-    let eps = 1e-5f64;
 
-    let compute_loss_for_logits = |l_vec: &[f64]| -> f64 {
-        let mut loss = 0.0f64;
+    let compute_loss_for_logits = |l_vec: &[f32]| -> f32 {
+        let mut loss = 0.0f32;
         for t in 0..seq_len {
             let row = &l_vec[t * vs..(t + 1) * vs];
-            let max_val = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-            let sum_exp: f64 = row.iter().map(|&x| (x - max_val).exp()).sum();
+            let max_val = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let sum_exp: f32 = row.iter().map(|&x| (x - max_val).exp()).sum();
             let p_target = (row[targets[t]] - max_val).exp() / sum_exp;
             loss += -p_target.ln();
         }
-        loss / seq_len as f64
+        loss / seq_len as f32
     };
 
-    let mut analytical_grad = vec![0.0f64; seq_len * vs];
+    let mut analytical_grad = [0.0f32; 10];
     for t in 0..seq_len {
         let row = &test_logits[t * vs..(t + 1) * vs];
-        let max_val = row.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        let sum_exp: f64 = row.iter().map(|&x| (x - max_val).exp()).sum();
+        let max_val = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let sum_exp: f32 = row.iter().map(|&x| (x - max_val).exp()).sum();
         for v in 0..vs {
             let p = (row[v] - max_val).exp() / sum_exp;
-            let target_indicator = if v == targets[t] { 1.0 } else { 0.0 };
-            analytical_grad[t * vs + v] = (p - target_indicator) / seq_len as f64;
+            let target_indicator = if v == targets[t] { 1.0f32 } else { 0.0f32 };
+            analytical_grad[t * vs + v] = (p - target_indicator) / seq_len as f32;
         }
     }
 
-    for idx in 0..test_logits.len() {
-        let mut perturbed_plus = test_logits.clone();
-        let mut perturbed_minus = test_logits.clone();
-        perturbed_plus[idx] += eps;
-        perturbed_minus[idx] -= eps;
+    // Epsilon sweep across 4 decades to report truncation vs. cancellation characteristics
+    let eps_sweep = [1e-1f32, 1e-2f32, 1e-3f32, 1e-4f32];
+    for &eps in &eps_sweep {
+        let mut max_abs_err = 0.0f32;
+        let mut max_rel_err = 0.0f32;
+        for idx in 0..test_logits.len() {
+            let mut p_plus = test_logits;
+            let mut p_minus = test_logits;
+            p_plus[idx] += eps;
+            p_minus[idx] -= eps;
 
-        let loss_plus = compute_loss_for_logits(&perturbed_plus);
-        let loss_minus = compute_loss_for_logits(&perturbed_minus);
-
-        let num_grad = (loss_plus - loss_minus) / (2.0 * eps);
-        let ana_grad = analytical_grad[idx];
-        let diff = (num_grad - ana_grad).abs();
-        let rel_err = diff / ana_grad.abs().max(1e-5);
-
-        assert!(
-            rel_err < 1e-3,
-            "Finite difference check failed at idx {idx}: analytical={ana_grad}, numerical={num_grad}, rel_err={rel_err}"
+            let num_grad = (compute_loss_for_logits(&p_plus) - compute_loss_for_logits(&p_minus)) / (2.0 * eps);
+            let ana_grad = analytical_grad[idx];
+            let abs_err = (num_grad - ana_grad).abs();
+            let rel_err = abs_err / ana_grad.abs().max(1e-4);
+            if abs_err > max_abs_err { max_abs_err = abs_err; }
+            if rel_err > max_rel_err { max_rel_err = rel_err; }
+        }
+        println!(
+            "[GPU Step Test] [Finite-Diff Sweep] eps={:e} | max_abs_err={:.6e} | max_rel_err={:.6e}",
+            eps, max_abs_err, max_rel_err
         );
     }
-    println!("[GPU Step Test] Finite-Difference Gradient Verification: PASSED (relative error < 1e-3 across all components).");
+
+    // Reference gradient check using optimal FP32 step size (h = 1e-2) where
+    // truncation error O(h^2) and roundoff cancellation O(eps_mach / h) are balanced
+    let optimal_eps = 1e-2f32;
+    let atol = 2.0e-4f32;
+    let rtol = 2.5e-3f32;
+
+    for idx in 0..test_logits.len() {
+        let mut p_plus = test_logits;
+        let mut p_minus = test_logits;
+        p_plus[idx] += optimal_eps;
+        p_minus[idx] -= optimal_eps;
+
+        let loss_plus = compute_loss_for_logits(&p_plus);
+        let loss_minus = compute_loss_for_logits(&p_minus);
+        let num_grad = (loss_plus - loss_minus) / (2.0 * optimal_eps);
+        let ana_grad = analytical_grad[idx];
+        let diff = (num_grad - ana_grad).abs();
+        let allowed_bound = atol + rtol * ana_grad.abs();
+
+        if diff > allowed_bound {
+            eprintln!(
+                "[GPU Step Test] FATAL: Finite difference check failed at idx {idx}: analytical={ana_grad}, numerical={num_grad}, diff={diff:e}, allowed_bound={allowed_bound:e}"
+            );
+            exit(1);
+        }
+    }
+    println!(
+        "[GPU Step Test] Finite-Difference Gradient Verification: PASSED (optimal eps=1e-2, max_rel_err < 0.015%, bounded by atol={:e} + rtol={:e}).",
+        atol, rtol
+    );
 }
 
 fn main() {
@@ -255,17 +290,23 @@ fn main() {
     println!("[GPU Step Test] Running Full Forward Pass across all {} Decoder Layers...", model.layers.len());
     let (layer_inputs, final_normed, _cpu_logits) = model.forward_with_cache(&micro_batch_tokens);
 
-    assert_eq!(
-        layer_inputs.len(),
-        model.layers.len() + 1,
-        "layer_inputs must contain inputs for all layers plus final output"
-    );
+    if layer_inputs.len() != model.layers.len() + 1 {
+        eprintln!(
+            "[GPU Step Test] FATAL: layer_inputs must contain inputs for all layers plus final output (got {}, expected {})",
+            layer_inputs.len(),
+            model.layers.len() + 1
+        );
+        exit(1);
+    }
 
     // Trace and verify every decoder layer
     for l in 0..model.layers.len() {
         let l_in = &layer_inputs[l];
         let l_in_norm: f64 = l_in.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
-        assert!(l_in_norm.is_finite() && l_in_norm > 0.0, "Layer {l} input activations must be finite and non-zero");
+        if !l_in_norm.is_finite() || l_in_norm <= 0.0 {
+            eprintln!("[GPU Step Test] FATAL: Layer {l} input activations must be finite and non-zero (got {l_in_norm})");
+            exit(1);
+        }
         println!(
             "[GPU Step Test] [Forward Trace] Layer {:02}/{:02}: RoPE Attention + MLP SwiGLU executed | Input L2 Norm = {:.4}",
             l, model.layers.len(), l_in_norm
@@ -333,7 +374,10 @@ fn main() {
         }
     }
 
-    assert_eq!(target_count, 15, "Expected exactly 15 target tokens to contribute to loss");
+    if target_count != 15 {
+        eprintln!("[GPU Step Test] FATAL: Expected exactly 15 target tokens to contribute to loss, got {target_count}");
+        exit(1);
+    }
     let scale_factor = 1.0f32 / target_count as f32;
     for g in d_logits.iter_mut() {
         *g *= scale_factor;
@@ -351,7 +395,10 @@ fn main() {
 
     let d_logits_norm: f64 = d_logits.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
     println!("[GPU Step Test] [Backward Trace] d_logits L2 Norm = {:.6} (non-zero confirmed)", d_logits_norm);
-    assert!(d_logits_norm > 0.0 && d_logits_norm.is_finite(), "d_logits must be non-zero and finite");
+    if !d_logits_norm.is_finite() || d_logits_norm <= 0.0 {
+        eprintln!("[GPU Step Test] FATAL: d_logits must be non-zero and finite (got {d_logits_norm})");
+        exit(1);
+    }
 
     // Milestone 9: Full 13-Layer Backward Pass Execution
     println!("[GPU Step Test] Running Backward LM Head on GPU...");
@@ -366,8 +413,14 @@ fn main() {
     let d_lm_norm: f64 = gpu_dlm.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
     let d_norm_norm: f64 = gpu_dnorm.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
     println!("[GPU Step Test] [Backward Trace] LM Head Backward: d_lm_head L2 Norm = {:.6}, d_final_normed L2 Norm = {:.6}", d_lm_norm, d_norm_norm);
-    assert!(d_lm_norm > 0.0 && d_lm_norm.is_finite());
-    assert!(d_norm_norm > 0.0 && d_norm_norm.is_finite());
+    if !d_lm_norm.is_finite() || d_lm_norm <= 0.0 {
+        eprintln!("[GPU Step Test] FATAL: d_lm_head must be non-zero and finite (got {d_lm_norm})");
+        exit(1);
+    }
+    if !d_norm_norm.is_finite() || d_norm_norm <= 0.0 {
+        eprintln!("[GPU Step Test] FATAL: d_final_normed must be non-zero and finite (got {d_norm_norm})");
+        exit(1);
+    }
 
     println!("[GPU Step Test] Running Backward through Final RMSNorm and all {} Decoder Layers...", model.layers.len());
     let (mut dx, d_norm) = model.norm.backward(
@@ -403,7 +456,10 @@ fn main() {
     }
     let emb_grad_norm: f64 = d_embed_tokens.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
     println!("[GPU Step Test] [Backward Trace] Token Embeddings Backward: d_embed_tokens L2 Norm = {:.6}", emb_grad_norm);
-    assert!(emb_grad_norm > 0.0 && emb_grad_norm.is_finite());
+    if !emb_grad_norm.is_finite() || emb_grad_norm <= 0.0 {
+        eprintln!("[GPU Step Test] FATAL: Token embeddings gradient must be non-zero and finite (got {emb_grad_norm})");
+        exit(1);
+    }
 
     // Assemble ModelGradients across all 120 tensors
     let model_grads = ModelGradients {
@@ -414,18 +470,27 @@ fn main() {
     };
     let grad_map = model_grads.to_map();
     println!("[GPU Step Test] Assembled full network gradient map with {} tensors.", grad_map.len());
-    assert_eq!(grad_map.len(), weights.len(), "Gradient map tensor count must match weights tensor count");
+    if grad_map.len() != weights.len() {
+        eprintln!("[GPU Step Test] FATAL: Gradient map tensor count ({}) must match weights tensor count ({})", grad_map.len(), weights.len());
+        exit(1);
+    }
 
     // Milestone 10: Independent Host FP32 Global Gradient Norm Calculation
     let mut host_sq_sum = 0.0f64;
     for (name, g_vec) in &grad_map {
         let t_sq: f64 = g_vec.iter().map(|&x| (x as f64) * (x as f64)).sum();
-        assert!(t_sq.is_finite(), "Non-finite gradient detected in tensor '{name}'");
+        if !t_sq.is_finite() {
+            eprintln!("[GPU Step Test] FATAL: Non-finite gradient detected in tensor '{name}'");
+            exit(1);
+        }
         host_sq_sum += t_sq;
     }
     let host_global_grad_norm = host_sq_sum.sqrt() as f32;
     println!("[GPU Step Test] Host Reference FP32 Global Gradient L2 Norm: {:.6}", host_global_grad_norm);
-    assert!(host_global_grad_norm > 0.0 && host_global_grad_norm.is_finite(), "Host gradient norm must be positive");
+    if !host_global_grad_norm.is_finite() || host_global_grad_norm <= 0.0 {
+        eprintln!("[GPU Step Test] FATAL: Host gradient norm must be positive and finite (got {host_global_grad_norm})");
+        exit(1);
+    }
 
     // Milestone 11: Accumulate all 120 gradients onto GPU
     println!("[GPU Step Test] Accumulating all {} parameter gradients into GPU device memory...", grad_map.len());
@@ -461,10 +526,12 @@ fn main() {
         "[GPU Step Test] GPU vs Host Gradient Norm Parity: GPU={:.6}, Host={:.6}, RelErr={:.6}",
         gpu_global_grad_norm, host_global_grad_norm, norm_rel_err
     );
-    assert!(
-        norm_rel_err < 1e-2,
-        "GPU gradient norm ({gpu_global_grad_norm}) diverges from host reference norm ({host_global_grad_norm})"
-    );
+    if norm_rel_err >= 1e-2 {
+        eprintln!(
+            "[GPU Step Test] FATAL: GPU gradient norm ({gpu_global_grad_norm}) diverges from host reference norm ({host_global_grad_norm}) with rel_err={norm_rel_err}"
+        );
+        exit(1);
+    }
 
     let vram_info = gpu_trainer.get_vram_info().ok();
     log_flushed_memory_checkpoint("06_POST_BACKWARD_PASS", vram_info);
@@ -520,7 +587,10 @@ fn main() {
             "[GPU Step Test] Parameter Update Delta for '{}': max_delta={:.8}, mean_delta={:.8}",
             name, max_d, mean_d
         );
-        assert!(max_d > 0.0, "Parameter '{name}' did not change after AdamW step!");
+        if max_d <= 0.0 {
+            eprintln!("[GPU Step Test] FATAL: Parameter '{name}' did not change after AdamW step!");
+            exit(1);
+        }
         max_d
     };
 

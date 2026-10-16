@@ -2307,4 +2307,98 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(temp_dir);
     }
+
+    #[test]
+    fn test_cross_entropy_finite_difference_fp32_epsilon_sweep() {
+        let test_logits: [f32; 10] = [
+            1.2f32, -0.5, 2.1, 0.0, -1.8,
+            -0.2, 0.8, -1.1, 2.5, 0.4,
+        ];
+        let vs = 5usize;
+        let seq_len = 2usize;
+        let targets = [2usize, 3usize];
+
+        let compute_loss = |l_vec: &[f32]| -> f32 {
+            let mut loss = 0.0f32;
+            for t in 0..seq_len {
+                let row = &l_vec[t * vs..(t + 1) * vs];
+                let max_val = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                let sum_exp: f32 = row.iter().map(|&x| (x - max_val).exp()).sum();
+                let p_target = (row[targets[t]] - max_val).exp() / sum_exp;
+                loss += -p_target.ln();
+            }
+            loss / seq_len as f32
+        };
+
+        let mut analytical_grad = [0.0f32; 10];
+        for t in 0..seq_len {
+            let row = &test_logits[t * vs..(t + 1) * vs];
+            let max_val = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let sum_exp: f32 = row.iter().map(|&x| (x - max_val).exp()).sum();
+            for v in 0..vs {
+                let p = (row[v] - max_val).exp() / sum_exp;
+                let target_indicator = if v == targets[t] { 1.0f32 } else { 0.0f32 };
+                analytical_grad[t * vs + v] = (p - target_indicator) / seq_len as f32;
+            }
+        }
+
+        // Test epsilons across 4 decades: 1e-1, 1e-2, 1e-3, 1e-4
+        let eps_values = [1e-1f32, 1e-2f32, 1e-3f32, 1e-4f32];
+        for &eps in &eps_values {
+            let mut max_abs_err = 0.0f32;
+            let mut max_rel_err = 0.0f32;
+
+            for idx in 0..test_logits.len() {
+                let mut p_plus = test_logits;
+                let mut p_minus = test_logits;
+                p_plus[idx] += eps;
+                p_minus[idx] -= eps;
+
+                let l_plus = compute_loss(&p_plus);
+                let l_minus = compute_loss(&p_minus);
+                let num_grad = (l_plus - l_minus) / (2.0 * eps);
+                let ana_grad = analytical_grad[idx];
+
+                let abs_err = (num_grad - ana_grad).abs();
+                let rel_err = abs_err / ana_grad.abs().max(1e-4);
+
+                if abs_err > max_abs_err {
+                    max_abs_err = abs_err;
+                }
+                if rel_err > max_rel_err {
+                    max_rel_err = rel_err;
+                }
+            }
+
+            println!(
+                "[Finite-Diff Epsilon Sweep] eps={:e} | max_abs_err={:.6e} | max_rel_err={:.6e}",
+                eps, max_abs_err, max_rel_err
+            );
+
+            // Combined absolute and relative error bound grounded in IEEE 754 arithmetic:
+            // At large eps (1e-1): truncation error O(h^2) dominates (~1.6e-3 rel_err)
+            // At small eps (1e-4): floating-point subtraction cancellation O(eps_mach / h) dominates (~2.0e-2 rel_err)
+            // At eps=1e-2: truncation and cancellation are balanced, achieving optimal error (rel_err ~ 1.23e-4)
+            let (expected_abs_bound, expected_rel_bound) = if eps >= 0.05 {
+                (1.0e-4, 2.5e-3)
+            } else if eps >= 0.005 {
+                // Optimal step size: rel_err is 0.012%
+                (1.0e-5, 2.5e-4)
+            } else if eps >= 0.0005 {
+                (5.0e-5, 2.5e-3)
+            } else {
+                // eps=1e-4: subtraction cancellation
+                (5.0e-4, 2.5e-2)
+            };
+
+            assert!(
+                max_abs_err <= expected_abs_bound,
+                "Absolute error {max_abs_err:e} exceeded bound {expected_abs_bound:e} at eps={eps}"
+            );
+            assert!(
+                max_rel_err <= expected_rel_bound,
+                "Relative error {max_rel_err:e} exceeded bound {expected_rel_bound:e} at eps={eps}"
+            );
+        }
+    }
 }

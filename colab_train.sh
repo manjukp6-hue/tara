@@ -229,7 +229,17 @@ echo "Pre-Training Authorization Gate Passed!"
 
 # 5b. Production-Model GPU 1-Step Execution & Memory Diagnostic Gate
 echo "=== [PRODUCTION-MODEL GPU 1-STEP EXECUTION & MEMORY DIAGNOSTIC GATE] ==="
-/usr/bin/time -v ./target/release/tara_gpu_step_test \
+TIME_CMD=""
+if [ -x "/usr/bin/time" ]; then
+    TIME_CMD="/usr/bin/time -v"
+elif command -v apt-get >/dev/null 2>&1; then
+    apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq time >/dev/null 2>&1
+    if [ -x "/usr/bin/time" ]; then
+        TIME_CMD="/usr/bin/time -v"
+    fi
+fi
+
+$TIME_CMD ./target/release/tara_gpu_step_test \
     --model storage/models/tara_candidate_v1 \
     --device auto \
     --precision auto

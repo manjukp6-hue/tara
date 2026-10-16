@@ -464,6 +464,8 @@ impl NativeSelfTrainer {
     }
 
     /// Calculate projected training memory footprint in MB given total parameter count, target device, and precision.
+    /// Explicitly accounts for Host RAM and GPU VRAM placements: model weights, gradients, AdamW moments,
+    /// activations, chunk buffers, workspaces, and safety margins.
     pub fn estimate_memory_footprint_mb_detailed(
         total_params: usize,
         is_gpu: bool,
@@ -472,34 +474,56 @@ impl NativeSelfTrainer {
         batch_size: usize,
         seq_len: usize,
     ) -> (f64, String) {
-        if is_gpu && is_f16 {
-            // Mixed precision FP16 with streamed AdamW moments:
-            // 1. FP16 model weights on device: 2 bytes / param
-            let w_mb = (total_params * 2) as f64 / (1024.0 * 1024.0);
-            // 2. FP32 gradients on device: 4 bytes / param
-            let g_mb = (total_params * 4) as f64 / (1024.0 * 1024.0);
-            // 3. Reusable chunk buffers (d_chunk_w, d_chunk_m, d_chunk_v): 3 * 4 bytes * max_tensor_len
-            let chunk_mb = (max_tensor_len * 12) as f64 / (1024.0 * 1024.0);
-            // 4. Activations for micro-batch (RMSNorm + Attention + MLP for micro-batch, seq_len):
-            let act_mb = (batch_size * seq_len * 2048 * 8) as f64 / (1024.0 * 1024.0);
-            // 5. CUDA context and driver overhead
-            let cuda_overhead = 400.0;
-            let total = w_mb + g_mb + chunk_mb + act_mb + cuda_overhead;
-            let breakdown = format!(
-                "FP16 Weights: {w_mb:.1}MB, FP32 Grads: {g_mb:.1}MB, Chunk Buffers: {chunk_mb:.1}MB, Activations: {act_mb:.1}MB, CUDA Overhead: {cuda_overhead:.1}MB"
-            );
-            (total, breakdown)
+        // 1. Host RAM Breakdown:
+        // Canonical FP32 model weights on host: 4 bytes / param
+        let host_model_mb = (total_params * 4) as f64 / (1024.0 * 1024.0);
+        // Host optimizer states: if on GPU, 0 MB on host; if CPU training, 12 bytes / param (grads + m + v)
+        let host_opt_mb = if is_gpu {
+            0.0
         } else {
-            // Unstreamed full FP32: 4 bytes weights + 4 bytes grad + 8 bytes AdamW (m, v)
-            let total = (total_params * 16) as f64 / (1024.0 * 1024.0) + 50.0;
-            let breakdown = format!(
-                "FP32 Weights: {:.1}MB, Grads: {:.1}MB, AdamW Moments: {:.1}MB, Overhead: 50.0MB",
-                (total_params * 4) as f64 / (1024.0 * 1024.0),
-                (total_params * 4) as f64 / (1024.0 * 1024.0),
-                (total_params * 8) as f64 / (1024.0 * 1024.0)
-            );
-            (total, breakdown)
-        }
+            (total_params * 12) as f64 / (1024.0 * 1024.0)
+        };
+        // Activations & cache buffers on host: micro-batch activations across transformer layers
+        let host_act_mb = (batch_size * seq_len * 2048 * 4 * 14) as f64 / (1024.0 * 1024.0);
+        let host_overhead_mb = 350.0; // Tokenizer, runtime, OS process baseline
+        let host_subtotal = host_model_mb + host_opt_mb + host_act_mb + host_overhead_mb;
+        let host_total_with_margin = host_subtotal * 1.15; // 15% safety headroom
+
+        // 2. GPU VRAM Breakdown:
+        let (gpu_w_mb, gpu_g_mb, gpu_chunk_mb, gpu_act_mb, gpu_total_with_margin) = if is_gpu {
+            let w_mb = if is_f16 {
+                (total_params * 2) as f64 / (1024.0 * 1024.0)
+            } else {
+                (total_params * 4) as f64 / (1024.0 * 1024.0)
+            };
+            let g_mb = (total_params * 4) as f64 / (1024.0 * 1024.0);
+            let chunk_mb = (max_tensor_len * 12) as f64 / (1024.0 * 1024.0);
+            let act_mb = (batch_size * seq_len * 2048 * 8) as f64 / (1024.0 * 1024.0) + 150.0;
+            let cuda_overhead_mb = 450.0;
+            let subtotal = w_mb + g_mb + chunk_mb + act_mb + cuda_overhead_mb;
+            (w_mb, g_mb, chunk_mb, act_mb, subtotal * 1.10) // 10% safety headroom
+        } else {
+            (0.0, 0.0, 0.0, 0.0, 0.0)
+        };
+
+        // Governing peak memory is the maximum of Host RAM and GPU VRAM requirements
+        let governing_peak = if is_gpu {
+            host_total_with_margin.max(gpu_total_with_margin)
+        } else {
+            host_total_with_margin
+        };
+
+        let breakdown = if is_gpu {
+            format!(
+                "Host RAM: Model={host_model_mb:.1}MB, Opt={host_opt_mb:.1}MB, Act={host_act_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB | GPU VRAM: Weights={gpu_w_mb:.1}MB, Grads={gpu_g_mb:.1}MB, Chunks={gpu_chunk_mb:.1}MB, Act={gpu_act_mb:.1}MB, Total(+10% Margin)={gpu_total_with_margin:.1}MB (Governing Peak: {governing_peak:.1}MB)",
+            )
+        } else {
+            format!(
+                "Host RAM: Model={host_model_mb:.1}MB, Grads+Moments={host_opt_mb:.1}MB, Act={host_act_mb:.1}MB, Overhead={host_overhead_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB",
+            )
+        };
+
+        (governing_peak, breakdown)
     }
 
     /// Calculate projected training memory footprint in MB given total parameter count.
@@ -964,6 +988,7 @@ impl NativeSelfTrainer {
                 "samples contain no encodable prompt/target token pairs".into(),
             ));
         }
+        drop(samples);
         println!(
             "[Tokenizer] Successfully tokenized {} sequence pairs.",
             training_tokens.len()
@@ -992,29 +1017,6 @@ impl NativeSelfTrainer {
                 val_tokens.len()
             );
         }
-
-        // Compute baseline loss strictly across held-out validation sequences
-        let mut model = TaraForCausalLM::from_weights_and_config(
-            weights.clone(),
-            config.clone(),
-            &self.model_dir,
-        )
-        .map_err(|e| TrainerError::Model(e.to_string()))?;
-
-        let initial_loss: Option<f64> = if val_tokens.is_empty() {
-            println!(
-                "[Preflight] Skipping baseline validation loss (held-out validation unavailable)."
-            );
-            None
-        } else {
-            println!(
-                "[Preflight] Evaluating baseline loss across {} held-out validation samples...",
-                val_tokens.len()
-            );
-            let loss = compute_model_loss(&model, &val_tokens);
-            println!("[Preflight] Held-out validation baseline loss: {:.4}", loss);
-            Some(loss)
-        };
 
         // 7. Full-Network Backpropagation with AdamW and Gradient Accumulation
         // Initialize hardware acceleration device backend
@@ -1088,6 +1090,30 @@ impl NativeSelfTrainer {
                     }
                 }
             }
+        };
+
+        // Construct canonical in-memory model
+        let mut model = TaraForCausalLM::from_weights_and_config(
+            weights.clone(),
+            config.clone(),
+            &self.model_dir,
+        )
+        .map_err(|e| TrainerError::Model(e.to_string()))?;
+
+        // Compute baseline loss strictly across held-out validation sequences
+        let initial_loss: Option<f64> = if val_tokens.is_empty() {
+            println!(
+                "[Preflight] Skipping baseline validation loss (held-out validation unavailable)."
+            );
+            None
+        } else {
+            println!(
+                "[Preflight] Evaluating baseline loss across {} held-out validation samples...",
+                val_tokens.len()
+            );
+            let loss = compute_model_loss(&model, &val_tokens);
+            println!("[Preflight] Held-out validation baseline loss: {:.4}", loss);
+            Some(loss)
         };
 
         let device_label = if let Some(ref t) = gpu_trainer_opt {
@@ -1210,12 +1236,8 @@ impl NativeSelfTrainer {
                     let (resumed_weights, _) =
                         crate::safetensors::load_model_weights_with_purpose(resume_dir, "RESUME")?;
                     weights = resumed_weights;
-                    model = TaraForCausalLM::from_weights_and_config(
-                        weights.clone(),
-                        config.clone(),
-                        &self.model_dir,
-                    )
-                    .map_err(|e| TrainerError::Model(e.to_string()))?;
+                    model.update_weights(&weights)
+                        .map_err(|e| TrainerError::Model(e.to_string()))?;
                     if let Some(ref mut gpu_trainer) = gpu_trainer_opt {
                         let _ = gpu_trainer.register_weights(&weights);
                     }
@@ -1622,13 +1644,9 @@ impl NativeSelfTrainer {
                         batch_bytes_count = 0;
                         step_start_instant = std::time::Instant::now();
 
-                        // Reload model in-memory with updated weights
-                        model = TaraForCausalLM::from_weights_and_config(
-                            weights.clone(),
-                            config.clone(),
-                            &self.model_dir,
-                        )
-                        .map_err(|e| TrainerError::Model(e.to_string()))?;
+                        // Update model in-memory with updated weights in-place (zero reallocation!)
+                        model.update_weights(&weights)
+                            .map_err(|e| TrainerError::Model(e.to_string()))?;
 
                         // Dynamic milestone and periodic persistent checkpoint saving
                         if let Some(ref cp_dir) = self.checkpoint_dir {

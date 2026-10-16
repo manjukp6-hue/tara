@@ -35,7 +35,7 @@ use tara_engine::tokenizer::TaraTokenizer;
 use tara_engine::train_candidate::{run_controlled_training_with_options, TrainingOptions};
 use tara_engine::{
     compute_file_sha256, load_model_weights_with_purpose, load_model_weights_with_shapes,
-    load_safetensors_with_shapes, TaraForCausalLM,
+    load_safetensors_with_shapes, read_model_metadata_shapes, TaraForCausalLM,
 };
 
 /// Extensible specification for a single training stage in the pipeline.
@@ -637,27 +637,31 @@ pub fn verify_working_model_with_purpose(
     }
 
     let mut param_count: Option<usize> = None;
-    match load_model_weights_with_purpose(&model_dir.to_string_lossy(), purpose) {
-        Ok((weights, _)) => {
-            if weights.is_empty() {
+    match read_model_metadata_shapes(&model_dir.to_string_lossy()) {
+        Ok(shapes) => {
+            if shapes.is_empty() {
                 missing.push("SafeTensors weights dictionary is empty".to_string());
             } else {
-                param_count = Some(weights.values().map(|w| w.len()).sum());
-                if let Some(cfg) = cfg_opt {
-                    if let Err(e) = TaraForCausalLM::from_weights_and_config(
-                        weights,
-                        cfg,
-                        &model_dir.to_string_lossy(),
-                    ) {
+                let total: usize = shapes.values().map(|s| s.iter().product::<usize>()).sum();
+                param_count = Some(total);
+                if let Some(ref cfg) = cfg_opt {
+                    if let Err(e) = TaraForCausalLM::validate_architecture_shapes(&shapes, cfg) {
                         missing.push(format!(
                             "SafeTensors weights incompatible with TaraForCausalLM architecture: {e}"
                         ));
                     }
                 }
+                println!(
+                    "[SafeTensors Metadata Verified] Model at '{}' contains {} tensors, {} parameters | Purpose: {}",
+                    model_dir.display(),
+                    shapes.len(),
+                    total,
+                    purpose
+                );
             }
         }
         Err(e) => {
-            missing.push(format!("Failed to load model SafeTensors weights: {e}"));
+            missing.push(format!("Failed to read model SafeTensors metadata: {e}"));
         }
     }
 

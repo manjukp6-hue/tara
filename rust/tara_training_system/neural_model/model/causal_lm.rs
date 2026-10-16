@@ -187,6 +187,163 @@ impl TaraForCausalLM {
         })
     }
 
+    /// Validate all required model tensor shapes against the config without loading float weights into memory.
+    pub fn validate_architecture_shapes(
+        shapes: &HashMap<String, Vec<usize>>,
+        config: &TaraConfig,
+    ) -> Result<usize, ModelError> {
+        let mut total_params = 0usize;
+        let mut check_shape = |name: &str, expected_len: usize| -> Result<(), ModelError> {
+            let shape = shapes
+                .get(name)
+                .ok_or_else(|| ModelError::MissingWeight(name.into()))?;
+            let actual: usize = shape.iter().product();
+            if actual != expected_len {
+                return Err(ModelError::InvalidWeightShape {
+                    name: name.into(),
+                    actual,
+                    expected: expected_len,
+                });
+            }
+            total_params += actual;
+            Ok(())
+        };
+
+        check_shape(
+            "model.embed_tokens.weight",
+            config.vocab_size * config.hidden_size,
+        )?;
+        check_shape("model.norm.weight", config.hidden_size)?;
+        if shapes.contains_key("lm_head.weight") {
+            check_shape(
+                "lm_head.weight",
+                config.vocab_size * config.hidden_size,
+            )?;
+        }
+        let hs = config.hidden_size;
+        let hd = config.effective_head_dim();
+        for layer in 0..config.num_hidden_layers {
+            let prefix = format!("model.layers.{layer}");
+            for (suffix, count) in [
+                (
+                    "self_attn.q_proj.weight",
+                    config.num_attention_heads * hd * hs,
+                ),
+                (
+                    "self_attn.k_proj.weight",
+                    config.num_key_value_heads * hd * hs,
+                ),
+                (
+                    "self_attn.v_proj.weight",
+                    config.num_key_value_heads * hd * hs,
+                ),
+                (
+                    "self_attn.o_proj.weight",
+                    hs * config.num_attention_heads * hd,
+                ),
+                ("input_layernorm.weight", hs),
+                ("post_attention_layernorm.weight", hs),
+                ("mlp.gate_proj.weight", config.intermediate_size * hs),
+                ("mlp.up_proj.weight", config.intermediate_size * hs),
+                ("mlp.down_proj.weight", hs * config.intermediate_size),
+            ] {
+                check_shape(&format!("{prefix}.{suffix}"), count)?;
+            }
+        }
+        Ok(total_params)
+    }
+
+    /// Update model weights in-place from a weights map without allocating new layers or cloning.
+    pub fn update_weights(&mut self, weights: &HashMap<String, Vec<f32>>) -> Result<(), ModelError> {
+        if let Some(w) = weights.get("model.embed_tokens.weight") {
+            if w.len() != self.embed_tokens.len() {
+                return Err(ModelError::InvalidWeightShape {
+                    name: "model.embed_tokens.weight".into(),
+                    actual: w.len(),
+                    expected: self.embed_tokens.len(),
+                });
+            }
+            self.embed_tokens.copy_from_slice(w);
+        }
+        if let Some(w) = weights.get("model.norm.weight") {
+            if w.len() != self.norm.weight.len() {
+                return Err(ModelError::InvalidWeightShape {
+                    name: "model.norm.weight".into(),
+                    actual: w.len(),
+                    expected: self.norm.weight.len(),
+                });
+            }
+            self.norm.weight.copy_from_slice(w);
+        }
+        if let Some(w) = weights.get("lm_head.weight") {
+            if w.len() != self.lm_head.len() {
+                return Err(ModelError::InvalidWeightShape {
+                    name: "lm_head.weight".into(),
+                    actual: w.len(),
+                    expected: self.lm_head.len(),
+                });
+            }
+            self.lm_head.copy_from_slice(w);
+        }
+        for (idx, layer) in self.layers.iter_mut().enumerate() {
+            let prefix = format!("model.layers.{idx}");
+            if let Some(w) = weights.get(&format!("{prefix}.input_layernorm.weight")) {
+                layer.input_layernorm.weight.copy_from_slice(w);
+            }
+            if let Some(w) = weights.get(&format!("{prefix}.post_attention_layernorm.weight")) {
+                layer.post_attention_layernorm.weight.copy_from_slice(w);
+            }
+            if let Some(w) = weights.get(&format!("{prefix}.self_attn.q_proj.weight")) {
+                layer.self_attn.q_proj.copy_from_slice(w);
+            }
+            if let Some(w) = weights.get(&format!("{prefix}.self_attn.k_proj.weight")) {
+                layer.self_attn.k_proj.copy_from_slice(w);
+            }
+            if let Some(w) = weights.get(&format!("{prefix}.self_attn.v_proj.weight")) {
+                layer.self_attn.v_proj.copy_from_slice(w);
+            }
+            if let Some(w) = weights.get(&format!("{prefix}.self_attn.o_proj.weight")) {
+                layer.self_attn.o_proj.copy_from_slice(w);
+            }
+            if let Some(w) = weights.get(&format!("{prefix}.mlp.gate_proj.weight")) {
+                layer.mlp.gate_proj.copy_from_slice(w);
+            }
+            if let Some(w) = weights.get(&format!("{prefix}.mlp.up_proj.weight")) {
+                layer.mlp.up_proj.copy_from_slice(w);
+            }
+            if let Some(w) = weights.get(&format!("{prefix}.mlp.down_proj.weight")) {
+                layer.mlp.down_proj.copy_from_slice(w);
+            }
+        }
+        Ok(())
+    }
+
+    /// Export references to all model weights as a HashMap without cloning any memory.
+    pub fn weights_ref_map(&self) -> HashMap<String, &Vec<f32>> {
+        let mut map = HashMap::new();
+        map.insert("model.embed_tokens.weight".to_string(), &self.embed_tokens);
+        map.insert("model.norm.weight".to_string(), &self.norm.weight);
+        map.insert("lm_head.weight".to_string(), &self.lm_head);
+        for (i, layer) in self.layers.iter().enumerate() {
+            let prefix = format!("model.layers.{i}");
+            map.insert(format!("{prefix}.input_layernorm.weight"), &layer.input_layernorm.weight);
+            map.insert(format!("{prefix}.post_attention_layernorm.weight"), &layer.post_attention_layernorm.weight);
+            map.insert(format!("{prefix}.self_attn.q_proj.weight"), &layer.self_attn.q_proj);
+            map.insert(format!("{prefix}.self_attn.k_proj.weight"), &layer.self_attn.k_proj);
+            map.insert(format!("{prefix}.self_attn.v_proj.weight"), &layer.self_attn.v_proj);
+            map.insert(format!("{prefix}.self_attn.o_proj.weight"), &layer.self_attn.o_proj);
+            map.insert(format!("{prefix}.mlp.gate_proj.weight"), &layer.mlp.gate_proj);
+            map.insert(format!("{prefix}.mlp.up_proj.weight"), &layer.mlp.up_proj);
+            map.insert(format!("{prefix}.mlp.down_proj.weight"), &layer.mlp.down_proj);
+        }
+        map
+    }
+
+    /// Export a full owned clone of weights map only when required (e.g. for checkpoint persistence).
+    pub fn to_weights_map(&self) -> HashMap<String, Vec<f32>> {
+        self.weights_ref_map().into_iter().map(|(k, v)| (k, v.clone())).collect()
+    }
+
     /// Run the forward pass over a sequence of token IDs.
     ///
     /// Returns a flat `[seq_len * vocab_size]` logit buffer.  The logits for

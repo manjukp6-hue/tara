@@ -312,6 +312,109 @@ pub fn load_model_weights_with_purpose(
     }
 }
 
+/// Read tensor shapes and dtypes from a SafeTensors file without loading tensor payload data.
+pub fn read_safetensors_shapes(path: &str) -> Result<HashMap<String, Vec<usize>>, SafeTensorsError> {
+    use std::io::Read;
+    let mut file = fs::File::open(path)?;
+    let file_len = file.metadata()?.len() as usize;
+
+    if file_len < 8 {
+        return Err(SafeTensorsError::Truncated {
+            expected: 8,
+            got: file_len,
+        });
+    }
+
+    let mut len_buf = [0u8; 8];
+    file.read_exact(&mut len_buf)?;
+    let header_len = usize::try_from(u64::from_le_bytes(len_buf)).map_err(|_| {
+        SafeTensorsError::InvalidHeader("header length overflows address space".into())
+    })?;
+    let header_end = 8usize
+        .checked_add(header_len)
+        .ok_or_else(|| SafeTensorsError::InvalidHeader("header length overflow".into()))?;
+
+    if file_len < header_end {
+        return Err(SafeTensorsError::Truncated {
+            expected: header_end,
+            got: file_len,
+        });
+    }
+
+    let mut header_bytes = vec![0u8; header_len];
+    file.read_exact(&mut header_bytes)?;
+    let header_str = std::str::from_utf8(&header_bytes)
+        .map_err(|e| SafeTensorsError::InvalidHeader(e.to_string()))?;
+
+    let header: serde_json::Value = serde_json::from_str(header_str)?;
+    let obj = header.as_object().ok_or_else(|| {
+        SafeTensorsError::InvalidHeader("header root must be a JSON object".into())
+    })?;
+
+    let mut shapes = HashMap::new();
+    for (name, meta) in obj {
+        if name == "__metadata__" {
+            continue;
+        }
+        let shape_arr = meta
+            .get("shape")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                SafeTensorsError::InvalidHeader(format!("missing shape for tensor '{name}'"))
+            })?;
+        let mut shape_vec = Vec::with_capacity(shape_arr.len());
+        for dim in shape_arr {
+            let d = dim
+                .as_u64()
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or_else(|| {
+                    SafeTensorsError::InvalidHeader(format!("invalid shape for tensor '{name}'"))
+                })?;
+            shape_vec.push(d);
+        }
+        shapes.insert(name.clone(), shape_vec);
+    }
+    Ok(shapes)
+}
+
+/// Read tensor shapes for an entire model directory (sharded via index.json or single file)
+/// without loading any float payload into memory.
+pub fn read_model_metadata_shapes(
+    model_dir: &str,
+) -> Result<HashMap<String, Vec<usize>>, SafeTensorsError> {
+    let index_path = format!("{}/model.safetensors.index.json", model_dir);
+    if std::path::Path::new(&index_path).exists() {
+        let raw = fs::read_to_string(&index_path)?;
+        let index: serde_json::Value = serde_json::from_str(&raw)?;
+        let weight_map = index
+            .get("weight_map")
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| {
+                SafeTensorsError::InvalidHeader(
+                    "sharded index is missing 'weight_map' object".into(),
+                )
+            })?;
+
+        let mut shard_files = std::collections::BTreeSet::new();
+        for file_val in weight_map.values() {
+            if let Some(f_str) = file_val.as_str() {
+                shard_files.insert(f_str.to_string());
+            }
+        }
+        let root = std::path::Path::new(model_dir).canonicalize()?;
+        let mut all_shapes = HashMap::new();
+        for shard_name in shard_files {
+            let shard_path = root.join(&shard_name);
+            let shapes = read_safetensors_shapes(&shard_path.to_string_lossy())?;
+            all_shapes.extend(shapes);
+        }
+        Ok(all_shapes)
+    } else {
+        let single_path = format!("{}/model.safetensors", model_dir);
+        read_safetensors_shapes(&single_path)
+    }
+}
+
 /// Load model tensors and preserve the dimensions from the source files.
 pub fn load_model_weights_with_shapes(
     model_dir: &str,

@@ -230,10 +230,7 @@ pub fn compute_model_weights_digest(dir: &Path) -> Result<Option<String>, String
     }
 
     if shard_files.is_empty() {
-        return Err(format!(
-            "Directory '{}' exists but contains no SafeTensors weight shards",
-            dir.display()
-        ));
+        return Ok(None);
     }
 
     shard_files.sort();
@@ -2118,7 +2115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let stage_status = if is_verified_complete {
             "COMPLETED".to_string()
-        } else if out_path.exists() {
+        } else if out_path.exists() && weights_hash.is_some() {
             "STALE_OR_UNVERIFIED".to_string()
         } else {
             "STAGED_READY".to_string()

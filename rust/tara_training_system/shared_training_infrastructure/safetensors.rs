@@ -61,32 +61,38 @@ pub fn load_safetensors(path: &str) -> Result<HashMap<String, Vec<f32>>, SafeTen
 
 /// Load tensor values and their original dimensions from a SafeTensors file.
 pub fn load_safetensors_with_shapes(path: &str) -> Result<WeightsWithShapes, SafeTensorsError> {
-    let bytes = fs::read(path)?;
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = fs::File::open(path)?;
+    let file_len = file.metadata()?.len() as usize;
 
-    if bytes.len() < 8 {
+    if file_len < 8 {
         return Err(SafeTensorsError::Truncated {
             expected: 8,
-            got: bytes.len(),
+            got: file_len,
         });
     }
 
+    let mut len_buf = [0u8; 8];
+    file.read_exact(&mut len_buf)?;
     // 8-byte little-endian header length
     let header_len =
-        usize::try_from(u64::from_le_bytes(bytes[..8].try_into().unwrap())).map_err(|_| {
+        usize::try_from(u64::from_le_bytes(len_buf)).map_err(|_| {
             SafeTensorsError::InvalidHeader("header length overflows address space".into())
         })?;
     let header_end = 8usize
         .checked_add(header_len)
         .ok_or_else(|| SafeTensorsError::InvalidHeader("header length overflow".into()))?;
 
-    if bytes.len() < header_end {
+    if file_len < header_end {
         return Err(SafeTensorsError::Truncated {
             expected: header_end,
-            got: bytes.len(),
+            got: file_len,
         });
     }
 
-    let header_str = std::str::from_utf8(&bytes[8..header_end])
+    let mut header_bytes = vec![0u8; header_len];
+    file.read_exact(&mut header_bytes)?;
+    let header_str = std::str::from_utf8(&header_bytes)
         .map_err(|e| SafeTensorsError::InvalidHeader(e.to_string()))?;
 
     let header: serde_json::Value = serde_json::from_str(header_str)?;
@@ -95,7 +101,7 @@ pub fn load_safetensors_with_shapes(path: &str) -> Result<WeightsWithShapes, Saf
     })?;
 
     let data_base = header_end;
-    let data_len = bytes.len() - data_base;
+    let data_len = file_len - data_base;
     let mut tensors: HashMap<String, Vec<f32>> = HashMap::new();
     let mut shapes: HashMap<String, Vec<usize>> = HashMap::new();
     let mut ranges = Vec::new();
@@ -161,15 +167,17 @@ pub fn load_safetensors_with_shapes(path: &str) -> Result<WeightsWithShapes, Saf
         if start > end || end > data_len {
             return Err(SafeTensorsError::Truncated {
                 expected: data_base.saturating_add(end),
-                got: bytes.len(),
+                got: file_len,
             });
         }
 
         ranges.push((start, end, name.clone()));
-        let abs_start = data_base + start;
-        let abs_end = data_base + end;
-        let raw = &bytes[abs_start..abs_end];
-        let floats = convert_to_f32(dtype_str, raw, name)?;
+        let abs_start = (data_base + start) as u64;
+        let tensor_bytes_len = end - start;
+        file.seek(SeekFrom::Start(abs_start))?;
+        let mut raw = vec![0u8; tensor_bytes_len];
+        file.read_exact(&mut raw)?;
+        let floats = convert_to_f32(dtype_str, &raw, name)?;
         if floats.len() != element_count {
             return Err(SafeTensorsError::BadOffsets(name.clone()));
         }

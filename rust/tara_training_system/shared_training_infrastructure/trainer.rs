@@ -463,9 +463,48 @@ impl NativeSelfTrainer {
         self
     }
 
+    /// Calculate projected training memory footprint in MB given total parameter count, target device, and precision.
+    pub fn estimate_memory_footprint_mb_detailed(
+        total_params: usize,
+        is_gpu: bool,
+        is_f16: bool,
+        max_tensor_len: usize,
+        batch_size: usize,
+        seq_len: usize,
+    ) -> (f64, String) {
+        if is_gpu && is_f16 {
+            // Mixed precision FP16 with streamed AdamW moments:
+            // 1. FP16 model weights on device: 2 bytes / param
+            let w_mb = (total_params * 2) as f64 / (1024.0 * 1024.0);
+            // 2. FP32 gradients on device: 4 bytes / param
+            let g_mb = (total_params * 4) as f64 / (1024.0 * 1024.0);
+            // 3. Reusable chunk buffers (d_chunk_w, d_chunk_m, d_chunk_v): 3 * 4 bytes * max_tensor_len
+            let chunk_mb = (max_tensor_len * 12) as f64 / (1024.0 * 1024.0);
+            // 4. Activations for micro-batch (RMSNorm + Attention + MLP for micro-batch, seq_len):
+            let act_mb = (batch_size * seq_len * 2048 * 8) as f64 / (1024.0 * 1024.0);
+            // 5. CUDA context and driver overhead
+            let cuda_overhead = 400.0;
+            let total = w_mb + g_mb + chunk_mb + act_mb + cuda_overhead;
+            let breakdown = format!(
+                "FP16 Weights: {w_mb:.1}MB, FP32 Grads: {g_mb:.1}MB, Chunk Buffers: {chunk_mb:.1}MB, Activations: {act_mb:.1}MB, CUDA Overhead: {cuda_overhead:.1}MB"
+            );
+            (total, breakdown)
+        } else {
+            // Unstreamed full FP32: 4 bytes weights + 4 bytes grad + 8 bytes AdamW (m, v)
+            let total = (total_params * 16) as f64 / (1024.0 * 1024.0) + 50.0;
+            let breakdown = format!(
+                "FP32 Weights: {:.1}MB, Grads: {:.1}MB, AdamW Moments: {:.1}MB, Overhead: 50.0MB",
+                (total_params * 4) as f64 / (1024.0 * 1024.0),
+                (total_params * 4) as f64 / (1024.0 * 1024.0),
+                (total_params * 8) as f64 / (1024.0 * 1024.0)
+            );
+            (total, breakdown)
+        }
+    }
+
     /// Calculate projected training memory footprint in MB given total parameter count.
     pub fn estimate_memory_footprint_mb(total_params: usize) -> f64 {
-        (total_params * 16) as f64 / (1024.0 * 1024.0) + 50.0
+        Self::estimate_memory_footprint_mb_detailed(total_params, false, false, 0, 1, 512).0
     }
 
     /// Return the current trainer status (last cycle time, epoch count, etc.).
@@ -852,10 +891,36 @@ impl NativeSelfTrainer {
 
         // 4. Memory footprint preflight check
         let total_params: usize = weights.values().map(|v| v.len()).sum();
-        let projected_mb = Self::estimate_memory_footprint_mb(total_params);
+        let max_tensor_len = weights.values().map(|v| v.len()).max().unwrap_or(0);
+        let is_gpu = match self.device {
+            TrainingDevice::Gpu => true,
+            TrainingDevice::Cpu => false,
+            TrainingDevice::Auto => {
+                crate::cuda::is_cuda_available()
+                    || std::env::var("TARA_FORCE_GPU").map(|v| v == "1" || v == "true").unwrap_or(false)
+            }
+        };
+        let is_f16 = match self.precision {
+            crate::cuda::TrainingPrecision::Fp16 => true,
+            crate::cuda::TrainingPrecision::Fp32 => false,
+            crate::cuda::TrainingPrecision::Auto => is_gpu,
+        };
+        let (projected_mb, memory_breakdown) = Self::estimate_memory_footprint_mb_detailed(
+            total_params,
+            is_gpu,
+            is_f16,
+            max_tensor_len,
+            1,
+            512,
+        );
+        println!(
+            "[Memory Preflight] Estimated training memory: {projected_mb:.1} MB (Safety ceiling: {:.1} MB)",
+            self.max_memory_mb
+        );
+        println!("[Memory Preflight] Detailed breakdown: {memory_breakdown}");
         if projected_mb > self.max_memory_mb {
             return Err(TrainerError::Model(format!(
-                "Projected training memory {projected_mb:.1} MB exceeds {:.1} MB safety ceiling",
+                "Projected training memory {projected_mb:.1} MB exceeds {:.1} MB safety ceiling. Breakdown: {memory_breakdown}",
                 self.max_memory_mb
             )));
         }

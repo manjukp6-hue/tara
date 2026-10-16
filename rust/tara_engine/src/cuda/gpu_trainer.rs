@@ -1369,6 +1369,14 @@ pub fn is_cuda_required() -> bool {
         || is_cuda_required_value(std::env::var("CI_CUDA").ok().as_deref())
 }
 
+/// Returns `true` if a CUDA driver is present and at least one CUDA-capable device is detected.
+pub fn is_cuda_available() -> bool {
+    crate::cuda::driver::CudaDriver::load()
+        .and_then(|d| d.device_count())
+        .map(|c| c > 0)
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

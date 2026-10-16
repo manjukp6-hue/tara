@@ -4,6 +4,7 @@
 //! RoPE, SwiGLU MLP, and LM Head) with AdamW optimization, gradient clipping,
 //! gradient accumulation, streaming dataset buffering, and isolated candidate staging.
 
+use rayon::prelude::*;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -983,7 +984,12 @@ impl NativeSelfTrainer {
                 {
                     return None;
                 }
-                let max_len = config.max_position_embeddings.max(2);
+                let max_seq_override = std::env::var("TARA_MAX_SEQ_LEN")
+                    .ok()
+                    .and_then(|s| s.parse::<usize>().ok());
+                let max_len = max_seq_override
+                    .unwrap_or(config.max_position_embeddings)
+                    .clamp(2, config.max_position_embeddings);
                 let input_start = input_ids.len().saturating_sub(max_len - 1);
                 let mut tokens = input_ids[input_start..].to_vec();
                 let target_start = tokens.len();
@@ -1404,6 +1410,17 @@ impl NativeSelfTrainer {
                 }
                 let sample_start = std::time::Instant::now();
                 let seq_len = tokens.len();
+                println!(
+                    "[Train Epoch {}] Processing sample {}/{} (seq_len: {}, micro-step {}/{})...",
+                    epoch_idx + 1,
+                    samples_seen + 1,
+                    train_tokens.len(),
+                    seq_len,
+                    accum_count + 1,
+                    accumulation_steps
+                );
+                let _ = std::io::stdout().flush();
+
                 let (layer_inputs, final_normed, logits) = if let Some(ref gpu_trainer) = gpu_trainer_opt {
                     let (inputs, fnorm) = model.forward_activations(tokens);
                     let lgs = gpu_trainer
@@ -1420,47 +1437,46 @@ impl NativeSelfTrainer {
                     (inputs, fnorm, lgs)
                 };
 
-                // Compute d_logits for supervised causal cross-entropy
-                let mut d_logits = vec![0.0f32; seq_len * config.vocab_size];
-                let mut valid_targets = 0usize;
-                let mut sample_loss = 0.0f32;
+                // Compute d_logits for supervised causal cross-entropy (Rayon-parallelized across token positions)
+                let vs = config.vocab_size;
+                let eff_target_start = (*target_start).max(1);
+                let mut d_logits = vec![0.0f32; seq_len * vs];
 
-                for (pos, &token_val) in tokens
-                    .iter()
+                let (unnorm_sample_loss, valid_targets) = d_logits
+                    .par_chunks_exact_mut(vs)
                     .enumerate()
-                    .take(seq_len)
-                    .skip((*target_start).max(1))
-                {
-                    let predictor = pos.saturating_sub(1);
-                    let target = token_val as usize;
-                    if target >= config.vocab_size {
-                        continue;
-                    }
-                    let logit_start = predictor * config.vocab_size;
-                    let logits_slice = &logits[logit_start..logit_start + config.vocab_size];
-                    let grad_slice = &mut d_logits[logit_start..logit_start + config.vocab_size];
+                    .map(|(predictor, grad_slice)| {
+                        let pos = predictor + 1;
+                        if pos >= eff_target_start && pos < seq_len {
+                            let target = tokens[pos] as usize;
+                            if target < vs {
+                                let logit_start = predictor * vs;
+                                let logits_slice = &logits[logit_start..logit_start + vs];
+                                let max_logit = logits_slice.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                                let mut sum_exp = 0.0f32;
+                                for (v, &l) in logits_slice.iter().enumerate() {
+                                    let exp_val = (l - max_logit).exp();
+                                    grad_slice[v] = exp_val;
+                                    sum_exp += exp_val;
+                                }
 
-                    let max_logit = logits_slice.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                    let mut sum_exp = 0.0f32;
-                    for (v, &l) in logits_slice.iter().enumerate() {
-                        let exp_val = (l - max_logit).exp();
-                        grad_slice[v] = exp_val;
-                        sum_exp += exp_val;
-                    }
-
-                    if sum_exp > 0.0 && sum_exp.is_finite() {
-                        let inv_sum = 1.0 / sum_exp;
-                        for val in grad_slice.iter_mut().take(config.vocab_size) {
-                            *val *= inv_sum;
+                                if sum_exp > 0.0 && sum_exp.is_finite() {
+                                    let inv_sum = 1.0 / sum_exp;
+                                    for val in grad_slice.iter_mut().take(vs) {
+                                        *val *= inv_sum;
+                                    }
+                                    let loss = sum_exp.ln() - (logits_slice[target] - max_logit);
+                                    grad_slice[target] -= 1.0;
+                                    return (loss, 1usize);
+                                }
+                            }
                         }
-                        sample_loss += sum_exp.ln() - (logits_slice[target] - max_logit);
-                        grad_slice[target] -= 1.0;
-                        valid_targets += 1;
-                    }
-                }
+                        (0.0f32, 0usize)
+                    })
+                    .reduce(|| (0.0f32, 0usize), |a, b| (a.0 + b.0, a.1 + b.1));
 
                 if valid_targets > 0 {
-                    sample_loss /= valid_targets as f32;
+                    let sample_loss = unnorm_sample_loss / valid_targets as f32;
                     batch_loss_sum += sample_loss;
                     batch_tokens_count += valid_targets;
                     let target_bytes: usize = tokens[*target_start..]

@@ -239,39 +239,47 @@ impl TaraAttention {
         let scale = (hd as f32).sqrt().recip();
         let mut attn_weights = vec![0.0f32; nh * seq_len * seq_len];
 
-        for h in 0..nh {
-            for i in 0..seq_len {
-                let qi = &q_rot[i * nh * hd + h * hd..i * nh * hd + h * hd + hd];
-                for j in 0..seq_len {
-                    let masked = if j > i {
-                        f32::NEG_INFINITY
-                    } else {
-                        let kj = &k_exp[j * nh * hd + h * hd..j * nh * hd + h * hd + hd];
+        attn_weights
+            .par_chunks_exact_mut(seq_len * seq_len)
+            .enumerate()
+            .for_each(|(h, h_attn)| {
+                for i in 0..seq_len {
+                    let qi = &q_rot[i * nh * hd + h * hd..i * nh * hd + (h + 1) * hd];
+                    let row = &mut h_attn[i * seq_len..(i + 1) * seq_len];
+                    for j in 0..=i {
+                        let kj = &k_exp[j * nh * hd + h * hd..j * nh * hd + (h + 1) * hd];
                         let dot: f32 = qi.iter().zip(kj.iter()).map(|(&a, &b)| a * b).sum();
-                        dot * scale
-                    };
-                    attn_weights[h * seq_len * seq_len + i * seq_len + j] = masked;
+                        row[j] = dot * scale;
+                    }
+                    for j in (i + 1)..seq_len {
+                        row[j] = f32::NEG_INFINITY;
+                    }
                 }
-            }
-        }
+            });
 
         // Softmax over last dim (per query position, per head)
         softmax_inplace(&mut attn_weights, nh, seq_len);
 
         // ── Weighted sum over values ──────────────────────────────
         let mut context = vec![0.0f32; seq_len * nh * hd];
-        for h in 0..nh {
-            for i in 0..seq_len {
-                for j in 0..seq_len {
-                    let w = attn_weights[h * seq_len * seq_len + i * seq_len + j];
-                    let vj = &v_exp[j * nh * hd + h * hd..j * nh * hd + h * hd + hd];
-                    let out_slice = &mut context[i * nh * hd + h * hd..i * nh * hd + h * hd + hd];
-                    for (o, &vi) in out_slice.iter_mut().zip(vj.iter()) {
-                        *o += w * vi;
+        context
+            .par_chunks_exact_mut(nh * hd)
+            .enumerate()
+            .for_each(|(i, ctx_i)| {
+                for h in 0..nh {
+                    let out_slice = &mut ctx_i[h * hd..(h + 1) * hd];
+                    let w_row = &attn_weights[h * seq_len * seq_len + i * seq_len..];
+                    for j in 0..=i {
+                        let w = w_row[j];
+                        if w > 0.0 {
+                            let vj = &v_exp[j * nh * hd + h * hd..j * nh * hd + (h + 1) * hd];
+                            for (o, &vi) in out_slice.iter_mut().zip(vj.iter()) {
+                                *o += w * vi;
+                            }
+                        }
                     }
                 }
-            }
-        }
+            });
         context
     }
 
@@ -405,36 +413,44 @@ impl TaraAttention {
 
         let scale = (hd as f32).sqrt().recip();
         let mut attn_weights = vec![0.0f32; nh * seq_len * seq_len];
-        for h in 0..nh {
-            for i in 0..seq_len {
-                for j in 0..seq_len {
-                    let qi = &q_rot[i * nh * hd + h * hd..i * nh * hd + h * hd + hd];
-                    let kj = &k_exp[j * nh * hd + h * hd..j * nh * hd + h * hd + hd];
-                    let dot: f32 = qi.iter().zip(kj.iter()).map(|(&a, &b)| a * b).sum();
-                    let masked = if j > i {
-                        f32::NEG_INFINITY
-                    } else {
-                        dot * scale
-                    };
-                    attn_weights[h * seq_len * seq_len + i * seq_len + j] = masked;
+        attn_weights
+            .par_chunks_exact_mut(seq_len * seq_len)
+            .enumerate()
+            .for_each(|(h, h_attn)| {
+                for i in 0..seq_len {
+                    let qi = &q_rot[i * nh * hd + h * hd..i * nh * hd + (h + 1) * hd];
+                    let row = &mut h_attn[i * seq_len..(i + 1) * seq_len];
+                    for j in 0..=i {
+                        let kj = &k_exp[j * nh * hd + h * hd..j * nh * hd + (h + 1) * hd];
+                        let dot: f32 = qi.iter().zip(kj.iter()).map(|(&a, &b)| a * b).sum();
+                        row[j] = dot * scale;
+                    }
+                    for j in (i + 1)..seq_len {
+                        row[j] = f32::NEG_INFINITY;
+                    }
                 }
-            }
-        }
+            });
         softmax_inplace(&mut attn_weights, nh, seq_len);
 
         let mut context = vec![0.0f32; seq_len * nh * hd];
-        for h in 0..nh {
-            for i in 0..seq_len {
-                for j in 0..seq_len {
-                    let w = attn_weights[h * seq_len * seq_len + i * seq_len + j];
-                    let vj = &v_exp[j * nh * hd + h * hd..j * nh * hd + h * hd + hd];
-                    let out_slice = &mut context[i * nh * hd + h * hd..i * nh * hd + h * hd + hd];
-                    for (o, &vi) in out_slice.iter_mut().zip(vj.iter()) {
-                        *o += w * vi;
+        context
+            .par_chunks_exact_mut(nh * hd)
+            .enumerate()
+            .for_each(|(i, ctx_i)| {
+                for h in 0..nh {
+                    let out_slice = &mut ctx_i[h * hd..(h + 1) * hd];
+                    let w_row = &attn_weights[h * seq_len * seq_len + i * seq_len..];
+                    for j in 0..=i {
+                        let w = w_row[j];
+                        if w > 0.0 {
+                            let vj = &v_exp[j * nh * hd + h * hd..j * nh * hd + (h + 1) * hd];
+                            for (o, &vi) in out_slice.iter_mut().zip(vj.iter()) {
+                                *o += w * vi;
+                            }
+                        }
                     }
                 }
-            }
-        }
+            });
 
         // 1. Output projection backward:
         // dy: [seq_len, hs], context: [seq_len, nh * hd]
@@ -468,69 +484,110 @@ impl TaraAttention {
             });
 
         // 2. Attention weights and Value gradients:
-        let mut d_v_exp = vec![0.0f32; seq_len * nh * hd];
         let mut d_attn_weights = vec![0.0f32; nh * seq_len * seq_len];
-
-        for h in 0..nh {
-            for i in 0..seq_len {
-                let d_c = &d_context[i * nh * hd + h * hd..i * nh * hd + h * hd + hd];
-                for j in 0..seq_len {
-                    let w = attn_weights[h * seq_len * seq_len + i * seq_len + j];
-                    let vj = &v_exp[j * nh * hd + h * hd..j * nh * hd + h * hd + hd];
-
-                    let mut d_w = 0.0f32;
-                    for d in 0..hd {
-                        d_w += d_c[d] * vj[d];
-                        d_v_exp[j * nh * hd + h * hd + d] += d_c[d] * w;
-                    }
-                    d_attn_weights[h * seq_len * seq_len + i * seq_len + j] = d_w;
-                }
-            }
-        }
-
-        // 3. Softmax backward:
-        let mut d_scores = vec![0.0f32; nh * seq_len * seq_len];
-        for h in 0..nh {
-            for i in 0..seq_len {
-                let w_row = &attn_weights[h * seq_len * seq_len + i * seq_len
-                    ..(h * seq_len * seq_len + i * seq_len + seq_len)];
-                let dw_row = &d_attn_weights[h * seq_len * seq_len + i * seq_len
-                    ..(h * seq_len * seq_len + i * seq_len + seq_len)];
-
-                let sum_w_dw: f32 = w_row
-                    .iter()
-                    .zip(dw_row.iter())
-                    .map(|(&w, &dw)| w * dw)
-                    .sum();
-                for j in 0..seq_len {
-                    if j <= i {
-                        let w = w_row[j];
-                        let dw = dw_row[j];
-                        d_scores[h * seq_len * seq_len + i * seq_len + j] =
-                            w * (dw - sum_w_dw) * scale;
-                    }
-                }
-            }
-        }
-
-        // 4. Dot product backward (Q_rot and K_exp gradients):
-        let mut d_q_rot = vec![0.0f32; seq_len * nh * hd];
-        let mut d_k_exp = vec![0.0f32; seq_len * nh * hd];
-        for h in 0..nh {
-            for i in 0..seq_len {
-                for j in 0..seq_len {
-                    let d_score = d_scores[h * seq_len * seq_len + i * seq_len + j];
-                    if d_score != 0.0 {
-                        let qi = &q_rot[i * nh * hd + h * hd..i * nh * hd + h * hd + hd];
-                        let kj = &k_exp[j * nh * hd + h * hd..j * nh * hd + h * hd + hd];
-                        for d in 0..hd {
-                            d_q_rot[i * nh * hd + h * hd + d] += d_score * kj[d];
-                            d_k_exp[j * nh * hd + h * hd + d] += d_score * qi[d];
+        d_attn_weights
+            .par_chunks_exact_mut(seq_len * seq_len)
+            .enumerate()
+            .for_each(|(h, h_d_attn)| {
+                for i in 0..seq_len {
+                    let d_c = &d_context[i * nh * hd + h * hd..i * nh * hd + (h + 1) * hd];
+                    let row = &mut h_d_attn[i * seq_len..(i + 1) * seq_len];
+                    for j in 0..=i {
+                        let w = attn_weights[h * seq_len * seq_len + i * seq_len + j];
+                        if w > 0.0 {
+                            let vj = &v_exp[j * nh * hd + h * hd..j * nh * hd + (h + 1) * hd];
+                            let mut d_w = 0.0f32;
+                            for d in 0..hd {
+                                d_w += d_c[d] * vj[d];
+                            }
+                            row[j] = d_w;
                         }
                     }
                 }
-            }
-        }
+            });
+
+        let mut d_v_exp = vec![0.0f32; seq_len * nh * hd];
+        d_v_exp
+            .par_chunks_exact_mut(nh * hd)
+            .enumerate()
+            .for_each(|(j, dv_j)| {
+                for h in 0..nh {
+                    let dv_slice = &mut dv_j[h * hd..(h + 1) * hd];
+                    for i in j..seq_len {
+                        let w = attn_weights[h * seq_len * seq_len + i * seq_len + j];
+                        if w > 0.0 {
+                            let d_c = &d_context[i * nh * hd + h * hd..i * nh * hd + (h + 1) * hd];
+                            for d in 0..hd {
+                                dv_slice[d] += d_c[d] * w;
+                            }
+                        }
+                    }
+                }
+            });
+
+        // 3. Softmax backward:
+        let mut d_scores = vec![0.0f32; nh * seq_len * seq_len];
+        d_scores
+            .par_chunks_exact_mut(seq_len * seq_len)
+            .enumerate()
+            .for_each(|(h, h_d_scores)| {
+                for i in 0..seq_len {
+                    let w_row = &attn_weights[h * seq_len * seq_len + i * seq_len..(h * seq_len * seq_len + (i + 1) * seq_len)];
+                    let dw_row = &d_attn_weights[h * seq_len * seq_len + i * seq_len..(h * seq_len * seq_len + (i + 1) * seq_len)];
+
+                    let sum_w_dw: f32 = w_row[..=i]
+                        .iter()
+                        .zip(dw_row[..=i].iter())
+                        .map(|(&w, &dw)| w * dw)
+                        .sum();
+                    let ds_row = &mut h_d_scores[i * seq_len..(i + 1) * seq_len];
+                    for j in 0..=i {
+                        let w = w_row[j];
+                        let dw = dw_row[j];
+                        ds_row[j] = w * (dw - sum_w_dw) * scale;
+                    }
+                }
+            });
+
+        // 4. Dot product backward (Q_rot and K_exp gradients):
+        let mut d_q_rot = vec![0.0f32; seq_len * nh * hd];
+        d_q_rot
+            .par_chunks_exact_mut(nh * hd)
+            .enumerate()
+            .for_each(|(i, dq_i)| {
+                for h in 0..nh {
+                    let dq_slice = &mut dq_i[h * hd..(h + 1) * hd];
+                    let ds_row = &d_scores[h * seq_len * seq_len + i * seq_len..];
+                    for j in 0..=i {
+                        let ds = ds_row[j];
+                        if ds != 0.0 {
+                            let kj = &k_exp[j * nh * hd + h * hd..j * nh * hd + (h + 1) * hd];
+                            for d in 0..hd {
+                                dq_slice[d] += ds * kj[d];
+                            }
+                        }
+                    }
+                }
+            });
+
+        let mut d_k_exp = vec![0.0f32; seq_len * nh * hd];
+        d_k_exp
+            .par_chunks_exact_mut(nh * hd)
+            .enumerate()
+            .for_each(|(j, dk_j)| {
+                for h in 0..nh {
+                    let dk_slice = &mut dk_j[h * hd..(h + 1) * hd];
+                    for i in j..seq_len {
+                        let ds = d_scores[h * seq_len * seq_len + i * seq_len + j];
+                        if ds != 0.0 {
+                            let qi = &q_rot[i * nh * hd + h * hd..i * nh * hd + (h + 1) * hd];
+                            for d in 0..hd {
+                                dk_slice[d] += ds * qi[d];
+                            }
+                        }
+                    }
+                }
+            });
 
         // 5. GQA un-expansion for K and V:
         let mut d_k_rot = vec![0.0f32; seq_len * nkv * hd];
@@ -633,26 +690,22 @@ impl TaraAttention {
 }
 
 /// In-place causal softmax over `[nh, seq, seq]` attention weights.
-fn softmax_inplace(w: &mut [f32], nh: usize, seq_len: usize) {
-    for h in 0..nh {
-        for i in 0..seq_len {
-            let row_start = h * seq_len * seq_len + i * seq_len;
-            let row = &mut w[row_start..row_start + seq_len];
-
-            // Numerically stable softmax
-            let max = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-            let mut sum = 0.0f32;
+fn softmax_inplace(w: &mut [f32], _nh: usize, seq_len: usize) {
+    w.par_chunks_exact_mut(seq_len).for_each(|row| {
+        // Numerically stable softmax
+        let max = row.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        let mut sum = 0.0f32;
+        for v in row.iter_mut() {
+            *v = (*v - max).exp();
+            sum += *v;
+        }
+        if sum > 0.0 {
+            let inv_sum = 1.0 / sum;
             for v in row.iter_mut() {
-                *v = (*v - max).exp();
-                sum += *v;
-            }
-            if sum > 0.0 {
-                for v in row.iter_mut() {
-                    *v /= sum;
-                }
+                *v *= inv_sum;
             }
         }
-    }
+    });
 }
 
 #[cfg(test)]

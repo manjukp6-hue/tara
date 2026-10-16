@@ -83,12 +83,16 @@ pub struct MemorySnapshot {
     pub gpu_used_vram_mb: Option<f64>,
     pub gpu_free_vram_mb: Option<f64>,
     pub gpu_total_vram_mb: Option<f64>,
+    pub disk_free_mb: Option<f64>,
+    pub disk_total_mb: Option<f64>,
 }
 
 /// Explicit audit of AdamW optimizer memory requirements across host and GPU.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AdamWMemoryAudit {
     pub total_parameters: usize,
+    pub weights_gpu_bytes: usize,
+    pub weights_gpu_device: &'static str,
     pub master_weights_bytes: usize,
     pub master_weights_device: &'static str,
     pub gradients_bytes: usize,
@@ -105,9 +109,13 @@ pub struct AdamWMemoryAudit {
 
 impl AdamWMemoryAudit {
     pub fn display_summary(&self) -> String {
+        let total_gpu_dec_mb = self.total_gpu_bytes as f64 / 1_000_000.0;
+        let total_gpu_mib = self.total_gpu_bytes as f64 / (1024.0 * 1024.0);
         format!(
-            "[AdamW Audit] Params: {} | Master Weights: {:.2} MB ({}) | Gradients: {:.2} MB ({}) | Moments (m+v): {:.2} MB ({}) | GPU Chunks: {:.2} MB | Total Host: {:.2} MB | Total GPU: {:.2} MB | Mode: {}",
+            "[AdamW Audit] Params: {} | Weights (GPU): {:.2} MB ({}) | Master Weights: {:.2} MB ({}) | Gradients: {:.2} MB ({}) | Moments (m+v): {:.2} MB ({}) | GPU Chunks: {:.2} MB | Total Host: {:.2} MB | Total GPU: {:.2} MB ({:.2} MiB) | Mode: {}",
             self.total_parameters,
+            self.weights_gpu_bytes as f64 / (1024.0 * 1024.0),
+            self.weights_gpu_device,
             self.master_weights_bytes as f64 / (1024.0 * 1024.0),
             self.master_weights_device,
             self.gradients_bytes as f64 / (1024.0 * 1024.0),
@@ -116,7 +124,8 @@ impl AdamWMemoryAudit {
             self.moment1_device,
             self.chunk_buffers_gpu_bytes as f64 / (1024.0 * 1024.0),
             self.total_host_bytes as f64 / (1024.0 * 1024.0),
-            self.total_gpu_bytes as f64 / (1024.0 * 1024.0),
+            total_gpu_dec_mb,
+            total_gpu_mib,
             if self.is_streamed { "STREAMED" } else { "GPU_RESIDENT" }
         )
     }
@@ -243,6 +252,59 @@ pub fn capture_memory_snapshot(vram_info: Option<(usize, usize)>) -> MemorySnaps
     let (process_rss_mb, process_hwm_mb, host_total_mb, host_avail_mb, cgroup_limit_mb, cgroup_current_mb, cgroup_oom_kills, cgroup_events_summary) =
         (0.0f64, 0.0f64, 0.0f64, 0.0f64, None, None, None, None);
 
+    #[cfg(target_os = "linux")]
+    let (disk_free_mb, disk_total_mb) = {
+        let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+        let path = std::ffi::CString::new(".").unwrap_or_default();
+        if unsafe { libc::statvfs(path.as_ptr(), &mut stat) } == 0 {
+            let frsize = stat.f_frsize as u64;
+            let free_bytes = (stat.f_bavail as u64) * frsize;
+            let total_bytes = (stat.f_blocks as u64) * frsize;
+            (
+                Some(free_bytes as f64 / (1024.0 * 1024.0)),
+                Some(total_bytes as f64 / (1024.0 * 1024.0)),
+            )
+        } else {
+            (None, None)
+        }
+    };
+
+    #[cfg(windows)]
+    let (disk_free_mb, disk_total_mb) = {
+        use std::os::windows::ffi::OsStrExt;
+        let path: Vec<u16> = std::ffi::OsStr::new(".").encode_wide().chain(Some(0)).collect();
+        let mut free_bytes_avail: u64 = 0;
+        let mut total_bytes: u64 = 0;
+        let mut total_free_bytes: u64 = 0;
+        extern "system" {
+            fn GetDiskFreeSpaceExW(
+                lpDirectoryName: *const u16,
+                lpFreeBytesAvailableToCaller: *mut u64,
+                lpTotalNumberOfBytes: *mut u64,
+                lpTotalNumberOfFreeBytes: *mut u64,
+            ) -> i32;
+        }
+        let ok = unsafe {
+            GetDiskFreeSpaceExW(
+                path.as_ptr(),
+                &mut free_bytes_avail,
+                &mut total_bytes,
+                &mut total_free_bytes,
+            )
+        };
+        if ok != 0 {
+            (
+                Some(free_bytes_avail as f64 / (1024.0 * 1024.0)),
+                Some(total_bytes as f64 / (1024.0 * 1024.0)),
+            )
+        } else {
+            (None, None)
+        }
+    };
+
+    #[cfg(not(any(target_os = "linux", windows)))]
+    let (disk_free_mb, disk_total_mb) = (None, None);
+
     let (gpu_used_vram_mb, gpu_free_vram_mb, gpu_total_vram_mb) = if let Some((free_b, total_b)) = vram_info {
         let free_mb = free_b as f64 / (1024.0 * 1024.0);
         let tot_mb = total_b as f64 / (1024.0 * 1024.0);
@@ -264,6 +326,8 @@ pub fn capture_memory_snapshot(vram_info: Option<(usize, usize)>) -> MemorySnaps
         gpu_used_vram_mb,
         gpu_free_vram_mb,
         gpu_total_vram_mb,
+        disk_free_mb,
+        disk_total_mb,
     }
 }
 
@@ -287,6 +351,9 @@ pub fn log_flushed_memory_checkpoint(op_name: &str, vram_info: Option<(usize, us
         if kills > 0 {
             msg.push_str(&format!(" | *** OOM KILLS DETECTED: {kills} ***"));
         }
+    }
+    if let (Some(free_d), Some(tot_d)) = (snap.disk_free_mb, snap.disk_total_mb) {
+        msg.push_str(&format!(" | Disk Free: {:.1} MB / {:.1} MB", free_d, tot_d));
     }
     if let (Some(used), Some(free), Some(tot)) = (snap.gpu_used_vram_mb, snap.gpu_free_vram_mb, snap.gpu_total_vram_mb) {
         msg.push_str(&format!(" | GPU VRAM: {:.1} MB used / {:.1} MB free ({:.1} MB total)", used, free, tot));
@@ -1569,10 +1636,20 @@ impl CudaTrainer {
         };
 
         if self.stream_optimizer {
+            let weights_gpu_bytes = if self.precision == TrainingPrecision::Fp16 {
+                total_parameters * std::mem::size_of::<half::f16>()
+            } else {
+                total_parameters * std::mem::size_of::<f32>()
+            };
+            let weights_gpu_device = if self.precision == TrainingPrecision::Fp16 {
+                "GPU VRAM (FP16)"
+            } else {
+                "GPU VRAM (FP32)"
+            };
             let master_weights_bytes = total_parameters * std::mem::size_of::<f32>();
             let master_weights_device = "Host RAM";
             let gradients_bytes = total_parameters * std::mem::size_of::<f32>();
-            let gradients_device = "GPU VRAM";
+            let gradients_device = "GPU VRAM (FP32)";
             // Moments are compactly streamed as FP16 (2 bytes each) on host
             let moment1_bytes = total_parameters * std::mem::size_of::<half::f16>();
             let moment1_device = "Host RAM (FP16)";
@@ -1580,10 +1657,12 @@ impl CudaTrainer {
             let moment2_device = "Host RAM (FP16)";
             let chunk_buffers_gpu_bytes = 3 * max_tensor_len * std::mem::size_of::<f32>();
             let total_host_bytes = master_weights_bytes + moment1_bytes + moment2_bytes;
-            let total_gpu_bytes = gradients_bytes + chunk_buffers_gpu_bytes;
+            let total_gpu_bytes = weights_gpu_bytes + gradients_bytes + chunk_buffers_gpu_bytes;
 
             AdamWMemoryAudit {
                 total_parameters,
+                weights_gpu_bytes,
+                weights_gpu_device,
                 master_weights_bytes,
                 master_weights_device,
                 gradients_bytes,
@@ -1598,20 +1677,32 @@ impl CudaTrainer {
                 is_streamed: true,
             }
         } else {
+            let weights_gpu_bytes = if self.precision == TrainingPrecision::Fp16 {
+                total_parameters * std::mem::size_of::<half::f16>()
+            } else {
+                total_parameters * std::mem::size_of::<f32>()
+            };
+            let weights_gpu_device = if self.precision == TrainingPrecision::Fp16 {
+                "GPU VRAM (FP16)"
+            } else {
+                "GPU VRAM (FP32)"
+            };
             let master_weights_bytes = total_parameters * std::mem::size_of::<f32>();
-            let master_weights_device = "GPU VRAM";
+            let master_weights_device = "GPU VRAM (FP32)";
             let gradients_bytes = total_parameters * std::mem::size_of::<f32>();
-            let gradients_device = "GPU VRAM";
+            let gradients_device = "GPU VRAM (FP32)";
             let moment1_bytes = total_parameters * std::mem::size_of::<f32>();
             let moment1_device = "GPU VRAM (FP32)";
             let moment2_bytes = total_parameters * std::mem::size_of::<f32>();
             let moment2_device = "GPU VRAM (FP32)";
             let chunk_buffers_gpu_bytes = 0;
             let total_host_bytes = 0;
-            let total_gpu_bytes = master_weights_bytes + gradients_bytes + moment1_bytes + moment2_bytes;
+            let total_gpu_bytes = weights_gpu_bytes + master_weights_bytes + gradients_bytes + moment1_bytes + moment2_bytes;
 
             AdamWMemoryAudit {
                 total_parameters,
+                weights_gpu_bytes,
+                weights_gpu_device,
                 master_weights_bytes,
                 master_weights_device,
                 gradients_bytes,
@@ -2572,21 +2663,24 @@ mod tests {
     fn test_adamw_memory_audit_non_zero() {
         let audit = AdamWMemoryAudit {
             total_parameters: 3000,
+            weights_gpu_bytes: 3000 * 2,
+            weights_gpu_device: "GPU VRAM (FP16)",
             master_weights_bytes: 3000 * 4,
             master_weights_device: "Host RAM",
             gradients_bytes: 3000 * 4,
-            gradients_device: "GPU VRAM",
+            gradients_device: "GPU VRAM (FP32)",
             moment1_bytes: 3000 * 2,
             moment1_device: "Host RAM (FP16)",
             moment2_bytes: 3000 * 2,
             moment2_device: "Host RAM (FP16)",
             chunk_buffers_gpu_bytes: 3 * 2000 * 4,
             total_host_bytes: 3000 * 4 + 3000 * 2 + 3000 * 2,
-            total_gpu_bytes: 3000 * 4 + 3 * 2000 * 4,
+            total_gpu_bytes: 3000 * 2 + 3000 * 4 + 3 * 2000 * 4,
             is_streamed: true,
         };
 
         assert_eq!(audit.total_parameters, 3000);
+        assert!(audit.weights_gpu_bytes > 0);
         assert!(audit.master_weights_bytes > 0);
         assert!(audit.gradients_bytes > 0);
         assert!(audit.moment1_bytes > 0);

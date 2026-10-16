@@ -16,8 +16,8 @@ use std::process::exit;
 
 use tara_engine::config::TaraConfig;
 use tara_engine::cuda::{is_cuda_available, log_flushed_memory_checkpoint, CudaTrainer, TrainingPrecision};
-use tara_engine::internal_diagnostics::write_safetensors_sharded;
-use tara_engine::{load_model_weights_with_purpose, read_model_metadata_shapes, TaraForCausalLM};
+use tara_engine::internal_diagnostics::write_safetensors_sharded_with_callback;
+use tara_engine::{load_model_weights_with_purpose, load_safetensors_with_shapes, read_model_metadata_shapes, TaraForCausalLM};
 
 fn print_usage() {
     println!("TARA Standalone GPU 1-Step Verification Utility");
@@ -612,12 +612,27 @@ fn main() {
     println!("[GPU Step Test] {}", opt_audit.display_summary());
     log_flushed_memory_checkpoint("11_POST_OPTIMIZER_STATE_ALLOCATION", vram_info);
 
-    // Milestone 13: GPU AdamW Parameter Update Step
+    // Milestone 13: GPU AdamW Parameter Update Step with Bounded Memory Snapshots
     log_flushed_memory_checkpoint("12_PRE_ADAMW_UPDATE", vram_info);
-    println!("[GPU Step Test] Snapshotting parameter tensors before AdamW update...");
-    let initial_lm_head = weights.get("lm_head.weight").cloned().expect("lm_head.weight");
-    let initial_embed = weights.get("model.embed_tokens.weight").cloned().expect("embed_tokens");
-    let initial_layer0_q = weights.get("model.layers.0.self_attn.q_proj.weight").cloned().expect("layer0.q_proj");
+    println!("[GPU Step Test] Capturing bounded parameter snapshots before AdamW update...");
+    // Snapshot full small tensors across architecture tiers (bounded to a few KB total)
+    let initial_norm = weights.get("model.norm.weight").cloned().expect("norm");
+    let initial_layer0_ln = weights.get("model.layers.0.input_layernorm.weight").cloned().expect("layer0.input_layernorm");
+    let initial_layer12_ln = weights.get("model.layers.12.input_layernorm.weight").cloned().expect("layer12.input_layernorm");
+
+    // Snapshot bounded representative slices of massive projection tensors (4096 elements = 16 KB)
+    let lm_head_ref = weights.get("lm_head.weight").expect("lm_head");
+    let embed_ref = weights.get("model.embed_tokens.weight").expect("embed_tokens");
+    let layer0_q_ref = weights.get("model.layers.0.self_attn.q_proj.weight").expect("layer0.q_proj");
+
+    let slice_len = 4096.min(lm_head_ref.len());
+    let initial_lm_head_slice = lm_head_ref[..slice_len].to_vec();
+    let initial_embed_slice = embed_ref[..slice_len].to_vec();
+    let initial_layer0_q_slice = layer0_q_ref[..slice_len].to_vec();
+
+    // Accumulate whole-tensor element sums without memory allocation
+    let initial_lm_head_sum: f64 = lm_head_ref.iter().map(|&x| x as f64).sum();
+    let initial_embed_sum: f64 = embed_ref.iter().map(|&x| x as f64).sum();
 
     println!("[GPU Step Test] Executing GPU AdamW Step across all parameters...");
     let step_result = match gpu_trainer.step_adamw_with_weights(
@@ -648,7 +663,7 @@ fn main() {
         }
     }
 
-    // Verify parameter delta across multiple distinct layers
+    // Verify parameter delta across multiple distinct layers and representative slices
     let check_param_delta = |name: &str, init: &[f32], upd: &[f32]| -> f32 {
         let mut max_d = 0.0f32;
         let mut sum_d = 0.0f64;
@@ -671,14 +686,30 @@ fn main() {
         max_d
     };
 
-    check_param_delta("lm_head.weight", &initial_lm_head, weights.get("lm_head.weight").unwrap());
-    check_param_delta("model.embed_tokens.weight", &initial_embed, weights.get("model.embed_tokens.weight").unwrap());
-    check_param_delta("model.layers.0.self_attn.q_proj.weight", &initial_layer0_q, weights.get("model.layers.0.self_attn.q_proj.weight").unwrap());
+    check_param_delta("model.norm.weight", &initial_norm, weights.get("model.norm.weight").unwrap());
+    check_param_delta("model.layers.0.input_layernorm.weight", &initial_layer0_ln, weights.get("model.layers.0.input_layernorm.weight").unwrap());
+    check_param_delta("model.layers.12.input_layernorm.weight", &initial_layer12_ln, weights.get("model.layers.12.input_layernorm.weight").unwrap());
+    check_param_delta("lm_head.weight[..slice]", &initial_lm_head_slice, &weights.get("lm_head.weight").unwrap()[..slice_len]);
+    check_param_delta("model.embed_tokens.weight[..slice]", &initial_embed_slice, &weights.get("model.embed_tokens.weight").unwrap()[..slice_len]);
+    check_param_delta("model.layers.0.self_attn.q_proj.weight[..slice]", &initial_layer0_q_slice, &weights.get("model.layers.0.self_attn.q_proj.weight").unwrap()[..slice_len]);
+
+    let updated_lm_head_sum: f64 = weights.get("lm_head.weight").unwrap().iter().map(|&x| x as f64).sum();
+    let updated_embed_sum: f64 = weights.get("model.embed_tokens.weight").unwrap().iter().map(|&x| x as f64).sum();
+    let delta_lm_head_sum = (updated_lm_head_sum - initial_lm_head_sum).abs();
+    let delta_embed_sum = (updated_embed_sum - initial_embed_sum).abs();
+    println!(
+        "[GPU Step Test] Global Sum Delta across full tensor: lm_head={:.6}, embed_tokens={:.6}",
+        delta_lm_head_sum, delta_embed_sum
+    );
+    if delta_lm_head_sum <= 0.0 || delta_embed_sum <= 0.0 {
+        eprintln!("[GPU Step Test] FATAL: Parameter sum delta is non-positive after AdamW step!");
+        exit(1);
+    }
 
     let vram_info = gpu_trainer.get_vram_info().ok();
     log_flushed_memory_checkpoint("12_POST_ADAMW_UPDATE", vram_info);
 
-    // Milestone 14: Checkpoint Save and Reload Parity Verification
+    // Milestone 14: Instrumented Sharded SafeTensors Checkpoint Save and Parity Verification
     let temp_cp_dir = PathBuf::from("storage/checkpoints/gpu_step_test_parity");
     if temp_cp_dir.exists() {
         let _ = fs::remove_dir_all(&temp_cp_dir);
@@ -705,7 +736,19 @@ fn main() {
         }
     };
 
-    if let Err(e) = write_safetensors_sharded(&weights, &shapes, &temp_cp_dir.to_string_lossy(), 500 * 1024 * 1024) {
+    let cp_write_result = write_safetensors_sharded_with_callback(
+        &weights,
+        &shapes,
+        &temp_cp_dir.to_string_lossy(),
+        500 * 1024 * 1024,
+        "model",
+        false,
+        |op_tag| {
+            let v_info = gpu_trainer.get_vram_info().ok();
+            log_flushed_memory_checkpoint(&format!("13_{op_tag}"), v_info);
+        },
+    );
+    if let Err(e) = cp_write_result {
         eprintln!("[GPU Step Test] FATAL: Failed to write test checkpoint: {e}");
         let _ = fs::remove_dir_all(&temp_cp_dir);
         exit(1);
@@ -714,36 +757,122 @@ fn main() {
     let vram_info = gpu_trainer.get_vram_info().ok();
     log_flushed_memory_checkpoint("13_POST_CHECKPOINT_WRITE", vram_info);
 
+    // Milestone 14b: Bounded Shard-by-Shard Checkpoint Parity Reload
     log_flushed_memory_checkpoint("14_PRE_CHECKPOINT_RELOAD", vram_info);
-    println!("[GPU Step Test] Reloading checkpoint to verify parity...");
-    let (reloaded_weights, _) = match load_model_weights_with_purpose(&temp_cp_dir.to_string_lossy(), "CHECKPOINT_PARITY_TEST") {
-        Ok(w) => w,
+    println!("[GPU Step Test] Reloading checkpoint shard-by-shard to verify parity with bounded memory...");
+
+    let index_file_path = temp_cp_dir.join("model.safetensors.index.json");
+    if !index_file_path.exists() {
+        eprintln!("[GPU Step Test] FATAL: Checkpoint index missing at {}", index_file_path.display());
+        let _ = fs::remove_dir_all(&temp_cp_dir);
+        exit(1);
+    }
+
+    let index_str = match fs::read_to_string(&index_file_path) {
+        Ok(s) => s,
         Err(e) => {
-            eprintln!("[GPU Step Test] FATAL: Failed to reload test checkpoint: {e}");
+            eprintln!("[GPU Step Test] FATAL: Could not read checkpoint index: {e}");
+            let _ = fs::remove_dir_all(&temp_cp_dir);
+            exit(1);
+        }
+    };
+    let index_val: serde_json::Value = match serde_json::from_str(&index_str) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[GPU Step Test] FATAL: Malformed checkpoint index JSON: {e}");
             let _ = fs::remove_dir_all(&temp_cp_dir);
             exit(1);
         }
     };
 
-    let mut parity_mismatches = 0usize;
-    for (name, orig_vals) in &weights {
-        if let Some(rel_vals) = reloaded_weights.get(name) {
-            if orig_vals.len() != rel_vals.len() {
-                eprintln!("[GPU Step Test] Length mismatch for tensor '{name}': orig={}, reloaded={}", orig_vals.len(), rel_vals.len());
-                parity_mismatches += 1;
-                continue;
-            }
-            for (i, (&o, &r)) in orig_vals.iter().zip(rel_vals.iter()).enumerate() {
-                if (o - r).abs() > 1e-6 {
-                    eprintln!("[GPU Step Test] Value mismatch for tensor '{name}' at index {i}: orig={o}, reloaded={r}");
-                    parity_mismatches += 1;
-                    break;
-                }
-            }
-        } else {
-            eprintln!("[GPU Step Test] Missing tensor '{name}' in reloaded checkpoint!");
-            parity_mismatches += 1;
+    let weight_map = match index_val.get("weight_map").and_then(|v| v.as_object()) {
+        Some(m) => m,
+        None => {
+            eprintln!("[GPU Step Test] FATAL: Missing 'weight_map' in checkpoint index");
+            let _ = fs::remove_dir_all(&temp_cp_dir);
+            exit(1);
         }
+    };
+
+    let mut shard_files = std::collections::BTreeSet::new();
+    for file_val in weight_map.values() {
+        if let Some(f_str) = file_val.as_str() {
+            shard_files.insert(f_str.to_string());
+        }
+    }
+
+    let mut parity_mismatches = 0usize;
+    let mut verified_tensor_count = 0usize;
+
+    for (shard_idx, shard_name) in shard_files.iter().enumerate() {
+        let shard_path = temp_cp_dir.join(shard_name);
+        println!(
+            "[GPU Step Test] Verifying shard {}/{}: {}",
+            shard_idx + 1,
+            shard_files.len(),
+            shard_path.display()
+        );
+        let (shard_tensors, shard_shapes) = match load_safetensors_with_shapes(&shard_path.to_string_lossy()) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[GPU Step Test] FATAL: Failed to load shard '{}': {e}", shard_path.display());
+                let _ = fs::remove_dir_all(&temp_cp_dir);
+                exit(1);
+            }
+        };
+
+        for (name, rel_vals) in shard_tensors {
+            if let Some(orig_vals) = weights.get(&name) {
+                if orig_vals.len() != rel_vals.len() {
+                    eprintln!(
+                        "[GPU Step Test] Length mismatch for tensor '{name}': orig={}, reloaded={}",
+                        orig_vals.len(),
+                        rel_vals.len()
+                    );
+                    parity_mismatches += 1;
+                    continue;
+                }
+                if let Some(expected_shape) = shapes.get(&name) {
+                    if let Some(actual_shape) = shard_shapes.get(&name) {
+                        if expected_shape != actual_shape {
+                            eprintln!(
+                                "[GPU Step Test] Shape mismatch for tensor '{name}': expected={:?}, got={:?}",
+                                expected_shape,
+                                actual_shape
+                            );
+                            parity_mismatches += 1;
+                            continue;
+                        }
+                    }
+                }
+                for (i, (&o, &r)) in orig_vals.iter().zip(rel_vals.iter()).enumerate() {
+                    if (o - r).abs() > 1e-6 {
+                        eprintln!(
+                            "[GPU Step Test] Value mismatch for tensor '{name}' at index {i}: orig={o}, reloaded={r}"
+                        );
+                        parity_mismatches += 1;
+                        break;
+                    }
+                }
+                verified_tensor_count += 1;
+            } else {
+                eprintln!("[GPU Step Test] Unexpected tensor '{name}' in shard '{shard_name}'!");
+                parity_mismatches += 1;
+            }
+        }
+
+        // Shard is dropped here, reclaiming memory immediately before next shard is read
+        let vram_snap = gpu_trainer.get_vram_info().ok();
+        log_flushed_memory_checkpoint(&format!("14_POST_SHARD_PARITY_{}", shard_idx + 1), vram_snap);
+    }
+
+    if verified_tensor_count != weights.len() {
+        eprintln!(
+            "[GPU Step Test] FATAL: Checkpoint verified only {verified_tensor_count} / {} tensors!",
+            weights.len()
+        );
+        let _ = fs::remove_dir_all(&temp_cp_dir);
+        exit(1);
     }
 
     if parity_mismatches > 0 {
@@ -752,7 +881,9 @@ fn main() {
         exit(1);
     }
 
-    println!("[GPU Step Test] Checkpoint parity check passed with 100% exact match across all {} tensors.", weights.len());
+    println!(
+        "[GPU Step Test] Checkpoint parity check passed with 100% exact match across all {verified_tensor_count} tensors."
+    );
 
     // Clean up temporary test checkpoint directory post-verification under test artifact lifecycle policy
     let _ = fs::remove_dir_all(&temp_cp_dir);

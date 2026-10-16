@@ -265,6 +265,8 @@ if [ "$GPU_STEP_STATUS" -ne 0 ]; then
     if [ "$GPU_STEP_STATUS" -ge 128 ]; then
         SIG_NUM=$(( GPU_STEP_STATUS - 128 ))
         echo "=== [PROCESS TERMINATED BY SIGNAL $SIG_NUM (SIGKILL / OOM KILLER DETECTED)] ==="
+        echo "[KERNEL DMESG BUFFER AUDIT]"
+        dmesg -T 2>/dev/null | tail -n 25 || true
     fi
     if [ -f "/sys/fs/cgroup/memory.events" ]; then
         echo "[CGROUP EVENTS AT FAILURE]"

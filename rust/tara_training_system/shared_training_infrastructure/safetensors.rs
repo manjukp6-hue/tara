@@ -724,15 +724,24 @@ pub fn resolve_max_shard_size_bytes() -> usize {
         .unwrap_or(CANONICAL_MAX_SHARD_SIZE_BYTES)
 }
 
-/// Write tensors into sharded SafeTensors files with configurable prefix and precision.
-pub fn write_safetensors_sharded_with_prefix(
+/// Write tensors into sharded SafeTensors files with configurable prefix, precision, and telemetry callback.
+/// Streaming serializer: partitions tensor metadata into shards with ZERO heap cloning of tensor data.
+/// Writes directly to disk shard-by-shard with temporary files and atomic rename to guarantee consistency.
+pub fn write_safetensors_sharded_with_callback<F>(
     tensors: &HashMap<String, Vec<f32>>,
     shapes: &HashMap<String, Vec<usize>>,
     output_dir: &str,
     max_shard_size_bytes: usize,
     prefix: &str,
     is_bf16: bool,
-) -> Result<Vec<String>, SafeTensorsError> {
+    mut on_diagnostic: F,
+) -> Result<Vec<String>, SafeTensorsError>
+where
+    F: FnMut(&str),
+{
+    use std::io::Write;
+
+    on_diagnostic("PRE_CHECKPOINT_SERIALIZATION");
     fs::create_dir_all(output_dir)?;
 
     let bytes_per_elem = if is_bf16 { 2 } else { 4 };
@@ -742,50 +751,122 @@ pub fn write_safetensors_sharded_with_prefix(
     let mut names: Vec<&String> = tensors.keys().collect();
     names.sort();
 
-    let mut shards: Vec<WeightsWithShapes> = Vec::new();
-    let mut current_shard_tensors = HashMap::new();
-    let mut current_shard_shapes = HashMap::new();
+    // Zero-copy sharding plan: stores only references to tensor names without copying float buffers
+    let mut shard_plans: Vec<Vec<&String>> = Vec::new();
+    let mut current_shard_names: Vec<&String> = Vec::new();
     let mut current_shard_bytes = 0usize;
 
-    for name in names {
-        let t_data = tensors[name].clone();
-        let t_shape = shapes
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| vec![t_data.len()]);
-        let t_bytes = t_data.len() * bytes_per_elem;
+    for &name in &names {
+        let t_len = tensors[name].len();
+        let t_bytes = t_len * bytes_per_elem;
 
-        if current_shard_bytes + t_bytes > max_shard_size_bytes && !current_shard_tensors.is_empty()
-        {
-            shards.push((current_shard_tensors, current_shard_shapes));
-            current_shard_tensors = HashMap::new();
-            current_shard_shapes = HashMap::new();
+        if current_shard_bytes + t_bytes > max_shard_size_bytes && !current_shard_names.is_empty() {
+            shard_plans.push(std::mem::take(&mut current_shard_names));
             current_shard_bytes = 0;
         }
 
         current_shard_bytes += t_bytes;
-        current_shard_shapes.insert(name.clone(), t_shape);
-        current_shard_tensors.insert(name.clone(), t_data);
+        current_shard_names.push(name);
     }
 
-    if !current_shard_tensors.is_empty() {
-        shards.push((current_shard_tensors, current_shard_shapes));
+    if !current_shard_names.is_empty() {
+        shard_plans.push(current_shard_names);
     }
-
 
     let mut shard_filenames = Vec::new();
     let mut weight_map = serde_json::Map::new();
 
-    for (idx, (shard_tensors, shard_shapes)) in shards.into_iter().enumerate() {
+    for (idx, shard_names) in shard_plans.into_iter().enumerate() {
+        let op_pre = format!("PRE_SHARD_WRITE_{}", idx + 1);
+        on_diagnostic(&op_pre);
+
         let filename = format!("{}-{:05}.safetensors", prefix, idx + 1);
         let shard_path = format!("{}/{}", output_dir, filename);
-        if is_bf16 {
-            write_safetensors_bf16_with_shapes(&shard_tensors, &shard_shapes, &shard_path)?;
-        } else {
-            write_safetensors_with_shapes(&shard_tensors, &shard_shapes, &shard_path)?;
+        let tmp_shard_path = format!("{}/{}.tmp", output_dir, filename);
+
+        // Build header JSON for this shard from metadata only
+        let mut offset: u64 = 0;
+        let mut header_obj = serde_json::Map::new();
+
+        for &name in &shard_names {
+            let data = &tensors[name];
+            let default_shape = vec![data.len()];
+            let shape = shapes.get(name).unwrap_or(&default_shape);
+            let byte_len = (data.len() as u64)
+                .checked_mul(bytes_per_elem as u64)
+                .ok_or_else(|| {
+                    SafeTensorsError::InvalidHeader(format!("byte length overflow for tensor '{name}'"))
+                })?;
+
+            let dtype_str = if is_bf16 { "BF16" } else { "F32" };
+            header_obj.insert(
+                name.clone(),
+                serde_json::json!({
+                    "dtype": dtype_str,
+                    "shape": shape,
+                    "data_offsets": [offset, offset + byte_len]
+                }),
+            );
+            offset += byte_len;
         }
 
-        for tensor_name in shard_tensors.keys() {
+        let header_json = serde_json::to_string(&header_obj)?;
+
+        // Pad to 8-byte boundary per SafeTensors spec
+        let raw_len = header_json.len();
+        let padded_len = raw_len.div_ceil(8) * 8;
+        let padding = padded_len - raw_len;
+
+        let header_len = padded_len as u64;
+        let len_bytes = header_len.to_le_bytes();
+
+        let file = fs::File::create(&tmp_shard_path)?;
+        let mut out = std::io::BufWriter::with_capacity(4 * 1024 * 1024, file);
+        out.write_all(&len_bytes)?;
+        out.write_all(header_json.as_bytes())?;
+        if padding > 0 {
+            out.write_all(&vec![b' '; padding])?;
+        }
+
+        // Stream tensor data directly from source references with bounded 64KB buffer
+        let mut chunk = Vec::with_capacity(65536);
+        for &name in &shard_names {
+            let data = &tensors[name];
+            if is_bf16 {
+                for &v in data.iter() {
+                    let bf = half::bf16::from_f32(v).to_bits();
+                    chunk.extend_from_slice(&bf.to_le_bytes());
+                    if chunk.len() >= 65536 {
+                        out.write_all(&chunk)?;
+                        chunk.clear();
+                    }
+                }
+            } else {
+                for &v in data.iter() {
+                    chunk.extend_from_slice(&v.to_le_bytes());
+                    if chunk.len() >= 65536 {
+                        out.write_all(&chunk)?;
+                        chunk.clear();
+                    }
+                }
+            }
+        }
+        if !chunk.is_empty() {
+            out.write_all(&chunk)?;
+            drop(chunk);
+        }
+
+        out.flush()?;
+        out.get_ref().sync_all()?;
+        drop(out);
+
+        let op_flush = format!("POST_SHARD_FLUSH_{}", idx + 1);
+        on_diagnostic(&op_flush);
+
+        // Atomically rename temporary shard file
+        fs::rename(&tmp_shard_path, &shard_path)?;
+
+        for &tensor_name in &shard_names {
             weight_map.insert(tensor_name.clone(), serde_json::json!(filename));
         }
         shard_filenames.push(filename);
@@ -799,9 +880,37 @@ pub fn write_safetensors_sharded_with_prefix(
     });
 
     let index_path = format!("{}/model.safetensors.index.json", output_dir);
-    fs::write(&index_path, serde_json::to_string_pretty(&index_json)?)?;
+    let tmp_index_path = format!("{}/model.safetensors.index.json.tmp", output_dir);
+    let mut idx_file = fs::File::create(&tmp_index_path)?;
+    idx_file.write_all(serde_json::to_string_pretty(&index_json)?.as_bytes())?;
+    idx_file.flush()?;
+    idx_file.sync_all()?;
+    drop(idx_file);
+    fs::rename(&tmp_index_path, &index_path)?;
+
+    on_diagnostic("POST_CHECKPOINT_SERIALIZATION");
 
     Ok(shard_filenames)
+}
+
+/// Write tensors into sharded SafeTensors files with configurable prefix and precision.
+pub fn write_safetensors_sharded_with_prefix(
+    tensors: &HashMap<String, Vec<f32>>,
+    shapes: &HashMap<String, Vec<usize>>,
+    output_dir: &str,
+    max_shard_size_bytes: usize,
+    prefix: &str,
+    is_bf16: bool,
+) -> Result<Vec<String>, SafeTensorsError> {
+    write_safetensors_sharded_with_callback(
+        tensors,
+        shapes,
+        output_dir,
+        max_shard_size_bytes,
+        prefix,
+        is_bf16,
+        |_| {},
+    )
 }
 
 /// Write F32 tensors into either a single SafeTensors file or multiple canonical shards with an index file.

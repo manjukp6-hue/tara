@@ -136,7 +136,8 @@ pub mod internal_diagnostics {
     pub use crate::cuda::gpu_trainer::{unpack_u32_to_f16, CudaTrainer};
     pub use crate::safetensors::{
         write_safetensors, write_safetensors_bf16_with_shapes, write_safetensors_sharded,
-        write_safetensors_sharded_with_prefix, write_safetensors_with_shapes,
+        write_safetensors_sharded_with_callback, write_safetensors_sharded_with_prefix,
+        write_safetensors_with_shapes,
     };
     pub use crate::trainer::{
         promote_directory_atomically, recover_interrupted_promotion, AdamWHyperparams,

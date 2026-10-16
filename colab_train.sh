@@ -94,16 +94,23 @@ mkdir -p storage/models/tara_world_model
 
 HF_MODEL_SOURCE="${HF_MODEL_REPO:-${HF_REPO:-manjukp6/tara}}"
 
+HF_TOKEN_FLAG=()
+if [ -n "${HF_TOKEN:-}" ]; then
+    HF_TOKEN_FLAG=(--token "$HF_TOKEN")
+fi
+
 # Verify Neural Model Candidate weights exist on disk
 NEURAL_SHARDS=(storage/models/tara_candidate_v1/*.safetensors)
 if [ ! -e "${NEURAL_SHARDS[0]}" ]; then
     echo "=== [MODEL INGESTION: STREAMING NEURAL MODEL V1 FROM HUGGING FACE] ==="
     HF_NEURAL_DOWNLOADED=0
     if [ -n "$HF_MODEL_SOURCE" ]; then
+        echo "[HF DOWNLOAD] Downloading neural_model_v1/* from https://huggingface.co/$HF_MODEL_SOURCE..."
         if huggingface-cli download "$HF_MODEL_SOURCE" \
+            "${HF_TOKEN_FLAG[@]}" \
             --include "neural_model_v1/*" \
             --local-dir storage/models \
-            --repo-type model 2>/dev/null; then
+            --repo-type model; then
             if [ -d "storage/models/neural_model_v1" ]; then
                 shopt -s nullglob
                 mv storage/models/neural_model_v1/* storage/models/tara_candidate_v1/
@@ -118,8 +125,9 @@ if [ ! -e "${NEURAL_SHARDS[0]}" ]; then
         fi
     fi
     if [ "$HF_NEURAL_DOWNLOADED" -eq 0 ]; then
-        echo "=== [INITIALIZING CANDIDATE NEURAL MODEL SAFETENSORS SHARDS] ==="
-        ./target/release/tara_model_sharder --init-fresh --model-dir storage/models/tara_candidate_v1
+        echo "=== [ERROR: COULD NOT DOWNLOAD NEURAL MODEL V1 FROM HUGGING FACE] ==="
+        echo "Please ensure HF_TOKEN is exported with read access to https://huggingface.co/$HF_MODEL_SOURCE"
+        exit 1
     fi
 fi
 
@@ -129,10 +137,12 @@ if [ ! -e "${WORLD_SHARDS[0]}" ]; then
     echo "=== [MODEL INGESTION: STREAMING WORLD MODEL V1 FROM HUGGING FACE] ==="
     HF_WORLD_DOWNLOADED=0
     if [ -n "$HF_MODEL_SOURCE" ]; then
+        echo "[HF DOWNLOAD] Downloading world_model_v1/* from https://huggingface.co/$HF_MODEL_SOURCE..."
         if huggingface-cli download "$HF_MODEL_SOURCE" \
+            "${HF_TOKEN_FLAG[@]}" \
             --include "world_model_v1/*" \
             --local-dir storage/models \
-            --repo-type model 2>/dev/null; then
+            --repo-type model; then
             if [ -d "storage/models/world_model_v1" ]; then
                 shopt -s nullglob
                 mv storage/models/world_model_v1/* storage/models/tara_world_model/
@@ -147,8 +157,9 @@ if [ ! -e "${WORLD_SHARDS[0]}" ]; then
         fi
     fi
     if [ "$HF_WORLD_DOWNLOADED" -eq 0 ]; then
-        echo "=== [INITIALIZING WORLD MODEL SAFETENSORS SHARDS] ==="
-        ./target/release/tara_model_sharder --rebuild-world-model --model-dir storage/models/tara_world_model
+        echo "=== [ERROR: COULD NOT DOWNLOAD WORLD MODEL V1 FROM HUGGING FACE] ==="
+        echo "Please ensure HF_TOKEN is exported with read access to https://huggingface.co/$HF_MODEL_SOURCE"
+        exit 1
     fi
 fi
 

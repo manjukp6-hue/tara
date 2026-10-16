@@ -987,11 +987,13 @@ impl NativeSelfTrainer {
                 {
                     return None;
                 }
+                let max_seq_default = tara_hd::CpuStreamHelper::new()
+                    .recommend_chunk_size(config.max_position_embeddings, config.hidden_size);
                 let max_seq_override = std::env::var("TARA_MAX_SEQ_LEN")
                     .ok()
                     .and_then(|s| s.parse::<usize>().ok());
                 let max_len = max_seq_override
-                    .unwrap_or(config.max_position_embeddings)
+                    .unwrap_or(max_seq_default)
                     .clamp(2, config.max_position_embeddings);
                 let input_start = input_ids.len().saturating_sub(max_len - 1);
                 let mut tokens = input_ids[input_start..].to_vec();
@@ -1416,13 +1418,17 @@ impl NativeSelfTrainer {
                 let sample_idx_in_epoch = skip_count + sample_offset;
                 let sample_in_epoch = sample_idx_in_epoch + 1;
                 let sample_start = std::time::Instant::now();
-                let (active_tokens, raw_target_start) = if gpu_trainer_opt.is_none() && tokens.len() > 512 {
-                    let chunk_size = cpu_stream_helper.recommend_chunk_size(tokens.len(), config.hidden_size);
+                let stream_chunk_size = cpu_stream_helper.recommend_chunk_size(tokens.len(), config.hidden_size);
+                let active_seq_limit = std::env::var("TARA_MAX_SEQ_LEN")
+                    .ok()
+                    .and_then(|s| s.parse::<usize>().ok())
+                    .unwrap_or(stream_chunk_size);
+                let (active_tokens, raw_target_start) = if tokens.len() > active_seq_limit {
                     println!(
-                        "[{stage_label} | On-Demand Stream] Bound long sequence ({} tokens) to {} tokens on CPU to preserve RAM",
-                        tokens.len(), chunk_size
+                        "[{stage_label} | Bounded Stream] Bound sequence ({} tokens) to {} tokens to preserve compute latency & RAM",
+                        tokens.len(), active_seq_limit
                     );
-                    (&tokens[..chunk_size], (*target_start).min(chunk_size))
+                    (&tokens[..active_seq_limit], (*target_start).min(active_seq_limit))
                 } else {
                     (&tokens[..], *target_start)
                 };

@@ -1,0 +1,41 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Aryabhata I",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "tara://historical/ind_math_004_aryabhata_pi"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Indian Mathematics Record\nTreatise: Aryabhatiya (Ganitapada, Verse 10)\nAuthor: Aryabhata I\nPeriod: 499 CE\nDomain: trigonometry\n\nHISTORICAL_FORMULA:\ncaturadhikaṃ śatamaṣṭaguṇaṃ dvāṣaṣṭistathā sahasrāṇām / ayutadvayaviṣkambhasyāsanno vṛttapariṇāhaḥ (Add 4 to 100, multiply by 8, add 62,000; this gives the approximate circumference of a circle of diameter 20,000)\n\nMODERN_EQUIVALENT:\n\\pi \\approx \\frac{(100 + 4) \\times 8 + 62000}{20000} = \\frac{62832}{20000} = 3.1416 (Explicitly qualified as 'asanna' meaning approximate)\n\nMathematical Context: Used to compute 24-entry sine table (ardha-jya) in increments of 3 degrees 45 minutes for a radius R = 3438 arcminutes.\nHistorical Significance: First known mathematical text to explicitly state that the ratio of circumference to diameter is incommensurable/approximate (asanna).\nProvenance Reference: The Aryabhatiya (Clark, 1930; K. S. Shukla, INSA, 1976)",
+  "content_sha256": "7c439105c5987d6c53de07f3e96e1da495de5169ac0b958431ab3cb3128a1e11",
+  "file_path": "storage/knowledge\\partitions/mathematics/indian_mathematics\\8e\\8e29166a2c382415.json",
+  "id": "8e29166a2c382415",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/indian_mathematics",
+  "provenance": {
+    "author_or_curator": "Aryabhata I",
+    "content_sha256": "7c439105c5987d6c53de07f3e96e1da495de5169ac0b958431ab3cb3128a1e11",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "tara://historical/ind_math_004_aryabhata_pi"
+  },
+  "source": "tara://historical/ind_math_004_aryabhata_pi",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "aryabhata_i_trigonometry",
+  "subpartition": "indian_mathematics",
+  "tags": [
+    "indian_mathematics",
+    "trigonometry",
+    "aryabhata_i",
+    "historical_mathematics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

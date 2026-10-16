@@ -1,0 +1,41 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Madhava of Sangamagrama (Kerala School of Astronomy and Mathematics)",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "tara://historical/ind_math_009_madhava_series"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Indian Mathematics Record\nTreatise: Yuktidipika, Tantrasamgraha-vyakhya, and Yuktibhasa (Jyesthadeva, c. 1530 CE)\nAuthor: Madhava of Sangamagrama (Kerala School of Astronomy and Mathematics)\nPeriod: c. 1340 - 1425 CE (Sangamagrama / Irinjalakuda, Kerala)\nDomain: sequences_series\n\nHISTORICAL_FORMULA:\nMadhava infinite series for arc and circumference: Vyaase vaaridhi-nihate... (Madhava series for pi and trigonometric functions)\n\nMODERN_EQUIVALENT:\n\\frac{\\pi}{4} = 1 - \\frac{1}{3} + \\frac{1}{5} - \\frac{1}{7} + \\cdots = \\sum_{n=0}^{\\infty} \\frac{(-1)^n}{2n+1} \\quad \\text{and} \\quad \\sin(x) = x - \\frac{x^3}{3!} + \\frac{x^5}{5!} - \\frac{x^7}{7!} + \\cdots\n\nMathematical Context: Developed rapid rational correction terms (such as (+/- 1)/(4n^2 + 1)) to accelerate slow convergence of the alternating series for pi.\nHistorical Significance: Anticipated European discovery of Taylor/Maclaurin and Leibniz infinite series expansions by nearly 300 years.\nProvenance Reference: Yuktibhasa of Jyesthadeva: An Analytical Exposition of the Rationales of Indian Mathematics and Astronomy (K. V. Sarma, Springer, 2008)",
+  "content_sha256": "e32c3a4953e944a8a076ce189349f0ed2d55cc687f270a3d0305bc06a155c144",
+  "file_path": "storage/knowledge\\partitions/mathematics/indian_mathematics\\e6\\e6f368b1701295f2.json",
+  "id": "e6f368b1701295f2",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/indian_mathematics",
+  "provenance": {
+    "author_or_curator": "Madhava of Sangamagrama (Kerala School of Astronomy and Mathematics)",
+    "content_sha256": "e32c3a4953e944a8a076ce189349f0ed2d55cc687f270a3d0305bc06a155c144",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "tara://historical/ind_math_009_madhava_series"
+  },
+  "source": "tara://historical/ind_math_009_madhava_series",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "madhava_of_sangamagrama_(kerala_school_of_astronomy_and_mathematics)_sequences_series",
+  "subpartition": "indian_mathematics",
+  "tags": [
+    "indian_mathematics",
+    "sequences_series",
+    "madhava_of_sangamagrama_(kerala_school_of_astronomy_and_mathematics)",
+    "historical_mathematics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

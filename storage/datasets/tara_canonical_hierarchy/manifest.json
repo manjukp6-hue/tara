@@ -1,0 +1,101 @@
+{
+  "curriculum_training_order": {
+    "stage_1_foundational_cognitive": {
+      "difficulty_progression": [
+        "Easy",
+        "Medium",
+        "Hard"
+      ],
+      "target_levels": [
+        "Pre-Primary",
+        "Grade 1",
+        "Grade 2",
+        "Grade 3",
+        "Grade 4",
+        "Grade 5",
+        "Grade 6",
+        "Grade 7",
+        "Grade 8",
+        "Grade 9",
+        "Grade 10"
+      ]
+    },
+    "stage_2_pre_university": {
+      "difficulty_progression": [
+        "Easy",
+        "Medium",
+        "Hard",
+        "Expert"
+      ],
+      "target_levels": [
+        "1st PUC",
+        "2nd PUC"
+      ]
+    },
+    "stage_3_higher_education": {
+      "difficulty_progression": [
+        "Medium",
+        "Hard",
+        "Expert"
+      ],
+      "target_levels": [
+        "Diploma",
+        "Degree",
+        "Postgraduate"
+      ]
+    },
+    "stage_4_frontier_research": {
+      "difficulty_progression": [
+        "Hard",
+        "Expert",
+        "Research"
+      ],
+      "target_levels": [
+        "PhD",
+        "Professional / Advanced",
+        "Research"
+      ]
+    },
+    "unspecified_general": {
+      "difficulty_progression": [
+        "Easy",
+        "Medium",
+        "Hard",
+        "Unknown"
+      ],
+      "target_levels": [
+        "Level-Unspecified",
+        "Unclassified"
+      ]
+    }
+  },
+  "generated_timestamp": "1791306396",
+  "hierarchy_levels": [
+    "Domain",
+    "Subdomain",
+    "Education Level",
+    "Difficulty",
+    "Topic",
+    "Subtopic",
+    "Record"
+  ],
+  "manifest_version": "3.0.0",
+  "metrics": {
+    "content_mutations": 0,
+    "difficulty_distribution": {},
+    "domain_distribution": {},
+    "duplicate_creations": 0,
+    "education_level_distribution": {},
+    "license_distribution": {},
+    "missing_records": 0,
+    "source_distribution": {},
+    "topic_distribution": {},
+    "total_bytes_after": 0,
+    "total_bytes_before": 0,
+    "total_input_records": 0,
+    "total_output_records": 0
+  },
+  "schema": "CanonicalHierarchicalDataset",
+  "shards": [],
+  "verification_status": "VERIFIED_CANONICAL_HIERARCHICAL_SUCCESS"
+}

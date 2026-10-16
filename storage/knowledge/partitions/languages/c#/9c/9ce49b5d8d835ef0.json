@@ -1,0 +1,40 @@
+{
+  "alternative_sources": [
+    {
+      "author": "C#",
+      "license": "MIT (.NET Runtime and Roslyn Compiler)",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://learn.microsoft.com/en-us/dotnet/csharp/"
+    }
+  ],
+  "category": "languages",
+  "confidence": 1.0,
+  "content": "Programming Language Reference: C#\nVersion: C# 12 / 13 (.NET 8 / 9)\nSyntax: Modern component-oriented language executing on the .NET Common Language Runtime (CLR).\nSemantics: Managed code execution, JIT compilation, LINQ query expressions, async/await task-based asynchronous pattern (TAP).\nType System: Strong static typing with unified type system (System.Object), value types (structs), reference types (classes, records), nullable reference types.\nMemory Model: Managed generational garbage collection (Server GC / Workstation GC), Span / Memory for allocation-free slicing.\nConcurrency: Task Parallel Library (TPL), async/await, Channels, lock statement, System.Threading.Channels.\nError Handling: Structured exception handling with try/catch/when/finally blocks.\nStandard APIs: System.Collections.Generic, System.Linq, System.Text.Json, System.Threading.Tasks, System.IO\nSpecification: ECMA-334 Standard / Microsoft C# Language Design\nOfficial Docs: https://learn.microsoft.com/en-us/dotnet/csharp/",
+  "content_sha256": "74e21fbca33989ddcfd9ede8e0ddd2fe32f57fb0e4e08a84bcee40c6d646c440",
+  "file_path": "storage/knowledge\\partitions/languages/c#\\9c\\9ce49b5d8d835ef0.json",
+  "id": "9ce49b5d8d835ef0",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:49Z",
+  "originating_record_id": null,
+  "partition": "partitions/languages/c#",
+  "provenance": {
+    "author_or_curator": "C#",
+    "content_sha256": "74e21fbca33989ddcfd9ede8e0ddd2fe32f57fb0e4e08a84bcee40c6d646c440",
+    "imported_at": "2026-09-29T09:59:49Z",
+    "license": "MIT (.NET Runtime and Roslyn Compiler)",
+    "source_uri": "https://learn.microsoft.com/en-us/dotnet/csharp/"
+  },
+  "source": "https://learn.microsoft.com/en-us/dotnet/csharp/",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "language_spec_c#",
+  "subpartition": "c#",
+  "tags": [
+    "programming_languages",
+    "c#",
+    "language_specification",
+    "languages"
+  ],
+  "topic": "languages",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

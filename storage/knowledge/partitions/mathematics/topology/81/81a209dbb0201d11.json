@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Leonhard Euler & Henri Poincare",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://eulerarchive.maa.org/pages/E230.html"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Euler Polyhedral Characteristic\nExact Expression: \\chi = V - E + F = 2 - 2g\nDefinitions: Topological invariant characterizing the topological space shape or structure regardless of bending or stretching.\nDerivation/Reference: Leonhard Euler (1758); Henri Poincare generalized to higher dimensions (1895)\nExample: Cube: V=8, E=12, F=6 -> chi = 8 - 12 + 6 = 2 (genus g = 0 sphere topology)\nDomain: topology\nAssumptions: Finite CW-complex or closed 2-manifold\nCommon Errors: Applying sphere formula V - E + F = 2 to toroidal manifolds (genus 1 where chi = 0)",
+  "content_sha256": "800a3c9435e60dc965c215c76b57ec97fc5a9871b993d5abf45441b2efd8f7cf",
+  "file_path": "storage/knowledge\\partitions/mathematics/topology\\81\\81a209dbb0201d11.json",
+  "id": "81a209dbb0201d11",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:30Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/topology",
+  "provenance": {
+    "author_or_curator": "Leonhard Euler & Henri Poincare",
+    "content_sha256": "800a3c9435e60dc965c215c76b57ec97fc5a9871b993d5abf45441b2efd8f7cf",
+    "imported_at": "2026-09-29T10:11:30Z",
+    "license": "Public Domain",
+    "source_uri": "https://eulerarchive.maa.org/pages/E230.html"
+  },
+  "source": "https://eulerarchive.maa.org/pages/E230.html",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Euler Polyhedral Characteristic",
+  "subpartition": "topology",
+  "tags": [
+    "euler_characteristic",
+    "topological_invariant",
+    "genus",
+    "polyhedra",
+    "formula",
+    "topology",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Isaac Newton & Joseph Raphson",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://archive.org/details/analysisaequati00raphgoog"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Newton-Raphson Root-Finding Iteration\nExact Expression: x_{n+1} = x_n - \\frac{f(x_n)}{f'(x_n)}\nDefinitions: Root-finding algorithm that produces successively better approximations to the roots of a real-valued function using linear tangent approximation.\nDerivation/Reference: Isaac Newton, De analysi per aequationes numero terminorum infinitas (1669); Joseph Raphson, Analysis aequationum universalis (1690)\nExample: Solve x^2 - 2 = 0 with x_0 = 1: x_1 = 1 - (1-2)/(2*1) = 1.5; x_2 = 1.5 - (2.25-2)/(3) = 1.41666...\nDomain: numerical_methods\nAssumptions: f'(x_n) != 0; Initial guess x_0 is sufficiently close to genuine root r; f''(r) exists and is continuous\nCommon Errors: Division by zero when tangent slope f'(x_n) = 0; Chaotic oscillation near inflection points",
+  "content_sha256": "b7d65f62446776d74d22b95d375623894c1497002c93f4cf5390cebebe91434a",
+  "file_path": "storage/knowledge\\partitions/mathematics/numerical_methods\\9e\\9ec51d1d2b0d80bf.json",
+  "id": "9ec51d1d2b0d80bf",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:30Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/numerical_methods",
+  "provenance": {
+    "author_or_curator": "Isaac Newton & Joseph Raphson",
+    "content_sha256": "b7d65f62446776d74d22b95d375623894c1497002c93f4cf5390cebebe91434a",
+    "imported_at": "2026-09-29T10:11:30Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/analysisaequati00raphgoog"
+  },
+  "source": "https://archive.org/details/analysisaequati00raphgoog",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Newton-Raphson Root-Finding Iteration",
+  "subpartition": "numerical_methods",
+  "tags": [
+    "newton_raphson",
+    "root_finding",
+    "quadratic_convergence",
+    "numerical_analysis",
+    "formula",
+    "numerical_methods",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

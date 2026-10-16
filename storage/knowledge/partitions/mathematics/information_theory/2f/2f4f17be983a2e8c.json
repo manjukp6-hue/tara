@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Claude Elwood Shannon",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://doi.org/10.1002/j.1538-7305.1948.tb01338.x"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Shannon Information Entropy\nExact Expression: H(X) = -\\sum_{x \\in \\mathcal{X}} P(x) \\log_2 P(x)\nDefinitions: Fundamental measure of the average rate at which information is produced by a stochastic source of data.\nDerivation/Reference: Claude E. Shannon, A Mathematical Theory of Communication (Bell System Technical Journal, 1948)\nExample: Fair coin toss: P(H)=P(T)=0.5 -> H = -(0.5*log2(0.5) + 0.5*log2(0.5)) = -(-0.5 - 0.5) = 1.0 bit\nDomain: information_theory\nAssumptions: P(x) >= 0, sum P(x) = 1, with 0 * log(0) = 0 by continuity\nCommon Errors: Using natural log ln instead of log2 without converting units to nats",
+  "content_sha256": "a4015cab11a758dbdc9c775bce488ecf4f9c8ea5f9ed1acf05c671575cc30b86",
+  "file_path": "storage/knowledge\\partitions/mathematics/information_theory\\2f\\2f4f17be983a2e8c.json",
+  "id": "2f4f17be983a2e8c",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:31Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/information_theory",
+  "provenance": {
+    "author_or_curator": "Claude Elwood Shannon",
+    "content_sha256": "a4015cab11a758dbdc9c775bce488ecf4f9c8ea5f9ed1acf05c671575cc30b86",
+    "imported_at": "2026-09-29T10:11:31Z",
+    "license": "Public Domain",
+    "source_uri": "https://doi.org/10.1002/j.1538-7305.1948.tb01338.x"
+  },
+  "source": "https://doi.org/10.1002/j.1538-7305.1948.tb01338.x",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Shannon Information Entropy",
+  "subpartition": "information_theory",
+  "tags": [
+    "shannon_entropy",
+    "information_theory",
+    "data_compression",
+    "bits",
+    "shannon",
+    "formula",
+    "information_theory",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

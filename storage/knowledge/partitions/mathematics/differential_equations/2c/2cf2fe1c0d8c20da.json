@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Jean-Baptiste Joseph Fourier",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://archive.org/details/theorieanalytiqu00four"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Heat Conduction Equation\nExact Expression: \\frac{\\partial u}{\\partial t} = \\alpha \\nabla^2 u\nDefinitions: Parabolic partial differential equation describing the distribution of heat (or variation in temperature) in a given region over time.\nDerivation/Reference: Joseph Fourier, Theorie analytique de la chaleur (1822)\nExample: 1D fundamental solution: u(x, t) = (1 / sqrt(4*pi*alpha*t)) * exp(-x^2 / (4*alpha*t))\nDomain: differential_equations\nAssumptions: Homogeneous, isotropic medium with constant thermal properties; Fourier's law of thermal conduction holds\nCommon Errors: Confusing parabolic heat equation with hyperbolic wave equation",
+  "content_sha256": "bf2826c9faed4831f42e64d8536d6613dd718d1b95649acc79adc638c1b3218f",
+  "file_path": "storage/knowledge\\partitions/mathematics/differential_equations\\2c\\2cf2fe1c0d8c20da.json",
+  "id": "2cf2fe1c0d8c20da",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:30Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/differential_equations",
+  "provenance": {
+    "author_or_curator": "Jean-Baptiste Joseph Fourier",
+    "content_sha256": "bf2826c9faed4831f42e64d8536d6613dd718d1b95649acc79adc638c1b3218f",
+    "imported_at": "2026-09-29T10:11:30Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/theorieanalytiqu00four"
+  },
+  "source": "https://archive.org/details/theorieanalytiqu00four",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Heat Conduction Equation",
+  "subpartition": "differential_equations",
+  "tags": [
+    "heat_equation",
+    "pde",
+    "diffusion",
+    "parabolic",
+    "fourier",
+    "formula",
+    "differential_equations",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

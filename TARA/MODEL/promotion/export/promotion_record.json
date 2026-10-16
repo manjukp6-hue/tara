@@ -1,0 +1,9 @@
+{
+  "promotion_id": "RETIRED_SMOKE_TEST_20261001",
+  "status": "NO_MODEL_REGISTERED",
+  "historical_record": {
+    "retired_model": "storage/models/tara/model.safetensors",
+    "retirement_reason": "Smoke-test 118K parameter model cleanly removed. No active production model registered."
+  },
+  "timestamp_utc": "2026-10-01T00:00:00Z"
+}

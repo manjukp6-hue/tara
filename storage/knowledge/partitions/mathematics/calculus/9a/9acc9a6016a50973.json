@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Isaac Newton & Gottfried Wilhelm Leibniz",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://gutenberg.org/ebooks/principia"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Fundamental Theorem of Calculus (Part 2)\nExact Expression: \\int_{a}^{b} f(x) \\, dx = F(b) - F(a)\nDefinitions: Connects differentiation and definite integration, proving that definite integrals can be computed using antiderivatives.\nDerivation/Reference: Isaac Barrow, James Gregory, Isaac Newton, Gottfried Wilhelm Leibniz (1670-1684)\nExample: int_0^2 (3x^2) dx = [x^3]_0^2 = 2^3 - 0^3 = 8\nDomain: calculus\nAssumptions: f is continuous on closed interval [a, b]; F'(x) = f(x) for all x in (a, b)\nCommon Errors: Applying FTC to integrand with jump or asymptotic discontinuity inside [a, b]",
+  "content_sha256": "5b1681c99a247260e2bb05e6ce8c83e9c62fdb1253d4f482becc211191207200",
+  "file_path": "storage/knowledge\\partitions/mathematics/calculus\\9a\\9acc9a6016a50973.json",
+  "id": "9acc9a6016a50973",
+  "last_merged_at": "2026-09-29T10:34:32Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/calculus",
+  "provenance": {
+    "author_or_curator": "Isaac Newton & Gottfried Wilhelm Leibniz",
+    "content_sha256": "5b1681c99a247260e2bb05e6ce8c83e9c62fdb1253d4f482becc211191207200",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "https://gutenberg.org/ebooks/principia"
+  },
+  "source": "https://gutenberg.org/ebooks/principia",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Fundamental Theorem of Calculus (Part 2)",
+  "subpartition": "calculus",
+  "tags": [
+    "definite_integral",
+    "antiderivative",
+    "riemann",
+    "formula",
+    "calculus",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

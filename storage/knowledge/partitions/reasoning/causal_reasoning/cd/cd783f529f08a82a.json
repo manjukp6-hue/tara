@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Judea Pearl",
+      "license": "CC-BY-4.0",
+      "merged_at": "2026-09-29T10:01:23Z",
+      "source": "Causality: Models, Reasoning, and Inference (Judea Pearl, Cambridge University Press, 2000)"
+    }
+  ],
+  "category": "reasoning",
+  "confidence": 1.0,
+  "content": "Judea Pearl's Causal Do-Calculus formalizes causal inference using Directed Acyclic Graphs (DAGs) distinguishing observational conditioning P(Y|X) from interventional surgery P(Y|do(X)). Back-door and front-door criteria identify and neutralize confounding variables, allowing structural counterfactual queries: 'Would outcome Y have occurred had action X been different, given observed evidence E?'",
+  "content_sha256": "96d19b89591ced35c6f8910fd1f75a14c0d19d38f5d13f0c92513fc4ed1ed46a",
+  "file_path": "storage/knowledge\\partitions/reasoning/causal_reasoning\\cd\\cd783f529f08a82a.json",
+  "id": "cd783f529f08a82a",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:50Z",
+  "originating_record_id": null,
+  "partition": "partitions/reasoning/causal_reasoning",
+  "provenance": {
+    "author_or_curator": "Judea Pearl",
+    "content_sha256": "96d19b89591ced35c6f8910fd1f75a14c0d19d38f5d13f0c92513fc4ed1ed46a",
+    "imported_at": "2026-09-29T09:59:50Z",
+    "license": "CC-BY-4.0",
+    "source_uri": "Causality: Models, Reasoning, and Inference (Judea Pearl, Cambridge University Press, 2000)"
+  },
+  "source": "Causality: Models, Reasoning, and Inference (Judea Pearl, Cambridge University Press, 2000)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "pearl_causal_calculus_and_counterfactuals",
+  "subpartition": "causal_reasoning",
+  "tags": [
+    "causality",
+    "do_calculus",
+    "judea_pearl",
+    "dags",
+    "counterfactuals",
+    "reasoning",
+    "causal_reasoning"
+  ],
+  "topic": "reasoning",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

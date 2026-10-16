@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "The Austin Group (IEEE & The Open Group)",
+      "license": "OpenDataCommons",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://pubs.opengroup.org/onlinepubs/9699919799/"
+    }
+  ],
+  "category": "manuals",
+  "confidence": 1.0,
+  "content": "IEEE Std 1003.1-2017 / POSIX.1-2017 defines standard operating system interfaces including file system hierarchy, process management (fork, exec, wait), signals, memory mapping (mmap), and file descriptors ensuring portability across Unix, Linux, and POSIX-compliant systems.",
+  "content_sha256": "12c77ea204a15707d3164cb0bee13c753e0ed8cca254c2528a8c931e45901c0a",
+  "file_path": "storage/knowledge\\partitions/manuals/os_posix\\e1\\e1c5d0308f210907.json",
+  "id": "e1c5d0308f210907",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:50Z",
+  "originating_record_id": null,
+  "partition": "partitions/manuals/os_posix",
+  "provenance": {
+    "author_or_curator": "The Austin Group (IEEE & The Open Group)",
+    "content_sha256": "12c77ea204a15707d3164cb0bee13c753e0ed8cca254c2528a8c931e45901c0a",
+    "imported_at": "2026-09-29T09:59:50Z",
+    "license": "OpenDataCommons",
+    "source_uri": "https://pubs.opengroup.org/onlinepubs/9699919799/"
+  },
+  "source": "https://pubs.opengroup.org/onlinepubs/9699919799/",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "posix_ieee_1003_1_operating_system_interface",
+  "subpartition": "os_posix",
+  "tags": [
+    "posix",
+    "ieee_1003_1",
+    "operating_system",
+    "unix",
+    "manual",
+    "manuals",
+    "os_posix"
+  ],
+  "topic": "manuals",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

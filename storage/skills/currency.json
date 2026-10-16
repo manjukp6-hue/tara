@@ -1,0 +1,25 @@
+{
+  "skill_name": "currency.convert_usd_to_inr",
+  "version": "3",
+  "description": "Converts USD to INR using the live exchange rate stored in TARA_USD_INR_RATE environment variable. If not set, returns an error — no hardcoded rates.",
+  "steps": [
+    {
+      "step": 1,
+      "action": "data.generate_jupyter_notebook",
+      "params": {
+        "operation": "currency_convert",
+        "from_currency": "USD",
+        "to_currency": "INR",
+        "amount": "${params.usd}"
+      }
+    }
+  ],
+  "notes": [
+    "Previously contained a hardcoded rate (86.5 INR/USD) as a Python script.",
+    "Hardcoded rates are prohibited — they become stale and mislead users.",
+    "The actual conversion logic must read TARA_USD_INR_RATE at runtime or call a live rate API.",
+    "This JSON stub is a placeholder until a live rate feed is wired into the data skill domain."
+  ],
+  "updated_at": "2026-09-29T12:35:00Z",
+  "updated_by": "TARA_AUDIT_FIX"
+}

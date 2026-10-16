@@ -1,0 +1,36 @@
+{
+  "status": "SUCCESS",
+  "id": "9fce95a23b1e1544",
+  "topic": "mathematics",
+  "subpartition": "indian_mathematics",
+  "subject": "brahmasphutasiddhanta_algebra_and_quadrilaterals",
+  "tags": [
+    "mathematics",
+    "indian_mathematics",
+    "brahmasphutasiddhanta",
+    "algebra",
+    "quadratic_formula",
+    "formula",
+    "external_download",
+    "cc-by-sa-4.0"
+  ],
+  "category": "mathematics",
+  "partition": "partitions/mathematics/indian_mathematics",
+  "file_path": "storage/knowledge/partitions\\mathematics\\indian_mathematics\\9f\\9fce95a23b1e1544.json",
+  "content": "The Brāhma-sphuṭa-siddhānta (\"Correctly Established Doctrine of Brahma\", abbreviated BSS)\nis a main work of Brahmagupta, written c. 628. This text of mathematical astronomy contains significant mathematical content, including the first good understanding of the role of zero, rules for manipulating both negative and positive numbers, a method for computing square roots, methods of solving linear and quadratic equations, rules for summing series, Brahmagupta's identity, and Brahmagupta theorem.\nThe book was written completely in verse and does not contain any kind of mathematical notation. Nevertheless, it contained the first clear description of the quadratic formula (the solution of the quadratic equation).\n\n\n== Positive and negative numbers ==\nBrāhmasphuṭasiddhānta is one of the first books to provide concrete ideas on positive numbers, negative numbers, and zero. For example, it notes that the sum of a positive number and a negative number is their difference or, if they are equal, zero; that subtracting a negative number is equivalent to adding a positive number; that the product of two negative numbers is positive. Some of the notions of fractions differ from the modern rational number system. For example, Brahmagupta allows division by zero resulting in a fraction with a 0 in the denominator, and defines 0/0 = 0. In modern mathematics, division by zero is undefined for any field.\n\n\n== Influence ==\nAshadhara, the son of Rihluka, wrote Graha-jnana with tables based on Brahma-sphuta-siddhanta in 1132. This work is also known by the names Graha-ganita, Brahma-tulyanayana, Bhaumadi-panchagraha-nayana, Kshanika-grahanayana, or simply Ashadhara. Harihara wrote an extended version of the Graha-jnana around 1575 CE.",
+  "content_sha256": "61f42b774e659237826ca295e63dd0cfe506edba12f0a961c5fc6e7dea0f2cba",
+  "confidence": 1.0,
+  "source": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=Brahmasphutasiddhanta&format=json",
+  "source_type": "EXTERNAL_DOWNLOADED",
+  "originating_record_id": null,
+  "learned_at": "2026-09-30T11:20:00Z",
+  "alternative_sources": [],
+  "verification_status": "OPEN_SOURCE_VERIFIED",
+  "provenance": {
+    "author_or_curator": "Brahmagupta (c. 628 CE)",
+    "content_sha256": "89ea5dcf8823271f0f8949b414e2f5ccc71612e66cfbb6731aab60277d884070",
+    "imported_at": "2026-09-30T11:20:00Z",
+    "license": "CC-BY-SA-4.0",
+    "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=Brahmasphutasiddhanta&format=json"
+  }
+}

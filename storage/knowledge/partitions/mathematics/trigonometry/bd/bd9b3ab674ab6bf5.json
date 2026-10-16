@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Leonhard Euler",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://archive.org/details/introductioinana01eule"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Euler's Formula\nExact Expression: e^{ix} = \\cos(x) + i \\sin(x)\nDefinitions: Fundamental bridge establishing the algebraic relationship between complex exponential functions and trigonometric functions.\nDerivation/Reference: Leonhard Euler, Introductio in analysin infinitorum (1748)\nExample: For x = pi: e^{i*pi} = cos(pi) + i*sin(pi) = -1 + 0 = -1 -> e^{i*pi} + 1 = 0\nDomain: trigonometry\nAssumptions: x in R (or generalized to C)\nCommon Errors: Inputting angle x in degrees instead of radians",
+  "content_sha256": "a1a0ab536e5b72acd55da25a096898c89aa444d95b54bef917266346063960db",
+  "file_path": "storage/knowledge\\partitions/mathematics/trigonometry\\bd\\bd9b3ab674ab6bf5.json",
+  "id": "bd9b3ab674ab6bf5",
+  "last_merged_at": "2026-09-29T10:34:32Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/trigonometry",
+  "provenance": {
+    "author_or_curator": "Leonhard Euler",
+    "content_sha256": "a1a0ab536e5b72acd55da25a096898c89aa444d95b54bef917266346063960db",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/introductioinana01eule"
+  },
+  "source": "https://archive.org/details/introductioinana01eule",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Euler's Formula",
+  "subpartition": "trigonometry",
+  "tags": [
+    "complex_analysis",
+    "euler_identity",
+    "unit_circle",
+    "formula",
+    "trigonometry",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

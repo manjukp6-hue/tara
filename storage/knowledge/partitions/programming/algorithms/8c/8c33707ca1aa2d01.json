@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Thomas H. Cormen, Charles E. Leiserson, Ronald L. Rivest, Clifford Stein",
+      "license": "CC-BY-4.0",
+      "merged_at": "2026-09-29T10:12:39Z",
+      "source": "Introduction to Algorithms (CLRS: Cormen, Leiserson, Rivest, Stein, MIT Press)"
+    }
+  ],
+  "category": "programming",
+  "confidence": 1.0,
+  "content": "Asymptotic analysis quantifies algorithm time and space efficiency as input size n approaches infinity using Big-O (upper bound), Big-Omega (lower bound), and Big-Theta (tight bound). The Master Theorem provides closed-form asymptotic bounds for divide-and-conquer recurrences T(n) = a*T(n/b) + f(n): If f(n) = O(n^(log_b(a) - epsilon)), then T(n) = Theta(n^(log_b(a))); if f(n) = Theta(n^(log_b(a))), then T(n) = Theta(n^(log_b(a)) * log n).",
+  "content_sha256": "be218e11f21f8dd4e67d3743c96d8378e16d4cf8c9918a7ab09ee285b9b66d42",
+  "file_path": "storage/knowledge\\partitions/programming/algorithms\\8c\\8c33707ca1aa2d01.json",
+  "id": "8c33707ca1aa2d01",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:34Z",
+  "originating_record_id": null,
+  "partition": "partitions/programming/algorithms",
+  "provenance": {
+    "author_or_curator": "Thomas H. Cormen, Charles E. Leiserson, Ronald L. Rivest, Clifford Stein",
+    "content_sha256": "be218e11f21f8dd4e67d3743c96d8378e16d4cf8c9918a7ab09ee285b9b66d42",
+    "imported_at": "2026-09-29T10:11:34Z",
+    "license": "CC-BY-4.0",
+    "source_uri": "Introduction to Algorithms (CLRS: Cormen, Leiserson, Rivest, Stein, MIT Press)"
+  },
+  "source": "Introduction to Algorithms (CLRS: Cormen, Leiserson, Rivest, Stein, MIT Press)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "asymptotic_algorithmic_complexity_and_master_theorem",
+  "subpartition": "algorithms",
+  "tags": [
+    "algorithms",
+    "asymptotic_analysis",
+    "big_o",
+    "master_theorem",
+    "divide_and_conquer",
+    "programming"
+  ],
+  "topic": "programming",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

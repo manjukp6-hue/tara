@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Ronald L. Rivest, Adi Shamir, & Leonard Adleman",
+      "license": "CC-BY-4.0",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://doi.org/10.1145/359340.359342"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: RSA Asymmetric Cryptosystem\nExact Expression: c \\equiv m^e \\pmod n \\quad \\text{and} \\quad m \\equiv c^d \\pmod n\nDefinitions: Public-key asymmetric cryptosystem based on the computational intractability of the prime factorization problem for large semiprime integers.\nDerivation/Reference: Ron Rivest, Adi Shamir, & Leonard Adleman, A Method for Obtaining Digital Signatures and Public-Key Cryptosystems (Communications of the ACM, 1978); Clifford Cocks (GCHQ, 1973)\nExample: p=61, q=53 -> n=3233, phi=3120. Choose e=17 -> d=2753. Message m=65 -> c = 65^17 mod 3233 = 2790; Decrypt: 2790^2753 mod 3233 = 65\nDomain: cryptography\nAssumptions: p and q are secret large random primes; gcd(m, n) = 1 (or protected via PKCS#1 OAEP padding)\nCommon Errors: Using textbook RSA without randomized OAEP padding (leaves cipher vulnerable to Coppersmith and chosen-ciphertext attacks)",
+  "content_sha256": "fa102a480d9e4b131ceade72d5bad1a1d12b3edcb5e69d7c861f89bc4e2e7325",
+  "file_path": "storage/knowledge\\partitions/mathematics/cryptography\\b8\\b86b08cad68553cb.json",
+  "id": "b86b08cad68553cb",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:33Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/cryptography",
+  "provenance": {
+    "author_or_curator": "Ronald L. Rivest, Adi Shamir, & Leonard Adleman",
+    "content_sha256": "fa102a480d9e4b131ceade72d5bad1a1d12b3edcb5e69d7c861f89bc4e2e7325",
+    "imported_at": "2026-09-29T10:11:33Z",
+    "license": "CC-BY-4.0",
+    "source_uri": "https://doi.org/10.1145/359340.359342"
+  },
+  "source": "https://doi.org/10.1145/359340.359342",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "RSA Asymmetric Cryptosystem",
+  "subpartition": "cryptography",
+  "tags": [
+    "rsa",
+    "cryptography",
+    "public_key",
+    "asymmetric_encryption",
+    "prime_factorization",
+    "formula",
+    "cryptography",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

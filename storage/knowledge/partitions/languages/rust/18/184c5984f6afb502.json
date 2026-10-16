@@ -1,0 +1,40 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Rust",
+      "license": "MIT OR Apache-2.0",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://doc.rust-lang.org/book/"
+    }
+  ],
+  "category": "languages",
+  "confidence": 1.0,
+  "content": "Programming Language Reference: Rust\nVersion: Rust 2021 Edition / Rust 1.80+\nSyntax: C-family curly-brace syntax with expression-oriented semantics, pattern matching, traits, and associated types.\nSemantics: Strict affine type system with compile-time borrow checker ensuring memory safety and thread safety without garbage collection.\nType System: Statically and strongly typed, algebraic data types (enums with data), trait-based polymorphism, zero-cost abstractions.\nMemory Model: Linear ownership with single owner, RAII destructor drop semantics, stack by default, explicit heap via Box/Rc/Arc.\nConcurrency: Fearless concurrency: Send and Sync traits enforced at compile-time, std::thread, channels, async/await with Pin/Future.\nError Handling: Explicit Result and Option types with '?' carrier operator, no runtime exceptions; panic! for unrecoverable errors.\nStandard APIs: std::vec::Vec, std::collections::HashMap, std::sync::Arc, std::sync::Mutex, std::fs::File\nSpecification: The Rust Reference (https://doc.rust-lang.org/reference/)\nOfficial Docs: https://doc.rust-lang.org/book/",
+  "content_sha256": "59b86af1a0b83ee93aea911167057f51c571e7744e62845867e7399ab6219d38",
+  "file_path": "storage/knowledge\\partitions/languages/rust\\18\\184c5984f6afb502.json",
+  "id": "184c5984f6afb502",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:49Z",
+  "originating_record_id": null,
+  "partition": "partitions/languages/rust",
+  "provenance": {
+    "author_or_curator": "Rust",
+    "content_sha256": "59b86af1a0b83ee93aea911167057f51c571e7744e62845867e7399ab6219d38",
+    "imported_at": "2026-09-29T09:59:49Z",
+    "license": "MIT OR Apache-2.0",
+    "source_uri": "https://doc.rust-lang.org/book/"
+  },
+  "source": "https://doc.rust-lang.org/book/",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "language_spec_rust",
+  "subpartition": "rust",
+  "tags": [
+    "programming_languages",
+    "rust",
+    "language_specification",
+    "languages"
+  ],
+  "topic": "languages",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Mark D. Wilkinson et al.",
+      "license": "CC-BY-4.0",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "The FAIR Guiding Principles for scientific data management and stewardship (Wilkinson et al., Nature Scientific Data, 2016)"
+    }
+  ],
+  "category": "science",
+  "confidence": 1.0,
+  "content": "Open science standards mandate research transparency, reproducibility, and verifiability to counteract the replication crisis. Key principles include Study Pre-Registration (registering hypotheses and analysis plans before data collection), Open Data and Code availability, and FAIR data guidelines (Findable, Accessible, Interoperable, and Reusable). Independent replication protocols evaluate external validity and statistical robustness.",
+  "content_sha256": "f2a65f639e0fffc47ddad6d4b8e09a999c1f5b9bbccb306e5535b9f85693be67",
+  "file_path": "storage/knowledge\\partitions/science/scientific_method\\e2\\e26b422c1f551152.json",
+  "id": "e26b422c1f551152",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:34Z",
+  "originating_record_id": null,
+  "partition": "partitions/science/scientific_method",
+  "provenance": {
+    "author_or_curator": "Mark D. Wilkinson et al.",
+    "content_sha256": "f2a65f639e0fffc47ddad6d4b8e09a999c1f5b9bbccb306e5535b9f85693be67",
+    "imported_at": "2026-09-29T10:11:34Z",
+    "license": "CC-BY-4.0",
+    "source_uri": "The FAIR Guiding Principles for scientific data management and stewardship (Wilkinson et al., Nature Scientific Data, 2016)"
+  },
+  "source": "The FAIR Guiding Principles for scientific data management and stewardship (Wilkinson et al., Nature Scientific Data, 2016)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "open_science_replication_standards_and_fair_principles",
+  "subpartition": "scientific_method",
+  "tags": [
+    "open_science",
+    "reproducibility",
+    "fair_data",
+    "pre_registration",
+    "replication",
+    "science",
+    "scientific_method"
+  ],
+  "topic": "science",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

@@ -1,0 +1,41 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Charles Sanders Peirce",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:23Z",
+      "source": "Collected Papers of Charles Sanders Peirce (1931)"
+    }
+  ],
+  "category": "reasoning",
+  "confidence": 1.0,
+  "content": "Abductive reasoning (Inference to the Best Explanation - IBE) formulates explanatory hypotheses from surprising or incomplete observations: Given surprising observation C, if hypothesis A were true, C would follow as a matter of course; hence there is reason to suspect A is true. Evaluated through parsimony (Occam's razor), explanatory power, coherence, and testability.",
+  "content_sha256": "9dcbffe4f7f883dab3ba4784183be206d1ac177c1fd8b62d0bcb44ebe48085c8",
+  "file_path": "storage/knowledge\\partitions/reasoning/abduction\\2e\\2ec0fa2269121dfd.json",
+  "id": "2ec0fa2269121dfd",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:50Z",
+  "originating_record_id": null,
+  "partition": "partitions/reasoning/abduction",
+  "provenance": {
+    "author_or_curator": "Charles Sanders Peirce",
+    "content_sha256": "9dcbffe4f7f883dab3ba4784183be206d1ac177c1fd8b62d0bcb44ebe48085c8",
+    "imported_at": "2026-09-29T09:59:50Z",
+    "license": "Public Domain",
+    "source_uri": "Collected Papers of Charles Sanders Peirce (1931)"
+  },
+  "source": "Collected Papers of Charles Sanders Peirce (1931)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "abductive_reasoning_inference_to_best_explanation",
+  "subpartition": "abduction",
+  "tags": [
+    "abduction",
+    "inference_to_best_explanation",
+    "peirce",
+    "diagnosis",
+    "reasoning"
+  ],
+  "topic": "reasoning",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

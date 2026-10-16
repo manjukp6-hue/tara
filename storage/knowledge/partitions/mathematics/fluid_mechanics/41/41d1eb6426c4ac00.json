@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Claude-Louis Navier & George Gabriel Stokes",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://archive.org/details/mathphyspapers01stokrich"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Incompressible Navier-Stokes Equation\nExact Expression: \\rho \\left( \\frac{\\partial \\mathbf{u}}{\\partial t} + (\\mathbf{u} \\cdot \\nabla) \\mathbf{u} \\right) = -\\nabla p + \\mu \\nabla^2 \\mathbf{u} + \\mathbf{f}\nDefinitions: Set of non-linear partial differential equations describing the motion of viscous, incompressible fluid substances.\nDerivation/Reference: Claude-Louis Navier (1822) & Sir George Gabriel Stokes (1845)\nExample: Poiseuille laminar flow through cylindrical pipe: parabolic velocity profile u(r) = (Delta P / 4 mu L)(R^2 - r^2)\nDomain: fluid_mechanics\nAssumptions: Newtonian fluid (linear stress-strain rate relation); Constant fluid density rho (Mach number M < 0.3)\nCommon Errors: Omitting non-linear convective acceleration term (u * grad)u in high Reynolds number flows",
+  "content_sha256": "c4d609f90124b4008ab7e41a33407b85694dc30ca4a1a1f326fc1b218d32f447",
+  "file_path": "storage/knowledge\\partitions/mathematics/fluid_mechanics\\41\\41d1eb6426c4ac00.json",
+  "id": "41d1eb6426c4ac00",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:31Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/fluid_mechanics",
+  "provenance": {
+    "author_or_curator": "Claude-Louis Navier & George Gabriel Stokes",
+    "content_sha256": "c4d609f90124b4008ab7e41a33407b85694dc30ca4a1a1f326fc1b218d32f447",
+    "imported_at": "2026-09-29T10:11:31Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/mathphyspapers01stokrich"
+  },
+  "source": "https://archive.org/details/mathphyspapers01stokrich",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Incompressible Navier-Stokes Equation",
+  "subpartition": "fluid_mechanics",
+  "tags": [
+    "navier_stokes",
+    "fluid_dynamics",
+    "viscosity",
+    "turbulence",
+    "clay_millennium",
+    "formula",
+    "fluid_mechanics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

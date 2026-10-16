@@ -1,0 +1,40 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Bash (Bourne Again SHell)",
+      "license": "GPL-3.0-or-later",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://www.gnu.org/software/bash/manual/"
+    }
+  ],
+  "category": "languages",
+  "confidence": 1.0,
+  "content": "Programming Language Reference: Bash (Bourne Again SHell)\nVersion: GNU Bash 5.2 / IEEE Std 1003.1 (POSIX sh)\nSyntax: Command language interpreter for Unix-like systems combining interactive command line with shell scripting.\nSemantics: Text stream processing via standard streams (stdin, stdout, stderr), process pipelines, environment variables.\nType System: Untyped string-oriented; variables hold strings or arrays, arithmetic evaluated via $(( expression )).\nMemory Model: Process virtual address space per subshell fork, environment variable inheritance via export.\nConcurrency: Background jobs (&), wait command, named pipes (FIFOs), coprocs, signals (trap).\nError Handling: Exit status $? (0 = success, non-zero = error), set -e (errexit), set -u (nounset), set -o pipefail.\nStandard APIs: echo, cd, read, test / [ ], export, trap, kill\nSpecification: Bash Reference Manual (Free Software Foundation)\nOfficial Docs: https://www.gnu.org/software/bash/manual/",
+  "content_sha256": "78db559a82ba3bf8f4edb4c2724966180f1cd58dd81af11f9665762610916a4f",
+  "file_path": "storage/knowledge\\partitions/languages/bash_(bourne_again_shell)\\ca\\caa83a2eb1c4c554.json",
+  "id": "caa83a2eb1c4c554",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:49Z",
+  "originating_record_id": null,
+  "partition": "partitions/languages/bash_(bourne_again_shell)",
+  "provenance": {
+    "author_or_curator": "Bash (Bourne Again SHell)",
+    "content_sha256": "78db559a82ba3bf8f4edb4c2724966180f1cd58dd81af11f9665762610916a4f",
+    "imported_at": "2026-09-29T09:59:49Z",
+    "license": "GPL-3.0-or-later",
+    "source_uri": "https://www.gnu.org/software/bash/manual/"
+  },
+  "source": "https://www.gnu.org/software/bash/manual/",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "language_spec_bash_(bourne_again_shell)",
+  "subpartition": "bash_(bourne_again_shell)",
+  "tags": [
+    "programming_languages",
+    "bash_(bourne_again_shell)",
+    "language_specification",
+    "languages"
+  ],
+  "topic": "languages",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

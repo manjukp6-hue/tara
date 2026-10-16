@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Euclid of Alexandria",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://mathcs.clarku.edu/~djoyce/java/elements/bookI/propI47.html"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Pythagorean Theorem\nExact Expression: a^2 + b^2 = c^2\nDefinitions: In any right-angled triangle in Euclidean space, the square of the hypotenuse equals the sum of squares of the other two sides.\nDerivation/Reference: Euclid's Elements Book I, Proposition 47; Baudhayana Sulba Sutra 1.48\nExample: Legs 3 and 4 -> c = sqrt(3^2 + 4^2) = sqrt(9 + 16) = 5\nDomain: geometry\nAssumptions: Euclidean metric space (curvature K = 0); Angle between a and b is 90 degrees\nCommon Errors: Applying to non-right triangles without cosine correction (Law of Cosines)",
+  "content_sha256": "fa3978cd18f1e1c85dbebbad721259bae799b1dcd3b1265987047a82a02b6139",
+  "file_path": "storage/knowledge\\partitions/mathematics/geometry\\9d\\9d9484bec512f14e.json",
+  "id": "9d9484bec512f14e",
+  "last_merged_at": "2026-09-29T10:34:32Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/geometry",
+  "provenance": {
+    "author_or_curator": "Euclid of Alexandria",
+    "content_sha256": "fa3978cd18f1e1c85dbebbad721259bae799b1dcd3b1265987047a82a02b6139",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "https://mathcs.clarku.edu/~djoyce/java/elements/bookI/propI47.html"
+  },
+  "source": "https://mathcs.clarku.edu/~djoyce/java/elements/bookI/propI47.html",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Pythagorean Theorem",
+  "subpartition": "geometry",
+  "tags": [
+    "right_triangle",
+    "euclidean",
+    "metric",
+    "formula",
+    "geometry",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

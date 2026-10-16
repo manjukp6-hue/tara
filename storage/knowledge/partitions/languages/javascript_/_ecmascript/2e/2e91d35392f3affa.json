@@ -1,0 +1,40 @@
+{
+  "alternative_sources": [
+    {
+      "author": "JavaScript / ECMAScript",
+      "license": "W3C Software Notice and License / ECMA Copyright",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://developer.mozilla.org/en-US/docs/Web/JavaScript"
+    }
+  ],
+  "category": "languages",
+  "confidence": 1.0,
+  "content": "Programming Language Reference: JavaScript / ECMAScript\nVersion: ECMAScript 2023 / 2024 (ECMA-262)\nSyntax: C-inspired syntax with dynamic typing, prototypical inheritance, object literals, and first-class functions.\nSemantics: Single-threaded event loop architecture with non-blocking I/O, microtask/macrotask queues, JIT execution (V8/SpiderMonkey).\nType System: Dynamic, weak typing with 8 primitive types (undefined, null, boolean, number, bigint, string, symbol) + object.\nMemory Model: Automatic mark-and-sweep garbage collection, heap storage for objects and closures, call stack execution.\nConcurrency: Asynchronous concurrency via Promises, async/await, Web Workers / Worker threads for CPU parallelism.\nError Handling: try/catch/finally handling Error instances and custom error prototypes.\nStandard APIs: Array, Object, Promise, Fetch, Map, Set, JSON, Intl\nSpecification: ECMA-262 Standard (https://tc39.es/ecma262/)\nOfficial Docs: https://developer.mozilla.org/en-US/docs/Web/JavaScript",
+  "content_sha256": "402b22a454b3e693729f73cb61ee2db93132a397bc0ba5f9fe2b2bfc2ebe5e04",
+  "file_path": "storage/knowledge\\partitions/languages/javascript_/_ecmascript\\2e\\2e91d35392f3affa.json",
+  "id": "2e91d35392f3affa",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:49Z",
+  "originating_record_id": null,
+  "partition": "partitions/languages/javascript_/_ecmascript",
+  "provenance": {
+    "author_or_curator": "JavaScript / ECMAScript",
+    "content_sha256": "402b22a454b3e693729f73cb61ee2db93132a397bc0ba5f9fe2b2bfc2ebe5e04",
+    "imported_at": "2026-09-29T09:59:49Z",
+    "license": "W3C Software Notice and License / ECMA Copyright",
+    "source_uri": "https://developer.mozilla.org/en-US/docs/Web/JavaScript"
+  },
+  "source": "https://developer.mozilla.org/en-US/docs/Web/JavaScript",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "language_spec_javascript_/_ecmascript",
+  "subpartition": "javascript_/_ecmascript",
+  "tags": [
+    "programming_languages",
+    "javascript_/_ecmascript",
+    "language_specification",
+    "languages"
+  ],
+  "topic": "languages",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

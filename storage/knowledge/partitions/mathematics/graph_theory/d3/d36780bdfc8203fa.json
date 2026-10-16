@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Leonhard Euler",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://eulerarchive.maa.org/pages/E053.html"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Euler's Handshaking Lemma\nExact Expression: \\sum_{v \\in V} \\deg(v) = 2|E|\nDefinitions: Statement that every finite undirected graph has an even sum of vertex degrees, exactly equal to twice the number of edges.\nDerivation/Reference: Leonhard Euler, Solutio problematis ad geometriam situs pertinentis (Konigsberg Bridge Problem, 1736)\nExample: Triangle graph K_3: 3 vertices each of degree 2 -> sum = 2+2+2 = 6 = 2 * 3 edges\nDomain: graph_theory\nAssumptions: G is a finite undirected graph (loops contribute 2 to degree)\nCommon Errors: Applying directly to directed graphs without separating in-degree and out-degree",
+  "content_sha256": "fb382030e4371cc7ee71bace07fbc13508bac85c5add5b65ebff4343ab1e255f",
+  "file_path": "storage/knowledge\\partitions/mathematics/graph_theory\\d3\\d36780bdfc8203fa.json",
+  "id": "d36780bdfc8203fa",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:31Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/graph_theory",
+  "provenance": {
+    "author_or_curator": "Leonhard Euler",
+    "content_sha256": "fb382030e4371cc7ee71bace07fbc13508bac85c5add5b65ebff4343ab1e255f",
+    "imported_at": "2026-09-29T10:11:31Z",
+    "license": "Public Domain",
+    "source_uri": "https://eulerarchive.maa.org/pages/E053.html"
+  },
+  "source": "https://eulerarchive.maa.org/pages/E053.html",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Euler's Handshaking Lemma",
+  "subpartition": "graph_theory",
+  "tags": [
+    "handshaking_lemma",
+    "graph_theory",
+    "degree",
+    "euler",
+    "konigsberg",
+    "formula",
+    "graph_theory",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "William Wilson Morgan & Philip C. Keenan",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "An Atlas of Stellar Spectra (Morgan, Keenan, & Kellman, 1943) & Astrophysical Quantities (Allen, 1973)"
+    }
+  ],
+  "category": "science",
+  "confidence": 1.0,
+  "content": "Astronomical spectroscopy decodes the chemical composition, surface temperature, radial velocity, and atmospheric pressure of celestial bodies via atomic spectral absorption and emission lines (Fraunhofer lines). The Morgan-Keenan (MK) system classifies stars by temperature (O, B, A, F, G, K, M) and luminosity class (I to V). Radial velocity is measured through Doppler spectral shift: z = (lambda_obs - lambda_emit) / lambda_emit = v / c.",
+  "content_sha256": "10fb3d26c097e005591b09fe2f4ad703171d0d1cdf386750f676f4533d38902d",
+  "file_path": "storage/knowledge\\partitions/science/astronomy\\62\\62844e396f151777.json",
+  "id": "62844e396f151777",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:33Z",
+  "originating_record_id": null,
+  "partition": "partitions/science/astronomy",
+  "provenance": {
+    "author_or_curator": "William Wilson Morgan & Philip C. Keenan",
+    "content_sha256": "10fb3d26c097e005591b09fe2f4ad703171d0d1cdf386750f676f4533d38902d",
+    "imported_at": "2026-09-29T10:11:33Z",
+    "license": "Public Domain",
+    "source_uri": "An Atlas of Stellar Spectra (Morgan, Keenan, & Kellman, 1943) & Astrophysical Quantities (Allen, 1973)"
+  },
+  "source": "An Atlas of Stellar Spectra (Morgan, Keenan, & Kellman, 1943) & Astrophysical Quantities (Allen, 1973)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "astronomical_spectroscopy_and_stellar_classification",
+  "subpartition": "astronomy",
+  "tags": [
+    "astronomy",
+    "spectroscopy",
+    "stellar_classification",
+    "fraunhofer_lines",
+    "doppler_shift",
+    "science"
+  ],
+  "topic": "science",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

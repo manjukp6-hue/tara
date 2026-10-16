@@ -1,0 +1,14 @@
+{
+  "vram_budget_gb": "auto",
+  "ram_budget_gb": "auto",
+  "disk_cache_gb": "auto",
+  "cache_policy": "lfru",
+  "prefetch": true,
+  "async_io": true,
+  "telemetry": true,
+  "decay_steps": 100,
+  "admission_margin_pct": 25,
+  "admission_margin_fixed": 4,
+  "max_prefetch_depth": 2,
+  "fallback_to_native": false
+}

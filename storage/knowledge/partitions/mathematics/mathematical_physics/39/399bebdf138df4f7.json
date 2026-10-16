@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "James W. Cooley & John W. Tukey",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://doi.org/10.1090/S0025-5718-1965-0178586-1"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Discrete Fourier Transform (DFT)\nExact Expression: X_k = \\sum_{n=0}^{N-1} x_n \\cdot e^{-i \\frac{2\\pi}{N} k n} \\quad k = 0, \\dots, N-1\nDefinitions: Linear transformation converting a finite sequence of equally-spaced samples of a function into an equivalent-length sequence of complex frequency coefficients.\nDerivation/Reference: Carl Friedrich Gauss (Fast Fourier algorithm manuscript, 1805); J. W. Cooley & John W. Tukey (1965)\nExample: Input impulse delta[n] = [1, 0, 0, 0] -> X_k = [1, 1, 1, 1] (flat constant spectrum across all harmonics)\nDomain: mathematical_physics\nAssumptions: Uniform sampling interval Ts satisfying Nyquist-Shannon criterion fs >= 2 B\nCommon Errors: Confusing continuous Fourier Transform with discrete DFT; failing to account for spectral leakage and circular convolution",
+  "content_sha256": "2bf61e0cfb07e0c3af14755f1c5e96a45ac5e406be8a2fec19dadd33a1a4e1c3",
+  "file_path": "storage/knowledge\\partitions/mathematics/mathematical_physics\\39\\399bebdf138df4f7.json",
+  "id": "399bebdf138df4f7",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:33Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/mathematical_physics",
+  "provenance": {
+    "author_or_curator": "James W. Cooley & John W. Tukey",
+    "content_sha256": "2bf61e0cfb07e0c3af14755f1c5e96a45ac5e406be8a2fec19dadd33a1a4e1c3",
+    "imported_at": "2026-09-29T10:11:33Z",
+    "license": "Public Domain",
+    "source_uri": "https://doi.org/10.1090/S0025-5718-1965-0178586-1"
+  },
+  "source": "https://doi.org/10.1090/S0025-5718-1965-0178586-1",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Discrete Fourier Transform (DFT)",
+  "subpartition": "mathematical_physics",
+  "tags": [
+    "fourier_transform",
+    "dft",
+    "signal_processing",
+    "spectral_analysis",
+    "cooley_tukey",
+    "formula",
+    "mathematical_physics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

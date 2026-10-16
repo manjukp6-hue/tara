@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Joseph-Louis Lagrange",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://archive.org/details/thoriedesfoncti00lagrgoog"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Lagrange Mean Value Theorem\nExact Expression: f'(c) = \\frac{f(b) - f(a)}{b - a}\nDefinitions: States that for any continuous and differentiable curve, there exists at least one point where the tangent is parallel to the secant connecting the endpoints.\nDerivation/Reference: Derived from Rolle's theorem applied to auxiliary function h(x) = f(x) - [(f(b)-f(a))/(b-a)](x-a); Joseph-Louis Lagrange (1797)\nExample: f(x) = x^2 on [0, 2] -> f'(c) = (4 - 0)/2 = 2 -> 2c = 2 -> c = 1 in (0, 2)\nDomain: real_analysis\nAssumptions: f is continuous on [a, b]; f is differentiable on (a, b)\nCommon Errors: Applying to discontinuous functions or functions non-differentiable at cusps",
+  "content_sha256": "ea8a2e11184c684a679fe8480f6612ba266188f4af2d92fe919968d28fb6a999",
+  "file_path": "storage/knowledge\\partitions/mathematics/real_analysis\\51\\512b34167f881679.json",
+  "id": "512b34167f881679",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:30Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/real_analysis",
+  "provenance": {
+    "author_or_curator": "Joseph-Louis Lagrange",
+    "content_sha256": "ea8a2e11184c684a679fe8480f6612ba266188f4af2d92fe919968d28fb6a999",
+    "imported_at": "2026-09-29T10:11:30Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/thoriedesfoncti00lagrgoog"
+  },
+  "source": "https://archive.org/details/thoriedesfoncti00lagrgoog",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Lagrange Mean Value Theorem",
+  "subpartition": "real_analysis",
+  "tags": [
+    "mean_value_theorem",
+    "lagrange",
+    "derivatives",
+    "secant",
+    "formula",
+    "real_analysis",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

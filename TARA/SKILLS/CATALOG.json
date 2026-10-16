@@ -1,0 +1,860 @@
+{
+  "project": "TARA AI Skills Catalog",
+  "total_skills": 105,
+  "categories": [
+    "android",
+    "automation",
+    "coding",
+    "data",
+    "devops",
+    "documentation",
+    "engineering",
+    "multimedia",
+    "research",
+    "security",
+    "testing",
+    "web"
+  ],
+  "skills": [
+    {
+      "name": "agents-sdk",
+      "category": "engineering",
+      "path": "TARA/SKILLS/engineering/agents-sdk",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "android-emulator-qa",
+      "category": "android",
+      "path": "TARA/SKILLS/android/android-emulator-qa",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": false
+    },
+    {
+      "name": "aspnet-core",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/aspnet-core",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "boltz-check-status",
+      "category": "data",
+      "path": "TARA/SKILLS/data/boltz-check-status",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "boltz-cli-setup",
+      "category": "data",
+      "path": "TARA/SKILLS/data/boltz-cli-setup",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "boltz-protein-design",
+      "category": "data",
+      "path": "TARA/SKILLS/data/boltz-protein-design",
+      "license": "MIT",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "boltz-protein-screen",
+      "category": "data",
+      "path": "TARA/SKILLS/data/boltz-protein-screen",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "boltz-small-molecule-adme",
+      "category": "data",
+      "path": "TARA/SKILLS/data/boltz-small-molecule-adme",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "boltz-small-molecule-design",
+      "category": "data",
+      "path": "TARA/SKILLS/data/boltz-small-molecule-design",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "boltz-small-molecule-screen",
+      "category": "data",
+      "path": "TARA/SKILLS/data/boltz-small-molecule-screen",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "boltz-structure-and-binding",
+      "category": "data",
+      "path": "TARA/SKILLS/data/boltz-structure-and-binding",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "brainstorming",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/brainstorming",
+      "license": "MIT",
+      "scripts": true,
+      "references": false
+    },
+    {
+      "name": "build-chatgpt-app",
+      "category": "engineering",
+      "path": "TARA/SKILLS/engineering/build-chatgpt-app",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "building-native-ui",
+      "category": "engineering",
+      "path": "TARA/SKILLS/engineering/building-native-ui",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "chatgpt-app-submission",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/chatgpt-app-submission",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "chatgpt-apps",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/chatgpt-apps",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "cli-builder",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/cli-builder",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "cloudflare",
+      "category": "devops",
+      "path": "TARA/SKILLS/devops/cloudflare",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "cobrowse-sdk",
+      "category": "engineering",
+      "path": "TARA/SKILLS/engineering/cobrowse-sdk",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "codex-expo-run-actions",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/codex-expo-run-actions",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "contact-center",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/contact-center",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "dashboard-expert",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/dashboard-expert",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "define-goal",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/define-goal",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "dispatching-parallel-agents",
+      "category": "automation",
+      "path": "TARA/SKILLS/automation/dispatching-parallel-agents",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "earnings-preview",
+      "category": "research",
+      "path": "TARA/SKILLS/research/earnings-preview",
+      "license": "MIT",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "executing-plans",
+      "category": "automation",
+      "path": "TARA/SKILLS/automation/executing-plans",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "expo-api-routes",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/expo-api-routes",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "expo-cicd-workflows",
+      "category": "devops",
+      "path": "TARA/SKILLS/devops/expo-cicd-workflows",
+      "license": "MIT",
+      "scripts": true,
+      "references": false
+    },
+    {
+      "name": "expo-deployment",
+      "category": "devops",
+      "path": "TARA/SKILLS/devops/expo-deployment",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "expo-dev-client",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/expo-dev-client",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "expo-module",
+      "category": "engineering",
+      "path": "TARA/SKILLS/engineering/expo-module",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "expo-tailwind-setup",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/expo-tailwind-setup",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "expo-ui-jetpack-compose",
+      "category": "android",
+      "path": "TARA/SKILLS/android/expo-ui-jetpack-compose",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "expo-ui-swift-ui",
+      "category": "engineering",
+      "path": "TARA/SKILLS/engineering/expo-ui-swift-ui",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "finishing-a-development-branch",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/finishing-a-development-branch",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "general",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/general",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "generative-ui",
+      "category": "engineering",
+      "path": "TARA/SKILLS/engineering/generative-ui",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "gh-address-comments",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/gh-address-comments",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": false
+    },
+    {
+      "name": "gh-fix-ci",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/gh-fix-ci",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": false
+    },
+    {
+      "name": "hatch-pet",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/hatch-pet",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "imagegen",
+      "category": "multimedia",
+      "path": "TARA/SKILLS/multimedia/imagegen",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "jupyter-notebook",
+      "category": "data",
+      "path": "TARA/SKILLS/data/jupyter-notebook",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "linear",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/linear",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "meeting-sdk",
+      "category": "research",
+      "path": "TARA/SKILLS/research/meeting-sdk",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "migrate-to-codex",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/migrate-to-codex",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "mixpanel-auth",
+      "category": "security",
+      "path": "TARA/SKILLS/security/mixpanel-auth",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "mixpanelyst",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/mixpanelyst",
+      "license": "MIT",
+      "scripts": true,
+      "references": false
+    },
+    {
+      "name": "native-data-fetching",
+      "category": "data",
+      "path": "TARA/SKILLS/data/native-data-fetching",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "netlify-deploy",
+      "category": "devops",
+      "path": "TARA/SKILLS/devops/netlify-deploy",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "notion-knowledge-capture",
+      "category": "research",
+      "path": "TARA/SKILLS/research/notion-knowledge-capture",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "notion-meeting-intelligence",
+      "category": "research",
+      "path": "TARA/SKILLS/research/notion-meeting-intelligence",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "notion-research-documentation",
+      "category": "research",
+      "path": "TARA/SKILLS/research/notion-research-documentation",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "notion-spec-to-implementation",
+      "category": "research",
+      "path": "TARA/SKILLS/research/notion-spec-to-implementation",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "oauth",
+      "category": "security",
+      "path": "TARA/SKILLS/security/oauth",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "openai-docs",
+      "category": "research",
+      "path": "TARA/SKILLS/research/openai-docs",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "pdf",
+      "category": "research",
+      "path": "TARA/SKILLS/research/pdf",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "phone",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/phone",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "playwright",
+      "category": "web",
+      "path": "TARA/SKILLS/web/playwright",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "plugin-builder",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/plugin-builder",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "posthog",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/posthog",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "probe-sdk",
+      "category": "engineering",
+      "path": "TARA/SKILLS/engineering/probe-sdk",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "receiving-code-review",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/receiving-code-review",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "render-deploy",
+      "category": "devops",
+      "path": "TARA/SKILLS/devops/render-deploy",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "requesting-code-review",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/requesting-code-review",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "rest-api",
+      "category": "web",
+      "path": "TARA/SKILLS/web/rest-api",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "rivet-sdk",
+      "category": "engineering",
+      "path": "TARA/SKILLS/engineering/rivet-sdk",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "rtms",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/rtms",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "screenshot",
+      "category": "multimedia",
+      "path": "TARA/SKILLS/multimedia/screenshot",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": false
+    },
+    {
+      "name": "scribe",
+      "category": "documentation",
+      "path": "TARA/SKILLS/documentation/scribe",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "security-best-practices",
+      "category": "security",
+      "path": "TARA/SKILLS/security/security-best-practices",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "security-ownership-map",
+      "category": "security",
+      "path": "TARA/SKILLS/security/security-ownership-map",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "security-threat-model",
+      "category": "security",
+      "path": "TARA/SKILLS/security/security-threat-model",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "sentry",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/sentry",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": false
+    },
+    {
+      "name": "setup",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/setup",
+      "license": "MIT",
+      "scripts": true,
+      "references": false
+    },
+    {
+      "name": "skill-builder",
+      "category": "automation",
+      "path": "TARA/SKILLS/automation/skill-builder",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "skill-installer",
+      "category": "automation",
+      "path": "TARA/SKILLS/automation/skill-installer",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": false
+    },
+    {
+      "name": "speech",
+      "category": "multimedia",
+      "path": "TARA/SKILLS/multimedia/speech",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "start",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/start",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "subagent-driven-development",
+      "category": "automation",
+      "path": "TARA/SKILLS/automation/subagent-driven-development",
+      "license": "MIT",
+      "scripts": true,
+      "references": false
+    },
+    {
+      "name": "supabase",
+      "category": "data",
+      "path": "TARA/SKILLS/data/supabase",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "supabase-postgres-best-practices",
+      "category": "data",
+      "path": "TARA/SKILLS/data/supabase-postgres-best-practices",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "systematic-debugging",
+      "category": "testing",
+      "path": "TARA/SKILLS/testing/systematic-debugging",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "team-chat",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/team-chat",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "temporal-cloud-setup",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/temporal-cloud-setup",
+      "license": "MIT",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "temporal-developer",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/temporal-developer",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "temporal-ops",
+      "category": "devops",
+      "path": "TARA/SKILLS/devops/temporal-ops",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "temporal-serverless",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/temporal-serverless",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "test-driven-development",
+      "category": "testing",
+      "path": "TARA/SKILLS/testing/test-driven-development",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "transcribe",
+      "category": "multimedia",
+      "path": "TARA/SKILLS/multimedia/transcribe",
+      "license": "Apache-2.0",
+      "scripts": true,
+      "references": true
+    },
+    {
+      "name": "ui-toolkit",
+      "category": "engineering",
+      "path": "TARA/SKILLS/engineering/ui-toolkit",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "upgrading-expo",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/upgrading-expo",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "use-dom",
+      "category": "web",
+      "path": "TARA/SKILLS/web/use-dom",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "using-git-worktrees",
+      "category": "devops",
+      "path": "TARA/SKILLS/devops/using-git-worktrees",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "using-superpowers",
+      "category": "automation",
+      "path": "TARA/SKILLS/automation/using-superpowers",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "vercel-deploy",
+      "category": "devops",
+      "path": "TARA/SKILLS/devops/vercel-deploy",
+      "license": "MIT",
+      "scripts": true,
+      "references": false
+    },
+    {
+      "name": "verification-before-completion",
+      "category": "testing",
+      "path": "TARA/SKILLS/testing/verification-before-completion",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "video-sdk",
+      "category": "multimedia",
+      "path": "TARA/SKILLS/multimedia/video-sdk",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "virtual-agent",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/virtual-agent",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "webhooks",
+      "category": "web",
+      "path": "TARA/SKILLS/web/webhooks",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "websockets",
+      "category": "web",
+      "path": "TARA/SKILLS/web/websockets",
+      "license": "MIT",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "winui-app",
+      "category": "engineering",
+      "path": "TARA/SKILLS/engineering/winui-app",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": true
+    },
+    {
+      "name": "wrangler",
+      "category": "devops",
+      "path": "TARA/SKILLS/devops/wrangler",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "writing-plans",
+      "category": "documentation",
+      "path": "TARA/SKILLS/documentation/writing-plans",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "writing-skills",
+      "category": "documentation",
+      "path": "TARA/SKILLS/documentation/writing-skills",
+      "license": "MIT",
+      "scripts": false,
+      "references": false
+    },
+    {
+      "name": "yeet",
+      "category": "coding",
+      "path": "TARA/SKILLS/coding/yeet",
+      "license": "Apache-2.0",
+      "scripts": false,
+      "references": false
+    }
+  ]
+}

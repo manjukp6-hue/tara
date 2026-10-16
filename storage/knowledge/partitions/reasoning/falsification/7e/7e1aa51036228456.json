@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Karl Popper",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:23Z",
+      "source": "The Logic of Scientific Discovery (Karl Popper, 1935/1959)"
+    }
+  ],
+  "category": "reasoning",
+  "confidence": 1.0,
+  "content": "Karl Popper's falsification criterion establishes that a scientific hypothesis must make empirically testable predictions capable of being refuted by observable counterexamples. In accordance with Modus Tollens (H -> P; not P; therefore not H), a single reproducible empirical counterexample refutes a universal claim, forming the foundation of rigorous hypothesis testing and eliminating unscientific unfalsifiable claims.",
+  "content_sha256": "dba2f1b0b08d60cb75cd8286951ec6a7043e14c7162b5844daf4a15257cc0dd1",
+  "file_path": "storage/knowledge\\partitions/reasoning/falsification\\7e\\7e1aa51036228456.json",
+  "id": "7e1aa51036228456",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:50Z",
+  "originating_record_id": null,
+  "partition": "partitions/reasoning/falsification",
+  "provenance": {
+    "author_or_curator": "Karl Popper",
+    "content_sha256": "dba2f1b0b08d60cb75cd8286951ec6a7043e14c7162b5844daf4a15257cc0dd1",
+    "imported_at": "2026-09-29T09:59:50Z",
+    "license": "Public Domain",
+    "source_uri": "The Logic of Scientific Discovery (Karl Popper, 1935/1959)"
+  },
+  "source": "The Logic of Scientific Discovery (Karl Popper, 1935/1959)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "popperian_falsifiability_and_counterexample_reasoning",
+  "subpartition": "falsification",
+  "tags": [
+    "falsification",
+    "popper",
+    "counterexample",
+    "null_hypothesis",
+    "epistemology",
+    "reasoning"
+  ],
+  "topic": "reasoning",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

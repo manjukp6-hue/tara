@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Eugenio Beltrami & Camille Jordan",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://archive.org/details/giornaledimatemat00battgoog"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Singular Value Decomposition (SVD)\nExact Expression: A = U \\Sigma V^*\nDefinitions: Factorization of any rectangular matrix into rotation, scaling, and rotation operators, exposing rank, pseudo-inverse, and low-rank approximations.\nDerivation/Reference: Eugenio Beltrami (1873), Camille Jordan (1874), Carl Eckart & Gale Young (1936)\nExample: For symmetric positive semi-definite A, SVD coincides with spectral eigendecomposition A = Q Lambda Q^T\nDomain: linear_algebra\nAssumptions: A in C^{m x n}; \\sigma_1 >= \\sigma_2 >= ... >= \\sigma_r >= 0\nCommon Errors: Confusing singular values \\sigma_i with eigenvalues \\lambda_i for non-symmetric matrices",
+  "content_sha256": "a8425f8628ad63931c074e4a253bcafd5ad1292cb329c2769fb1ce3a6d0cc87c",
+  "file_path": "storage/knowledge\\partitions/mathematics/linear_algebra\\19\\19566913a67d8de0.json",
+  "id": "19566913a67d8de0",
+  "last_merged_at": "2026-09-29T10:34:32Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/linear_algebra",
+  "provenance": {
+    "author_or_curator": "Eugenio Beltrami & Camille Jordan",
+    "content_sha256": "a8425f8628ad63931c074e4a253bcafd5ad1292cb329c2769fb1ce3a6d0cc87c",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/giornaledimatemat00battgoog"
+  },
+  "source": "https://archive.org/details/giornaledimatemat00battgoog",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Singular Value Decomposition (SVD)",
+  "subpartition": "linear_algebra",
+  "tags": [
+    "matrix_decomposition",
+    "low_rank",
+    "pseudoinverse",
+    "formula",
+    "linear_algebra",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

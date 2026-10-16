@@ -1,0 +1,41 @@
+{
+  "alternative_sources": [
+    {
+      "author": "John Stuart Mill & David Hume",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:23Z",
+      "source": "A System of Logic (John Stuart Mill, 1843)"
+    }
+  ],
+  "category": "reasoning",
+  "confidence": 1.0,
+  "content": "Inductive reasoning establishes probabilistic generalizations from observed instances to unobserved cases. Forms include enumerative induction, statistical inference, and analogy. Unlike deduction, inductive conclusions possess inductive probability rather than deductive certainty, formalizing the scientific method through repeated measurement and Bayesian confirmation theory.",
+  "content_sha256": "6e541354d7c774d2b6b8fbb3a76c5d13dc24312b759eba5d8b01e5cf0e124350",
+  "file_path": "storage/knowledge\\partitions/reasoning/induction\\de\\decd4844e24f46d6.json",
+  "id": "decd4844e24f46d6",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:50Z",
+  "originating_record_id": null,
+  "partition": "partitions/reasoning/induction",
+  "provenance": {
+    "author_or_curator": "John Stuart Mill & David Hume",
+    "content_sha256": "6e541354d7c774d2b6b8fbb3a76c5d13dc24312b759eba5d8b01e5cf0e124350",
+    "imported_at": "2026-09-29T09:59:50Z",
+    "license": "Public Domain",
+    "source_uri": "A System of Logic (John Stuart Mill, 1843)"
+  },
+  "source": "A System of Logic (John Stuart Mill, 1843)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "empirical_induction_and_statistical_generalization",
+  "subpartition": "induction",
+  "tags": [
+    "induction",
+    "empirical_inference",
+    "generalization",
+    "scientific_method",
+    "reasoning"
+  ],
+  "topic": "reasoning",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

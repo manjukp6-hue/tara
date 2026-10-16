@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Abraham de Moivre",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://archive.org/details/doctrineofchance00moiv"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Principle of Inclusion-Exclusion\nExact Expression: \\left| \\bigcup_{i=1}^n A_i \\right| = \\sum_{k=1}^n (-1)^{k-1} \\sum_{1 \\le i_1 < \\dots < i_k \\le n} |A_{i_1} \\cap \\dots \\cap A_{i_k}|\nDefinitions: Counting technique computing the size of a union of finite sets by alternating additions and subtractions of intersections.\nDerivation/Reference: Abraham de Moivre (1718); Daniel da Silva (1854); J. J. Sylvester (1883)\nExample: For 2 sets: |A|=10, |B|=15, |A cap B|=4 -> |A cup B| = 10 + 15 - 4 = 21\nDomain: discrete_mathematics\nAssumptions: A_i are finite sets\nCommon Errors: Sign alternation errors at higher orders k",
+  "content_sha256": "23811b6e67718c39a1339a8ece8c5731e0cc11cebec58998e1170f2b22703d7a",
+  "file_path": "storage/knowledge\\partitions/mathematics/discrete_mathematics\\07\\0743bf9e2df3b660.json",
+  "id": "0743bf9e2df3b660",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:30Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/discrete_mathematics",
+  "provenance": {
+    "author_or_curator": "Abraham de Moivre",
+    "content_sha256": "23811b6e67718c39a1339a8ece8c5731e0cc11cebec58998e1170f2b22703d7a",
+    "imported_at": "2026-09-29T10:11:30Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/doctrineofchance00moiv"
+  },
+  "source": "https://archive.org/details/doctrineofchance00moiv",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Principle of Inclusion-Exclusion",
+  "subpartition": "discrete_mathematics",
+  "tags": [
+    "inclusion_exclusion",
+    "combinatorics",
+    "set_theory",
+    "cardinality",
+    "formula",
+    "discrete_mathematics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

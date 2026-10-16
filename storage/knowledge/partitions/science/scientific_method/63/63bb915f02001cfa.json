@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Francis Bacon & Imre Lakatos",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "Novum Organum (Francis Bacon, 1620) & The Methodology of Scientific Research Programmes (Imre Lakatos, 1978)"
+    }
+  ],
+  "category": "science",
+  "confidence": 1.0,
+  "content": "The scientific method is the empirical process of acquiring knowledge characterized by systematic observation, controlled experimentation, precise measurement, mathematical modeling, hypothesis formulation, and rigorous peer replication. Core components include independent variable manipulation, dependent variable measurement, control groups to isolate confounders, and double-blind protocols to eliminate observer bias.",
+  "content_sha256": "603942628743c9c0436ae3244bd595942c1e0cca2aaab6c450cb1f106ebcd2e1",
+  "file_path": "storage/knowledge\\partitions/science/scientific_method\\63\\63bb915f02001cfa.json",
+  "id": "63bb915f02001cfa",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:33Z",
+  "originating_record_id": null,
+  "partition": "partitions/science/scientific_method",
+  "provenance": {
+    "author_or_curator": "Francis Bacon & Imre Lakatos",
+    "content_sha256": "603942628743c9c0436ae3244bd595942c1e0cca2aaab6c450cb1f106ebcd2e1",
+    "imported_at": "2026-09-29T10:11:33Z",
+    "license": "Public Domain",
+    "source_uri": "Novum Organum (Francis Bacon, 1620) & The Methodology of Scientific Research Programmes (Imre Lakatos, 1978)"
+  },
+  "source": "Novum Organum (Francis Bacon, 1620) & The Methodology of Scientific Research Programmes (Imre Lakatos, 1978)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "empirical_scientific_method_and_experimental_controls",
+  "subpartition": "scientific_method",
+  "tags": [
+    "scientific_method",
+    "experimental_design",
+    "control_groups",
+    "empirical_inquiry",
+    "double_blind",
+    "science"
+  ],
+  "topic": "science",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

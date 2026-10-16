@@ -1,0 +1,40 @@
+{
+  "alternative_sources": [
+    {
+      "author": "C++",
+      "license": "Public ISO Standard",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://en.cppreference.com/w/cpp"
+    }
+  ],
+  "category": "languages",
+  "confidence": 1.0,
+  "content": "Programming Language Reference: C++\nVersion: ISO/IEC 14882:2020 (C++20 / C++23)\nSyntax: Multi-paradigm language extending C with classes, templates, exceptions, namespaces, operator overloading, and RAII.\nSemantics: High-performance native compilation, zero-overhead abstraction principle, deterministic object destruction.\nType System: Statically typed, nominal subtyping, compile-time metaprogramming via templates and concepts (C++20).\nMemory Model: RAII with smart pointers (std::unique_ptr, std::shared_ptr), move semantics (std::move, rvalue references &&).\nConcurrency: std::thread, std::jthread, std::async, std::atomic, std::mutex, condition variables, coroutines (C++20).\nError Handling: Exception handling via try/catch/throw, std::expected (C++23), std::optional.\nStandard APIs: std::vector, std::unordered_map, std::string, std::filesystem, std::ranges, std::format\nSpecification: ISO/IEC 14882 Standard\nOfficial Docs: https://en.cppreference.com/w/cpp",
+  "content_sha256": "22523daec2181aae29648f44b8d194c4ede313462dd50c534bc2abfa245aa4e6",
+  "file_path": "storage/knowledge\\partitions/languages/c++\\09\\093999ee1c3fa865.json",
+  "id": "093999ee1c3fa865",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:49Z",
+  "originating_record_id": null,
+  "partition": "partitions/languages/c++",
+  "provenance": {
+    "author_or_curator": "C++",
+    "content_sha256": "22523daec2181aae29648f44b8d194c4ede313462dd50c534bc2abfa245aa4e6",
+    "imported_at": "2026-09-29T09:59:49Z",
+    "license": "Public ISO Standard",
+    "source_uri": "https://en.cppreference.com/w/cpp"
+  },
+  "source": "https://en.cppreference.com/w/cpp",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "language_spec_c++",
+  "subpartition": "c++",
+  "tags": [
+    "programming_languages",
+    "c++",
+    "language_specification",
+    "languages"
+  ],
+  "topic": "languages",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "United States Geological Survey (USGS)",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://www.usgs.gov/educational-resources/continents-and-oceans"
+    }
+  ],
+  "category": "geography",
+  "confidence": 1.0,
+  "content": "Earth physical geography comprises 7 continents (Asia: 44.58M km^2, Africa: 30.37M km^2, North America: 24.71M km^2, South America: 17.84M km^2, Antarctica: 14.20M km^2, Europe: 10.18M km^2, Australia/Oceania: 8.60M km^2) and 5 major oceans (Pacific: 165.25M km^2, Atlantic: 106.46M km^2, Indian: 70.56M km^2, Southern: 20.33M km^2, Arctic: 14.06M km^2). Highest elevation is Mount Everest (8,848.86 m) and deepest point is Challenger Deep in Mariana Trench (10,994 m).",
+  "content_sha256": "eff832f396d12cb73ae33bdf3876ac2ab687e84b9ea7dcf7911d90b714f9e278",
+  "file_path": "storage/knowledge\\partitions/geography/physical\\9a\\9a36063458e503c6.json",
+  "id": "9a36063458e503c6",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:50Z",
+  "originating_record_id": null,
+  "partition": "partitions/geography/physical",
+  "provenance": {
+    "author_or_curator": "United States Geological Survey (USGS)",
+    "content_sha256": "eff832f396d12cb73ae33bdf3876ac2ab687e84b9ea7dcf7911d90b714f9e278",
+    "imported_at": "2026-09-29T09:59:50Z",
+    "license": "Public Domain",
+    "source_uri": "https://www.usgs.gov/educational-resources/continents-and-oceans"
+  },
+  "source": "https://www.usgs.gov/educational-resources/continents-and-oceans",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "earth_continents_and_major_oceans",
+  "subpartition": "physical",
+  "tags": [
+    "geography",
+    "continents",
+    "oceans",
+    "mount_everest",
+    "physical_geography",
+    "physical"
+  ],
+  "topic": "geography",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

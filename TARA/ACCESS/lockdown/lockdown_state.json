@@ -1,0 +1,8 @@
+{
+  "current_state": "NORMAL",
+  "crypto_failure_count": 0,
+  "biometric_failure_count": 0,
+  "temporary_locked_until": null,
+  "lockdown_reason": null,
+  "write_block_active": false
+}

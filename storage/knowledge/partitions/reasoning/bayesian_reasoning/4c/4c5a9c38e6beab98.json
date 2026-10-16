@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Thomas Bayes & Edwin T. Jaynes",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:39Z",
+      "source": "Philosophical Transactions (Bayes, 1763) & Probability Theory: The Logic of Science (E. T. Jaynes, 2003)"
+    }
+  ],
+  "category": "reasoning",
+  "confidence": 1.0,
+  "content": "Bayesian reasoning models rational belief updating over hypothesis space H given observed empirical evidence E: P(H|E) = P(E|H)P(H) / P(E). Relative hypothesis comparison uses the Bayes Factor K = P(E|H1) / P(E|H0). Quantifies how evidence should rationally shift subjective confidence, formalizing scientific inference under uncertainty.",
+  "content_sha256": "f15855a5d3d19d27ef607c813694d534d3615c049aa8bf33f9f193289f42f37c",
+  "file_path": "storage/knowledge\\partitions/reasoning/bayesian_reasoning\\4c\\4c5a9c38e6beab98.json",
+  "id": "4c5a9c38e6beab98",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:35Z",
+  "originating_record_id": null,
+  "partition": "partitions/reasoning/bayesian_reasoning",
+  "provenance": {
+    "author_or_curator": "Thomas Bayes & Edwin T. Jaynes",
+    "content_sha256": "f15855a5d3d19d27ef607c813694d534d3615c049aa8bf33f9f193289f42f37c",
+    "imported_at": "2026-09-29T10:11:35Z",
+    "license": "Public Domain",
+    "source_uri": "Philosophical Transactions (Bayes, 1763) & Probability Theory: The Logic of Science (E. T. Jaynes, 2003)"
+  },
+  "source": "Philosophical Transactions (Bayes, 1763) & Probability Theory: The Logic of Science (E. T. Jaynes, 2003)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "bayesian_epistemology_and_belief_updating",
+  "subpartition": "bayesian_reasoning",
+  "tags": [
+    "bayesian_reasoning",
+    "bayes_factor",
+    "epistemology",
+    "belief_updating",
+    "priors",
+    "reasoning"
+  ],
+  "topic": "reasoning",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

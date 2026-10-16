@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "manifest_name": "TARA Canonical Artifact Manifest",
+  "manifest_version": "1.0.0",
+  "model_identity": "TARA",
+  "model_version": "none",
+  "protocol_version": "1.0.0",
+  "canonical_model_sha256": "NO_MODEL_REGISTERED",
+  "canonical_param_count": 0,
+  "note": "The 118,080-parameter smoke-test model has been cleanly removed. No active production model is currently registered. All artifact hashes are computed dynamically at runtime from authentic filesystem state.",
+  "artifacts": {
+    "tokenizer": {
+      "path": "storage/models/tara_candidate_v1/tokenizer.json",
+      "sha256": "DYNAMIC_RUNTIME_VERIFIED",
+      "required": true,
+      "format": "json"
+    },
+    "contract_schemas": {
+      "path": "TARA/CONTRACTS/v1/schemas.json",
+      "sha256": "DYNAMIC_RUNTIME_VERIFIED",
+      "required": true,
+      "format": "json_schema"
+    },
+    "rust_contracts": {
+      "path": "rust/tara_server/src/rules/contract.rs",
+      "sha256": "DYNAMIC_RUNTIME_VERIFIED",
+      "required": true,
+      "format": "rust"
+    }
+  },
+  "runtime_invariants": {
+    "allow_unverified_model": false,
+    "allow_unauthenticated_workers": false,
+    "enforce_zero_trust": true,
+    "creator_authority_id": "ROOT_OPERATOR",
+    "creator_display_name": "OPERATOR_ROOT"
+  }
+}

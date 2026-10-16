@@ -1,0 +1,44 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Emmy Noether & Camille Jordan",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://doi.org/10.1007/BF01449112"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: First Isomorphism Theorem for Groups\nExact Expression: G / \\ker(\\phi) \\cong \\mathrm{im}(\\phi)\nDefinitions: Fundamental theorem stating that the quotient group of a group by the kernel of a homomorphism is naturally isomorphic to its image.\nDerivation/Reference: Derived by Camille Jordan (1870) and formalized by Emmy Noether (1927)\nExample: phi: (Z, +) -> ({1, -1}, *) with phi(n) = (-1)^n -> ker(phi) = 2Z -> Z / 2Z cong {1, -1}\nDomain: abstract_algebra\nAssumptions: phi is a valid group homomorphism\nCommon Errors: Forgetting that ker(phi) must be a normal subgroup in non-abelian groups",
+  "content_sha256": "dd0fe108ef15960a3c2feef98a1326cf94e467194d7071f89ed8fcad3264c4f6",
+  "file_path": "storage/knowledge\\partitions/mathematics/abstract_algebra\\61\\61872cc45887b4c6.json",
+  "id": "61872cc45887b4c6",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:30Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/abstract_algebra",
+  "provenance": {
+    "author_or_curator": "Emmy Noether & Camille Jordan",
+    "content_sha256": "dd0fe108ef15960a3c2feef98a1326cf94e467194d7071f89ed8fcad3264c4f6",
+    "imported_at": "2026-09-29T10:11:30Z",
+    "license": "Public Domain",
+    "source_uri": "https://doi.org/10.1007/BF01449112"
+  },
+  "source": "https://doi.org/10.1007/BF01449112",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "First Isomorphism Theorem for Groups",
+  "subpartition": "abstract_algebra",
+  "tags": [
+    "isomorphism",
+    "homomorphism",
+    "quotient_group",
+    "kernel",
+    "noether",
+    "formula",
+    "abstract_algebra",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

@@ -1,0 +1,42 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Thomas Bayes & Richard Price",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://doi.org/10.1098/rstl.1763.0053"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Bayes' Theorem\nExact Expression: P(A|B) = \\frac{P(B|A) \\, P(A)}{P(B)}\nDefinitions: Mathematical formulation describing the probability of an event based on prior knowledge of conditions that might be related to the event.\nDerivation/Reference: Thomas Bayes, An Essay towards solving a Problem in the Doctrine of Chances (1763); Pierre-Simon Laplace (1774)\nExample: Prior disease prevalence P(D)=0.01, test sensitivity P(T|D)=0.95, false positive P(T|~D)=0.05 -> P(D|T) = (0.95*0.01)/(0.95*0.01 + 0.05*0.99) = 0.161\nDomain: probability\nAssumptions: P(B) > 0\nCommon Errors: Base rate fallacy: ignoring prior probability P(A) and equating P(A|B) with P(B|A)",
+  "content_sha256": "6c6600377ede794e6eccb5378ae09f5dd128cfb778dd30cd38e99877458703d9",
+  "file_path": "storage/knowledge\\partitions/mathematics/probability\\14\\14baa78d7a7257d0.json",
+  "id": "14baa78d7a7257d0",
+  "last_merged_at": "2026-09-29T10:34:32Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/probability",
+  "provenance": {
+    "author_or_curator": "Thomas Bayes & Richard Price",
+    "content_sha256": "6c6600377ede794e6eccb5378ae09f5dd128cfb778dd30cd38e99877458703d9",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "https://doi.org/10.1098/rstl.1763.0053"
+  },
+  "source": "https://doi.org/10.1098/rstl.1763.0053",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Bayes' Theorem",
+  "subpartition": "probability",
+  "tags": [
+    "bayesian",
+    "conditional_probability",
+    "inference",
+    "formula",
+    "probability",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

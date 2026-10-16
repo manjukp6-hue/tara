@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Fischer Black & Myron Scholes",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://doi.org/10.1086/260062"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Black-Scholes Differential Equation\nExact Expression: \\frac{\\partial V}{\\partial t} + \\frac{1}{2}\\sigma^2 S^2 \\frac{\\partial^2 V}{\\partial S^2} + r S \\frac{\\partial V}{\\partial S} - r V = 0\nDefinitions: Partial differential equation governing the price evolution of European call and put options under continuous-time geometric Brownian motion.\nDerivation/Reference: Fischer Black & Myron Scholes, The Pricing of Options and Corporate Liabilities (Journal of Political Economy, 1973); Robert C. Merton (1973)\nExample: European call closed-form with d1 = [ln(S/K) + (r + sigma^2/2)(T-t)] / [sigma*sqrt(T-t)]\nDomain: financial_mathematics\nAssumptions: Geometric Brownian motion dS = mu S dt + sigma S dW; No arbitrage, frictionless markets, constant risk-free rate\nCommon Errors: Assuming constant volatility across all strikes and maturities (ignoring volatility smile/skew)",
+  "content_sha256": "617a609f1f30b03c6ee843adb16b7403ec890ca22fa6f74260ec44357017e978",
+  "file_path": "storage/knowledge\\partitions/mathematics/financial_mathematics\\62\\62f217e04ef50d84.json",
+  "id": "62f217e04ef50d84",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:31Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/financial_mathematics",
+  "provenance": {
+    "author_or_curator": "Fischer Black & Myron Scholes",
+    "content_sha256": "617a609f1f30b03c6ee843adb16b7403ec890ca22fa6f74260ec44357017e978",
+    "imported_at": "2026-09-29T10:11:31Z",
+    "license": "Public Domain",
+    "source_uri": "https://doi.org/10.1086/260062"
+  },
+  "source": "https://doi.org/10.1086/260062",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Black-Scholes Differential Equation",
+  "subpartition": "financial_mathematics",
+  "tags": [
+    "black_scholes",
+    "financial_math",
+    "options_pricing",
+    "ito_calculus",
+    "formula",
+    "financial_mathematics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

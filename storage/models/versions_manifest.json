@@ -1,0 +1,20 @@
+{
+  "active_version": null,
+  "model_status": "NO_MODEL_REGISTERED",
+  "note": "The 118,080-parameter smoke-test model (TARA_PROMOTED_RUN_20260916_144324) has been removed. It was a Cargo integration / smoke-test model only — never intended for production, inference, or deployment. The production TARA model has not yet been trained. Register a real trained model here before production deployment.",
+  "rollback_history": [
+    {
+      "version_id": "TARA_PROMOTED_RUN_20260916_144324",
+      "parameter_count": 118080,
+      "timestamp": "2026-09-17T07:13:00Z",
+      "removal_reason": "Smoke-test model removed 2026-10-01. Was a 118K-parameter Cargo integration test model. Not production-grade.",
+      "status": "removed"
+    },
+    {
+      "version_id": "TARA_BASELINE",
+      "timestamp": "2026-09-15T11:59:07Z",
+      "status": "archived_weights_missing"
+    }
+  ],
+  "versions": {}
+}

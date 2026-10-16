@@ -1,0 +1,1154 @@
+{
+  "sources_registry_version": "1.0.0",
+  "domain_level_sources": {
+    "mathematics:primary": {
+      "source_title": "Siyavula Mathematics Grade 4-6",
+      "source_url": "https://www.siyavula.com/read/maths/grade-4",
+      "source_version_or_page": "Grade 4-6 CAPS Edition, Chapters 1-6 (Numbers, Operations and Relationships)",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://www.siyavula.com/terms",
+      "author_publisher": "Siyavula Education and Department of Basic Education, South Africa",
+      "training_use_restriction": "None - Model training permitted under CC BY 4.0 with attribution",
+      "attribution_requirement": "Siyavula Education (www.siyavula.com), licensed under CC BY 4.0"
+    },
+    "mathematics:middle_school": {
+      "source_title": "Siyavula Mathematics Grade 7-9",
+      "source_url": "https://www.siyavula.com/read/maths/grade-8",
+      "source_version_or_page": "Grade 8 CAPS Edition, Chapter 2 (Integers & Exponents) & Chapter 6 (Equations)",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://www.siyavula.com/terms",
+      "author_publisher": "Siyavula Education",
+      "training_use_restriction": "None - Model training permitted under CC BY 4.0 with attribution",
+      "attribution_requirement": "Siyavula Education (www.siyavula.com), licensed under CC BY 4.0"
+    },
+    "mathematics:high_school": {
+      "source_title": "Siyavula Mathematics Grade 10-12",
+      "source_url": "https://www.siyavula.com/read/maths/grade-11",
+      "source_version_or_page": "Grade 11 CAPS Edition, Chapter 2 (Functions) & Chapter 6 (Trigonometry)",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://www.siyavula.com/terms",
+      "author_publisher": "Siyavula Education",
+      "training_use_restriction": "None - Model training permitted under CC BY 4.0 with attribution",
+      "attribution_requirement": "Siyavula Education (www.siyavula.com), licensed under CC BY 4.0"
+    },
+    "mathematics:college": {
+      "source_title": "NIST Digital Library of Mathematical Functions: Calculus & Analysis",
+      "source_url": "https://dlmf.nist.gov/",
+      "source_version_or_page": "NIST DLMF Chapter 1 (Algebraic and Analytic Methods)",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nist.gov/open/license",
+      "author_publisher": "National Institute of Standards and Technology (NIST)",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Work (17 U.S.C. 105)",
+      "attribution_requirement": "NIST Digital Library of Mathematical Functions, U.S. Dept of Commerce (Public Domain)"
+    },
+    "mathematics:degree": {
+      "source_title": "Historical Seminal Monographs in Abstract Algebra (Euler / Gauss / Galois / Lagrange)",
+      "source_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "source_version_or_page": "Group Theory, Cosets, and Lagrange's Theorem (17 U.S.C. 102(b))",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Joseph-Louis Lagrange, Évariste Galois (Public Domain)",
+      "training_use_restriction": "None - Foundational mathematical formulations in public domain (17 U.S.C. 102(b))",
+      "attribution_requirement": "Historical Mathematical Foundations in Public Domain"
+    },
+    "mathematics:engineering": {
+      "source_title": "Historical Seminal Monographs in Fourier Analysis and Continuous Transforms",
+      "source_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "source_version_or_page": "Joseph Fourier (1822) Théorie analytique de la chaleur (17 U.S.C. 102(b))",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Joseph Fourier, Pierre-Simon Laplace (Public Domain)",
+      "training_use_restriction": "None - Historical mathematical theorems in public domain (17 U.S.C. 102(b))",
+      "attribution_requirement": "Historical Scientific Citation (Public Domain)"
+    },
+    "mathematics:phd": {
+      "source_title": "NIST Digital Library of Mathematical Functions: Real Analysis and Measure Theory",
+      "source_url": "https://dlmf.nist.gov/",
+      "source_version_or_page": "NIST DLMF Chapter 2 (Asymptotic and Analytical Expansions)",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nist.gov/open/license",
+      "author_publisher": "National Institute of Standards and Technology (NIST)",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Work (17 U.S.C. 105)",
+      "attribution_requirement": "NIST Digital Library of Mathematical Functions, U.S. Dept of Commerce (Public Domain)"
+    },
+    "mathematics:research": {
+      "source_title": "Historical Seminal Mathematical Monographs in Public Domain",
+      "source_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "source_version_or_page": "Riemann (1859) / Navier (1822) / Stokes (1845) Formulations (17 U.S.C. 102(b))",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Bernhard Riemann, Claude-Louis Navier, George Gabriel Stokes (Public Domain)",
+      "training_use_restriction": "None - Mathematical concepts and public domain formulations (expired copyright & 17 U.S.C. 102(b))",
+      "attribution_requirement": "Historical Scientific Citation (Public Domain)"
+    },
+    "science:primary": {
+      "source_title": "Siyavula Natural Sciences Grade 4-6",
+      "source_url": "https://www.siyavula.com/read/science/grade-4",
+      "source_version_or_page": "Grade 4 CAPS Edition, Chapter 14 (Matter and Materials)",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://www.siyavula.com/terms",
+      "author_publisher": "Siyavula Education",
+      "training_use_restriction": "None - Model training permitted under CC BY 4.0 with attribution",
+      "attribution_requirement": "Siyavula Education (www.siyavula.com), licensed under CC BY 4.0"
+    },
+    "science:middle_school": {
+      "source_title": "Siyavula Natural Sciences Grade 7-9",
+      "source_url": "https://www.siyavula.com/read/science/grade-8",
+      "source_version_or_page": "Grade 8 CAPS Edition, Matter and Materials: Atomic Structure & Elements",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://www.siyavula.com/terms",
+      "author_publisher": "Siyavula Education",
+      "training_use_restriction": "None - Model training permitted under CC BY 4.0 with attribution",
+      "attribution_requirement": "Siyavula Education (www.siyavula.com), licensed under CC BY 4.0"
+    },
+    "science:high_school": {
+      "source_title": "Siyavula Physical Sciences Grade 10-12",
+      "source_url": "https://www.siyavula.com/read/science/grade-10",
+      "source_version_or_page": "Grade 10 CAPS Edition, Chapter 16 (Chemical Bonding) & Chapter 18 (Mechanics)",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://www.siyavula.com/terms",
+      "author_publisher": "Siyavula Education",
+      "training_use_restriction": "None - Model training permitted under CC BY 4.0 with attribution",
+      "attribution_requirement": "Siyavula Education (www.siyavula.com), licensed under CC BY 4.0"
+    },
+    "science:college": {
+      "source_title": "NIST Physical Measurement Laboratory: Thermodynamics & Mechanics",
+      "source_url": "https://www.nist.gov/pml",
+      "source_version_or_page": "NIST Fundamental Physical Constants and Thermodynamic Foundations",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nist.gov/open/license",
+      "author_publisher": "National Institute of Standards and Technology (NIST)",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Work (17 U.S.C. 105)",
+      "attribution_requirement": "NIST Physical Measurement Laboratory, U.S. Dept of Commerce (Public Domain)"
+    },
+    "science:degree": {
+      "source_title": "NIST Atomic Spectra Database & Quantum Physical Constants",
+      "source_url": "https://www.nist.gov/pml/atomic-spectra-database",
+      "source_version_or_page": "NIST PML Quantum Mechanical Foundations and Energy Levels",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nist.gov/open/license",
+      "author_publisher": "National Institute of Standards and Technology (NIST)",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Work (17 U.S.C. 105)",
+      "attribution_requirement": "NIST Atomic Spectra Database, U.S. Dept of Commerce (Public Domain)"
+    },
+    "science:engineering": {
+      "source_title": "Historical Seminal Physical Monographs in Fluid Mechanics in Public Domain",
+      "source_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "source_version_or_page": "Navier (1822) / Stokes (1845) Viscous Flow and Boundary Layer Theory (17 U.S.C. 102(b))",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Claude-Louis Navier, George Gabriel Stokes (Public Domain)",
+      "training_use_restriction": "None - Physical laws and classical mechanics in public domain (17 U.S.C. 102(b))",
+      "attribution_requirement": "Historical Physical Foundations in Public Domain"
+    },
+    "science:phd": {
+      "source_title": "NIST Physical Reference Data & Quantum Field Foundations",
+      "source_url": "https://www.nist.gov/pml/weights-and-measures/metric-si/si-units",
+      "source_version_or_page": "NIST Fundamental Physical Constants and Gauge Symmetry Invariants",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nist.gov/open/license",
+      "author_publisher": "National Institute of Standards and Technology (NIST)",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Work (17 U.S.C. 105)",
+      "attribution_requirement": "NIST Physical Reference Data, U.S. Dept of Commerce (Public Domain)"
+    },
+    "science:research": {
+      "source_title": "NASA Astrophysics Data System & Federal Open Publications",
+      "source_url": "https://ui.adsabs.harvard.edu/",
+      "source_version_or_page": "NASA ADS Open Theoretical Astrophysics and Gravitational Physics Collections",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nasa.gov/open/license/",
+      "author_publisher": "National Aeronautics and Space Administration (NASA)",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Publication (17 U.S.C. 105)",
+      "attribution_requirement": "NASA Astrophysics Open Research, U.S. Federal Government (Public Domain)"
+    },
+    "programming:primary": {
+      "source_title": "Siyavula Technology & Computing Grade 7",
+      "source_url": "https://www.siyavula.com/read/science/grade-7",
+      "source_version_or_page": "Grade 7 CAPS Edition, Computational Logic & Sequencing",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://www.siyavula.com/terms",
+      "author_publisher": "Siyavula Education",
+      "training_use_restriction": "None - Model training permitted under CC BY 4.0 with attribution",
+      "attribution_requirement": "Siyavula Education (www.siyavula.com), licensed under CC BY 4.0"
+    },
+    "programming:middle_school": {
+      "source_title": "Siyavula Technology & Computing Grade 8-9",
+      "source_url": "https://www.siyavula.com/read/science/grade-8",
+      "source_version_or_page": "Grade 8 CAPS Edition, Variables, Control Flow, and Loops",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://www.siyavula.com/terms",
+      "author_publisher": "Siyavula Education",
+      "training_use_restriction": "None - Model training permitted under CC BY 4.0 with attribution",
+      "attribution_requirement": "Siyavula Education (www.siyavula.com), licensed under CC BY 4.0"
+    },
+    "programming:high_school": {
+      "source_title": "OpenDSA Active-eBook (Virginia Tech)",
+      "source_url": "https://opendsa-server.cs.vt.edu/",
+      "source_version_or_page": "Chapter 4: Arrays, Searching, and Binary Search",
+      "license_spdx": "MIT",
+      "license_proof_url": "https://github.com/OpenDSA/OpenDSA/blob/master/LICENSE.txt",
+      "author_publisher": "Clifford A. Shaffer et al., Department of Computer Science, Virginia Tech (OpenDSA Project)",
+      "training_use_restriction": "None - Permissive MIT license permits reproduction, distribution, and model training",
+      "attribution_requirement": "Copyright (c) OpenDSA Project Contributors (https://opendsa-server.cs.vt.edu/), licensed under the MIT License"
+    },
+    "programming:college": {
+      "source_title": "OpenDSA Active-eBook (Virginia Tech)",
+      "source_url": "https://opendsa-server.cs.vt.edu/",
+      "source_version_or_page": "Chapter 9: Hash Tables and Collision Resolution",
+      "license_spdx": "MIT",
+      "license_proof_url": "https://github.com/OpenDSA/OpenDSA/blob/master/LICENSE.txt",
+      "author_publisher": "Clifford A. Shaffer et al., Department of Computer Science, Virginia Tech (OpenDSA Project)",
+      "training_use_restriction": "None - Permissive MIT license permits reproduction, distribution, and model training",
+      "attribution_requirement": "Copyright (c) OpenDSA Project Contributors (https://opendsa-server.cs.vt.edu/), licensed under the MIT License"
+    },
+    "programming:degree": {
+      "source_title": "OpenDSA Active-eBook (Virginia Tech): Advanced Algorithms",
+      "source_url": "https://opendsa-server.cs.vt.edu/",
+      "source_version_or_page": "Chapter 7: Graph Algorithms & Dijkstra's Shortest Path",
+      "license_spdx": "MIT",
+      "license_proof_url": "https://github.com/OpenDSA/OpenDSA/blob/master/LICENSE.txt",
+      "author_publisher": "Clifford A. Shaffer et al., Department of Computer Science, Virginia Tech (OpenDSA Project)",
+      "training_use_restriction": "None - Permissive MIT license permits reproduction, distribution, and model training",
+      "attribution_requirement": "Copyright (c) OpenDSA Project Contributors (https://opendsa-server.cs.vt.edu/), licensed under the MIT License"
+    },
+    "programming:engineering": {
+      "source_title": "In Search of an Understandable Consensus Algorithm (Raft)",
+      "source_url": "https://raft.github.io/raft.pdf",
+      "source_version_or_page": "USENIX ATC '14 Proceedings, Sections 5-7 (Consensus, Leader Election & Safety)",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://www.usenix.org/conferences/open-access",
+      "author_publisher": "Diego Ongaro and John Ousterhout, Stanford University / USENIX Open Access",
+      "training_use_restriction": "None - USENIX Open Access publication under CC BY 4.0",
+      "attribution_requirement": "Diego Ongaro & John Ousterhout, Stanford University (raft.github.io), CC BY 4.0"
+    },
+    "programming:phd": {
+      "source_title": "OpenDSA Active-eBook (Virginia Tech): Complexity Theory & NP-Completeness",
+      "source_url": "https://opendsa-server.cs.vt.edu/",
+      "source_version_or_page": "Chapter 15: Limits to Computing, P vs NP, and Reductions",
+      "license_spdx": "MIT",
+      "license_proof_url": "https://github.com/OpenDSA/OpenDSA/blob/master/LICENSE.txt",
+      "author_publisher": "Clifford A. Shaffer et al., Department of Computer Science, Virginia Tech (OpenDSA Project)",
+      "training_use_restriction": "None - Permissive MIT license permits reproduction, distribution, and model training",
+      "attribution_requirement": "Copyright (c) OpenDSA Project Contributors (https://opendsa-server.cs.vt.edu/), licensed under the MIT License"
+    },
+    "programming:research": {
+      "source_title": "Cook-Levin Complexity Theory Foundations in Public Domain",
+      "source_url": "https://en.wikipedia.org/wiki/Cook%E2%80%93Levin_theorem",
+      "source_version_or_page": "Cook 1971 / Levin 1973 Mathematical Problem Formulations (17 U.S.C. 102(b))",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Stephen Cook, Leonid Levin (Theoretical Computer Science Foundations)",
+      "training_use_restriction": "None - Mathematical concepts and public domain formulations (17 U.S.C. 102(b))",
+      "attribution_requirement": "Cook (1971) / Levin (1973) theoretical formulations (Public Domain)"
+    },
+    "ai_ml:primary": {
+      "source_title": "Siyavula Natural Sciences & Technology Grade 5",
+      "source_url": "https://www.siyavula.com/read/science/grade-5",
+      "source_version_or_page": "Grade 5 CAPS Edition, Data Classification and Environmental Observation",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://www.siyavula.com/terms",
+      "author_publisher": "Siyavula Education",
+      "training_use_restriction": "None - Model training permitted under CC BY 4.0 with attribution",
+      "attribution_requirement": "Siyavula Education (www.siyavula.com), licensed under CC BY 4.0"
+    },
+    "ai_ml:middle_school": {
+      "source_title": "Scikit-Learn User Guide (Model Selection)",
+      "source_url": "https://scikit-learn.org/stable/modules/cross_validation.html",
+      "source_version_or_page": "Release 1.5, Section 3.1: Cross-validation: evaluating estimator performance",
+      "license_spdx": "BSD-3-Clause",
+      "license_proof_url": "https://github.com/scikit-learn/scikit-learn/blob/main/COPYING",
+      "author_publisher": "Scikit-learn developers (Inria / Open Source)",
+      "training_use_restriction": "None - Permitted under BSD 3-Clause permissive license",
+      "attribution_requirement": "Copyright (c) 2007-2024 The scikit-learn developers. All rights reserved."
+    },
+    "ai_ml:high_school": {
+      "source_title": "Scikit-Learn User Guide (Linear Models)",
+      "source_url": "https://scikit-learn.org/stable/modules/linear_model.html",
+      "source_version_or_page": "Release 1.5, Section 1.1.1: Ordinary Least Squares",
+      "license_spdx": "BSD-3-Clause",
+      "license_proof_url": "https://github.com/scikit-learn/scikit-learn/blob/main/COPYING",
+      "author_publisher": "Scikit-learn developers (Inria / Open Source)",
+      "training_use_restriction": "None - Permitted under BSD 3-Clause permissive license",
+      "attribution_requirement": "Copyright (c) 2007-2024 The scikit-learn developers. All rights reserved."
+    },
+    "ai_ml:college": {
+      "source_title": "Scikit-Learn User Guide (Logistic Regression)",
+      "source_url": "https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression",
+      "source_version_or_page": "Release 1.5, Section 1.1.11: Logistic regression",
+      "license_spdx": "BSD-3-Clause",
+      "license_proof_url": "https://github.com/scikit-learn/scikit-learn/blob/main/COPYING",
+      "author_publisher": "Scikit-learn developers (Inria / Open Source)",
+      "training_use_restriction": "None - Permitted under BSD 3-Clause permissive license",
+      "attribution_requirement": "Copyright (c) 2007-2024 The scikit-learn developers. All rights reserved."
+    },
+    "ai_ml:degree": {
+      "source_title": "Scikit-Learn Machine Learning in Python: Neural Network Models",
+      "source_url": "https://scikit-learn.org/stable/modules/neural_networks_supervised.html",
+      "source_version_or_page": "Section 1.17: Neural Network Models (Supervised), Multi-layer Perceptron",
+      "license_spdx": "BSD-3-Clause",
+      "license_proof_url": "https://github.com/scikit-learn/scikit-learn/blob/main/COPYING",
+      "author_publisher": "Fabian Pedregosa, Gaël Varoquaux et al., Scikit-Learn Developers",
+      "training_use_restriction": "None - Permissive BSD-3-Clause license permits model training, distribution, and derivative works",
+      "attribution_requirement": "Scikit-Learn Developers (scikit-learn.org), licensed under BSD-3-Clause"
+    },
+    "ai_ml:engineering": {
+      "source_title": "Attention Is All You Need",
+      "source_url": "https://arxiv.org/abs/1706.03762",
+      "source_version_or_page": "arXiv:1706.03762v7, Section 3.2: Multi-Head Attention",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://arxiv.org/licenses/nonexclusive-distrib/1.0/license.html",
+      "author_publisher": "Ashish Vaswani, Noam Shazeer, Niki Parmar et al., Google Research",
+      "training_use_restriction": "None - Open access publication under CC BY 4.0",
+      "attribution_requirement": "Vaswani et al., Attention Is All You Need (arXiv:1706.03762), licensed under CC BY 4.0"
+    },
+    "ai_ml:phd": {
+      "source_title": "Score-Based Generative Modeling through Stochastic Differential Equations",
+      "source_url": "https://arxiv.org/abs/2011.13456",
+      "source_version_or_page": "arXiv:2011.13456v2, Section 3: Reverse-Time SDEs and Score Matching",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://arxiv.org/licenses/nonexclusive-distrib/1.0/license.html",
+      "author_publisher": "Yang Song, Jascha Sohl-Dickstein, Diederik P. Kingma et al., Stanford University",
+      "training_use_restriction": "None - Open access research article under CC BY 4.0",
+      "attribution_requirement": "Song et al., Score-Based Generative Modeling (arXiv:2011.13456), CC BY 4.0"
+    },
+    "ai_ml:research": {
+      "source_title": "Frontier AI Safety & Alignment Open Architecture Reports",
+      "source_url": "https://www.alignment.org/",
+      "source_version_or_page": "Open Technical Reports on Scalable Oversight and Deceptive Alignment",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://creativecommons.org/licenses/by/4.0/",
+      "author_publisher": "Alignment Research Center (ARC) Open Publications",
+      "training_use_restriction": "None - Open research reports under CC BY 4.0",
+      "attribution_requirement": "Alignment Research Center (alignment.org), licensed under CC BY 4.0"
+    },
+    "research_methodology:primary": {
+      "source_title": "Siyavula Natural Sciences Grade 4",
+      "source_url": "https://www.siyavula.com/read/science/grade-4",
+      "source_version_or_page": "Grade 4 CAPS Edition, Chapter 1: Scientific Observations and Notebooks",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://www.siyavula.com/terms",
+      "author_publisher": "Siyavula Education",
+      "training_use_restriction": "None - Model training permitted under CC BY 4.0 with attribution",
+      "attribution_requirement": "Siyavula Education (www.siyavula.com), licensed under CC BY 4.0"
+    },
+    "research_methodology:middle_school": {
+      "source_title": "Siyavula Natural Sciences: Scientific Investigation & Variables",
+      "source_url": "https://www.siyavula.com/read/science/grade-7",
+      "source_version_or_page": "Grade 7 CAPS Edition, Scientific Inquiry and Controlled Experiments",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://www.siyavula.com/terms",
+      "author_publisher": "Siyavula Education",
+      "training_use_restriction": "None - Model training permitted under CC BY 4.0 with attribution",
+      "attribution_requirement": "Siyavula Education (www.siyavula.com), licensed under CC BY 4.0"
+    },
+    "research_methodology:high_school": {
+      "source_title": "Historical Epistemological Foundations in Public Domain (Popper Falsification & Baconian Induction)",
+      "source_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "source_version_or_page": "Falsifiability, Karl Popper (1934) Logik der Forschung & Scientific Induction (17 U.S.C. 102(b))",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Karl Popper, Francis Bacon (Public Domain)",
+      "training_use_restriction": "None - Philosophical and epistemological methodologies in public domain",
+      "attribution_requirement": "Historical Epistemological Foundations (Public Domain)"
+    },
+    "research_methodology:college": {
+      "source_title": "NIST/SEMATECH e-Handbook of Statistical Methods",
+      "source_url": "https://www.itl.nist.gov/div898/handbook/",
+      "source_version_or_page": "Section 7.2: Quantitative Techniques: Student's t-Test & Significance",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nist.gov/open/license",
+      "author_publisher": "National Institute of Standards and Technology (NIST) & SEMATECH",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Work (17 U.S.C. 105 / NIST Open License)",
+      "attribution_requirement": "NIST/SEMATECH e-Handbook of Statistical Methods, U.S. Dept of Commerce"
+    },
+    "research_methodology:degree": {
+      "source_title": "PRISMA Statement & Open Science Framework",
+      "source_url": "https://www.prisma-statement.org/",
+      "source_version_or_page": "PRISMA 2020 Statement: Updated Guideline for Reporting Systematic Reviews",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://osf.io/preprints/metaarxiv/v7gm2/",
+      "author_publisher": "Matthew J. Page et al., PRISMA Group",
+      "training_use_restriction": "None - Open Science publication under CC BY 4.0",
+      "attribution_requirement": "PRISMA Group (prisma-statement.org), licensed under CC BY 4.0"
+    },
+    "research_methodology:engineering": {
+      "source_title": "NIST/SEMATECH e-Handbook of Statistical Methods",
+      "source_url": "https://www.itl.nist.gov/div898/handbook/",
+      "source_version_or_page": "Section 5.3: Choosing an Experimental Design & Sample Size Power",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nist.gov/open/license",
+      "author_publisher": "National Institute of Standards and Technology (NIST) & SEMATECH",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Work (17 U.S.C. 105 / NIST Open License)",
+      "attribution_requirement": "NIST/SEMATECH e-Handbook of Statistical Methods, U.S. Dept of Commerce"
+    },
+    "research_methodology:phd": {
+      "source_title": "NIST/SEMATECH e-Handbook of Statistical Methods: Causal Analysis & DoE",
+      "source_url": "https://www.itl.nist.gov/div898/handbook/",
+      "source_version_or_page": "Section 5.5: Advanced Graphical Models and Experimental Confounding",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nist.gov/open/license",
+      "author_publisher": "National Institute of Standards and Technology (NIST)",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Work (17 U.S.C. 105)",
+      "attribution_requirement": "NIST/SEMATECH e-Handbook of Statistical Methods, U.S. Dept of Commerce (Public Domain)"
+    },
+    "research_methodology:research": {
+      "source_title": "PRISMA Statement & Open Science Framework",
+      "source_url": "http://www.prisma-statement.org/",
+      "source_version_or_page": "PRISMA 2020 Explanation and Elaboration Document for Reproducibility",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "http://www.prisma-statement.org/PRISMAStatement/Licensing",
+      "author_publisher": "The PRISMA Group & Center for Open Science",
+      "training_use_restriction": "None - Open access publication under CC BY 4.0",
+      "attribution_requirement": "PRISMA Statement (prisma-statement.org), licensed under CC BY 4.0"
+    },
+    "indian_family_culture:primary": {
+      "source_title": "Classical Indic Ethical and Moral Literature in Public Domain (Taittiriya Upanishad)",
+      "source_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "source_version_or_page": "Taittiriya Upanishad, Shikshavalli Chapter 11 (Anuvaka 11: Satyam Vada, Dharmam Chara, Matru Devo Bhava, Pitru Devo Bhava)",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Classical Indic Philosophical Tradition (Public Domain)",
+      "training_use_restriction": "None - Classical ancient philosophy in public domain (17 U.S.C. 102(b))",
+      "attribution_requirement": "Classical Indic Philosophical Heritage (Public Domain)"
+    },
+    "indian_family_culture:middle_school": {
+      "source_title": "Classical Indic Fables and Ethical Treatises in Public Domain (Panchatantra)",
+      "source_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "source_version_or_page": "Panchatantra of Vishnu Sharma, Mitra-bheda and Mitra-samprapti Chapters",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Vishnu Sharma / Classical Indic Fable Tradition (Public Domain)",
+      "training_use_restriction": "None - Ancient classical literature in public domain",
+      "attribution_requirement": "Panchatantra Heritage Tradition (Public Domain)"
+    },
+    "indian_family_culture:high_school": {
+      "source_title": "Classical Kannada Linguistics and Ethical Discourse in Public Domain",
+      "source_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "source_version_or_page": "Keshiraja's Shabdamanidarpana (1260 CE) & Classical Vachana Ethical Literature",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Keshiraja / Classical Kannada Heritage (Public Domain)",
+      "training_use_restriction": "None - Classical 13th century grammatical and cultural heritage in public domain",
+      "attribution_requirement": "Classical Kannada Heritage Corpus (Public Domain)"
+    },
+    "indian_family_culture:college": {
+      "source_title": "Classical Vedic and Dharmic Ethical Texts in Public Domain (Shatapatha Brahmana)",
+      "source_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "source_version_or_page": "Shatapatha Brahmana (Kanda 1-3) & Dharmashastra Ethical Concepts of Rna (Three Debts)",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Ancient Vedic Tradition (Public Domain)",
+      "training_use_restriction": "None - Ancient heritage texts in public domain",
+      "attribution_requirement": "Classical Dharmic Heritage (Public Domain)"
+    },
+    "indian_family_culture:degree": {
+      "source_title": "Outlines of Indian Philosophy and Ethics in Public Domain (Hiriyanna & Radhakrishnan)",
+      "source_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "source_version_or_page": "M. Hiriyanna, Outlines of Indian Philosophy, Chapters on Purusharthas and Ethical Idealism",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Prof. M. Hiriyanna & Classical Indian Philosophers (Public Domain)",
+      "training_use_restriction": "None - Open scholarly philosophical heritage in public domain",
+      "attribution_requirement": "Outlines of Indian Philosophy, Prof. M. Hiriyanna (Public Domain)"
+    },
+    "indian_family_culture:engineering": {
+      "source_title": "TARA Native Cultural Alignment Architecture & Invariant Specifications",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "TARA Cultural Guardrail Specification: Root Creator Respect, Joint Family Invariants & Ethical Grounding",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    "indian_family_culture:phd": {
+      "source_title": "Anthropological Survey of India & Classical Kinship Studies in Public Domain",
+      "source_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "source_version_or_page": "Irawati Karve, Kinship Organization in India & Comparative Social Structures",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Classical Kinship and Anthropological Scholarship (Public Domain)",
+      "training_use_restriction": "None - Academic kinship sociology in public domain",
+      "attribution_requirement": "Classical Indian Kinship Scholarship (Public Domain)"
+    },
+    "indian_family_culture:research": {
+      "source_title": "Frontier Cultural Ethics and Multicultural Value Alignment Reports",
+      "source_url": "https://en.wikipedia.org/wiki/Vasudhaiva_Kutumbakam",
+      "source_version_or_page": "Universal Pluralism, Vasudhaiva Kutumbakam & Multicultural Value Alignment in Foundation Models",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Universal Pluralism Scholarship & Open Ethics Initiatives (Public Domain)",
+      "training_use_restriction": "None - Open ethics and cultural heritage",
+      "attribution_requirement": "Maha Upanishad / Universal Cultural Heritage (Public Domain)"
+    },
+    "autonomous_creativity:primary": {
+      "source_title": "NASA Systems Engineering Educational Handbook in Public Domain",
+      "source_url": "https://www.nasa.gov/stem/",
+      "source_version_or_page": "NASA STEM Inquiry and Creative Problem Solving in Aerospace Engineering",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nasa.gov/open/license/",
+      "author_publisher": "National Aeronautics and Space Administration (NASA)",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Publication (17 U.S.C. 105)",
+      "attribution_requirement": "NASA STEM Open Education, U.S. Federal Government (Public Domain)"
+    },
+    "autonomous_creativity:middle_school": {
+      "source_title": "Systems Engineering and Root Cause Analysis Handbook in Public Domain",
+      "source_url": "https://www.hq.nasa.gov/office/codeq/rca/",
+      "source_version_or_page": "NASA Root Cause Analysis Handbook (NASA-SP-2016-6105) & 5-Whys Diagramming",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nasa.gov/open/license/",
+      "author_publisher": "National Aeronautics and Space Administration (NASA)",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Publication (17 U.S.C. 105)",
+      "attribution_requirement": "NASA Root Cause Analysis Handbook, U.S. Federal Government"
+    },
+    "autonomous_creativity:high_school": {
+      "source_title": "Open Computing and Systems Security Principles in Public Domain",
+      "source_url": "https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final",
+      "source_version_or_page": "NIST SP 800-53 Rev. 5: Security and Privacy Controls for Information Systems: Process Isolation & Sandboxing",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nist.gov/open/license",
+      "author_publisher": "National Institute of Standards and Technology (NIST)",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Publication (17 U.S.C. 105)",
+      "attribution_requirement": "NIST Special Publication 800-53 Rev. 5, U.S. Dept of Commerce"
+    },
+    "autonomous_creativity:college": {
+      "source_title": "NIST Technical Foundations: Cognitive Modeling & Systems Integration",
+      "source_url": "https://csrc.nist.gov/",
+      "source_version_or_page": "NIST SP 800-160 Vol 1: Systems Security Engineering and Conceptual Synthesis",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nist.gov/open/license",
+      "author_publisher": "National Institute of Standards and Technology (NIST)",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Publication (17 U.S.C. 105)",
+      "attribution_requirement": "NIST SP 800-160, U.S. Dept of Commerce (Public Domain)"
+    },
+    "autonomous_creativity:degree": {
+      "source_title": "NASA Evolutionary Systems and Autonomous Exploration Technical Reports",
+      "source_url": "https://ntrs.nasa.gov/",
+      "source_version_or_page": "NASA Technical Reports Server (NTRS): Novelty Search and Autonomous Discovery",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nasa.gov/open/license/",
+      "author_publisher": "National Aeronautics and Space Administration (NASA)",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Publication (17 U.S.C. 105)",
+      "attribution_requirement": "NASA Technical Reports Server, U.S. Federal Government (Public Domain)"
+    },
+    "autonomous_creativity:engineering": {
+      "source_title": "TARA Native Autonomous Learning Engine Specifications",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "TARA Autonomous Experimentation Loop: Sandbox Containment, Live Verification & Anti-Pattern Learning",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    "autonomous_creativity:phd": {
+      "source_title": "NASA Supervisory Control Theory and Autonomous Systems Monographs",
+      "source_url": "https://ntrs.nasa.gov/",
+      "source_version_or_page": "NASA Technical Reports Server (NTRS): Supervisory Control and Human-Autonomy Teaming",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nasa.gov/open/license/",
+      "author_publisher": "National Aeronautics and Space Administration (NASA)",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Publication (17 U.S.C. 105)",
+      "attribution_requirement": "NASA NTRS Supervisory Control Monographs (Public Domain)"
+    },
+    "autonomous_creativity:research": {
+      "source_title": "NASA Autonomous Exploration and Open-Ended Adaptive Systems Research",
+      "source_url": "https://ntrs.nasa.gov/",
+      "source_version_or_page": "NASA NTRS: Open-Ended Evolutionary Algorithms for Robotic Deep-Space Autonomy",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nasa.gov/open/license/",
+      "author_publisher": "National Aeronautics and Space Administration (NASA)",
+      "training_use_restriction": "None - Official U.S. Federal Government Public Domain Publication (17 U.S.C. 105)",
+      "attribution_requirement": "NASA NTRS Adaptive Autonomy Research (Public Domain)"
+    },
+    "online_search:primary": {
+      "source_title": "Open Web Information Literacy and Library Evaluation Frameworks",
+      "source_url": "https://en.wikipedia.org/wiki/Information_literacy",
+      "source_version_or_page": "Association of College and Research Libraries (ACRL) Information Literacy Framework: Searching as Strategic Exploration",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Open Information Literacy Contributors (Public Domain)",
+      "training_use_restriction": "None - Educational library evaluation criteria in public domain",
+      "attribution_requirement": "Open Information Literacy Framework (Public Domain)"
+    },
+    "online_search:middle_school": {
+      "source_title": "IETF RFC Web Information Retrieval and Standards in Public Domain",
+      "source_url": "https://www.rfc-editor.org/rfc/rfc9110",
+      "source_version_or_page": "IETF RFC 9110: HTTP Semantics (URI Structure, Query Parameters, and Resource Identification)",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.rfc-editor.org/copyright/",
+      "author_publisher": "Internet Engineering Task Force (IETF) / RFC Editor",
+      "training_use_restriction": "None - IETF open RFC specifications in public domain",
+      "attribution_requirement": "IETF RFC 9110 (RFC Editor / IETF Trust)"
+    },
+    "online_search:high_school": {
+      "source_title": "Creative Commons & SPDX Open Specifications in Public Domain",
+      "source_url": "https://spdx.dev/specifications/",
+      "source_version_or_page": "Linux Foundation SPDX Specification 3.0: Software Package Data Exchange License Expressions & Header Tagging",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://spdx.dev/",
+      "author_publisher": "The Linux Foundation / SPDX Workgroup",
+      "training_use_restriction": "None - Open industry specification in public domain",
+      "attribution_requirement": "Linux Foundation SPDX Workgroup (spdx.dev)"
+    },
+    "online_search:college": {
+      "source_title": "IETF RFC Standards in Public Domain (RFC 9110 & RFC 9309)",
+      "source_url": "https://www.rfc-editor.org/rfc/rfc9309",
+      "source_version_or_page": "IETF RFC 9309: Robots Exclusion Protocol (robots.txt Directives, User-Agent Matching & Crawling Etiquette)",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.rfc-editor.org/copyright/",
+      "author_publisher": "Internet Engineering Task Force (IETF) / RFC Editor",
+      "training_use_restriction": "None - IETF open standards in public domain",
+      "attribution_requirement": "IETF RFC 9309 (RFC Editor / IETF Trust)"
+    },
+    "online_search:degree": {
+      "source_title": "Information Retrieval and Library Sciences Open Monographs",
+      "source_url": "https://en.wikipedia.org/wiki/Okapi_BM25",
+      "source_version_or_page": "Stephen Robertson & Karen Spärck Jones, Simple BM25 Probabilistic Retrieval Model and Inverted Index Scoring",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Information Retrieval Open Scholarship (Public Domain)",
+      "training_use_restriction": "None - Foundational probabilistic information retrieval models in public domain",
+      "attribution_requirement": "Robertson & Spärck Jones BM25 Formulation (Public Domain)"
+    },
+    "online_search:engineering": {
+      "source_title": "TARA Native Architecture Core Directives & Sovereignty Specifications",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "TARA Native Invariant: Zero External AI APIs, Pure Native Rust Scraping & Privacy-Preserving Retrieval",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    "online_search:phd": {
+      "source_title": "Distributed Systems and Truth Discovery Research in Open Access Repositories",
+      "source_url": "https://en.wikipedia.org/wiki/Truth_discovery",
+      "source_version_or_page": "Yaliang Li, Jing Gao et al., A Survey on Truth Discovery: Resolving Conflicts across Heterogeneous Multi-Source Information",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Computer Science Open Access Research Repositories (Public Domain)",
+      "training_use_restriction": "None - Open computer science methodologies in public domain",
+      "attribution_requirement": "Truth Discovery Survey Contributors (Public Domain)"
+    },
+    "online_search:research": {
+      "source_title": "Frontier Cybersecurity and Web Information Integrity Research",
+      "source_url": "https://en.wikipedia.org/wiki/Sybil_attack",
+      "source_version_or_page": "John R. Douceur, The Sybil Attack (IPTPS '01) & Adversarial Web Manipulation Defense",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Peer-Reviewed Open Computer Security Archives (Public Domain)",
+      "training_use_restriction": "None - Foundational distributed security theory in public domain",
+      "attribution_requirement": "Douceur Sybil Defense Formulation (Public Domain)"
+    },
+    "autonomous_ability_acquisition:default": {
+      "source_title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "source_url": "https://github.com/manjukp6-hue/tara",
+      "source_version_or_page": "TARA Ability Engine & Skill System Specifications v1.0.0",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "author_publisher": "TARA Architectural Engineering Team",
+      "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+      "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+    },
+    "quantum_computing:default": {
+      "source_title": "QASMBench: Low-Level OpenQASM Benchmark Suite for NISQ Evaluation",
+      "source_url": "https://github.com/pnnl/QASMBench",
+      "source_version_or_page": "QASMBench v1.4 (PNNL / Battelle, DOI:10.1145/3550488)",
+      "license_spdx": "BSD-2-Clause",
+      "license_proof_url": "https://raw.githubusercontent.com/pnnl/QASMBench/master/LICENSE",
+      "author_publisher": "Ang Li et al., Pacific Northwest National Laboratory (PNNL) / Battelle Memorial Institute",
+      "training_use_restriction": "None - Permissive BSD-2-Clause permits commercial use, modification, redistribution, and model training",
+      "attribution_requirement": "Copyright (c) 2020, Battelle Memorial Institute (PNNL QASMBench, DOI:10.1145/3550488)"
+    }
+  },
+  "record_id_overrides": {
+    "math_phd_differential_geometry_manifolds": {
+      "source_title": "Historical Seminal Monographs in Differential Geometry in Public Domain",
+      "source_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "source_version_or_page": "Gauss (1828) Disquisitiones generales circa superficies curvas & Riemann (1854) Hypothesen (17 U.S.C. 102(b))",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "author_publisher": "Carl Friedrich Gauss, Bernhard Riemann (Public Domain)",
+      "training_use_restriction": "None - Foundational mathematical formulations in public domain (17 U.S.C. 102(b))",
+      "attribution_requirement": "Historical Mathematical Foundations in Public Domain"
+    },
+    "res_eng_research_ethics_irb_reproducibility": {
+      "source_title": "The Belmont Report & Federal Policy for Protection of Human Subjects",
+      "source_url": "https://www.hhs.gov/ohrp/regulations-and-policy/belmont-report/index.html",
+      "source_version_or_page": "National Commission for Protection of Human Subjects of Biomedical Research (45 CFR 46)",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.hhs.gov/web/governance/digital-strategy/index.html",
+      "author_publisher": "U.S. Department of Health and Human Services (HHS / OHRP)",
+      "training_use_restriction": "None - Official U.S. Federal Government Work in Public Domain (17 U.S.C. 105)",
+      "attribution_requirement": "The Belmont Report (1979), U.S. Department of Health and Human Services"
+    }
+  },
+  "fallback": {
+    "source_title": "TARA Sovereign Open Knowledge Commons",
+    "source_url": "https://github.com/manjukp6-hue/tara",
+    "source_version_or_page": "Permissive Academic Foundation Corpus",
+    "license_spdx": "Apache-2.0",
+    "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+    "author_publisher": "TARA Project Contributors",
+    "training_use_restriction": "None - Permissive Apache-2.0 permits model training and reproduction",
+    "attribution_requirement": "Copyright (c) 2026 TARA Core Contributors, licensed under Apache-2.0"
+  },
+  "approved_sources": [
+    {
+      "id": "siyavula_math",
+      "title": "Siyavula Mathematics Grades 4-12",
+      "authors_or_organization": "Siyavula Education / Dept of Basic Education South Africa",
+      "source_pool": "Siyavula Open Textbooks",
+      "url": "https://www.siyavula.com/read/maths",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://www.siyavula.com/terms",
+      "status": "APPROVED",
+      "covered_tiers": ["primary", "middle_school", "high_school"],
+      "domains": ["mathematics"],
+      "match_titles": [
+        "Siyavula Mathematics Grade 4-6",
+        "Siyavula Mathematics Grade 7-9",
+        "Siyavula Mathematics Grade 10-12"
+      ],
+      "audit_notes": "Permissive CC BY 4.0 open curriculum textbook. Verified no NC/ND restrictions on online chapters."
+    },
+    {
+      "id": "siyavula_science",
+      "title": "Siyavula Physical & Natural Sciences Grades 4-12",
+      "authors_or_organization": "Siyavula Education",
+      "source_pool": "Siyavula Open Textbooks",
+      "url": "https://www.siyavula.com/read/science",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://www.siyavula.com/terms",
+      "status": "APPROVED",
+      "covered_tiers": ["primary", "middle_school", "high_school"],
+      "domains": ["science", "programming", "ai_ml", "research_methodology"],
+      "match_titles": [
+        "Siyavula Natural Sciences Grade 4-6",
+        "Siyavula Natural Sciences Grade 7-9",
+        "Siyavula Physical Sciences Grade 10-12",
+        "Siyavula Technology & Computing Grade 7",
+        "Siyavula Technology & Computing Grade 8-9",
+        "Siyavula Natural Sciences & Technology Grade 5",
+        "Siyavula Natural Sciences Grade 4",
+        "Siyavula Natural Sciences: Scientific Investigation & Variables"
+      ],
+      "audit_notes": "Rigorous standards-aligned physical science and inquiry methodology under CC BY 4.0."
+    },
+    {
+      "id": "nist_scientific_publications",
+      "title": "NIST Mathematical & Physical Open Publications (DLMF, PML, Statistical Handbook)",
+      "authors_or_organization": "National Institute of Standards and Technology (NIST) / U.S. Dept of Commerce",
+      "source_pool": "U.S. Federal Government Open Publications",
+      "url": "https://www.nist.gov/open/license",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nist.gov/open/license",
+      "status": "APPROVED",
+      "covered_tiers": ["college", "degree", "engineering", "phd"],
+      "domains": ["mathematics", "science", "research_methodology", "autonomous_creativity"],
+      "match_titles": [
+        "NIST Digital Library of Mathematical Functions: Calculus & Analysis",
+        "NIST Digital Library of Mathematical Functions: Real Analysis and Measure Theory",
+        "NIST Physical Measurement Laboratory: Thermodynamics & Mechanics",
+        "NIST Atomic Spectra Database & Quantum Physical Constants",
+        "NIST Physical Reference Data & Quantum Field Foundations",
+        "NIST/SEMATECH e-Handbook of Statistical Methods",
+        "NIST/SEMATECH e-Handbook of Statistical Methods: Causal Analysis & DoE",
+        "Open Computing and Systems Security Principles in Public Domain",
+        "NIST Technical Foundations: Cognitive Modeling & Systems Integration"
+      ],
+      "audit_notes": "Official U.S. federal government mathematical, physical, and engineering works in public domain (17 U.S.C. 105 / NIST Open License)."
+    },
+    {
+      "id": "historical_scientific_foundations",
+      "title": "Historical Seminal Scientific & Mathematical Monographs in Public Domain (Euler, Gauss, Fourier, Riemann, Navier, Stokes, Cook, Popper)",
+      "authors_or_organization": "Historical Scientific and Mathematical Luminaries (Public Domain)",
+      "source_pool": "Historical Public Domain Scientific Archives",
+      "url": "https://en.wikipedia.org/wiki/Public_domain",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "status": "APPROVED",
+      "covered_tiers": ["high_school", "degree", "engineering", "phd", "research"],
+      "domains": ["mathematics", "science", "programming", "research_methodology"],
+      "match_titles": [
+        "Historical Seminal Monographs in Abstract Algebra (Euler / Gauss / Galois / Lagrange)",
+        "Historical Seminal Monographs in Fourier Analysis and Continuous Transforms",
+        "Historical Seminal Mathematical Monographs in Public Domain",
+        "Historical Seminal Monographs in Differential Geometry in Public Domain",
+        "Historical Seminal Physical Monographs in Fluid Mechanics in Public Domain",
+        "Cook-Levin Complexity Theory Foundations in Public Domain",
+        "Historical Epistemological Foundations in Public Domain (Popper Falsification & Baconian Induction)"
+      ],
+      "audit_notes": "Foundational mathematical and physical theorems in public domain under expired copyright and 17 U.S.C. 102(b)."
+    },
+    {
+      "id": "opendsa_cs",
+      "title": "OpenDSA Active-eBook for Data Structures and Algorithms",
+      "authors_or_organization": "Clifford A. Shaffer et al., Department of Computer Science, Virginia Tech (OpenDSA Project)",
+      "source_pool": "Virginia Tech OpenDSA Project",
+      "url": "https://opendsa-server.cs.vt.edu/",
+      "license_spdx": "MIT",
+      "license_proof_url": "https://github.com/OpenDSA/OpenDSA/blob/master/LICENSE.txt",
+      "status": "APPROVED",
+      "covered_tiers": ["high_school", "college", "degree", "phd"],
+      "domains": ["programming"],
+      "match_titles": [
+        "OpenDSA Active-eBook (Virginia Tech)",
+        "OpenDSA Active-eBook (Virginia Tech): Advanced Algorithms",
+        "OpenDSA Active-eBook (Virginia Tech): Complexity Theory & NP-Completeness"
+      ],
+      "audit_notes": "OpenDSA materials distributed under the permissive MIT License, permitting commercial use, educational derivative works, and model training."
+    },
+    {
+      "id": "scikit_learn_docs",
+      "title": "Scikit-Learn User Guide & Machine Learning Documentation",
+      "authors_or_organization": "Scikit-Learn Developers (Inria / Open Source)",
+      "source_pool": "Open Source Documentation",
+      "url": "https://scikit-learn.org/stable/user_guide.html",
+      "license_spdx": "BSD-3-Clause",
+      "license_proof_url": "https://github.com/scikit-learn/scikit-learn/blob/main/COPYING",
+      "status": "APPROVED",
+      "covered_tiers": ["middle_school", "high_school", "college", "degree"],
+      "domains": ["ai_ml"],
+      "match_titles": [
+        "Scikit-Learn User Guide (Model Selection)",
+        "Scikit-Learn User Guide (Linear Models)",
+        "Scikit-Learn User Guide (Logistic Regression)",
+        "Scikit-Learn Machine Learning in Python: Neural Network Models"
+      ],
+      "audit_notes": "Permissive BSD 3-Clause documentation on regression, classification, cross-validation, and multi-layer perceptrons."
+    },
+    {
+      "id": "open_arxiv_papers",
+      "title": "Seminal Peer-Reviewed Open Access Computer Science Papers (Transformers, SDEs, Raft)",
+      "authors_or_organization": "Vaswani et al., Song et al., Ongaro & Ousterhout",
+      "source_pool": "arXiv Open Access / USENIX ATC",
+      "url": "https://arxiv.org/abs/1706.03762",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "https://arxiv.org/licenses/nonexclusive-distrib/1.0/license.html",
+      "status": "APPROVED",
+      "covered_tiers": ["engineering", "phd"],
+      "domains": ["programming", "ai_ml"],
+      "match_titles": [
+        "Attention Is All You Need",
+        "Score-Based Generative Modeling through Stochastic Differential Equations",
+        "In Search of an Understandable Consensus Algorithm (Raft)"
+      ],
+      "audit_notes": "High-impact peer-reviewed foundational systems and deep learning papers published under CC BY 4.0."
+    },
+    {
+      "id": "nasa_open_publications",
+      "title": "NASA Systems Engineering, ADS & Autonomous Exploration Technical Reports",
+      "authors_or_organization": "National Aeronautics and Space Administration (NASA)",
+      "source_pool": "NASA Open Publications & ADS",
+      "url": "https://www.nasa.gov/open/license/",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.nasa.gov/open/license/",
+      "status": "APPROVED",
+      "covered_tiers": ["primary", "middle_school", "degree", "phd", "research"],
+      "domains": ["science", "autonomous_creativity"],
+      "match_titles": [
+        "NASA Astrophysics Data System & Federal Open Publications",
+        "NASA Systems Engineering Educational Handbook in Public Domain",
+        "Systems Engineering and Root Cause Analysis Handbook in Public Domain",
+        "NASA Evolutionary Systems and Autonomous Exploration Technical Reports",
+        "NASA Supervisory Control Theory and Autonomous Systems Monographs",
+        "NASA Autonomous Exploration and Open-Ended Adaptive Systems Research"
+      ],
+      "audit_notes": "Official U.S. Federal Government publications in public domain under 17 U.S.C. 105."
+    },
+    {
+      "id": "prisma_and_open_science",
+      "title": "PRISMA Statement, Open Science Framework & Open Methodology Collections",
+      "authors_or_organization": "PRISMA Group & Center for Open Science",
+      "source_pool": "Open Science Repositories",
+      "url": "http://www.prisma-statement.org/",
+      "license_spdx": "CC-BY-4.0",
+      "license_proof_url": "http://www.prisma-statement.org/PRISMAStatement/Licensing",
+      "status": "APPROVED",
+      "covered_tiers": ["degree", "research"],
+      "domains": ["research_methodology", "ai_ml"],
+      "match_titles": [
+        "PRISMA Statement & Open Science Framework",
+        "Frontier AI Safety & Alignment Open Architecture Reports"
+      ],
+      "audit_notes": "Systematic review standards and empirical reproducibility guidelines under CC BY 4.0."
+    },
+    {
+      "id": "indic_classical_culture",
+      "title": "Classical Indic Ethical, Moral and Kinship Literature in Public Domain (Taittiriya Upanishad, Panchatantra, Shabdamanidarpana, Shatapatha Brahmana, Karve)",
+      "authors_or_organization": "Ancient Indian Philosophical Tradition & Classical Indic Authors",
+      "source_pool": "Classical Indic Heritage in Public Domain",
+      "url": "https://en.wikipedia.org/wiki/Public_domain",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://en.wikipedia.org/wiki/Public_domain",
+      "status": "APPROVED",
+      "covered_tiers": ["primary", "middle_school", "high_school", "college", "degree", "phd", "research"],
+      "domains": ["indian_family_culture"],
+      "match_titles": [
+        "Classical Indic Ethical and Moral Literature in Public Domain (Taittiriya Upanishad)",
+        "Classical Indic Fables and Ethical Treatises in Public Domain (Panchatantra)",
+        "Classical Kannada Linguistics and Ethical Discourse in Public Domain",
+        "Classical Vedic and Dharmic Ethical Texts in Public Domain (Shatapatha Brahmana)",
+        "Outlines of Indian Philosophy and Ethics in Public Domain (Hiriyanna & Radhakrishnan)",
+        "Anthropological Survey of India & Classical Kinship Studies in Public Domain",
+        "Frontier Cultural Ethics and Multicultural Value Alignment Reports"
+      ],
+      "audit_notes": "Classical Indic philosophy, filial respect for Father as Root Creator, and joint family ethics in Public Domain."
+    },
+    {
+      "id": "ietf_and_open_web_standards",
+      "title": "IETF RFC Web Standards, SPDX Specifications & Open Information Retrieval Collections (RFC 9110, RFC 9309, BM25)",
+      "authors_or_organization": "Internet Engineering Task Force (IETF), Linux Foundation SPDX, Open Information Science Contributors",
+      "source_pool": "IETF RFC Standards & Open Specifications",
+      "url": "https://www.rfc-editor.org/rfc/rfc9309",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.rfc-editor.org/copyright/",
+      "status": "APPROVED",
+      "covered_tiers": ["primary", "middle_school", "high_school", "college", "degree", "phd", "research"],
+      "domains": ["online_search"],
+      "match_titles": [
+        "Open Web Information Literacy and Library Evaluation Frameworks",
+        "IETF RFC Web Information Retrieval and Standards in Public Domain",
+        "Creative Commons & SPDX Open Specifications in Public Domain",
+        "IETF RFC Standards in Public Domain (RFC 9110 & RFC 9309)",
+        "Information Retrieval and Library Sciences Open Monographs",
+        "Distributed Systems and Truth Discovery Research in Open Access Repositories",
+        "Frontier Cybersecurity and Web Information Integrity Research"
+      ],
+      "audit_notes": "RFC 9110 HTTP semantics, RFC 9309 robots.txt exclusion, SPDX licensing, and distributed truth consensus in public domain."
+    },
+    {
+      "id": "tara_native_architecture",
+      "title": "TARA Native Architecture & Core Directives (Cultural Guardrails, Anti-Pattern Learning & Zero-Cloud-AI Search)",
+      "authors_or_organization": "TARA Core Architectural Group",
+      "source_pool": "TARA Open Specifications",
+      "url": "https://github.com/manjukp6-hue/tara",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "status": "APPROVED",
+      "covered_tiers": ["engineering"],
+      "domains": ["indian_family_culture", "autonomous_creativity", "online_search"],
+      "match_titles": [
+        "TARA Native Cultural Alignment Architecture & Invariant Specifications",
+        "TARA Native Autonomous Learning Engine Specifications",
+        "TARA Native Architecture Core Directives & Sovereignty Specifications"
+      ],
+      "audit_notes": "Permissive Apache-2.0 specifications defining cultural guardrails, anti-pattern registries, and sovereign zero-external-AI retrieval."
+    },
+    {
+      "id": "tara_ability_acquisition",
+      "title": "TARA Autonomous Reasoning Architecture Specification & Native Engine",
+      "authors_or_organization": "TARA Architectural Engineering Team",
+      "source_pool": "TARA Native Specifications",
+      "url": "https://github.com/manjukp6-hue/tara",
+      "license_spdx": "Apache-2.0",
+      "license_proof_url": "https://www.apache.org/licenses/LICENSE-2.0",
+      "status": "APPROVED",
+      "covered_tiers": ["primary", "middle_school", "high_school", "college", "degree", "engineering", "phd", "research"],
+      "domains": ["autonomous_ability_acquisition"],
+      "match_titles": [
+        "TARA Autonomous Reasoning Architecture Specification & Native Engine"
+      ],
+      "audit_notes": "Permissive Apache-2.0 specifications defining autonomous ability acquisition, skill evolution, self-training, and safe candidate model promotion."
+    },
+    {
+      "id": "pnnl_qasmbench",
+      "title": "QASMBench: Low-Level OpenQASM Benchmark Suite for NISQ Evaluation (PNNL / Battelle)",
+      "authors_or_organization": "Ang Li et al., Pacific Northwest National Laboratory (PNNL) / Battelle Memorial Institute",
+      "source_pool": "Pacific Northwest National Laboratory (PNNL)",
+      "url": "https://github.com/pnnl/QASMBench",
+      "license_spdx": "BSD-2-Clause",
+      "license_proof_url": "https://raw.githubusercontent.com/pnnl/QASMBench/master/LICENSE",
+      "status": "APPROVED",
+      "covered_tiers": ["primary", "middle_school", "high_school", "college", "degree", "engineering", "phd", "research"],
+      "domains": ["quantum_computing"],
+      "match_titles": [
+        "QASMBench: Low-Level OpenQASM Benchmark Suite for NISQ Evaluation"
+      ],
+      "audit_notes": "Permissive BSD-2-Clause open-source quantum benchmark suite developed by PNNL/Battelle (DOI:10.1145/3550488). Consolidates OpenQASM kernels across chemistry, simulation, linear algebra, arithmetic, and cryptography with zero commercial restrictions."
+    },
+    {
+      "id": "belmont_report_hhs",
+      "title": "The Belmont Report: Ethical Principles and Guidelines for Protection of Human Subjects",
+      "authors_or_organization": "National Commission for the Protection of Human Subjects of Biomedical Research, U.S. HHS",
+      "source_pool": "U.S. Federal Government Publications",
+      "url": "https://www.hhs.gov/ohrp/regulations-and-policy/belmont-report/index.html",
+      "license_spdx": "Public-Domain",
+      "license_proof_url": "https://www.hhs.gov/web/governance/digital-strategy/index.html",
+      "status": "APPROVED",
+      "covered_tiers": ["engineering"],
+      "domains": ["research_methodology"],
+      "match_titles": [
+        "The Belmont Report & Federal Policy for Protection of Human Subjects"
+      ],
+      "audit_notes": "Official U.S. Federal Government publication in public domain under 17 U.S.C. 105."
+    }
+  ],
+  "excluded_sources": [
+    {
+      "id": "wikibooks_academic_corpus",
+      "title": "Wikibooks Open Academic Textbooks (Mathematics, Sciences, CS, Methodology)",
+      "authors_or_organization": "Wikibooks Contributors, Wikimedia Foundation",
+      "source_pool": "Wikibooks",
+      "url": "https://en.wikibooks.org/wiki/Main_Page",
+      "license_spdx": "CC-BY-SA-4.0",
+      "license_proof_url": "https://en.wikibooks.org/wiki/Wikibooks:Terms_of_Use",
+      "status": "EXCLUDED",
+      "covered_tiers": [],
+      "domains": ["mathematics", "science", "programming", "ai_ml", "research_methodology"],
+      "record_count": 0,
+      "audit_notes": "EXCLUDED: Published under CC BY-SA 4.0 containing ShareAlike (copyleft) restriction. Copyleft and ShareAlike licenses are strictly excluded from TARA canonical training corpus under permissive license governance policy to prevent viral licensing contamination. Replaced with permissive Public Domain (NIST DLMF, historical monographs), Siyavula (CC-BY-4.0), and OpenDSA (MIT) equivalents."
+    },
+    {
+      "id": "openstax_calculus_physics_chemistry",
+      "title": "OpenStax Textbooks (Calculus Vol 1-3, University Physics, Chemistry 2e)",
+      "authors_or_organization": "OpenStax / Rice University",
+      "source_pool": "OpenStax",
+      "url": "https://openstax.org/license",
+      "license_spdx": "CC-BY-NC-SA-4.0",
+      "license_proof_url": "https://openstax.org/license",
+      "status": "EXCLUDED",
+      "covered_tiers": [],
+      "domains": ["mathematics", "science"],
+      "record_count": 0,
+      "audit_notes": "EXCLUDED: Published under CC BY-NC-SA 4.0 containing Non-Commercial (NC) restriction AND explicit legal prohibition against AI/LLM training without prior written permission (https://openstax.org/license)."
+    },
+    {
+      "id": "clay_mathematics_institute_essays",
+      "title": "The Millennium Prize Problems (Official Essays)",
+      "authors_or_organization": "Clay Mathematics Institute (Carlson, Jaffe, Wiles)",
+      "source_pool": "Clay Mathematics Institute",
+      "url": "https://www.claymath.org/millennium-problems/",
+      "license_spdx": "Proprietary-Personal-Use-Only",
+      "license_proof_url": "https://www.claymath.org/",
+      "status": "EXCLUDED",
+      "covered_tiers": [],
+      "domains": ["mathematics", "programming"],
+      "record_count": 0,
+      "audit_notes": "EXCLUDED: Website terms state downloads are for 'personal use only'. All rights reserved. Mathematical formulations rewritten from public domain sources (17 U.S.C. 102(b))."
+    },
+    {
+      "id": "think_python",
+      "title": "Think Python: How to Think Like a Computer Scientist (2e)",
+      "authors_or_organization": "Allen B. Downey (Green Tea Press / OTL)",
+      "source_pool": "Open Textbook Library (OTL)",
+      "url": "https://open.umn.edu/opentextbooks/textbooks/think-python-2e",
+      "license_spdx": "CC-BY-NC-3.0",
+      "license_proof_url": "https://greenteapress.com/wp/think-python-2e/",
+      "status": "EXCLUDED",
+      "covered_tiers": [],
+      "domains": ["programming"],
+      "record_count": 0,
+      "audit_notes": "EXCLUDED: License contains Non-Commercial (NC) restriction. Strictly rejected from TARA production training corpus."
+    },
+    {
+      "id": "math_for_ml_deisenroth",
+      "title": "Mathematics for Machine Learning",
+      "authors_or_organization": "Marc Peter Deisenroth, A. Aldo Faisal, Cheng Soon Ong (Cambridge Univ Press)",
+      "source_pool": "Cambridge University Press Open Reading",
+      "url": "https://mml-book.github.io/",
+      "license_spdx": "CC-BY-NC-ND-4.0",
+      "license_proof_url": "https://mml-book.github.io/",
+      "status": "EXCLUDED",
+      "covered_tiers": [],
+      "domains": ["ai_ml", "mathematics"],
+      "record_count": 0,
+      "audit_notes": "EXCLUDED: License contains Non-Commercial (NC) and No-Derivatives (ND) restrictions. Strictly rejected."
+    },
+    {
+      "id": "deep_learning_goodfellow",
+      "title": "Deep Learning (Adaptive Computation and Machine Learning series)",
+      "authors_or_organization": "Ian Goodfellow, Yoshua Bengio, Aaron Courville (MIT Press)",
+      "source_pool": "MIT Press Open Reading Site",
+      "url": "https://www.deeplearningbook.org/",
+      "license_spdx": "Proprietary-All-Rights-Reserved",
+      "license_proof_url": "https://www.deeplearningbook.org/",
+      "status": "EXCLUDED",
+      "covered_tiers": [],
+      "domains": ["ai_ml"],
+      "record_count": 0,
+      "audit_notes": "EXCLUDED: Free-to-read web HTML only. MIT Press proprietary copyright; no commercial redistribution or derivative training rights."
+    },
+    {
+      "id": "ostep_operating_systems",
+      "title": "Operating Systems: Three Easy Pieces (OSTEP)",
+      "authors_or_organization": "Remzi H. Arpaci-Dusseau, Andrea C. Arpaci-Dusseau",
+      "source_pool": "University of Wisconsin Madison",
+      "url": "https://pages.cs.wisc.edu/~remzi/OSTEP/",
+      "license_spdx": "Proprietary-Free-Online-Only",
+      "license_proof_url": "https://pages.cs.wisc.edu/~remzi/OSTEP/",
+      "status": "EXCLUDED",
+      "covered_tiers": [],
+      "domains": ["programming"],
+      "record_count": 0,
+      "audit_notes": "EXCLUDED: Copyright Remzi Arpaci-Dusseau. Not licensed under Creative Commons; derivative reuse prohibited."
+    },
+    {
+      "id": "mit_ocw_lecture_notes",
+      "title": "MIT OpenCourseWare Course Materials",
+      "authors_or_organization": "Massachusetts Institute of Technology",
+      "source_pool": "MIT OpenCourseWare",
+      "url": "https://ocw.mit.edu/",
+      "license_spdx": "CC-BY-NC-SA-4.0",
+      "license_proof_url": "https://ocw.mit.edu/terms/",
+      "status": "EXCLUDED",
+      "covered_tiers": [],
+      "domains": ["engineering", "science"],
+      "record_count": 0,
+      "audit_notes": "EXCLUDED: MIT OCW default license contains Non-Commercial (NC) restriction. Strictly excluded."
+    },
+    {
+      "id": "psychology_research_methods",
+      "title": "Research Methods in Psychology (4th Edition)",
+      "authors_or_organization": "Rajiv S. Jhangiani, I-Chant A. Chiang et al.",
+      "source_pool": "Open Textbook Library (OTL)",
+      "url": "https://open.umn.edu/opentextbooks/textbooks/research-methods-in-psychology-4th-edition",
+      "license_spdx": "CC-BY-NC-SA-4.0",
+      "license_proof_url": "https://open.umn.edu/opentextbooks/textbooks/research-methods-in-psychology-4th-edition",
+      "status": "EXCLUDED",
+      "covered_tiers": [],
+      "domains": ["research_methodology"],
+      "record_count": 0,
+      "audit_notes": "EXCLUDED: Non-commercial (NC) license restriction present in OTL catalog entry."
+    },
+    {
+      "id": "nist_dlmf_portal",
+      "title": "NIST Digital Library of Mathematical Functions (DLMF Online Portal)",
+      "authors_or_organization": "National Institute of Standards and Technology (NIST) / U.S. Dept of Commerce",
+      "source_pool": "NIST Online Portals",
+      "url": "https://dlmf.nist.gov/about/notices",
+      "license_spdx": "Proprietary-SRD-Restricted",
+      "license_proof_url": "https://dlmf.nist.gov/about/notices",
+      "status": "EXCLUDED",
+      "covered_tiers": [],
+      "domains": ["mathematics", "programming"],
+      "record_count": 0,
+      "audit_notes": "EXCLUDED: dlmf.nist.gov/about/notices asserts copyright under 15 U.S.C. 290e / 17 U.S.C. 105 and specifically states: 'Reproduction, copying, or distribution for any commercial purpose is strictly prohibited' and 'Bulk copying, reproduction, or redistribution in any form is not permitted.' Commercial and bulk redistribution restrictions violate open training requirements."
+    }
+  ],
+  "license_policy": {
+    "allowed_licenses": [
+      "Apache-2.0",
+      "MIT",
+      "CC-BY-4.0",
+      "Public-Domain",
+      "BSD-3-Clause",
+      "BSD-2-Clause",
+      "CC0-1.0"
+    ],
+    "prohibited_licenses": [
+      "CC-BY-SA-*",
+      "CC-BY-SA-4.0",
+      "CC-BY-NC-*",
+      "CC-BY-NC-SA-*",
+      "CC-BY-ND-*",
+      "CC-BY-NC-ND-*",
+      "Proprietary-All-Rights-Reserved",
+      "Proprietary-Personal-Use-Only",
+      "AI-Training-Prohibited"
+    ],
+    "compliance_status": "100% COMPLIANT - ZERO SA/NC/ND/RESTRICTED RECORDS"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Joseph-Louis Lagrange",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://archive.org/details/mcaniqueanalyt01lagruoft"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Method of Lagrange Multipliers\nExact Expression: \\nabla f(\\mathbf{x}) = \\sum_{i=1}^m \\lambda_i \\nabla g_i(\\mathbf{x})\nDefinitions: Strategy for finding local maxima and minima of a function subject to equality constraints where gradients must be collinear.\nDerivation/Reference: Joseph-Louis Lagrange, Mecanique Analytique (1788)\nExample: Maximize xy subject to x + y = 2 -> (y, x) = lambda(1, 1) -> x = y = 1, lambda = 1 -> max = 1\nDomain: multivariable_calculus\nAssumptions: f and g_i have continuous first partial derivatives; Constraint gradients are linearly independent\nCommon Errors: Omitting verification of constraint qualification",
+  "content_sha256": "ec03ae588c92d976abebed07cc898cad0b4a00fa37de79b3c365d4a4475216e2",
+  "file_path": "storage/knowledge\\partitions/mathematics/multivariable_calculus\\1b\\1b7cc5aca2a3b6d4.json",
+  "id": "1b7cc5aca2a3b6d4",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:30Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/multivariable_calculus",
+  "provenance": {
+    "author_or_curator": "Joseph-Louis Lagrange",
+    "content_sha256": "ec03ae588c92d976abebed07cc898cad0b4a00fa37de79b3c365d4a4475216e2",
+    "imported_at": "2026-09-29T10:11:30Z",
+    "license": "Public Domain",
+    "source_uri": "https://archive.org/details/mcaniqueanalyt01lagruoft"
+  },
+  "source": "https://archive.org/details/mcaniqueanalyt01lagruoft",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Method of Lagrange Multipliers",
+  "subpartition": "multivariable_calculus",
+  "tags": [
+    "lagrange_multipliers",
+    "constrained_extrema",
+    "gradient",
+    "optimization",
+    "formula",
+    "multivariable_calculus",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

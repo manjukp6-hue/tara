@@ -1,0 +1,43 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Isaac Newton & Pingala",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:12:38Z",
+      "source": "https://gutenberg.org/ebooks/principia"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Formula: Binomial Theorem\nExact Expression: (x + y)^n = \\sum_{k=0}^n \\binom{n}{k} x^{n-k} y^k\nDefinitions: Algebraic expansion of powers of a binomial into a polynomial sum with combinatorial coefficients.\nDerivation/Reference: Pingala Chanda Sutra (Meru Prastara, c. 200 BCE); Isaac Newton generalized to real/complex exponents (1665)\nExample: (x + y)^3 = x^3 + 3x^2 y + 3xy^2 + y^3 where binom(3, 1) = 3!/(1!2!) = 3\nDomain: combinatorics\nAssumptions: n in Z_{>=0}, xy = yx (commutative ring)\nCommon Errors: Applying standard finite summation formula to negative or non-integer n without infinite series convergence constraints",
+  "content_sha256": "1e3df88b20bb78a09072f6285bf20efebeba05c8e7f2bf39bac95b02acc2136f",
+  "file_path": "storage/knowledge\\partitions/mathematics/combinatorics\\48\\486e9cea5f66fcda.json",
+  "id": "486e9cea5f66fcda",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T10:11:30Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/combinatorics",
+  "provenance": {
+    "author_or_curator": "Isaac Newton & Pingala",
+    "content_sha256": "1e3df88b20bb78a09072f6285bf20efebeba05c8e7f2bf39bac95b02acc2136f",
+    "imported_at": "2026-09-29T10:11:30Z",
+    "license": "Public Domain",
+    "source_uri": "https://gutenberg.org/ebooks/principia"
+  },
+  "source": "https://gutenberg.org/ebooks/principia",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Binomial Theorem",
+  "subpartition": "combinatorics",
+  "tags": [
+    "binomial_theorem",
+    "pascals_triangle",
+    "combinations",
+    "combinatorics",
+    "formula",
+    "combinatorics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

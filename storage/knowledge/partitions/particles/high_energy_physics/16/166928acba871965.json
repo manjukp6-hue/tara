@@ -1,0 +1,39 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Science Reference",
+      "license": "CC-BY-4.0",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "Particle Data Group (PDG) Review of Particle Physics (2024)"
+    }
+  ],
+  "category": "particles",
+  "confidence": 1.0,
+  "content": "Scientific Concept: Standard Model of Particle Physics\nDomain: particles / high_energy_physics\nDefinition: Gauge quantum field theory based on SU(3)_C x SU(2)_L x U(1)_Y gauge symmetry group classifying all known elementary subatomic particles and their fundamental interactions.\n\nPrinciples:\nMatter Constituents: 12 fundamental fermions (6 quarks: u, d, c, s, t, b; 6 leptons: e, mu, tau, nu_e, nu_mu, nu_tau).\nGauge Bosons (Force Carriers): Photon (electromagnetic), 8 Gluons (strong), W+, W-, Z0 (weak force).\nScalar Boson: Higgs boson (H0) responsible for electroweak symmetry breaking and giving mass to gauge bosons and charged fermions.\nAntimatter: Every particle has a corresponding antiparticle with opposite electric charge and quantum numbers (e.g. positron e+).\n\nExperimental Proofs:\nDiscovery of neutral currents at CERN Gargamelle bubble chamber (1973)\nDiscovery of W and Z bosons at CERN UA1/UA2 experiments (1983)\nDiscovery of Top quark at Fermilab Tevatron (1995)\nObservation of Higgs boson at CERN Large Hadron Collider (ATLAS & CMS, 2012)\n\nApplications:\nPositron Emission Tomography (PET medical imaging)\nSemiconductor radiation hardening\nSuperconducting magnet technology",
+  "content_sha256": "f63e5eb992466ae98d732817410597a57bd247445259c6377f112076c29104ce",
+  "file_path": "storage/knowledge\\partitions/particles/high_energy_physics\\16\\166928acba871965.json",
+  "id": "166928acba871965",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/particles/high_energy_physics",
+  "provenance": {
+    "author_or_curator": "Science Reference",
+    "content_sha256": "f63e5eb992466ae98d732817410597a57bd247445259c6377f112076c29104ce",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "CC-BY-4.0",
+    "source_uri": "Particle Data Group (PDG) Review of Particle Physics (2024)"
+  },
+  "source": "Particle Data Group (PDG) Review of Particle Physics (2024)",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "Standard Model of Particle Physics",
+  "subpartition": "high_energy_physics",
+  "tags": [
+    "particles",
+    "high_energy_physics",
+    "scientific_concept"
+  ],
+  "topic": "particles",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

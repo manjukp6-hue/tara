@@ -1,0 +1,41 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Bhaskara I",
+      "license": "Public Domain",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "tara://historical/ind_math_007_bhaskara1_sine"
+    }
+  ],
+  "category": "mathematics",
+  "confidence": 1.0,
+  "content": "Indian Mathematics Record\nTreatise: Mahabhaskariya (Chapter VII, Verses 17-19)\nAuthor: Bhaskara I\nPeriod: c. 629 CE (Saurashtra / Asmaka)\nDomain: trigonometry\n\nHISTORICAL_FORMULA:\nMakhikādibhyo vinā jñāyate: Rational algebraic formula to find sine of any degree without sine table\n\nMODERN_EQUIVALENT:\n\\sin(x) \\approx \\frac{16x(\\pi - x)}{5\\pi^2 - 4x(\\pi - x)} \\quad \\text{for } x \\in [0, \\pi] \\quad (\\text{Maximum relative error } < 1.9\\%)\n\nMathematical Context: Allowed astronomers to compute accurate continuous sine values without storing discrete interpolation tables.\nHistorical Significance: First rational function approximation of transcendental trigonometric functions in recorded history.\nProvenance Reference: Mahabhaskariya of Bhaskara I (K. S. Shukla, Department of Mathematics, Lucknow University, 1960)",
+  "content_sha256": "61ffe256be6fdcfe3261e8092d3509a1d82270a4759d9b7ca3d7d4317fc2bc0a",
+  "file_path": "storage/knowledge\\partitions/mathematics/indian_mathematics\\a5\\a50b43536cded9a3.json",
+  "id": "a50b43536cded9a3",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:48Z",
+  "originating_record_id": null,
+  "partition": "partitions/mathematics/indian_mathematics",
+  "provenance": {
+    "author_or_curator": "Bhaskara I",
+    "content_sha256": "61ffe256be6fdcfe3261e8092d3509a1d82270a4759d9b7ca3d7d4317fc2bc0a",
+    "imported_at": "2026-09-29T09:59:48Z",
+    "license": "Public Domain",
+    "source_uri": "tara://historical/ind_math_007_bhaskara1_sine"
+  },
+  "source": "tara://historical/ind_math_007_bhaskara1_sine",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "bhaskara_i_trigonometry",
+  "subpartition": "indian_mathematics",
+  "tags": [
+    "indian_mathematics",
+    "trigonometry",
+    "bhaskara_i",
+    "historical_mathematics",
+    "mathematics"
+  ],
+  "topic": "mathematics",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

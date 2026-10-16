@@ -1,0 +1,43 @@
+{
+  "timestamp_utc": "1791880255",
+  "model_path": "storage/models/tara_candidate_v1",
+  "dataset_path": "storage/datasets/curriculum",
+  "model_config_sha256": "50cb80d3514dd58727767cc2f279feb521add465e136939389eeab093419a48c",
+  "tokenizer_sha256": "b9a6498e6ed702960658026d791abbb81c72a24eacfaea44584b08d009099449",
+  "dataset_fingerprint_sha256": "ae963af98111869e6bb873457ca8dac3697292f79fcb6e95eb6f8fb1f3279a42",
+  "tokenizer_audit": {
+    "vocab_size": 100000,
+    "max_token_len": 24,
+    "special_tokens_verified": 9,
+    "has_kannada_numerals": true,
+    "has_devanagari_numerals": true,
+    "config_vocab_size_match": true,
+    "status": "VERIFIED_PASSED"
+  },
+  "content_dedup": {
+    "total_records_scanned": 176,
+    "unique_records_count": 176,
+    "duplicate_records_count": 0,
+    "duplicate_rate_pct": 0.0,
+    "shards_scanned": 2,
+    "files_audited": [
+      "ability_acquisition.jsonl",
+      "foundational_curriculum.jsonl"
+    ],
+    "status": "VERIFIED_PASSED"
+  },
+  "model_weights_audit": {
+    "model_dir": "storage/models/tara_candidate_v1",
+    "num_layers": 22,
+    "hidden_size": 2048,
+    "intermediate_size": 5632,
+    "num_attention_heads": 64,
+    "num_kv_heads": 16,
+    "total_tensors_in_index": 201,
+    "total_bytes_reported": 5606580224,
+    "is_sharded": true,
+    "status": "VERIFIED_PASSED"
+  },
+  "authorization_status": "AUTHORIZED",
+  "authorized_by": "TARA Pre-Training Authorization Gate (Native Rust)"
+}

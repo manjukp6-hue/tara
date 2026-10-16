@@ -1,0 +1,40 @@
+{
+  "alternative_sources": [
+    {
+      "author": "Kotlin",
+      "license": "Apache-2.0",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://kotlinlang.org/docs/"
+    }
+  ],
+  "category": "languages",
+  "confidence": 1.0,
+  "content": "Programming Language Reference: Kotlin\nVersion: Kotlin 1.9 / 2.0 (K2 compiler)\nSyntax: Concise multiplatform language targeting JVM, Android, JavaScript, and Native (LLVM).\nSemantics: First-class null safety in type system, extension functions, smart casts, coroutines for structured concurrency.\nType System: Static typing with distinct nullable (T?) and non-nullable (T) types, sealed classes/interfaces, reified generics.\nMemory Model: Managed garbage collection on JVM, ARC on Kotlin/Native, full Java interop without overhead.\nConcurrency: Kotlin Coroutines: suspend functions, Dispatchers, Flow (reactive streams), structured concurrency scopes.\nError Handling: Unchecked exceptions, Result functional handling, runCatching block.\nStandard APIs: kotlin.collections, kotlin.sequences, kotlinx.coroutines, kotlinx.serialization\nSpecification: Kotlin Language Specification (JetBrains)\nOfficial Docs: https://kotlinlang.org/docs/",
+  "content_sha256": "a2254563e508cb3e99dcb9b01cd0969b760370c6116c13088f89559185ff792c",
+  "file_path": "storage/knowledge\\partitions/languages/kotlin\\c4\\c4ae058f89c8729a.json",
+  "id": "c4ae058f89c8729a",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:49Z",
+  "originating_record_id": null,
+  "partition": "partitions/languages/kotlin",
+  "provenance": {
+    "author_or_curator": "Kotlin",
+    "content_sha256": "a2254563e508cb3e99dcb9b01cd0969b760370c6116c13088f89559185ff792c",
+    "imported_at": "2026-09-29T09:59:49Z",
+    "license": "Apache-2.0",
+    "source_uri": "https://kotlinlang.org/docs/"
+  },
+  "source": "https://kotlinlang.org/docs/",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "language_spec_kotlin",
+  "subpartition": "kotlin",
+  "tags": [
+    "programming_languages",
+    "kotlin",
+    "language_specification",
+    "languages"
+  ],
+  "topic": "languages",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

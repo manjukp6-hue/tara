@@ -1,0 +1,40 @@
+{
+  "alternative_sources": [
+    {
+      "author": "SQL (Structured Query Language)",
+      "license": "Public ISO Standard (Implemented by PostgreSQL under PostgreSQL License, SQLite in Public Domain)",
+      "merged_at": "2026-09-29T10:01:22Z",
+      "source": "https://www.iso.org/standard/76583.html"
+    }
+  ],
+  "category": "languages",
+  "confidence": 1.0,
+  "content": "Programming Language Reference: SQL (Structured Query Language)\nVersion: ISO/IEC 9075:2023 (SQL:2023)\nSyntax: Declarative domain-specific language for managing and querying data in relational database management systems (RDBMS).\nSemantics: Relational algebra operations (selection, projection, join, set operations), ACID transaction semantics.\nType System: Static schema typing (INT, VARCHAR, DECIMAL, TIMESTAMP, JSON, BOOLEAN, ARRAY).\nMemory Model: Database buffer pool management, page-based table storage, Write-Ahead Logging (WAL) for durability.\nConcurrency: Multi-Version Concurrency Control (MVCC), transaction isolation levels (Read Committed, Repeatable Read, Serializable).\nError Handling: SQLSTATE error codes, transaction rollback via ROLLBACK TO SAVEPOINT.\nStandard APIs: DDL (CREATE, ALTER, DROP), DML (INSERT, UPDATE, DELETE), DQL (SELECT), DCL (GRANT, REVOKE)\nSpecification: ISO/IEC 9075 Standard\nOfficial Docs: https://www.iso.org/standard/76583.html",
+  "content_sha256": "558bf74db519ace87d3162e08c89b4749eed0a50467aa2f8f94835afd2988887",
+  "file_path": "storage/knowledge\\partitions/languages/sql_(structured_query_language)\\c2\\c270c783bc41b234.json",
+  "id": "c270c783bc41b234",
+  "last_merged_at": "2026-09-29T10:34:33Z",
+  "learned_at": "2026-09-29T09:59:49Z",
+  "originating_record_id": null,
+  "partition": "partitions/languages/sql_(structured_query_language)",
+  "provenance": {
+    "author_or_curator": "SQL (Structured Query Language)",
+    "content_sha256": "558bf74db519ace87d3162e08c89b4749eed0a50467aa2f8f94835afd2988887",
+    "imported_at": "2026-09-29T09:59:49Z",
+    "license": "Public ISO Standard (Implemented by PostgreSQL under PostgreSQL License, SQLite in Public Domain)",
+    "source_uri": "https://www.iso.org/standard/76583.html"
+  },
+  "source": "https://www.iso.org/standard/76583.html",
+  "source_type": "EXTERNAL_SOURCE",
+  "status": "SUCCESS",
+  "subject": "language_spec_sql_(structured_query_language)",
+  "subpartition": "sql_(structured_query_language)",
+  "tags": [
+    "programming_languages",
+    "sql_(structured_query_language)",
+    "language_specification",
+    "languages"
+  ],
+  "topic": "languages",
+  "verification_status": "OPEN_SOURCE_VERIFIED"
+}

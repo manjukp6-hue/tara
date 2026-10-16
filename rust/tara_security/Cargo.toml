@@ -1,0 +1,29 @@
+[package]
+name = "tara_security"
+version = "1.0.0"
+edition = "2021"
+authors = ["TARA Core Team"]
+description = "TARA AI — Dynamic Canonical Security Subsystem v2: Attestation, Authority, Policy, and Secure Operations"
+license = "Apache-2.0"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = { version = "0.10", features = ["oid"] }
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+rand = "0.8"
+hex = "0.4"
+hmac = "0.12"
+constant_time_eq = "0.3"
+zeroize = { version = "1.7", features = ["derive"] }
+base64 = "0.22"
+scrypt = "0.11"
+aes-gcm = "0.10"
+rsa = { version = "0.9", features = ["sha2"] }
+thiserror = "1.0"
+byteorder = "1.5"
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
+
+[features]
+default = []
+test-support = []

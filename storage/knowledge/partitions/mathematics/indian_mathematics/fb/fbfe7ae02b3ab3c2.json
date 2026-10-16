@@ -1,0 +1,36 @@
+{
+  "status": "SUCCESS",
+  "id": "fbfe7ae02b3ab3c2",
+  "topic": "mathematics",
+  "subpartition": "indian_mathematics",
+  "subject": "bijaganita_algebraic_identities_varga_prakriti",
+  "tags": [
+    "mathematics",
+    "indian_mathematics",
+    "bijaganita",
+    "algebra",
+    "indeterminate_equations",
+    "formula",
+    "external_download",
+    "cc-by-sa-4.0"
+  ],
+  "category": "mathematics",
+  "partition": "partitions/mathematics/indian_mathematics",
+  "file_path": "storage/knowledge/partitions\\mathematics\\indian_mathematics\\fb\\fbfe7ae02b3ab3c2.json",
+  "content": "Bijaganita  (IAST: Bījagaṇita) was treatise on algebra by the Indian mathematician Bhāskara II. It is the second volume of his main work Siddhānta Shiromani (\"Crown of treatises\") alongside Lilāvati, Grahaganita and Golādhyāya.\n\n\n== Meaning ==\nThe title of the work, bījagaṇita, which literally translates to \"mathematics (gaṇita) using seeds (bīja)\", is one of the two main branches of mediaeval Indian mathematics, the other being pātīgaṇita, or \"mathematics using algorithms\". Bījagaṇita derives its name from the fact that \"it employs algebraic equations (samīkaraṇa) which are compared to seeds (bīja) of plants since they have the potentiality to generate solutions to mathematical problems.\"\n\n\n== Contents ==\nThe book is divided into six parts, mainly indeterminate equations, quadratic equations, simple equations, surds. The contents are:\n\nIntroduction\nOn Simple Equations\nOn Quadratic Equations\nOn Equations involving indeterminate Questions of the 1st Degree\nOn Equations involving indeterminate Questions of the 2nd Degree\nOn Equations involving Rectangles\nIn Bijaganita Bhāskara II refined Jayadeva's way of generalization of Brahmagupta's approach to solving indeterminate quadratic equations, including Pell's equation which is known as chakravala method or cyclic method. Bijaganita is the first text to recognize that a positive number has two square roots\n\n\n== Translations ==\nThe translations or editions of the Bijaganita into English include:\n\n1817. Henry Thomas Colebrooke, Algebra, with Arithmetic and mensuration, from the Sanscrit of Brahmegupta and Bháscara\n1813. Ata Allah ibn Ahmad Nadir Rashidi; Samuel Davis\n1813. Strachey, Edward, Sir, 1812–1901\nBhaskaracharya's Bijaganita and its English and Marathi Translation by Prof. S. K. Abhyankar\nTwo notable Scholars from Varanasi Sudhakar Dwivedi and  Bapudeva Sastri studied Bijaganita in the nineteenth century.",
+  "content_sha256": "83109f7be4b525482de38adccd3547dd09cd878bc6383b429520739a3e8b323f",
+  "confidence": 1.0,
+  "source": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=Bijaganita&format=json",
+  "source_type": "EXTERNAL_DOWNLOADED",
+  "originating_record_id": null,
+  "learned_at": "2026-09-30T11:20:00Z",
+  "alternative_sources": [],
+  "verification_status": "OPEN_SOURCE_VERIFIED",
+  "provenance": {
+    "author_or_curator": "Bhaskara II",
+    "content_sha256": "85cc34ed26f9ca77bc6172a5b23fde8acad91f192899df53e6cc0c2e7ffda933",
+    "imported_at": "2026-09-30T11:20:00Z",
+    "license": "CC-BY-SA-4.0",
+    "source_uri": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&titles=Bijaganita&format=json"
+  }
+}

@@ -1302,6 +1302,7 @@ impl NativeSelfTrainer {
             let mut accum_count = 0usize;
             let mut batch_loss_sum = 0.0f32;
             let mut batch_tokens_count = 0usize;
+            let mut batch_bytes_count = 0usize;
             let mut step_start_instant = std::time::Instant::now();
 
             let skip_count = initial_sample_skip;
@@ -1371,6 +1372,11 @@ impl NativeSelfTrainer {
                     sample_loss /= valid_targets as f32;
                     batch_loss_sum += sample_loss;
                     batch_tokens_count += valid_targets;
+                    let target_bytes: usize = tokens[*target_start..]
+                        .iter()
+                        .map(|id| tokenizer.id_to_token.get(id).map(|s| s.len()).unwrap_or(1))
+                        .sum();
+                    batch_bytes_count += target_bytes.max(1);
 
                     // Normalise by number of target tokens
                     let norm_factor = 1.0 / valid_targets as f32;
@@ -1574,6 +1580,11 @@ impl NativeSelfTrainer {
                         };
                         let total_step_loss = batch_lm_loss + ewc_loss;
                         let ppl = (batch_lm_loss as f64).min(50.0).exp();
+                        let bpb = if batch_bytes_count > 0 {
+                            ((batch_lm_loss as f64) / std::f64::consts::LN_2) * (batch_tokens_count as f64) / (batch_bytes_count as f64)
+                        } else {
+                            (batch_lm_loss as f64) / std::f64::consts::LN_2
+                        };
                         let grad_norm = if let Some(ref gpu_trainer) = gpu_trainer_opt {
                             gpu_trainer.last_grad_norm()
                         } else {
@@ -1588,14 +1599,15 @@ impl NativeSelfTrainer {
                             .map(|m| m.to_string())
                             .unwrap_or_else(|| "∞".to_string());
                         println!(
-                            "[Train] Step {:>4}/{} (samples: {}) | Total Loss: {:.4} | LM Loss: {:.4} | Aux/EWC Loss: {:.4} | PPL: {:.2} | Grad Norm: {:.4} | LR: {:.6} | Throughput: {:.1} tok/s | Time: {:.3}s | Device: {}",
+                            "[Train] Step {:>4}/{} (samples: {}) | Total Loss: {:.4} | LM Loss: {:.4} | PPL: {:.2} | BPB: {:.4} | Aux/EWC Loss: {:.4} | Grad Norm: {:.4} | LR: {:.6} | Throughput: {:.1} tok/s | Time: {:.3}s | Device: {}",
                             optimizer_steps,
                             max_str,
                             samples_seen,
                             total_step_loss,
                             batch_lm_loss,
-                            ewc_loss,
                             ppl,
+                            bpb,
+                            ewc_loss,
                             grad_norm,
                             effective_lr,
                             throughput,
@@ -1607,6 +1619,7 @@ impl NativeSelfTrainer {
                         accum_count = 0;
                         batch_loss_sum = 0.0;
                         batch_tokens_count = 0;
+                        batch_bytes_count = 0;
                         step_start_instant = std::time::Instant::now();
 
                         // Reload model in-memory with updated weights
@@ -1773,6 +1786,11 @@ impl NativeSelfTrainer {
                 let batch_lm_loss = batch_loss_sum / accum_count as f32;
                 let total_step_loss = batch_lm_loss + ewc_loss;
                 let ppl = (batch_lm_loss as f64).min(50.0).exp();
+                let bpb = if batch_bytes_count > 0 {
+                    ((batch_lm_loss as f64) / std::f64::consts::LN_2) * (batch_tokens_count as f64) / (batch_bytes_count as f64)
+                } else {
+                    (batch_lm_loss as f64) / std::f64::consts::LN_2
+                };
                 let grad_norm = if let Some(ref gpu_trainer) = gpu_trainer_opt {
                     gpu_trainer.last_grad_norm()
                 } else {
@@ -1787,14 +1805,15 @@ impl NativeSelfTrainer {
                     .map(|m| m.to_string())
                     .unwrap_or_else(|| "∞".to_string());
                 println!(
-                    "[Train] Step {:>4}/{} (samples: {}) | Total Loss: {:.4} | LM Loss: {:.4} | Aux/EWC Loss: {:.4} | PPL: {:.2} | Grad Norm: {:.4} | LR: {:.6} | Throughput: {:.1} tok/s | Time: {:.3}s | Device: {} [Epoch Flush]",
+                    "[Train] Step {:>4}/{} (samples: {}) | Total Loss: {:.4} | LM Loss: {:.4} | PPL: {:.2} | BPB: {:.4} | Aux/EWC Loss: {:.4} | Grad Norm: {:.4} | LR: {:.6} | Throughput: {:.1} tok/s | Time: {:.3}s | Device: {} [Epoch Flush]",
                     optimizer_steps,
                     max_str,
                     samples_seen,
                     total_step_loss,
                     batch_lm_loss,
-                    ewc_loss,
                     ppl,
+                    bpb,
+                    ewc_loss,
                     grad_norm,
                     effective_lr,
                     throughput,

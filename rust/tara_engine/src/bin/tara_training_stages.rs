@@ -1132,8 +1132,8 @@ pub fn select_and_report_best_checkpoint(
         .ok_or_else(|| format!("Failed to evaluate final staged model in '{}'", staging_out_dir.display()))?;
     let mut best_source = "final_step".to_string();
     let mut best_path: Option<PathBuf> = None;
-
-    println!("  [LIVE EVAL] Stage '{}' Final Step -> Loss: {:.4} | Perplexity: {:.4}", stage_id, best_loss, best_ppl);
+    let bpb = best_loss / std::f64::consts::LN_2;
+    println!("  [LIVE EVAL] Stage '{}' Final Step -> Loss: {:.4} | Perplexity: {:.4} | Bits-Per-Byte: {:.4}", stage_id, best_loss, best_ppl, bpb);
 
     // Check all intermediate step checkpoints (e.g. step_100, step_200) to see if an earlier checkpoint was better
     if intermediate_cp_dir.exists() {
@@ -1147,7 +1147,8 @@ pub fn select_and_report_best_checkpoint(
             for cp_sub in subdirs {
                 let cp_name = cp_sub.file_name().unwrap_or_default().to_string_lossy().to_string();
                 if let Some((loss, ppl)) = eval_dir_loss(&cp_sub) {
-                    println!("  [LIVE EVAL] Intermediate '{}' -> Loss: {:.4} | Perplexity: {:.4}", cp_name, loss, ppl);
+                    let cp_bpb = loss / std::f64::consts::LN_2;
+                    println!("  [LIVE EVAL] Intermediate '{}' -> Loss: {:.4} | Perplexity: {:.4} | Bits-Per-Byte: {:.4}", cp_name, loss, ppl, cp_bpb);
                     if loss < best_loss {
                         best_loss = loss;
                         best_ppl = ppl;

@@ -778,9 +778,9 @@ $ADAMW_F16_DONE:
     ret;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // Full-Network Transformer Decoder Kernels (Embedding, RMSNorm, SwiGLU, Residual, RoPE, Attention)
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 
 // 13. Embedding Forward: out[t * hs + h] = embed_weight[tokens[t] * hs + h]
 .visible .entry embedding_fwd_kernel(
@@ -1466,6 +1466,21 @@ pub fn validate_ptx_registers(ptx: &str) -> Result<usize, String> {
     // exact scalar register names (e.g. "%p", "%f0", "%h0")
     let mut exact_regs: HashSet<String> = HashSet::new();
 
+    // Strictly validate that all lines are pure 7-bit ASCII. NVIDIA ptxas fails on non-ASCII characters anywhere in PTX.
+    for (line_idx, raw_line) in ptx.lines().enumerate() {
+        let line_no = line_idx + 1;
+        if !raw_line.is_ascii() {
+            let non_ascii_chars: Vec<(usize, char)> = raw_line
+                .char_indices()
+                .filter(|(_, c)| !c.is_ascii())
+                .collect();
+            return Err(format!(
+                "PTX line {line_no} contains non-ASCII character(s): {:?}. Line: '{}'",
+                non_ascii_chars, raw_line
+            ));
+        }
+    }
+
     for (line_idx, raw_line) in ptx.lines().enumerate() {
         let line_no = line_idx + 1;
         let line = raw_line.split("//").next().unwrap_or("").trim();
@@ -1652,5 +1667,53 @@ mod tests {
             err2.contains("out of declared bounds"),
             "Must reject %rd10 when %rd<10> is declared: {err2}"
         );
+    }
+
+    #[test]
+    fn test_ptx_kernels_file_capture_and_ascii_verification() {
+        use std::fs;
+        use std::path::PathBuf;
+
+        // 1. Capture and save the exact PTX module to target/tara_kernels.ptx
+        let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target");
+        fs::create_dir_all(&out_dir).expect("Failed to create target directory");
+        let ptx_path = out_dir.join("tara_kernels.ptx");
+        fs::write(&ptx_path, PTX_TARA_KERNELS).expect("Failed to write PTX to target/tara_kernels.ptx");
+
+        println!("Saved PTX file to: {}", ptx_path.display());
+        assert!(ptx_path.exists(), "PTX artifact must exist on disk");
+
+        // 2. Read back and inspect line 775 and surrounding lines
+        let ptx_content = fs::read_to_string(&ptx_path).expect("Failed to read back PTX file");
+        let lines: Vec<&str> = ptx_content.lines().collect();
+        println!("Total PTX lines: {}", lines.len());
+
+        // Line 775 (1-indexed -> index 774)
+        if lines.len() >= 780 {
+            println!("--- Lines 770 to 780 of target/tara_kernels.ptx ---");
+            for i in 769..780 {
+                println!("{:4}: {}", i + 1, lines[i]);
+            }
+        }
+
+        // 3. Locate every non-ASCII byte across the entire module
+        let mut non_ascii_found = Vec::new();
+        for (line_idx, line) in lines.iter().enumerate() {
+            let line_no = line_idx + 1;
+            for (byte_offset, ch) in line.char_indices() {
+                if !ch.is_ascii() {
+                    non_ascii_found.push((line_no, byte_offset, ch, line.to_string()));
+                }
+            }
+        }
+
+        assert!(
+            non_ascii_found.is_empty(),
+            "Found non-ASCII characters in PTX kernels: {:?}",
+            non_ascii_found
+        );
+
+        // 4. Validate complete ASCII property
+        assert!(PTX_TARA_KERNELS.is_ascii(), "PTX_TARA_KERNELS must be 100% 7-bit ASCII");
     }
 }

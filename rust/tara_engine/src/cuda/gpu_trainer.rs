@@ -129,7 +129,49 @@ impl CudaTrainer {
         precision: TrainingPrecision,
     ) -> Result<Self, CudaError> {
         let session = CudaSession::init(device_ordinal)?;
+        let dev = session.device().clone();
+        let (driver_major, driver_minor) = session.driver().driver_version().unwrap_or((0, 0));
+        println!("[CUDA Backend] Driver Version: {}.{}", driver_major, driver_minor);
+        println!(
+            "[CUDA Backend] GPU: {} (Compute Capability: {}.{}, Total VRAM: {:.1} MB)",
+            dev.name,
+            dev.compute_capability.0,
+            dev.compute_capability.1,
+            dev.total_vram_bytes as f64 / (1024.0 * 1024.0)
+        );
+        println!("[CUDA Backend] PTX Target: sm_50+ (PTX ISA 6.5, JIT Backend: CUDA Driver cuModuleLoadDataEx)");
+
         let module = session.load_ptx_module(PTX_TARA_KERNELS)?;
+
+        // Verify driver JIT and minimal hardware execution with a smoke kernel launch
+        let k_test = module.get_kernel("accum_grads_kernel")?;
+        let d_test_accum = session.allocate_f32(1)?;
+        let d_test_grad = session.allocate_f32(1)?;
+        session.upload_f32(&d_test_accum, &[10.0])?;
+        session.upload_f32(&d_test_grad, &[20.0])?;
+        let mut arg_a = d_test_accum.dptr;
+        let mut arg_g = d_test_grad.dptr;
+        let mut arg_n = 1u32;
+        let mut test_params = [std::ptr::null_mut(); 16];
+        test_params[0] = &mut arg_a as *mut u64 as *mut c_void;
+        test_params[1] = &mut arg_g as *mut u64 as *mut c_void;
+        test_params[2] = &mut arg_n as *mut u32 as *mut c_void;
+        unsafe {
+            k_test.launch((1, 1, 1), (1, 1, 1), 0, test_params, 3)?;
+        }
+        session.synchronize()?;
+        let mut test_out = vec![0.0f32; 1];
+        session.download_f32(&d_test_accum, &mut test_out)?;
+        if (test_out[0] - 30.0).abs() > 1e-4 {
+            return Err(CudaError::KernelError(format!(
+                "Minimal CUDA kernel verification failed: expected 30.0, got {}",
+                test_out[0]
+            )));
+        }
+        println!(
+            "[CUDA Backend] Minimal kernel verification passed on GPU ({:.1} + {:.1} = {:.1})",
+            10.0, 20.0, test_out[0]
+        );
 
         // Dynamically resolve Auto precision based on hardware capability
         let resolved_precision = match precision {
@@ -1080,10 +1122,6 @@ impl CudaTrainer {
                     self.session.download_f32_slice(d_cm, hm)?;
                     self.session.download_f32_slice(d_cv, hv)?;
                 }
-
-                // Reset gradient buffer
-                let zeros = vec![0.0f32; param.len];
-                self.session.upload_f32(&param.d_grad, &zeros)?;
             } else {
                 let (arg_w, arg_m, arg_v) = if self.stream_optimizer {
                     let d_cw = self.d_chunk_w.as_ref().unwrap();
@@ -1158,9 +1196,6 @@ impl CudaTrainer {
                         self.session.upload_f32_slice(dw, hw)?;
                     }
                 }
-
-                let zeros = vec![0.0f32; param.len];
-                self.session.upload_f32(&param.d_grad, &zeros)?;
             }
         }
 
@@ -1182,6 +1217,41 @@ impl CudaTrainer {
             out.insert(name.clone(), vals);
         }
         Ok(out)
+    }
+
+    /// Update an existing host weight map in-place without heap re-allocation.
+    pub fn download_weights_into(&self, target: &mut HashMap<String, Vec<f32>>) -> Result<(), CudaError> {
+        if self.stream_optimizer {
+            for (name, hw) in &self.h_weights {
+                if let Some(dest) = target.get_mut(name) {
+                    if dest.len() == hw.len() {
+                        dest.copy_from_slice(hw);
+                        continue;
+                    }
+                }
+                target.insert(name.clone(), hw.clone());
+            }
+            return Ok(());
+        }
+        for (name, param) in &self.params {
+            let dest = target.entry(name.clone()).or_insert_with(|| vec![0.0f32; param.len]);
+            if dest.len() != param.len {
+                dest.resize(param.len, 0.0);
+            }
+            if let Some(ref dw) = param.d_weight {
+                self.session.download_f32(dw, dest)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Direct reference to host master weights in streamed optimizer mode.
+    pub fn streamed_weights(&self) -> Option<&HashMap<String, Vec<f32>>> {
+        if self.stream_optimizer {
+            Some(&self.h_weights)
+        } else {
+            None
+        }
     }
 
     /// Export optimizer states (m, v) for persistent checkpointing.

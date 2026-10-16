@@ -477,9 +477,18 @@ impl NativeSelfTrainer {
         // 1. Host RAM Breakdown:
         // Canonical FP32 model weights on host: 4 bytes / param
         let host_model_mb = (total_params * 4) as f64 / (1024.0 * 1024.0);
-        // Host optimizer states: if on GPU, 0 MB on host; if CPU training, 12 bytes / param (grads + m + v)
+        // Host optimizer states:
+        // If GPU with streamed optimizer (active for 1B/large models where total VRAM bytes would exceed GPU headroom),
+        // momentum m and variance v reside on host: 8 bytes / param.
+        // If CPU training: grads (4B) + m (4B) + v (4B) = 12 bytes / param.
+        // If standard GPU with resident optimizer: 0 MB on host.
         let host_opt_mb = if is_gpu {
-            0.0
+            if total_params >= 200_000_000 {
+                // Streamed optimizer: m (4B) + v (4B) on host
+                (total_params * 8) as f64 / (1024.0 * 1024.0)
+            } else {
+                0.0
+            }
         } else {
             (total_params * 12) as f64 / (1024.0 * 1024.0)
         };
@@ -497,7 +506,11 @@ impl NativeSelfTrainer {
                 (total_params * 4) as f64 / (1024.0 * 1024.0)
             };
             let g_mb = (total_params * 4) as f64 / (1024.0 * 1024.0);
-            let chunk_mb = (max_tensor_len * 12) as f64 / (1024.0 * 1024.0);
+            let chunk_mb = if total_params >= 200_000_000 {
+                (max_tensor_len * 12) as f64 / (1024.0 * 1024.0)
+            } else {
+                (total_params * 12) as f64 / (1024.0 * 1024.0)
+            };
             let act_mb = (batch_size * seq_len * 2048 * 8) as f64 / (1024.0 * 1024.0) + 150.0;
             let cuda_overhead_mb = 450.0;
             let subtotal = w_mb + g_mb + chunk_mb + act_mb + cuda_overhead_mb;
@@ -515,7 +528,7 @@ impl NativeSelfTrainer {
 
         let breakdown = if is_gpu {
             format!(
-                "Host RAM: Model={host_model_mb:.1}MB, Opt={host_opt_mb:.1}MB, Act={host_act_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB | GPU VRAM: Weights={gpu_w_mb:.1}MB, Grads={gpu_g_mb:.1}MB, Chunks={gpu_chunk_mb:.1}MB, Act={gpu_act_mb:.1}MB, Total(+10% Margin)={gpu_total_with_margin:.1}MB (Governing Peak: {governing_peak:.1}MB)",
+                "Host RAM: Model={host_model_mb:.1}MB, Opt(m+v)={host_opt_mb:.1}MB, Act={host_act_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB | GPU VRAM: Weights={gpu_w_mb:.1}MB, Grads={gpu_g_mb:.1}MB, Chunks={gpu_chunk_mb:.1}MB, Act={gpu_act_mb:.1}MB, Total(+10% Margin)={gpu_total_with_margin:.1}MB (Governing Peak: {governing_peak:.1}MB)",
             )
         } else {
             format!(
@@ -1077,12 +1090,26 @@ impl NativeSelfTrainer {
                                 Some(t)
                             }
                             Err(e) => {
+                                if total_params >= 50_000_000 {
+                                    return Err(TrainerError::Model(format!(
+                                        "GPU buffer allocation failed for large model ({total_params} params): {e}. \
+                                         Silent CPU fallback is disabled under --device auto to prevent host memory exhaustion (OOM). \
+                                         Explicitly specify --device cpu if CPU execution is genuinely intended."
+                                    )));
+                                }
                                 println!("[Device] GPU buffer allocation failed ({e}); falling back to CPU.");
                                 None
                             }
                         }
                     }
                     Err(e) => {
+                        if total_params >= 50_000_000 {
+                            return Err(TrainerError::Model(format!(
+                                "CUDA initialization/compilation failed for large model ({total_params} params): {e}. \
+                                 Silent CPU fallback is disabled under --device auto to prevent host memory exhaustion (OOM). \
+                                 Explicitly specify --device cpu if CPU execution is genuinely intended."
+                            )));
+                        }
                         println!(
                             "[Device] CUDA GPU not available ({e}); safely falling back to CPU."
                         );
@@ -1547,9 +1574,17 @@ impl NativeSelfTrainer {
                                 step_taken = true;
                             }
 
-                            weights = gpu_trainer.download_weights().map_err(|e| {
-                                TrainerError::Model(format!("GPU weights download failed: {e}"))
-                            })?;
+                            if let Some(ref_w) = gpu_trainer.streamed_weights() {
+                                for (name, hw) in ref_w {
+                                    if let Some(dest) = weights.get_mut(name) {
+                                        dest.copy_from_slice(hw);
+                                    }
+                                }
+                            } else {
+                                gpu_trainer.download_weights_into(&mut weights).map_err(|e| {
+                                    TrainerError::Model(format!("GPU weights download failed: {e}"))
+                                })?;
+                            }
                         } else {
                             // CPU AdamW step with EWC gradient penalty
                             let factor = 1.0 / accum_count as f32;
@@ -1755,9 +1790,17 @@ impl NativeSelfTrainer {
                         step_taken = true;
                     }
 
-                    weights = gpu_trainer.download_weights().map_err(|e| {
-                        TrainerError::Model(format!("GPU weights download failed: {e}"))
-                    })?;
+                    if let Some(ref_w) = gpu_trainer.streamed_weights() {
+                        for (name, hw) in ref_w {
+                            if let Some(dest) = weights.get_mut(name) {
+                                dest.copy_from_slice(hw);
+                            }
+                        }
+                    } else {
+                        gpu_trainer.download_weights_into(&mut weights).map_err(|e| {
+                            TrainerError::Model(format!("GPU weights download failed: {e}"))
+                        })?;
+                    }
                 } else {
                     let factor = 1.0 / accum_count as f32;
                     for g in accum_grads.values_mut() {

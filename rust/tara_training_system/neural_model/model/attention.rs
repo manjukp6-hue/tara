@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use thiserror::Error;
 
+use rayon::prelude::*;
 use super::mlp::mat_mul;
 use super::rope::{RotaryDimensions, RotaryEmbedding};
 use crate::config::TaraConfig;
@@ -439,26 +440,32 @@ impl TaraAttention {
         // dy: [seq_len, hs], context: [seq_len, nh * hd]
         // o_proj: [hs, nh * hd]
         let mut d_o_proj = vec![0.0f32; hs * nh * hd];
-        for h_dim in 0..hs {
-            for c_dim in 0..nh * hd {
-                let mut sum = 0.0f32;
+        d_o_proj
+            .par_chunks_exact_mut(nh * hd)
+            .enumerate()
+            .for_each(|(h_dim, row)| {
                 for t in 0..seq_len {
-                    sum += dy[t * hs + h_dim] * context[t * nh * hd + c_dim];
+                    let dy_val = dy[t * hs + h_dim];
+                    let ctx_row = &context[t * nh * hd..(t + 1) * nh * hd];
+                    for (c_dim, val) in row.iter_mut().enumerate() {
+                        *val += dy_val * ctx_row[c_dim];
+                    }
                 }
-                d_o_proj[h_dim * nh * hd + c_dim] = sum;
-            }
-        }
+            });
 
         let mut d_context = vec![0.0f32; seq_len * nh * hd];
-        for t in 0..seq_len {
-            for c_dim in 0..nh * hd {
-                let mut sum = 0.0f32;
-                for h_dim in 0..hs {
-                    sum += dy[t * hs + h_dim] * self.o_proj[h_dim * nh * hd + c_dim];
+        d_context
+            .par_chunks_exact_mut(nh * hd)
+            .enumerate()
+            .for_each(|(t, row)| {
+                let dy_row = &dy[t * hs..(t + 1) * hs];
+                for (h_dim, &dy_val) in dy_row.iter().enumerate() {
+                    let o_row = &self.o_proj[h_dim * nh * hd..(h_dim + 1) * nh * hd];
+                    for (c_dim, val) in row.iter_mut().enumerate() {
+                        *val += dy_val * o_row[c_dim];
+                    }
                 }
-                d_context[t * nh * hd + c_dim] = sum;
-            }
-        }
+            });
 
         // 2. Attention weights and Value gradients:
         let mut d_v_exp = vec![0.0f32; seq_len * nh * hd];
@@ -552,55 +559,74 @@ impl TaraAttention {
 
         // 7. Input projections backward (q_proj, k_proj, v_proj):
         let mut d_q_proj = vec![0.0f32; (nh * hd) * hs];
-        for q_dim in 0..nh * hd {
-            for h_dim in 0..hs {
-                let mut sum = 0.0f32;
+        d_q_proj
+            .par_chunks_exact_mut(hs)
+            .enumerate()
+            .for_each(|(q_dim, row)| {
                 for t in 0..seq_len {
-                    sum += d_q[t * nh * hd + q_dim] * hidden_states[t * hs + h_dim];
+                    let dq_val = d_q[t * nh * hd + q_dim];
+                    let h_row = &hidden_states[t * hs..(t + 1) * hs];
+                    for (h_dim, val) in row.iter_mut().enumerate() {
+                        *val += dq_val * h_row[h_dim];
+                    }
                 }
-                d_q_proj[q_dim * hs + h_dim] = sum;
-            }
-        }
+            });
 
         let mut d_k_proj = vec![0.0f32; (nkv * hd) * hs];
-        for k_dim in 0..nkv * hd {
-            for h_dim in 0..hs {
-                let mut sum = 0.0f32;
+        d_k_proj
+            .par_chunks_exact_mut(hs)
+            .enumerate()
+            .for_each(|(k_dim, row)| {
                 for t in 0..seq_len {
-                    sum += d_k[t * nkv * hd + k_dim] * hidden_states[t * hs + h_dim];
+                    let dk_val = d_k[t * nkv * hd + k_dim];
+                    let h_row = &hidden_states[t * hs..(t + 1) * hs];
+                    for (h_dim, val) in row.iter_mut().enumerate() {
+                        *val += dk_val * h_row[h_dim];
+                    }
                 }
-                d_k_proj[k_dim * hs + h_dim] = sum;
-            }
-        }
+            });
 
         let mut d_v_proj = vec![0.0f32; (nkv * hd) * hs];
-        for v_dim in 0..nkv * hd {
-            for h_dim in 0..hs {
-                let mut sum = 0.0f32;
+        d_v_proj
+            .par_chunks_exact_mut(hs)
+            .enumerate()
+            .for_each(|(v_dim, row)| {
                 for t in 0..seq_len {
-                    sum += d_v[t * nkv * hd + v_dim] * hidden_states[t * hs + h_dim];
+                    let dv_val = d_v[t * nkv * hd + v_dim];
+                    let h_row = &hidden_states[t * hs..(t + 1) * hs];
+                    for (h_dim, val) in row.iter_mut().enumerate() {
+                        *val += dv_val * h_row[h_dim];
+                    }
                 }
-                d_v_proj[v_dim * hs + h_dim] = sum;
-            }
-        }
+            });
 
         // dx = d_q @ q_proj + d_k @ k_proj + d_v @ v_proj:
         let mut dx = vec![0.0f32; seq_len * hs];
-        for t in 0..seq_len {
-            for h_dim in 0..hs {
-                let mut sum = 0.0f32;
-                for q_dim in 0..nh * hd {
-                    sum += d_q[t * nh * hd + q_dim] * self.q_proj[q_dim * hs + h_dim];
+        dx.par_chunks_exact_mut(hs)
+            .enumerate()
+            .for_each(|(t, row)| {
+                let dq_row = &d_q[t * nh * hd..(t + 1) * nh * hd];
+                for (q_dim, &dq_val) in dq_row.iter().enumerate() {
+                    let q_row = &self.q_proj[q_dim * hs..(q_dim + 1) * hs];
+                    for (h_dim, val) in row.iter_mut().enumerate() {
+                        *val += dq_val * q_row[h_dim];
+                    }
                 }
-                for k_dim in 0..nkv * hd {
-                    sum += d_k[t * nkv * hd + k_dim] * self.k_proj[k_dim * hs + h_dim];
+                let dk_row = &d_k[t * nkv * hd..(t + 1) * nkv * hd];
+                for (k_dim, &dk_val) in dk_row.iter().enumerate() {
+                    let k_row = &self.k_proj[k_dim * hs..(k_dim + 1) * hs];
+                    for (h_dim, val) in row.iter_mut().enumerate() {
+                        *val += dk_val * k_row[h_dim];
+                    }
                 }
-                for v_dim in 0..nkv * hd {
-                    sum += d_v[t * nkv * hd + v_dim] * self.v_proj[v_dim * hs + h_dim];
+                let dv_row = &d_v[t * nkv * hd..(t + 1) * nkv * hd];
+                for (v_dim, &dv_val) in dv_row.iter().enumerate() {
+                    let v_row = &self.v_proj[v_dim * hs..(v_dim + 1) * hs];
+                    for (h_dim, val) in row.iter_mut().enumerate() {
+                        *val += dv_val * v_row[h_dim];
+                    }
                 }
-                dx[t * hs + h_dim] = sum;
-            }
-        }
+            });
 
         (dx, d_q_proj, d_k_proj, d_v_proj, d_o_proj)
     }

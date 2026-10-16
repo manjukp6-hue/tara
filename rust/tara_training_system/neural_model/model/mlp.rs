@@ -4,6 +4,7 @@
 //! Formula: `down_proj( silu(gate_proj(x)) * up_proj(x) )`.
 
 use std::collections::HashMap;
+use rayon::prelude::*;
 use thiserror::Error;
 
 /// Errors building the MLP layer.
@@ -193,27 +194,33 @@ impl TaraMlp {
 
         // 1. d_down_proj = dy^T @ hidden: shape [hidden_size, intermediate_size]
         let mut d_down_proj = vec![0.0f32; hidden_size * intermediate_size];
-        for h in 0..hidden_size {
-            for i in 0..intermediate_size {
-                let mut sum = 0.0f32;
+        d_down_proj
+            .par_chunks_exact_mut(intermediate_size)
+            .enumerate()
+            .for_each(|(h, row)| {
                 for t in 0..seq_len {
-                    sum += dy[t * hidden_size + h] * hidden[t * intermediate_size + i];
+                    let dy_val = dy[t * hidden_size + h];
+                    let h_row = &hidden[t * intermediate_size..(t + 1) * intermediate_size];
+                    for (i, val) in row.iter_mut().enumerate() {
+                        *val += dy_val * h_row[i];
+                    }
                 }
-                d_down_proj[h * intermediate_size + i] = sum;
-            }
-        }
+            });
 
         // 2. d_hidden = dy @ down_proj: shape [seq_len, intermediate_size]
         let mut d_hidden = vec![0.0f32; seq_len * intermediate_size];
-        for t in 0..seq_len {
-            for i in 0..intermediate_size {
-                let mut sum = 0.0f32;
-                for h in 0..hidden_size {
-                    sum += dy[t * hidden_size + h] * self.down_proj[h * intermediate_size + i];
+        d_hidden
+            .par_chunks_exact_mut(intermediate_size)
+            .enumerate()
+            .for_each(|(t, row)| {
+                let dy_row = &dy[t * hidden_size..(t + 1) * hidden_size];
+                for (h, &dy_val) in dy_row.iter().enumerate() {
+                    let w_row = &self.down_proj[h * intermediate_size..(h + 1) * intermediate_size];
+                    for (i, val) in row.iter_mut().enumerate() {
+                        *val += dy_val * w_row[i];
+                    }
                 }
-                d_hidden[t * intermediate_size + i] = sum;
-            }
-        }
+            });
 
         // 3. d_up = d_hidden * gate: shape [seq_len, intermediate_size]
         // 4. d_gate_raw = d_hidden * up * silu'(gate_raw): shape [seq_len, intermediate_size]
@@ -235,41 +242,49 @@ impl TaraMlp {
 
         // 5. d_up_proj = d_up^T @ x: shape [intermediate_size, hidden_size]
         let mut d_up_proj = vec![0.0f32; intermediate_size * hidden_size];
-        for i in 0..intermediate_size {
-            for h in 0..hidden_size {
-                let mut sum = 0.0f32;
+        d_up_proj
+            .par_chunks_exact_mut(hidden_size)
+            .enumerate()
+            .for_each(|(i, row)| {
                 for t in 0..seq_len {
-                    sum += d_up[t * intermediate_size + i] * x[t * hidden_size + h];
+                    let dup_val = d_up[t * intermediate_size + i];
+                    let x_row = &x[t * hidden_size..(t + 1) * hidden_size];
+                    for (h, val) in row.iter_mut().enumerate() {
+                        *val += dup_val * x_row[h];
+                    }
                 }
-                d_up_proj[i * hidden_size + h] = sum;
-            }
-        }
+            });
 
         // 6. d_gate_proj = d_gate_raw^T @ x: shape [intermediate_size, hidden_size]
         let mut d_gate_proj = vec![0.0f32; intermediate_size * hidden_size];
-        for i in 0..intermediate_size {
-            for h in 0..hidden_size {
-                let mut sum = 0.0f32;
+        d_gate_proj
+            .par_chunks_exact_mut(hidden_size)
+            .enumerate()
+            .for_each(|(i, row)| {
                 for t in 0..seq_len {
-                    sum += d_gate_raw[t * intermediate_size + i] * x[t * hidden_size + h];
+                    let dgate_val = d_gate_raw[t * intermediate_size + i];
+                    let x_row = &x[t * hidden_size..(t + 1) * hidden_size];
+                    for (h, val) in row.iter_mut().enumerate() {
+                        *val += dgate_val * x_row[h];
+                    }
                 }
-                d_gate_proj[i * hidden_size + h] = sum;
-            }
-        }
+            });
 
         // 7. dx = d_up @ up_proj + d_gate_raw @ gate_proj: shape [seq_len, hidden_size]
         let mut dx = vec![0.0f32; seq_len * hidden_size];
-        for t in 0..seq_len {
-            for h in 0..hidden_size {
-                let mut sum = 0.0f32;
-                for i in 0..intermediate_size {
-                    sum += d_up[t * intermediate_size + i] * self.up_proj[i * hidden_size + h]
-                        + d_gate_raw[t * intermediate_size + i]
-                            * self.gate_proj[i * hidden_size + h];
+        dx.par_chunks_exact_mut(hidden_size)
+            .enumerate()
+            .for_each(|(t, row)| {
+                let dup_row = &d_up[t * intermediate_size..(t + 1) * intermediate_size];
+                let dgate_row = &d_gate_raw[t * intermediate_size..(t + 1) * intermediate_size];
+                for (i, (&du, &dg)) in dup_row.iter().zip(dgate_row.iter()).enumerate() {
+                    let up_row = &self.up_proj[i * hidden_size..(i + 1) * hidden_size];
+                    let gate_row = &self.gate_proj[i * hidden_size..(i + 1) * hidden_size];
+                    for (h, val) in row.iter_mut().enumerate() {
+                        *val += du * up_row[h] + dg * gate_row[h];
+                    }
                 }
-                dx[t * hidden_size + h] = sum;
-            }
-        }
+            });
 
         (dx, d_gate_proj, d_up_proj, d_down_proj)
     }

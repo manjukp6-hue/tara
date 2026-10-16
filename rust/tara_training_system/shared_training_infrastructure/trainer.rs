@@ -7,7 +7,7 @@
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -1386,25 +1386,38 @@ impl NativeSelfTrainer {
             let skip_count = initial_sample_skip;
             initial_sample_skip = 0;
 
+            println!(
+                "[Train] Starting Epoch {}/{} ({} samples in pool, accumulation: {} micro-steps/optimizer step, device: {})...",
+                epoch_idx + 1,
+                max_epochs,
+                train_tokens.len(),
+                accumulation_steps,
+                device_label
+            );
+            let _ = std::io::stdout().flush();
+
             for (tokens, target_start) in train_tokens.iter().skip(skip_count) {
                 if let Some(max_s) = self.max_steps {
                     if optimizer_steps >= max_s {
                         break;
                     }
                 }
+                let sample_start = std::time::Instant::now();
                 let seq_len = tokens.len();
-                let (layer_inputs, final_normed, cpu_logits) = model.forward_with_cache(tokens);
-                let logits = if let Some(ref gpu_trainer) = gpu_trainer_opt {
-                    gpu_trainer
+                let (layer_inputs, final_normed, logits) = if let Some(ref gpu_trainer) = gpu_trainer_opt {
+                    let (inputs, fnorm) = model.forward_activations(tokens);
+                    let lgs = gpu_trainer
                         .forward_lm_head(
-                            &final_normed,
+                            &fnorm,
                             seq_len,
                             config.hidden_size,
                             config.vocab_size,
                         )
-                        .map_err(|e| TrainerError::Model(format!("GPU forward failed: {e}")))?
+                        .map_err(|e| TrainerError::Model(format!("GPU forward failed: {e}")))?;
+                    (inputs, fnorm, lgs)
                 } else {
-                    cpu_logits
+                    let (inputs, fnorm, lgs) = model.forward_with_cache(tokens);
+                    (inputs, fnorm, lgs)
                 };
 
                 // Compute d_logits for supervised causal cross-entropy
@@ -1461,6 +1474,21 @@ impl NativeSelfTrainer {
                     for g in d_logits.iter_mut() {
                         *g *= norm_factor;
                     }
+
+                    let sample_time = sample_start.elapsed().as_secs_f32();
+                    println!(
+                        "[Train Epoch {}] Sample {}/{} (seq_len: {}, micro-step {}/{}) | Loss: {:.4} | Time: {:.2}s | Device: {}",
+                        epoch_idx + 1,
+                        samples_seen + 1,
+                        train_tokens.len(),
+                        seq_len,
+                        accum_count + 1,
+                        accumulation_steps,
+                        sample_loss,
+                        sample_time,
+                        device_label
+                    );
+                    let _ = std::io::stdout().flush();
 
                     let grad_map = if let Some(ref gpu_trainer) = gpu_trainer_opt {
                         // GPU-accelerated LM Head backward projection

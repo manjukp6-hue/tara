@@ -482,12 +482,10 @@ impl TaraForCausalLM {
     /// Forward pass caching intermediate activations for exact backpropagation.
     ///
     /// Returns `(layer_inputs, final_normed, logits)`:
-    /// - `layer_inputs`: inputs to each layer (index 0 is layer 0 input, index N is final layer output)
-    /// - `final_normed`: shape `[seq_len, hidden_size]`
-    /// - `logits`: shape `[seq_len, vocab_size]`
-    pub fn forward_with_cache(&self, token_ids: &[u32]) -> (Vec<Vec<f32>>, Vec<f32>, Vec<f32>) {
+    /// Forward activations through embedding table, all layers, and final RMSNorm, omitting LM head logits.
+    pub fn forward_activations(&self, token_ids: &[u32]) -> (Vec<Vec<f32>>, Vec<f32>) {
         if token_ids.is_empty() {
-            return (Vec::new(), Vec::new(), Vec::new());
+            return (Vec::new(), Vec::new());
         }
         let seq_len = token_ids.len();
         let hs = self.config.hidden_size;
@@ -509,17 +507,34 @@ impl TaraForCausalLM {
         }
 
         let final_normed = self.norm.forward(layer_inputs.last().unwrap(), seq_len, hs);
+        (layer_inputs, final_normed)
+    }
 
-        // Compute logits: [seq_len, vocab_size]
-        let mut logits = vec![0.0f32; seq_len * vs];
-        for t in 0..seq_len {
-            let h_row = &final_normed[t * hs..(t + 1) * hs];
-            for v in 0..vs {
-                let lm_row = &self.lm_head[v * hs..(v + 1) * hs];
-                let dot: f32 = h_row.iter().zip(lm_row.iter()).map(|(&a, &b)| a * b).sum();
-                logits[t * vs + v] = dot;
-            }
+    /// Full forward pass returning activations, final norm, and LM head logits:
+    /// - `layer_inputs`: inputs to each layer (index 0 is layer 0 input, index N is final layer output)
+    /// - `final_normed`: shape `[seq_len, hidden_size]`
+    /// - `logits`: shape `[seq_len, vocab_size]`
+    pub fn forward_with_cache(&self, token_ids: &[u32]) -> (Vec<Vec<f32>>, Vec<f32>, Vec<f32>) {
+        let (layer_inputs, final_normed) = self.forward_activations(token_ids);
+        if layer_inputs.is_empty() {
+            return (Vec::new(), Vec::new(), Vec::new());
         }
+        let seq_len = token_ids.len();
+        let hs = self.config.hidden_size;
+        let vs = self.config.vocab_size;
+
+        use rayon::prelude::*;
+        let mut logits = vec![0.0f32; seq_len * vs];
+        logits
+            .par_chunks_exact_mut(vs)
+            .enumerate()
+            .for_each(|(t, l_row)| {
+                let h_row = &final_normed[t * hs..(t + 1) * hs];
+                for (v, val) in l_row.iter_mut().enumerate() {
+                    let lm_row = &self.lm_head[v * hs..(v + 1) * hs];
+                    *val = h_row.iter().zip(lm_row.iter()).map(|(&a, &b)| a * b).sum();
+                }
+            });
 
         (layer_inputs, final_normed, logits)
     }

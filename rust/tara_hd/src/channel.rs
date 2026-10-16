@@ -150,4 +150,51 @@ impl ComputeChannel {
             self.active_device.info().total_memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
         )
     }
+
+    /// Dispatch linear forward projection through the active compute device.
+    pub fn forward_linear(
+        &self,
+        weight: &[f32],
+        x: &[f32],
+        seq_len: usize,
+        in_dim: usize,
+        out_dim: usize,
+    ) -> Result<Vec<f32>, String> {
+        self.active_device.forward_linear(weight, x, seq_len, in_dim, out_dim)
+    }
+
+    /// Dispatch RMSNorm forward pass through the active compute device.
+    pub fn forward_rmsnorm(
+        &self,
+        weight: &[f32],
+        x: &[f32],
+        seq_len: usize,
+        hidden_dim: usize,
+        eps: f32,
+    ) -> Result<Vec<f32>, String> {
+        self.active_device.forward_rmsnorm(weight, x, seq_len, hidden_dim, eps)
+    }
+
+    /// Dispatch SwiGLU forward pass through the active compute device.
+    pub fn forward_swiglu(&self, gate: &[f32], up: &[f32]) -> Result<Vec<f32>, String> {
+        self.active_device.forward_swiglu(gate, up)
+    }
+
+    /// Dispatch residual addition through the active compute device.
+    pub fn add_residual(&self, a: &[f32], b: &[f32]) -> Result<Vec<f32>, String> {
+        self.active_device.add_residual(a, b)
+    }
+
+    /// Dispatch linear backward projection through the active compute device.
+    pub fn backward_linear(
+        &self,
+        weight: &[f32],
+        d_out: &[f32],
+        x: &[f32],
+        seq_len: usize,
+        in_dim: usize,
+        out_dim: usize,
+    ) -> Result<(Vec<f32>, Vec<f32>), String> {
+        self.active_device.backward_linear(weight, d_out, x, seq_len, in_dim, out_dim)
+    }
 }

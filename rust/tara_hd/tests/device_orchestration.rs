@@ -185,3 +185,48 @@ fn test_compute_channel_live_auto_initialization() {
     assert!(summary.contains("Device:"));
     assert!(summary.contains("Backend:"));
 }
+
+#[test]
+fn test_compute_dispatch_primitives() {
+    let channel = ComputeChannel::auto().expect("channel auto-init");
+
+    // 1. Linear forward: y = x @ W^T
+    // x: [2, 3], W: [4, 3] -> y: [2, 4]
+    let x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let w = vec![
+        1.0, 0.0, 0.0, // out 0
+        0.0, 1.0, 0.0, // out 1
+        0.0, 0.0, 1.0, // out 2
+        1.0, 1.0, 1.0, // out 3
+    ];
+    let y = channel.forward_linear(&w, &x, 2, 3, 4).expect("forward_linear");
+    assert_eq!(y.len(), 8);
+    assert_eq!(y[0], 1.0);
+    assert_eq!(y[1], 2.0);
+    assert_eq!(y[2], 3.0);
+    assert_eq!(y[3], 6.0); // 1 + 2 + 3
+
+    // 2. RMSNorm forward
+    let norm_w = vec![1.0, 1.0, 1.0];
+    let normed = channel.forward_rmsnorm(&norm_w, &x, 2, 3, 1e-5).expect("forward_rmsnorm");
+    assert_eq!(normed.len(), 6);
+
+    // 3. SwiGLU forward
+    let gate = vec![0.0, 1.0];
+    let up = vec![2.0, 3.0];
+    let swiglu = channel.forward_swiglu(&gate, &up).expect("forward_swiglu");
+    assert_eq!(swiglu.len(), 2);
+    assert!((swiglu[0] - 0.0).abs() < 1e-5); // 0 * sig(0) * 2 = 0
+
+    // 4. Residual add
+    let res = channel.add_residual(&x, &x).expect("add_residual");
+    assert_eq!(res[0], 2.0);
+    assert_eq!(res[5], 12.0);
+
+    // 5. Linear backward
+    let d_out = vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]; // [2, 4]
+    let (dw, dx) = channel.backward_linear(&w, &d_out, &x, 2, 3, 4).expect("backward_linear");
+    assert_eq!(dw.len(), 12); // [4, 3]
+    assert_eq!(dx.len(), 6);  // [2, 3]
+}
+

@@ -37,6 +37,160 @@ pub trait ComputeDevice: Send + Sync + Debug {
     fn kind(&self) -> &DeviceKind {
         &self.info().kind
     }
+
+    /// Linear forward projection: y = x @ weight^T.
+    /// x: [seq_len, in_dim], weight: [out_dim, in_dim], out: [seq_len, out_dim].
+    fn forward_linear(
+        &self,
+        weight: &[f32],
+        x: &[f32],
+        seq_len: usize,
+        in_dim: usize,
+        out_dim: usize,
+    ) -> Result<Vec<f32>, String> {
+        if seq_len == 0 || in_dim == 0 || out_dim == 0 {
+            return Ok(Vec::new());
+        }
+        if x.len() < seq_len * in_dim || weight.len() < out_dim * in_dim {
+            return Err(format!(
+                "forward_linear dimension mismatch: x len={}, weight len={}, expected {} and {}",
+                x.len(),
+                weight.len(),
+                seq_len * in_dim,
+                out_dim * in_dim
+            ));
+        }
+        use rayon::prelude::*;
+        let mut out = vec![0.0f32; seq_len * out_dim];
+        out.par_chunks_exact_mut(out_dim)
+            .enumerate()
+            .for_each(|(i, out_row)| {
+                let x_row = &x[i * in_dim..(i + 1) * in_dim];
+                for j in 0..out_dim {
+                    let w_row = &weight[j * in_dim..(j + 1) * in_dim];
+                    out_row[j] = x_row
+                        .iter()
+                        .zip(w_row.iter())
+                        .map(|(&a, &b)| a * b)
+                        .sum();
+                }
+            });
+        Ok(out)
+    }
+
+    /// RMSNorm forward pass.
+    fn forward_rmsnorm(
+        &self,
+        weight: &[f32],
+        x: &[f32],
+        seq_len: usize,
+        hidden_dim: usize,
+        eps: f32,
+    ) -> Result<Vec<f32>, String> {
+        if seq_len == 0 || hidden_dim == 0 {
+            return Ok(Vec::new());
+        }
+        if x.len() < seq_len * hidden_dim || weight.len() < hidden_dim {
+            return Err(format!(
+                "forward_rmsnorm dimension mismatch: x len={}, weight len={}, expected {} and {}",
+                x.len(),
+                weight.len(),
+                seq_len * hidden_dim,
+                hidden_dim
+            ));
+        }
+        use rayon::prelude::*;
+        let safe_eps = if eps.is_finite() && eps > 0.0 { eps } else { 1e-5 };
+        let mut out = vec![0.0f32; seq_len * hidden_dim];
+        out.par_chunks_exact_mut(hidden_dim)
+            .enumerate()
+            .for_each(|(i, out_row)| {
+                let x_row = &x[i * hidden_dim..(i + 1) * hidden_dim];
+                let mean_sq: f32 = x_row.iter().map(|&v| v * v).sum::<f32>() / (hidden_dim as f32).max(1.0);
+                let inv_rms = 1.0 / (mean_sq + safe_eps).sqrt();
+                for (j, (&xv, &wv)) in x_row.iter().zip(weight.iter()).enumerate() {
+                    out_row[j] = xv * inv_rms * wv;
+                }
+            });
+        Ok(out)
+    }
+
+    /// SwiGLU activation: out = (gate * sigmoid(gate)) * up.
+    fn forward_swiglu(&self, gate: &[f32], up: &[f32]) -> Result<Vec<f32>, String> {
+        let len = gate.len().min(up.len());
+        if len == 0 {
+            return Ok(Vec::new());
+        }
+        use rayon::prelude::*;
+        let mut out = vec![0.0f32; len];
+        out.par_iter_mut().enumerate().for_each(|(i, val)| {
+            let g = gate[i];
+            let sig = 1.0 / (1.0 + (-g).exp());
+            *val = (g * sig) * up[i];
+        });
+        Ok(out)
+    }
+
+    /// Element-wise residual addition: out = a + b.
+    fn add_residual(&self, a: &[f32], b: &[f32]) -> Result<Vec<f32>, String> {
+        let len = a.len().min(b.len());
+        if len == 0 {
+            return Ok(Vec::new());
+        }
+        use rayon::prelude::*;
+        let mut out = vec![0.0f32; len];
+        out.par_iter_mut().enumerate().for_each(|(i, val)| {
+            *val = a[i] + b[i];
+        });
+        Ok(out)
+    }
+
+    /// Linear backward projection: computes (d_weight, d_in).
+    fn backward_linear(
+        &self,
+        weight: &[f32],
+        d_out: &[f32],
+        x: &[f32],
+        seq_len: usize,
+        in_dim: usize,
+        out_dim: usize,
+    ) -> Result<(Vec<f32>, Vec<f32>), String> {
+        if seq_len == 0 || in_dim == 0 || out_dim == 0 {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        if d_out.len() < seq_len * out_dim || x.len() < seq_len * in_dim || weight.len() < out_dim * in_dim {
+            return Err("backward_linear buffer length mismatch".to_string());
+        }
+        use rayon::prelude::*;
+        let mut d_weight = vec![0.0f32; out_dim * in_dim];
+        d_weight
+            .par_chunks_exact_mut(in_dim)
+            .enumerate()
+            .for_each(|(o, w_row)| {
+                for s in 0..seq_len {
+                    let d_val = d_out[s * out_dim + o];
+                    let x_row = &x[s * in_dim..(s + 1) * in_dim];
+                    for (i, &xv) in x_row.iter().enumerate() {
+                        w_row[i] += d_val * xv;
+                    }
+                }
+            });
+
+        let mut d_in = vec![0.0f32; seq_len * in_dim];
+        d_in.par_chunks_exact_mut(in_dim)
+            .enumerate()
+            .for_each(|(s, in_row)| {
+                let d_row = &d_out[s * out_dim..(s + 1) * out_dim];
+                for (o, &dv) in d_row.iter().enumerate() {
+                    let w_row = &weight[o * in_dim..(o + 1) * in_dim];
+                    for (i, &wv) in w_row.iter().enumerate() {
+                        in_row[i] += dv * wv;
+                    }
+                }
+            });
+
+        Ok((d_weight, d_in))
+    }
 }
 
 /// Accelerated NVIDIA CUDA GPU device implementation.

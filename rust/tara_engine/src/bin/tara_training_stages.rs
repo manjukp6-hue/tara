@@ -257,6 +257,9 @@ pub fn compute_model_weights_digest(dir: &Path) -> Result<Option<String>, String
 /// Computes a whole-checkpoint digest covering `config.json`, `tokenizer.json`, model weight shards,
 /// `optimizer.safetensors`, and `checkpoint_state.json`.
 pub fn compute_full_checkpoint_digest(dir: &Path) -> Result<Option<String>, String> {
+    if !dir.exists() || is_empty_dir(dir) {
+        return Ok(None);
+    }
     let Some(weights_sha) = compute_model_weights_digest(dir)? else {
         return Ok(None);
     };
@@ -737,6 +740,33 @@ pub fn verify_continuation_ready_with_purpose(
 
 pub fn verify_continuation_ready(cp_dir: &Path) -> (bool, Vec<String>, Option<u64>) {
     verify_continuation_ready_with_purpose(cp_dir, "RESUME")
+}
+
+pub fn log_checkpoint_load(caller: &str, stage_id: &str, path: &str, purpose: &str) {
+    println!(
+        "[Checkpoint Loader] Caller: '{}' | Stage: '{}' | Path: '{}' | Purpose: {}",
+        caller, stage_id, path, purpose
+    );
+}
+
+pub fn verify_working_model_with_context(
+    caller: &str,
+    stage_id: &str,
+    model_dir: &Path,
+    purpose: &str,
+) -> (bool, Vec<String>, Option<usize>) {
+    log_checkpoint_load(caller, stage_id, &model_dir.to_string_lossy(), purpose);
+    verify_working_model_with_purpose(model_dir, purpose)
+}
+
+pub fn verify_continuation_ready_with_context(
+    caller: &str,
+    stage_id: &str,
+    cp_dir: &Path,
+    purpose: &str,
+) -> (bool, Vec<String>, Option<u64>) {
+    log_checkpoint_load(caller, stage_id, &cp_dir.to_string_lossy(), purpose);
+    verify_continuation_ready_with_purpose(cp_dir, purpose)
 }
 
 fn is_safe_stage_id(id: &str) -> bool {
@@ -1954,7 +1984,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !model_dir.exists() {
         return Err(format!("Base model directory missing: {}", model_dir.display()).into());
     }
-    let (is_base_model, missing_base, base_param_count) = verify_working_model(&model_dir);
+    let (is_base_model, missing_base, base_param_count) =
+        verify_working_model_with_context("main_pipeline_startup", "base_model", &model_dir, "INPUT");
     if !is_base_model {
         return Err(format!(
             "Base model directory '{}' is invalid: {:?}",
@@ -2039,7 +2070,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .into());
         }
-        let (is_model, missing_model, _) = verify_working_model(init_path);
+        let (is_model, missing_model, _) =
+            verify_working_model_with_context("cli_init_override", "entry", init_path, "INPUT");
         if !is_model {
             return Err(format!(
                 "Specified --init-from path '{}' is not a valid working model: {:?}",
@@ -2059,7 +2091,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .into());
         }
-        let (is_model, missing_model, _) = verify_working_model(r_path);
+        let (is_model, missing_model, _) =
+            verify_working_model_with_context("cli_resume_override", "entry", r_path, "RESUME");
         if !is_model {
             return Err(format!(
                 "Specified --resume-from path '{}' is not a valid working model: {:?}",
@@ -2068,7 +2101,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .into());
         }
-        let (is_cont, missing_cont, _) = verify_continuation_ready(r_path);
+        let (is_cont, missing_cont, _) =
+            verify_continuation_ready_with_context("cli_resume_override", "entry", r_path, "RESUME");
         if !is_cont {
             return Err(format!(
                 "Specified --resume-from path '{}' is not continuation-ready (requires valid checkpoint_state.json and optimizer.safetensors): {:?}",
@@ -2095,66 +2129,103 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or(false));
 
         let ds_path = PathBuf::from(&s.dataset_path);
-        let insp = if let Some(cached) = dataset_inspection_cache.get(&ds_path) {
+        let insp = if !is_targeted {
+            DatasetInspection {
+                jsonl_files: 0,
+                total_lines: 0,
+                valid_records: 0,
+                malformed_records: 0,
+                empty_lines: 0,
+                total_bytes: 0,
+                dataset_fingerprint: "untargeted_stage".to_string(),
+            }
+        } else if let Some(cached) = dataset_inspection_cache.get(&ds_path) {
             cached.clone()
         } else {
-            let res = match inspect_dataset(&ds_path) {
-                Ok(d) => d,
-                Err(e) => {
-                    if is_targeted {
-                        return Err(format!(
-                            "Dataset inspection failed for targeted stage '{}': {}",
-                            s.stage_id, e
-                        )
-                        .into());
-                    }
-                    DatasetInspection {
-                        jsonl_files: 0,
-                        total_lines: 0,
-                        valid_records: 0,
-                        malformed_records: 0,
-                        empty_lines: 0,
-                        total_bytes: 0,
-                        dataset_fingerprint: "missing_dataset".to_string(),
-                    }
-                }
-            };
+            let res = inspect_dataset(&ds_path).map_err(|e| {
+                format!(
+                    "Dataset inspection failed for targeted stage '{}': {}",
+                    s.stage_id, e
+                )
+            })?;
             dataset_inspection_cache.insert(ds_path, res.clone());
             res
         };
 
-        let in_digest = match compute_full_checkpoint_digest(Path::new(&s.input_checkpoint))? {
-            Some(d) => d,
-            None => "pending".to_string(),
+        let is_root_stage = s.depends_on.is_empty();
+        let in_path = Path::new(&s.input_checkpoint);
+
+        // Preflight input digest:
+        // Do NOT require checkpoints from future stages to exist before the first stage runs.
+        // Stage 1 depends on Stage 0's output, so validate that checkpoint only after Stage 0 successfully completes and saves it.
+        let in_digest = if !is_targeted {
+            "untargeted".to_string()
+        } else if is_root_stage {
+            let (is_base, missing, _) = verify_working_model_with_context(
+                "dag_preflight_entry_input",
+                &s.stage_id,
+                in_path,
+                "INPUT",
+            );
+            if !is_base {
+                return Err(format!(
+                    "Entry stage '{}' input checkpoint '{}' is not a valid working model: {:?}",
+                    s.stage_id,
+                    s.input_checkpoint,
+                    missing
+                )
+                .into());
+            }
+            compute_full_checkpoint_digest(in_path)?.unwrap_or_else(|| "pending".to_string())
+        } else {
+            // Downstream stage depends on uncompleted or completed predecessor
+            if in_path.exists() && !is_empty_dir(in_path) {
+                // If predecessor completed in a prior run
+                compute_full_checkpoint_digest(in_path)
+                    .unwrap_or(None)
+                    .unwrap_or_else(|| "pending".to_string())
+            } else {
+                "pending".to_string()
+            }
         };
+
         let fp =
             compute_stage_config_fingerprint(s, &in_digest, &insp.dataset_fingerprint, &precision);
 
-        let out_is_empty_or_nonexistent = !out_path.exists() || is_empty_dir(&out_path);
+        // Output directory classification:
+        // If the output directory exists but contains no valid checkpoint, classify it as NEW_RUN
+        // unless explicit resume mode was requested. Do not try to load it as model weights.
+        let (out_is_valid_model, out_is_continuation, out_completed_ts) =
+            if is_targeted && out_path.exists() && !is_empty_dir(&out_path) {
+                let (is_m, _, _) = verify_working_model_with_context(
+                    "dag_preflight_output_check",
+                    &s.stage_id,
+                    &out_path,
+                    "OUTPUT",
+                );
+                let (is_c, _, _) = verify_continuation_ready_with_context(
+                    "dag_preflight_output_check",
+                    &s.stage_id,
+                    &out_path,
+                    "OUTPUT",
+                );
+                if is_m && is_c && should_skip_completed_stage(&out_path, &fp) {
+                    (true, true, read_stage_completed_timestamp(&out_path))
+                } else {
+                    (false, false, None)
+                }
+            } else {
+                (false, false, None)
+            };
 
         let (is_model, is_cont, weights_hash, full_cp_hash, completed_ts, stage_status) =
-            if out_is_empty_or_nonexistent {
-                (false, false, None, None, None, "STAGED_READY".to_string())
+            if out_is_valid_model && out_is_continuation {
+                let w = compute_model_weights_digest(&out_path).ok().flatten();
+                let f = compute_full_checkpoint_digest(&out_path).ok().flatten();
+                (true, true, w, f, out_completed_ts, "COMPLETED".to_string())
             } else {
-                let w_hash = compute_model_weights_digest(&out_path)?;
-                let f_hash = compute_full_checkpoint_digest(&out_path)?;
-                let (m_ok, _, _) = verify_working_model_with_purpose(&out_path, "RESUME");
-                let (c_ok, _, _) = verify_continuation_ready_with_purpose(&out_path, "RESUME");
-
-                let is_comp = should_skip_completed_stage(&out_path, &fp);
-                let ts = if is_comp {
-                    read_stage_completed_timestamp(&out_path)
-                } else {
-                    None
-                };
-                let status = if is_comp {
-                    "COMPLETED".to_string()
-                } else if out_path.exists() && w_hash.is_some() {
-                    "STALE_OR_UNVERIFIED".to_string()
-                } else {
-                    "STAGED_READY".to_string()
-                };
-                (m_ok, c_ok, w_hash, f_hash, ts, status)
+                // Uncompleted, empty, or unverified output directory is classified as NEW_RUN
+                (false, false, None, None, None, "STAGED_READY".to_string())
             };
 
         if is_targeted {
@@ -3250,4 +3321,97 @@ mod tests {
         assert!(inc_missing.iter().any(|m| m.contains("Failed to load model SafeTensors weights")
             || m.contains("missing")));
     }
+
+    #[test]
+    fn test_multistage_dag_preflight_downstream_checkpoints_deferred() {
+        let dir = unique_test_dir("multistage_dag_preflight");
+        let base_model = dir.join("base_model");
+        let stage0_out = dir.join("stage0_out");
+        let stage1_out = dir.join("stage1_out");
+        let stage2_out = dir.join("stage2_out");
+
+        write_minimal_working_model(&base_model, false, false);
+        // Stage 0 output exists on disk as an empty directory (e.g. created by Google Drive / cloud storage)
+        fs::create_dir_all(&stage0_out).unwrap();
+
+        let ds_file = dir.join("test_dataset.jsonl");
+        fs::write(&ds_file, "{\"text\":\"Hello TARA multi-stage training\"}\n").unwrap();
+
+        let s0 = StageDefinition {
+            stage_index: 0,
+            stage_id: "stage0".to_string(),
+            stage_name: "Pretraining".to_string(),
+            description: "Stage 0".to_string(),
+            dataset_path: ds_file.to_string_lossy().to_string(),
+            input_checkpoint: base_model.to_string_lossy().to_string(),
+            output_checkpoint: stage0_out.to_string_lossy().to_string(),
+            epochs: 1,
+            max_steps: Some(10),
+            learning_rate: 1e-4,
+            batch_size: 2,
+            checkpoint_interval: 5,
+            depends_on: vec![],
+        };
+
+        let s1 = StageDefinition {
+            stage_index: 1,
+            stage_id: "stage1".to_string(),
+            stage_name: "Curriculum".to_string(),
+            description: "Stage 1".to_string(),
+            dataset_path: ds_file.to_string_lossy().to_string(),
+            input_checkpoint: stage0_out.to_string_lossy().to_string(),
+            output_checkpoint: stage1_out.to_string_lossy().to_string(),
+            epochs: 1,
+            max_steps: Some(10),
+            learning_rate: 1e-4,
+            batch_size: 2,
+            checkpoint_interval: 5,
+            depends_on: vec!["stage0".to_string()],
+        };
+
+        let s2 = StageDefinition {
+            stage_index: 2,
+            stage_id: "stage2".to_string(),
+            stage_name: "Adaptation".to_string(),
+            description: "Stage 2".to_string(),
+            dataset_path: ds_file.to_string_lossy().to_string(),
+            input_checkpoint: stage1_out.to_string_lossy().to_string(),
+            output_checkpoint: stage2_out.to_string_lossy().to_string(),
+            epochs: 1,
+            max_steps: Some(10),
+            learning_rate: 1e-4,
+            batch_size: 2,
+            checkpoint_interval: 5,
+            depends_on: vec!["stage1".to_string()],
+        };
+
+        let raw_stages = vec![s0, s1, s2];
+        assert!(validate_stage_definitions(&raw_stages, &base_model).is_ok());
+        let sorted = validate_and_sort_stage_dag(&raw_stages).expect("DAG validation failed");
+        assert_eq!(sorted.len(), 3);
+
+        // Preflight simulation: downstream checkpoints do NOT exist yet on disk
+        let mut scheduled_outputs: HashSet<PathBuf> = HashSet::new();
+        for (idx, stage) in sorted.iter().enumerate() {
+            let effective_in = PathBuf::from(&stage.input_checkpoint);
+            let norm_in = normalize_for_comparison(&effective_in);
+
+            if !scheduled_outputs.contains(&norm_in) {
+                // Only root stage (idx == 0) must exist on disk prior to execution
+                assert_eq!(idx, 0, "Only the entry stage may have an un-scheduled input checkpoint");
+                let (is_model, missing, _) = verify_working_model(&effective_in);
+                assert!(is_model, "Base model input must be valid: {:?}", missing);
+            }
+
+            // Verify that empty or nonexistent output dirs are recognized as NEW_RUN and not loaded as models
+            let out_p = PathBuf::from(&stage.output_checkpoint);
+            let is_empty_or_missing = !out_p.exists() || is_empty_dir(&out_p);
+            assert!(is_empty_or_missing);
+
+            scheduled_outputs.insert(normalize_for_comparison(Path::new(&stage.output_checkpoint)));
+        }
+
+        assert_eq!(scheduled_outputs.len(), 3);
+    }
 }
+

@@ -118,6 +118,7 @@ if [ ! -f "$MAIN_DS_DIR/tara_shard_001.jsonl" ]; then
         else
             echo "[DATASET NOTICE] Remote dataset download failed or not found. Checking local datasets in $MAIN_DS_DIR."
         fi
+    fi
 fi
 
 # 3b. Ingest Main Dataset V1 for Stage 4 (Scale Expansion)

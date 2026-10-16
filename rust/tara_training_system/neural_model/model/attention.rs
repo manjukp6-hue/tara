@@ -184,8 +184,30 @@ impl TaraAttention {
         // v: [seq, nkv*hd]
         let v = mat_mul(hidden_states, &self.v_proj, seq_len, hs, nkv * hd);
 
-        // ── Reshape to [seq, heads, head_dim] ────────────────────
-        // (already row-major; we just index carefully)
+        let context = self.forward_attention_context(&q, &k, &v, seq_len);
+
+        // ── Output projection ─────────────────────────────────────
+        // context is [seq, nh*hd]; o_proj is [hs, nh*hd]
+        mat_mul(&context, &self.o_proj, seq_len, nh * hd, hs)
+    }
+
+    /// Compute causal attention context from pre-computed Q, K, V projections.
+    /// Used by GPU-accelerated forward pipelines where Q, K, V linear projections
+    /// execute on GPU while attention context reduction executes with bounded memory.
+    pub fn forward_attention_context(
+        &self,
+        q: &[f32],
+        k: &[f32],
+        v: &[f32],
+        seq_len: usize,
+    ) -> Vec<f32> {
+        let nh = self.num_heads;
+        let nkv = self.num_kv_heads;
+        let hd = self.head_dim;
+
+        if nkv == 0 || nh == 0 || seq_len == 0 || hd == 0 {
+            return vec![0.0f32; seq_len * nh * hd];
+        }
 
         // ── Rotary embeddings ─────────────────────────────────────
         let (cos, sin) = self.rotary_emb.get_cos_sin(seq_len);
@@ -195,11 +217,10 @@ impl TaraAttention {
             num_heads_k: nkv,
             head_dim: hd,
         };
-        let (q_rot, k_rot) = RotaryEmbedding::apply_rotary_emb(&q, &k, &cos, &sin, dims);
+        let (q_rot, k_rot) = RotaryEmbedding::apply_rotary_emb(q, k, &cos, &sin, dims);
 
         // ── GQA: expand K/V by num_kv_groups ─────────────────────
         let kv_groups = (nh / nkv.max(1)).max(1);
-        // k_expanded: [seq, nh, hd]
         let mut k_exp = vec![0.0f32; seq_len * nh * hd];
         let mut v_exp = vec![0.0f32; seq_len * nh * hd];
         for pos in 0..seq_len {
@@ -215,7 +236,6 @@ impl TaraAttention {
 
         // ── Scaled dot-product with causal mask ───────────────────
         let scale = (hd as f32).sqrt().recip();
-        // attn_weights: [nh, seq, seq]
         let mut attn_weights = vec![0.0f32; nh * seq_len * seq_len];
 
         for h in 0..nh {
@@ -238,7 +258,6 @@ impl TaraAttention {
         softmax_inplace(&mut attn_weights, nh, seq_len);
 
         // ── Weighted sum over values ──────────────────────────────
-        // context: [seq, nh, hd]
         let mut context = vec![0.0f32; seq_len * nh * hd];
         for h in 0..nh {
             for i in 0..seq_len {
@@ -252,10 +271,7 @@ impl TaraAttention {
                 }
             }
         }
-
-        // ── Output projection ─────────────────────────────────────
-        // context is [seq, nh*hd]; o_proj is [hs, nh*hd]
-        mat_mul(&context, &self.o_proj, seq_len, nh * hd, hs)
+        context
     }
 
     /// Single-token forward pass using cached keys and values.

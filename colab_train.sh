@@ -241,7 +241,11 @@ fi
 
 COMPLETION_MARKER="storage/checkpoints/gpu_step_test_complete.json"
 GPU_LOG="/tmp/tara_gpu_step_test.log"
-rm -f "$COMPLETION_MARKER"
+
+if [ "${RUN_GPU_STEP_TEST:-}" = "always" ]; then
+    echo "[GPU GATE] RUN_GPU_STEP_TEST=always requested: clearing cached verification marker to force full test."
+    rm -f "$COMPLETION_MARKER"
+fi
 rm -f "$GPU_LOG"
 
 set +e

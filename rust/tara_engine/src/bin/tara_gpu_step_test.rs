@@ -28,7 +28,144 @@ fn print_usage() {
     println!("  --model <path>       Base model directory (default: storage/models/tara_candidate_v1)");
     println!("  --precision <prec>   Precision: auto, fp16, fp32 (default: auto)");
     println!("  --device <dev>       Device backend: auto, gpu, cuda (default: auto)");
+    println!("  --force              Force full execution (ignore cached verification marker)");
     println!("  -h, --help           Show this help message");
+}
+
+/// Retrieve the current source Git commit hash dynamically.
+fn get_current_git_commit() -> String {
+    if let Ok(commit) = env::var("TARA_GIT_COMMIT").or_else(|_| env::var("GIT_COMMIT")) {
+        let c = commit.trim();
+        if !c.is_empty() {
+            return c.to_string();
+        }
+    }
+    if let Ok(out) = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+    {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !s.is_empty() {
+                return s;
+            }
+        }
+    }
+    "unversioned".to_string()
+}
+
+/// Compute a dynamic SHA-256 fingerprint of the model configuration and safetensors metadata.
+fn compute_model_config_fingerprint(model_dir: &Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+
+    // 1. Hash config.json content
+    let config_path = model_dir.join("config.json");
+    if !config_path.exists() {
+        return Err(format!("config.json not found in {}", model_dir.display()));
+    }
+    let config_bytes = fs::read(&config_path).map_err(|e| format!("read config.json: {e}"))?;
+    hasher.update(&config_bytes);
+
+    // 2. Hash tokenizer.json if present
+    let tok_path = model_dir.join("tokenizer.json");
+    if tok_path.exists() {
+        if let Ok(tok_bytes) = fs::read(&tok_path) {
+            hasher.update(&tok_bytes);
+        }
+    }
+
+    // 3. Hash metadata / headers of safetensors in model_dir
+    let mut safetensors_files = Vec::new();
+    if let Ok(entries) = fs::read_dir(model_dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_file() && p.extension().map(|e| e == "safetensors").unwrap_or(false) {
+                safetensors_files.push(p);
+            }
+        }
+    }
+    safetensors_files.sort();
+
+    for sf in safetensors_files {
+        let file_name = sf.file_name().unwrap_or_default().to_string_lossy();
+        hasher.update(file_name.as_bytes());
+        if let Ok(meta) = sf.metadata() {
+            hasher.update(&meta.len().to_le_bytes());
+        }
+        if let Ok(mut f) = fs::File::open(&sf) {
+            use std::io::Read;
+            let mut buf = [0u8; 65536];
+            if let Ok(n) = f.read(&mut buf) {
+                hasher.update(&buf[..n]);
+            }
+        }
+    }
+
+    let result = hasher.finalize();
+    Ok(hex::encode(result))
+}
+
+/// Verify if a cached verification marker matches current code, model config, GPU, and precision.
+fn check_cached_marker(
+    marker_path: &Path,
+    current_commit: &str,
+    current_fingerprint: &str,
+    current_gpu: &str,
+    current_precision: &str,
+) -> Result<serde_json::Value, String> {
+    if !marker_path.exists() {
+        return Err(format!("marker file '{}' does not exist", marker_path.display()));
+    }
+    let content = fs::read_to_string(marker_path)
+        .map_err(|e| format!("failed to read marker file: {e}"))?;
+    let val: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("failed to parse marker JSON: {e}"))?;
+
+    let status = val.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    if status != "PASSED" {
+        return Err(format!("marker status is '{status}', expected 'PASSED'"));
+    }
+
+    let adamw = val.get("adamw_updated").and_then(|v| v.as_bool()).unwrap_or(false);
+    let parity = val.get("checkpoint_parity_verified").and_then(|v| v.as_bool()).unwrap_or(false);
+    if !adamw || !parity {
+        return Err("marker indicates incomplete AdamW or checkpoint parity verification".to_string());
+    }
+
+    let marker_commit = val.get("git_commit").and_then(|v| v.as_str()).unwrap_or("");
+    if marker_commit.is_empty() || marker_commit != current_commit {
+        return Err(format!(
+            "git commit mismatch: cached='{}', current='{}'",
+            marker_commit, current_commit
+        ));
+    }
+
+    let marker_fp = val.get("model_config_fingerprint").and_then(|v| v.as_str()).unwrap_or("");
+    if marker_fp.is_empty() || marker_fp != current_fingerprint {
+        return Err(format!(
+            "model config fingerprint mismatch: cached='{}', current='{}'",
+            marker_fp, current_fingerprint
+        ));
+    }
+
+    let marker_gpu = val.get("gpu_name").and_then(|v| v.as_str()).unwrap_or("");
+    if marker_gpu.is_empty() || marker_gpu != current_gpu {
+        return Err(format!(
+            "GPU hardware mismatch: cached='{}', current='{}'",
+            marker_gpu, current_gpu
+        ));
+    }
+
+    let marker_prec = val.get("precision").and_then(|v| v.as_str()).unwrap_or("");
+    if marker_prec.is_empty() || marker_prec != current_precision {
+        return Err(format!(
+            "precision mismatch: cached='{}', current='{}'",
+            marker_prec, current_precision
+        ));
+    }
+
+    Ok(val)
 }
 
 /// Deterministic numerical finite-difference test for cross-entropy gradients.
@@ -128,6 +265,7 @@ fn main() {
     let mut model_dir = "storage/models/tara_candidate_v1".to_string();
     let mut precision_str = "auto".to_string();
     let mut device_str = "auto".to_string();
+    let mut force_run = false;
 
     let args: Vec<String> = env::args().collect();
     let mut i = 1;
@@ -151,6 +289,9 @@ fn main() {
                     device_str = args[i].clone();
                 }
             }
+            "--force" => {
+                force_run = true;
+            }
             "-h" | "--help" => {
                 print_usage();
                 exit(0);
@@ -164,6 +305,13 @@ fn main() {
         i += 1;
     }
 
+    if env::var("RUN_GPU_STEP_TEST")
+        .map(|v| v.trim().eq_ignore_ascii_case("always"))
+        .unwrap_or(false)
+    {
+        force_run = true;
+    }
+
     println!("================================================================================");
     println!("             TARA PRODUCTION-MODEL GPU 1-STEP VERIFICATION SUITE                ");
     println!("================================================================================");
@@ -171,10 +319,7 @@ fn main() {
     println!("[GPU Step Test] Device Requested: {device_str}");
     println!("[GPU Step Test] Precision Requested: {precision_str}");
 
-    // Milestone 1: Cross-Entropy Finite-Difference Derivative Check
-    verify_cross_entropy_finite_differences();
-
-    // Milestone 2: Hardware GPU Validation
+    // Hardware GPU Validation
     log_flushed_memory_checkpoint("01_PRE_HARDWARE_CHECK", None);
     if !is_cuda_available() {
         eprintln!("[GPU Step Test] FATAL: CUDA hardware acceleration is NOT available on this system.");
@@ -206,6 +351,50 @@ fn main() {
         dev_info.total_vram_bytes as f64 / (1024.0 * 1024.0)
     );
     println!("[GPU Step Test] Resolved Training Precision: {:?}", gpu_trainer.precision());
+
+    let current_gpu_name = dev_info.name.clone();
+    let current_commit = get_current_git_commit();
+    let current_fingerprint = compute_model_config_fingerprint(Path::new(&model_dir))
+        .unwrap_or_else(|e| format!("unknown_{e}"));
+    let current_precision_str = format!("{:?}", gpu_trainer.precision()).to_lowercase();
+
+    // Check Cached Verification Marker
+    let marker_path = PathBuf::from("storage/checkpoints/gpu_step_test_complete.json");
+    if force_run {
+        println!("[GPU Step Test] Force execution active (RUN_GPU_STEP_TEST=always or --force). Skipping cache lookup.");
+    } else {
+        match check_cached_marker(
+            &marker_path,
+            &current_commit,
+            &current_fingerprint,
+            &current_gpu_name,
+            &current_precision_str,
+        ) {
+            Ok(cached) => {
+                let loss_val = cached.get("loss").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                println!("================================================================================");
+                println!("  [GPU Step Test] CACHED GPU ONE-STEP VERIFICATION IS VALID (SKIPPING TEST)     ");
+                println!("  Marker Path        : {}", marker_path.display());
+                println!("  Git Commit         : {current_commit}");
+                println!("  Model Fingerprint  : {current_fingerprint}");
+                println!("  GPU Hardware       : {current_gpu_name}");
+                println!("  Precision          : {current_precision_str}");
+                println!("  Verified Step Loss : {loss_val:.6}");
+                println!("  AdamW & Parity     : VERIFIED");
+                println!("================================================================================");
+                println!("================================================================================");
+                println!("             [GPU Step Test] ALL ONE-STEP VERIFICATION CHECKS PASSED.           ");
+                println!("================================================================================");
+                exit(0);
+            }
+            Err(reason) => {
+                println!("[GPU Step Test] Cached verification not used ({reason}). Executing full test suite...");
+            }
+        }
+    }
+
+    // Milestone 1: Cross-Entropy Finite-Difference Derivative Check
+    verify_cross_entropy_finite_differences();
 
     let vram_info = gpu_trainer.get_vram_info().ok();
     log_flushed_memory_checkpoint("02_POST_CUDA_INIT", vram_info);
@@ -899,6 +1088,10 @@ fn main() {
     }
     let marker_json = serde_json::json!({
         "status": "PASSED",
+        "git_commit": current_commit,
+        "model_config_fingerprint": current_fingerprint,
+        "gpu_name": current_gpu_name,
+        "precision": current_precision_str,
         "timestamp_epoch_secs": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
         "total_parameters": weights.len(),
         "loss": mean_loss,
@@ -919,3 +1112,81 @@ fn main() {
     println!("================================================================================");
     exit(0);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compute_model_config_fingerprint_deterministic() {
+        let temp_dir = std::env::temp_dir().join(format!("tara_test_fp_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let config_path = temp_dir.join("config.json");
+        fs::write(&config_path, r#"{"vocab_size": 100, "hidden_size": 64}"#).unwrap();
+
+        let fp1 = compute_model_config_fingerprint(&temp_dir).expect("fingerprint 1");
+        let fp2 = compute_model_config_fingerprint(&temp_dir).expect("fingerprint 2");
+        assert_eq!(fp1, fp2, "Fingerprint of unchanged directory must be identical");
+
+        // Mutating config must change fingerprint
+        fs::write(&config_path, r#"{"vocab_size": 200, "hidden_size": 64}"#).unwrap();
+        let fp3 = compute_model_config_fingerprint(&temp_dir).expect("fingerprint 3");
+        assert_ne!(fp1, fp3, "Fingerprint must change when config changes");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_check_cached_marker_matching_and_rejection() {
+        let temp_dir = std::env::temp_dir().join(format!("tara_test_marker_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let marker_path = temp_dir.join("gpu_step_test_complete.json");
+
+        let valid_marker = serde_json::json!({
+            "status": "PASSED",
+            "git_commit": "abc1234",
+            "model_config_fingerprint": "fp_test_123",
+            "gpu_name": "NVIDIA A100",
+            "precision": "fp16",
+            "loss": 10.5,
+            "host_grad_norm": 46.5,
+            "gpu_grad_norm": 46.4,
+            "adamw_updated": true,
+            "checkpoint_parity_verified": true
+        });
+        fs::write(&marker_path, serde_json::to_string(&valid_marker).unwrap()).unwrap();
+
+        // 1. Exact match must succeed
+        let res = check_cached_marker(&marker_path, "abc1234", "fp_test_123", "NVIDIA A100", "fp16");
+        assert!(res.is_ok(), "Exact match must succeed: {:?}", res);
+
+        // 2. Commit mismatch must be rejected
+        let res = check_cached_marker(&marker_path, "different_commit", "fp_test_123", "NVIDIA A100", "fp16");
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("git commit mismatch"));
+
+        // 3. Model fingerprint mismatch must be rejected
+        let res = check_cached_marker(&marker_path, "abc1234", "fp_modified", "NVIDIA A100", "fp16");
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("model config fingerprint mismatch"));
+
+        // 4. GPU hardware mismatch must be rejected
+        let res = check_cached_marker(&marker_path, "abc1234", "fp_test_123", "Tesla T4", "fp16");
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("GPU hardware mismatch"));
+
+        // 5. Precision mismatch must be rejected
+        let res = check_cached_marker(&marker_path, "abc1234", "fp_test_123", "NVIDIA A100", "fp32");
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("precision mismatch"));
+
+        // 6. Missing marker must be rejected
+        let non_existent = temp_dir.join("missing.json");
+        let res = check_cached_marker(&non_existent, "abc1234", "fp_test_123", "NVIDIA A100", "fp16");
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("does not exist"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+}
+

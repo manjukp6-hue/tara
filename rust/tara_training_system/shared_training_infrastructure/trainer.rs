@@ -2325,6 +2325,120 @@ pub fn promote_directory_atomically(
     }
 }
 
+fn forward_hidden_gpu(
+    model: &TaraForCausalLM,
+    gt: &crate::cuda::CudaTrainer,
+    active_tokens: &[u32],
+    hs: usize,
+    seq_len: usize,
+) -> Result<Vec<f32>, TrainerError> {
+    let eps = model.config.rms_norm_eps as f32;
+    let inter_size = model.config.intermediate_size;
+    let nh = model.config.num_attention_heads;
+    let nkv = model.config.num_key_value_heads;
+    let hd = model.config.effective_head_dim();
+
+    // 1. Embedding on GPU
+    let mut hidden = gt.forward_embedding(active_tokens, hs).map_err(|e| {
+        TrainerError::Model(format!("GPU forward_embedding failed: {e}"))
+    })?;
+
+    // 2. Decoder Layers on GPU
+    for (l_idx, layer) in model.layers.iter().enumerate() {
+        let pfx = format!("model.layers.{l_idx}");
+
+        // Attention block
+        let normed_x = gt
+            .forward_rmsnorm(&format!("{pfx}.input_layernorm.weight"), &hidden, seq_len, hs, eps)
+            .map_err(|e| {
+                TrainerError::Model(format!("GPU input_layernorm forward failed at layer {l_idx}: {e}"))
+            })?;
+
+        let q = gt
+            .forward_linear(&format!("{pfx}.self_attn.q_proj.weight"), &normed_x, seq_len, hs, nh * hd)
+            .map_err(|e| {
+                TrainerError::Model(format!("GPU q_proj forward failed at layer {l_idx}: {e}"))
+            })?;
+        let k = gt
+            .forward_linear(&format!("{pfx}.self_attn.k_proj.weight"), &normed_x, seq_len, hs, nkv * hd)
+            .map_err(|e| {
+                TrainerError::Model(format!("GPU k_proj forward failed at layer {l_idx}: {e}"))
+            })?;
+        let v = gt
+            .forward_linear(&format!("{pfx}.self_attn.v_proj.weight"), &normed_x, seq_len, hs, nkv * hd)
+            .map_err(|e| {
+                TrainerError::Model(format!("GPU v_proj forward failed at layer {l_idx}: {e}"))
+            })?;
+        drop(normed_x);
+
+        let context = layer.self_attn.forward_attention_context(&q, &k, &v, seq_len);
+        drop(q);
+        drop(k);
+        drop(v);
+
+        let attn_out = gt
+            .forward_linear(&format!("{pfx}.self_attn.o_proj.weight"), &context, seq_len, nh * hd, hs)
+            .map_err(|e| {
+                TrainerError::Model(format!("GPU o_proj forward failed at layer {l_idx}: {e}"))
+            })?;
+        drop(context);
+
+        let h = gt.add_residual(&hidden, &attn_out).map_err(|e| {
+            TrainerError::Model(format!("GPU attention add_residual failed at layer {l_idx}: {e}"))
+        })?;
+        drop(hidden);
+        drop(attn_out);
+
+        // MLP block
+        let normed_h = gt
+            .forward_rmsnorm(&format!("{pfx}.post_attention_layernorm.weight"), &h, seq_len, hs, eps)
+            .map_err(|e| {
+                TrainerError::Model(format!("GPU post_attention_layernorm forward failed at layer {l_idx}: {e}"))
+            })?;
+
+        let gate = gt
+            .forward_linear(&format!("{pfx}.mlp.gate_proj.weight"), &normed_h, seq_len, hs, inter_size)
+            .map_err(|e| {
+                TrainerError::Model(format!("GPU gate_proj forward failed at layer {l_idx}: {e}"))
+            })?;
+        let up = gt
+            .forward_linear(&format!("{pfx}.mlp.up_proj.weight"), &normed_h, seq_len, hs, inter_size)
+            .map_err(|e| {
+                TrainerError::Model(format!("GPU up_proj forward failed at layer {l_idx}: {e}"))
+            })?;
+        drop(normed_h);
+
+        let swiglu = gt.forward_swiglu(&gate, &up).map_err(|e| {
+            TrainerError::Model(format!("GPU forward_swiglu failed at layer {l_idx}: {e}"))
+        })?;
+        drop(gate);
+        drop(up);
+
+        let mlp_out = gt
+            .forward_linear(&format!("{pfx}.mlp.down_proj.weight"), &swiglu, seq_len, inter_size, hs)
+            .map_err(|e| {
+                TrainerError::Model(format!("GPU down_proj forward failed at layer {l_idx}: {e}"))
+            })?;
+        drop(swiglu);
+
+        hidden = gt.add_residual(&h, &mlp_out).map_err(|e| {
+            TrainerError::Model(format!("GPU mlp add_residual failed at layer {l_idx}: {e}"))
+        })?;
+        drop(h);
+        drop(mlp_out);
+    }
+
+    // 3. Final RMSNorm on GPU
+    let final_normed = gt
+        .forward_rmsnorm("model.norm.weight", &hidden, seq_len, hs, eps)
+        .map_err(|e| {
+            TrainerError::Model(format!("GPU final norm forward failed: {e}"))
+        })?;
+    drop(hidden);
+
+    Ok(final_normed)
+}
+
 fn compute_model_loss(
     model: &TaraForCausalLM,
     gpu_trainer_opt: Option<&crate::cuda::CudaTrainer>,
@@ -2363,12 +2477,10 @@ fn compute_model_loss(
         let active_tokens = &tokens[..seq_len];
         let eff_target_start = (*target_start).min(seq_len);
 
-        // 1. Forward hidden activations across decoder layers (micro-batch size 1, bounded memory)
-        let final_normed = model.forward_hidden(active_tokens);
-
-        // 2. Forward LM Head (GPU-accelerated when CUDA trainer is active)
-        let logits = if let Some(gt) = gpu_trainer_opt {
-            match gt.forward_lm_head(&final_normed, seq_len, hs, vs) {
+        // 1. Forward hidden activations and LM head (GPU-accelerated when CUDA trainer is active, Rayon-parallelized on CPU)
+        let (final_normed, logits) = if let Some(gt) = gpu_trainer_opt {
+            let fnorm = forward_hidden_gpu(model, gt, active_tokens, hs, seq_len)?;
+            let lgs = match gt.forward_lm_head(&fnorm, seq_len, hs, vs) {
                 Ok(l) => l,
                 Err(e) => {
                     eprintln!(
@@ -2378,18 +2490,20 @@ fn compute_model_loss(
                     let _ = std::io::stderr().flush();
                     return Err(TrainerError::Model(format!("GPU validation forward failed: {e}")));
                 }
-            }
+            };
+            (fnorm, lgs)
         } else {
+            let fnorm = model.forward_hidden(active_tokens);
             let mut cpu_logits = vec![0.0f32; seq_len * vs];
             for t in 0..seq_len {
-                let h_row = &final_normed[t * hs..(t + 1) * hs];
+                let h_row = &fnorm[t * hs..(t + 1) * hs];
                 let l_row = &mut cpu_logits[t * vs..(t + 1) * vs];
                 for (v, val) in l_row.iter_mut().enumerate().take(vs) {
                     let lm_row = &model.lm_head[v * hs..(v + 1) * hs];
                     *val = h_row.iter().zip(lm_row.iter()).map(|(&a, &b)| a * b).sum();
                 }
             }
-            cpu_logits
+            (fnorm, cpu_logits)
         };
         drop(final_normed);
 

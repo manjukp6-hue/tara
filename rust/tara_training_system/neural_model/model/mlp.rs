@@ -59,13 +59,25 @@ pub fn mat_mul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
         n
     );
     let mut c = vec![0.0f32; m * n];
-    for i in 0..m {
-        let a_row = &a[i * k..(i + 1) * k];
-        let c_row = &mut c[i * n..(i + 1) * n];
-        for j in 0..n {
-            let b_row = &b[j * k..(j + 1) * k];
-            let sum: f32 = a_row.iter().zip(b_row.iter()).map(|(&av, &bv)| av * bv).sum();
-            c_row[j] = sum;
+    if m >= 4 {
+        use rayon::prelude::*;
+        c.par_chunks_exact_mut(n).enumerate().for_each(|(i, c_row)| {
+            let a_row = &a[i * k..(i + 1) * k];
+            for j in 0..n {
+                let b_row = &b[j * k..(j + 1) * k];
+                let sum: f32 = a_row.iter().zip(b_row.iter()).map(|(&av, &bv)| av * bv).sum();
+                c_row[j] = sum;
+            }
+        });
+    } else {
+        for i in 0..m {
+            let a_row = &a[i * k..(i + 1) * k];
+            let c_row = &mut c[i * n..(i + 1) * n];
+            for j in 0..n {
+                let b_row = &b[j * k..(j + 1) * k];
+                let sum: f32 = a_row.iter().zip(b_row.iter()).map(|(&av, &bv)| av * bv).sum();
+                c_row[j] = sum;
+            }
         }
     }
     c

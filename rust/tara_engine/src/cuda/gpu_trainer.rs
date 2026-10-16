@@ -554,6 +554,10 @@ impl CudaTrainer {
         &self.session
     }
 
+    pub fn synchronize(&self) -> Result<(), CudaError> {
+        self.session.synchronize()
+    }
+
     pub fn last_grad_norm(&self) -> f32 {
         self.last_grad_norm
     }

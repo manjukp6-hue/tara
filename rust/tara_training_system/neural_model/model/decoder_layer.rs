@@ -154,6 +154,31 @@ impl TaraDecoderLayer {
         h.iter().zip(mlp_out.iter()).map(|(&a, &b)| a + b).collect()
     }
 
+    /// Run the decoder layer forward pass through the active hardware compute channel.
+    pub fn forward_channel(
+        &self,
+        x: &[f32],
+        seq_len: usize,
+        channel: &tara_hd::ComputeChannel,
+    ) -> Vec<f32> {
+        let hs = self.hidden_size;
+
+        let normed_x = self.input_layernorm.forward_channel(x, seq_len, hs, channel);
+        let attn_out = self.self_attn.forward_channel(&normed_x, seq_len, channel);
+        let h = channel.add_residual(x, &attn_out).unwrap_or_else(|_| {
+            x.iter().zip(attn_out.iter()).map(|(&a, &b)| a + b).collect()
+        });
+
+        let normed_h = self.post_attention_layernorm.forward_channel(&h, seq_len, hs, channel);
+        let mlp_out = self
+            .mlp
+            .forward_channel(&normed_h, seq_len, hs, self.intermediate_size, channel);
+
+        channel.add_residual(&h, &mlp_out).unwrap_or_else(|_| {
+            h.iter().zip(mlp_out.iter()).map(|(&a, &b)| a + b).collect()
+        })
+    }
+
     /// Single-token forward pass through the decoder layer using KV caching.
     ///
     /// `x`: `[1, hidden_size]` buffer.

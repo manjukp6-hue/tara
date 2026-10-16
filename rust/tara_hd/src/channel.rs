@@ -94,6 +94,24 @@ impl ComputeChannel {
         })
     }
 
+    /// Construct a ComputeChannel with an explicitly provided ComputeDevice implementation.
+    pub fn with_device(
+        device: Arc<dyn ComputeDevice>,
+        precision: PrecisionMode,
+        inventory: DiscoveredInventory,
+    ) -> Self {
+        Self {
+            active_device: device,
+            precision,
+            inventory,
+        }
+    }
+
+    /// Swap or update the active device implementation inside the channel.
+    pub fn set_device(&mut self, device: Arc<dyn ComputeDevice>) {
+        self.active_device = device;
+    }
+
     /// Return reference to the active compute device.
     pub fn device(&self) -> &dyn ComputeDevice {
         self.active_device.as_ref()
@@ -196,5 +214,60 @@ impl ComputeChannel {
         out_dim: usize,
     ) -> Result<(Vec<f32>, Vec<f32>), String> {
         self.active_device.backward_linear(weight, d_out, x, seq_len, in_dim, out_dim)
+    }
+
+    /// Dispatch named linear forward projection through the active compute device.
+    pub fn forward_linear_named(
+        &self,
+        weight_name: &str,
+        weight_slice: &[f32],
+        x: &[f32],
+        seq_len: usize,
+        in_dim: usize,
+        out_dim: usize,
+    ) -> Result<Vec<f32>, String> {
+        self.active_device.forward_linear_named(weight_name, weight_slice, x, seq_len, in_dim, out_dim)
+    }
+
+    /// Dispatch named RMSNorm forward pass through the active compute device.
+    pub fn forward_rmsnorm_named(
+        &self,
+        weight_name: &str,
+        weight_slice: &[f32],
+        x: &[f32],
+        seq_len: usize,
+        hidden_dim: usize,
+        eps: f32,
+    ) -> Result<Vec<f32>, String> {
+        self.active_device.forward_rmsnorm_named(weight_name, weight_slice, x, seq_len, hidden_dim, eps)
+    }
+
+    /// Dispatch named linear backward projection through the active compute device.
+    pub fn backward_linear_named(
+        &self,
+        weight_name: &str,
+        weight_slice: &[f32],
+        d_out: &[f32],
+        x: &[f32],
+        seq_len: usize,
+        in_dim: usize,
+        out_dim: usize,
+    ) -> Result<(Vec<f32>, Vec<f32>), String> {
+        self.active_device.backward_linear_named(weight_name, weight_slice, d_out, x, seq_len, in_dim, out_dim)
+    }
+
+    /// Dispatch embedding forward lookup through the active compute device.
+    pub fn forward_embedding(
+        &self,
+        token_ids: &[u32],
+        embed_table: &[f32],
+        hidden_size: usize,
+    ) -> Result<Vec<f32>, String> {
+        self.active_device.forward_embedding(token_ids, embed_table, hidden_size)
+    }
+
+    /// Dispatch gradient accumulation into device parameter buffer.
+    pub fn accumulate_gradient(&self, param_name: &str, gradient: &[f32]) -> Result<(), String> {
+        self.active_device.accumulate_gradient(param_name, gradient)
     }
 }

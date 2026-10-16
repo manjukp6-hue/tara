@@ -539,6 +539,110 @@ impl TaraForCausalLM {
         (layer_inputs, final_normed, logits)
     }
 
+    /// Forward pass caching intermediate activations for exact backpropagation routed through TARA-HD channel.
+    pub fn forward_activations_channel(
+        &self,
+        token_ids: &[u32],
+        channel: &tara_hd::ComputeChannel,
+    ) -> (Vec<Vec<f32>>, Vec<f32>) {
+        if token_ids.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        let seq_len = token_ids.len();
+        let hs = self.config.hidden_size;
+        let vs = self.config.vocab_size;
+
+        let x0 = channel
+            .forward_embedding(token_ids, &self.embed_tokens, hs)
+            .unwrap_or_else(|_| {
+                let mut emb = vec![0.0f32; seq_len * hs];
+                for (t, &id) in token_ids.iter().enumerate() {
+                    let id = (id as usize).min(vs.saturating_sub(1));
+                    let src = &self.embed_tokens[id * hs..(id + 1) * hs];
+                    emb[t * hs..(t + 1) * hs].copy_from_slice(src);
+                }
+                emb
+            });
+
+        let mut layer_inputs = Vec::with_capacity(self.layers.len() + 1);
+        layer_inputs.push(x0);
+
+        for (l, layer) in self.layers.iter().enumerate() {
+            let next_x = layer.forward_channel(&layer_inputs[l], seq_len, channel);
+            layer_inputs.push(next_x);
+        }
+
+        let final_normed = self.norm.forward_channel(layer_inputs.last().unwrap(), seq_len, hs, channel);
+        (layer_inputs, final_normed)
+    }
+
+    /// Build map from memory pointers of model weights to their canonical parameter names.
+    /// Enables TARA-HD devices to identify tensors by pointer and map them directly
+    /// to pre-allocated device hardware buffers.
+    pub fn parameter_slice_map(&self) -> HashMap<usize, String> {
+        let mut map = HashMap::new();
+        map.insert(self.embed_tokens.as_ptr() as usize, "model.embed_tokens.weight".to_string());
+        map.insert(self.norm.weight.as_ptr() as usize, "model.norm.weight".to_string());
+        map.insert(self.lm_head.as_ptr() as usize, "lm_head.weight".to_string());
+        for (i, layer) in self.layers.iter().enumerate() {
+            let pfx = format!("model.layers.{i}");
+            map.insert(layer.input_layernorm.weight.as_ptr() as usize, format!("{pfx}.input_layernorm.weight"));
+            map.insert(layer.post_attention_layernorm.weight.as_ptr() as usize, format!("{pfx}.post_attention_layernorm.weight"));
+            map.insert(layer.self_attn.q_proj.as_ptr() as usize, format!("{pfx}.self_attn.q_proj.weight"));
+            map.insert(layer.self_attn.k_proj.as_ptr() as usize, format!("{pfx}.self_attn.k_proj.weight"));
+            map.insert(layer.self_attn.v_proj.as_ptr() as usize, format!("{pfx}.self_attn.v_proj.weight"));
+            map.insert(layer.self_attn.o_proj.as_ptr() as usize, format!("{pfx}.self_attn.o_proj.weight"));
+            map.insert(layer.mlp.gate_proj.as_ptr() as usize, format!("{pfx}.mlp.gate_proj.weight"));
+            map.insert(layer.mlp.up_proj.as_ptr() as usize, format!("{pfx}.mlp.up_proj.weight"));
+            map.insert(layer.mlp.down_proj.as_ptr() as usize, format!("{pfx}.mlp.down_proj.weight"));
+        }
+        map
+    }
+
+    /// Full forward pass returning activations, final norm, and LM head logits routed through TARA-HD channel.
+    pub fn forward_with_cache_channel(
+        &self,
+        token_ids: &[u32],
+        channel: &tara_hd::ComputeChannel,
+    ) -> (Vec<Vec<f32>>, Vec<f32>, Vec<f32>) {
+        let (layer_inputs, final_normed) = self.forward_activations_channel(token_ids, channel);
+        if layer_inputs.is_empty() {
+            return (Vec::new(), Vec::new(), Vec::new());
+        }
+        let seq_len = token_ids.len();
+        let hs = self.config.hidden_size;
+        let vs = self.config.vocab_size;
+
+        let logits = channel
+            .forward_linear(&self.lm_head, &final_normed, seq_len, hs, vs)
+            .unwrap_or_else(|_| {
+                use rayon::prelude::*;
+                let mut lgs = vec![0.0f32; seq_len * vs];
+                lgs.par_chunks_exact_mut(vs)
+                    .enumerate()
+                    .for_each(|(t, l_row)| {
+                        let h_row = &final_normed[t * hs..(t + 1) * hs];
+                        for (v, val) in l_row.iter_mut().enumerate() {
+                            let lm_row = &self.lm_head[v * hs..(v + 1) * hs];
+                            *val = h_row.iter().zip(lm_row.iter()).map(|(&a, &b)| a * b).sum();
+                        }
+                    });
+                lgs
+            });
+
+        (layer_inputs, final_normed, logits)
+    }
+
+    /// Return the final normalized hidden state for each input token through TARA-HD channel.
+    pub fn forward_hidden_channel(
+        &self,
+        token_ids: &[u32],
+        channel: &tara_hd::ComputeChannel,
+    ) -> Vec<f32> {
+        let (_, final_normed) = self.forward_activations_channel(token_ids, channel);
+        final_normed
+    }
+
     /// Full backward pass through all transformer layers, embedding table, and LM head.
     ///
     /// Takes `d_logits`: shape `[seq_len, vocab_size]`.

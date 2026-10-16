@@ -191,6 +191,71 @@ pub trait ComputeDevice: Send + Sync + Debug {
 
         Ok((d_weight, d_in))
     }
+
+    /// Linear forward projection by parameter name (GPU VRAM resident when available) or slice fallback.
+    fn forward_linear_named(
+        &self,
+        _weight_name: &str,
+        weight_slice: &[f32],
+        x: &[f32],
+        seq_len: usize,
+        in_dim: usize,
+        out_dim: usize,
+    ) -> Result<Vec<f32>, String> {
+        self.forward_linear(weight_slice, x, seq_len, in_dim, out_dim)
+    }
+
+    /// RMSNorm forward pass by parameter name or slice fallback.
+    fn forward_rmsnorm_named(
+        &self,
+        _weight_name: &str,
+        weight_slice: &[f32],
+        x: &[f32],
+        seq_len: usize,
+        hidden_dim: usize,
+        eps: f32,
+    ) -> Result<Vec<f32>, String> {
+        self.forward_rmsnorm(weight_slice, x, seq_len, hidden_dim, eps)
+    }
+
+    /// Linear backward projection by parameter name or slice fallback.
+    fn backward_linear_named(
+        &self,
+        _weight_name: &str,
+        weight_slice: &[f32],
+        d_out: &[f32],
+        x: &[f32],
+        seq_len: usize,
+        in_dim: usize,
+        out_dim: usize,
+    ) -> Result<(Vec<f32>, Vec<f32>), String> {
+        self.backward_linear(weight_slice, d_out, x, seq_len, in_dim, out_dim)
+    }
+
+    /// Embedding forward lookup: token_id -> embedding vector.
+    fn forward_embedding(
+        &self,
+        token_ids: &[u32],
+        embed_table: &[f32],
+        hidden_size: usize,
+    ) -> Result<Vec<f32>, String> {
+        if token_ids.is_empty() || hidden_size == 0 {
+            return Ok(Vec::new());
+        }
+        let vs = embed_table.len() / hidden_size.max(1);
+        let mut out = vec![0.0f32; token_ids.len() * hidden_size];
+        for (t, &id) in token_ids.iter().enumerate() {
+            let id = (id as usize).min(vs.saturating_sub(1));
+            let src = &embed_table[id * hidden_size..(id + 1) * hidden_size];
+            out[t * hidden_size..(t + 1) * hidden_size].copy_from_slice(src);
+        }
+        Ok(out)
+    }
+
+    /// Accumulate gradient into device parameter buffer.
+    fn accumulate_gradient(&self, _param_name: &str, _gradient: &[f32]) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// Accelerated NVIDIA CUDA GPU device implementation.

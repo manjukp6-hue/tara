@@ -61,6 +61,19 @@ impl RmsNorm {
         out
     }
 
+    /// Apply RMSNorm to `x` through the active hardware compute channel.
+    pub fn forward_channel(
+        &self,
+        x: &[f32],
+        seq_len: usize,
+        hidden_size: usize,
+        channel: &tara_hd::ComputeChannel,
+    ) -> Vec<f32> {
+        channel
+            .forward_rmsnorm(&self.weight, x, seq_len, hidden_size, self.eps)
+            .unwrap_or_else(|_| self.forward(x, seq_len, hidden_size))
+    }
+
     /// Compute gradients for inputs `x` and weights `weight` given incoming gradient `dy`.
     ///
     /// Returns `(dx, dweight)`:

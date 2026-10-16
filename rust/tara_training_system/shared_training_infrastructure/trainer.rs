@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
@@ -931,7 +932,7 @@ impl NativeSelfTrainer {
         // 4. Hardware discovery and memory footprint preflight check via TARA-HD
         let total_params: usize = weights.values().map(|v| v.len()).sum();
         let max_tensor_len = weights.values().map(|v| v.len()).max().unwrap_or(0);
-        let hd_channel = tara_hd::ComputeChannel::with_options(
+        let mut hd_channel = tara_hd::ComputeChannel::with_options(
             &self.device,
             match self.precision {
                 crate::cuda::TrainingPrecision::Fp16 => tara_hd::PrecisionMode::Fp16,
@@ -1044,7 +1045,7 @@ impl NativeSelfTrainer {
 
         // 7. Full-Network Backpropagation with AdamW and Gradient Accumulation
         // Initialize hardware acceleration device backend via TARA-HD channel
-        let mut gpu_trainer_opt: Option<crate::cuda::CudaTrainer> = if hd_channel.is_gpu() {
+        let gpu_trainer_opt: Option<crate::cuda::CudaTrainer> = if hd_channel.is_gpu() {
             let dev_id = hd_channel.device().info().device_id as i32;
             match crate::cuda::CudaTrainer::new_with_precision(dev_id, self.precision) {
                 Ok(mut t) => {
@@ -1122,6 +1123,20 @@ impl NativeSelfTrainer {
         )
         .map_err(|e| TrainerError::Model(e.to_string()))?;
 
+        // Connect CudaComputeDevice into TARA-HD ComputeChannel as Single Source of Truth
+        let cuda_compute_dev_opt: Option<Arc<crate::cuda::CudaComputeDevice>> = if let Some(t) = gpu_trainer_opt {
+            let slice_map = model.parameter_slice_map();
+            let cuda_dev = Arc::new(crate::cuda::CudaComputeDevice::new(
+                hd_channel.device().info().clone(),
+                Arc::new(Mutex::new(t)),
+                slice_map,
+            ));
+            hd_channel.set_device(cuda_dev.clone());
+            Some(cuda_dev)
+        } else {
+            None
+        };
+
         // Compute baseline loss strictly across held-out validation sequences
         let initial_loss: Option<f64> = if val_tokens.is_empty() {
             println!(
@@ -1138,7 +1153,7 @@ impl NativeSelfTrainer {
                 println!("[Preflight Smoke Test] Running {smoke_count}-sample baseline validation smoke test...");
                 let _ = compute_model_loss(
                     &model,
-                    gpu_trainer_opt.as_ref(),
+                    &hd_channel,
                     smoke_val,
                     "Preflight Smoke",
                 )?;
@@ -1159,7 +1174,7 @@ impl NativeSelfTrainer {
 
             let loss = compute_model_loss(
                 &model,
-                gpu_trainer_opt.as_ref(),
+                &hd_channel,
                 active_val_tokens,
                 "Preflight",
             )?;
@@ -1167,8 +1182,8 @@ impl NativeSelfTrainer {
             Some(loss)
         };
 
-        let device_label = if let Some(ref t) = gpu_trainer_opt {
-            format!("GPU ({})", t.device().name)
+        let device_label = if hd_channel.is_gpu() {
+            format!("GPU ({})", hd_channel.device_name())
         } else if hd_channel.is_tpu() {
             format!("TPU ({})", hd_channel.device_name())
         } else {
@@ -1179,12 +1194,8 @@ impl NativeSelfTrainer {
             .stream_helper()
             .cloned()
             .unwrap_or_default();
-        let is_gpu = gpu_trainer_opt.is_some();
-        let precision_label = if let Some(ref t) = gpu_trainer_opt {
-            format!("{:?}", t.precision())
-        } else {
-            "Fp32".to_string()
-        };
+        let is_gpu = hd_channel.is_gpu();
+        let precision_label = format!("{:?}", hd_channel.precision());
 
         let mut optimizer = DynamicAdamW::new();
         let learning_rate = self.learning_rate.unwrap_or(1e-3f32);
@@ -1296,8 +1307,10 @@ impl NativeSelfTrainer {
                     weights = resumed_weights;
                     model.update_weights(&weights)
                         .map_err(|e| TrainerError::Model(e.to_string()))?;
-                    if let Some(ref mut gpu_trainer) = gpu_trainer_opt {
-                        let _ = gpu_trainer.register_weights(&weights);
+                    if let Some(ref dev) = cuda_compute_dev_opt {
+                        let mut t = dev.trainer().lock().map_err(|e| TrainerError::Model(e.to_string()))?;
+                        let _ = t.register_weights(&weights);
+                        dev.update_slice_map(model.parameter_slice_map());
                     }
 
                     // Restore and strictly validate optimizer state moments
@@ -1346,16 +1359,16 @@ impl NativeSelfTrainer {
                                 }
                             }
                         }
-                        if let Some(ref mut gpu_trainer) = gpu_trainer_opt {
-                            gpu_trainer
-                                .load_optimizer_state(&loaded_moments)
+                        if let Some(ref dev) = cuda_compute_dev_opt {
+                            let mut t = dev.trainer().lock().map_err(|e| TrainerError::Model(e.to_string()))?;
+                            t.load_optimizer_state(&loaded_moments)
                                 .map_err(|e| {
                                     TrainerError::Model(format!(
                                         "Failed to load GPU optimizer state from '{}': {e}",
                                         resume_dir
                                     ))
                                 })?;
-                            gpu_trainer.set_step_count(optimizer_steps as u64);
+                            t.set_step_count(optimizer_steps as u64);
                         }
                         optimizer.load_state(loaded_moments);
                         optimizer.set_step(optimizer_steps as u64);
@@ -1422,7 +1435,24 @@ impl NativeSelfTrainer {
                 let active_seq_limit = std::env::var("TARA_MAX_SEQ_LEN")
                     .ok()
                     .and_then(|s| s.parse::<usize>().ok())
-                    .unwrap_or(stream_chunk_size);
+                    .unwrap_or_else(|| {
+                        if hd_channel.is_gpu() {
+                            let vram_free_mb = cuda_compute_dev_opt
+                                .as_ref()
+                                .and_then(|d| d.trainer().lock().ok()?.get_vram_info().ok())
+                                .map(|(free, _)| free as f64 / (1024.0 * 1024.0))
+                                .unwrap_or(8192.0);
+                            if vram_free_mb < 2048.0 {
+                                512
+                            } else if vram_free_mb < 4096.0 {
+                                1024
+                            } else {
+                                2048.min(config.max_position_embeddings)
+                            }
+                        } else {
+                            stream_chunk_size
+                        }
+                    });
                 let (active_tokens, raw_target_start) = if tokens.len() > active_seq_limit {
                     println!(
                         "[{stage_label} | Bounded Stream] Bound sequence ({} tokens) to {} tokens to preserve compute latency & RAM",
@@ -1447,21 +1477,8 @@ impl NativeSelfTrainer {
                 );
                 let _ = std::io::stdout().flush();
 
-                let (layer_inputs, final_normed, logits) = if let Some(ref gpu_trainer) = gpu_trainer_opt {
-                    let (inputs, fnorm) = model.forward_activations(active_tokens);
-                    let lgs = gpu_trainer
-                        .forward_lm_head(
-                            &fnorm,
-                            seq_len,
-                            config.hidden_size,
-                            config.vocab_size,
-                        )
-                        .map_err(|e| TrainerError::Model(format!("GPU forward failed: {e}")))?;
-                    (inputs, fnorm, lgs)
-                } else {
-                    let (inputs, fnorm, lgs) = model.forward_with_cache(active_tokens);
-                    (inputs, fnorm, lgs)
-                };
+                let (layer_inputs, final_normed, logits) =
+                    model.forward_with_cache_channel(active_tokens, &hd_channel);
 
                 // Compute d_logits for supervised causal cross-entropy (Rayon-parallelized across token positions)
                 let vs = config.vocab_size;
@@ -1520,11 +1537,13 @@ impl NativeSelfTrainer {
                         *g *= norm_factor;
                     }
 
-                    // Stream gradients directly to GPU or CPU accumulator without keeping intermediate buffers
-                    if let Some(ref gpu_trainer) = gpu_trainer_opt {
-                        // GPU-accelerated LM Head backward projection
-                        let (gpu_dlm, gpu_dnorm) = gpu_trainer
-                            .backward_lm_head(
+                    // Stream gradients directly through TARA-HD channel
+                    if hd_channel.is_gpu() {
+                        // Hardware-accelerated LM Head backward projection through TARA-HD channel
+                        let (gpu_dlm, gpu_dnorm) = hd_channel
+                            .backward_linear_named(
+                                "lm_head.weight",
+                                &model.lm_head,
                                 &d_logits,
                                 &final_normed,
                                 seq_len,
@@ -1532,22 +1551,22 @@ impl NativeSelfTrainer {
                                 config.vocab_size,
                             )
                             .map_err(|e| {
-                                TrainerError::Model(format!("GPU backward failed: {e}"))
+                                TrainerError::Model(format!("Hardware backward failed: {e}"))
                             })?;
 
                         // Drop logits and norm activation buffers immediately
                         drop(d_logits);
                         drop(final_normed);
 
-                        // Accumulate LM Head gradient on GPU and drop host buffer immediately
-                        gpu_trainer
+                        // Accumulate LM Head gradient into hardware buffer and drop host buffer immediately
+                        hd_channel
                             .accumulate_gradient("lm_head.weight", &gpu_dlm)
                             .map_err(|e| {
-                                TrainerError::Model(format!("GPU gradient accumulation failed: {e}"))
+                                TrainerError::Model(format!("Gradient accumulation failed: {e}"))
                             })?;
                         drop(gpu_dlm);
 
-                        // Backward through RMSNorm with GPU-computed d_final_normed
+                        // Backward through RMSNorm with hardware-computed d_final_normed
                         let (mut dx, d_norm) = model.norm.backward(
                             &gpu_dnorm,
                             layer_inputs.last().unwrap(),
@@ -1556,53 +1575,53 @@ impl NativeSelfTrainer {
                         );
                         drop(gpu_dnorm);
 
-                        // Accumulate Norm gradient on GPU and drop host buffer immediately
-                        gpu_trainer
+                        // Accumulate Norm gradient into hardware buffer and drop host buffer immediately
+                        hd_channel
                             .accumulate_gradient("model.norm.weight", &d_norm)
                             .map_err(|e| {
-                                TrainerError::Model(format!("GPU gradient accumulation failed: {e}"))
+                                TrainerError::Model(format!("Gradient accumulation failed: {e}"))
                             })?;
                         drop(d_norm);
 
                         // Backward through decoder layers in reverse order:
-                        // Each layer's gradient is uploaded to GPU and dropped immediately,
-                        // keeping only ONE layer gradient (~180 MB) in RAM at a time instead of all 13 (~2.34 GB).
+                        // Each layer's gradient is uploaded through TARA-HD and dropped immediately,
+                        // keeping only ONE layer gradient in RAM at a time.
                         for l in (0..model.layers.len()).rev() {
                             let l_grads = model.layers[l].backward(&dx, &layer_inputs[l], seq_len);
 
                             let prefix = format!("model.layers.{}", l);
-                            gpu_trainer
+                            hd_channel
                                 .accumulate_gradient(&format!("{}.input_layernorm.weight", prefix), &l_grads.d_input_layernorm)
-                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
-                            gpu_trainer
+                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                            hd_channel
                                 .accumulate_gradient(&format!("{}.self_attn.q_proj.weight", prefix), &l_grads.d_q_proj)
-                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
-                            gpu_trainer
+                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                            hd_channel
                                 .accumulate_gradient(&format!("{}.self_attn.k_proj.weight", prefix), &l_grads.d_k_proj)
-                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
-                            gpu_trainer
+                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                            hd_channel
                                 .accumulate_gradient(&format!("{}.self_attn.v_proj.weight", prefix), &l_grads.d_v_proj)
-                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
-                            gpu_trainer
+                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                            hd_channel
                                 .accumulate_gradient(&format!("{}.self_attn.o_proj.weight", prefix), &l_grads.d_o_proj)
-                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
-                            gpu_trainer
+                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                            hd_channel
                                 .accumulate_gradient(&format!("{}.post_attention_layernorm.weight", prefix), &l_grads.d_post_attention_layernorm)
-                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
-                            gpu_trainer
+                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                            hd_channel
                                 .accumulate_gradient(&format!("{}.mlp.gate_proj.weight", prefix), &l_grads.d_gate_proj)
-                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
-                            gpu_trainer
+                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                            hd_channel
                                 .accumulate_gradient(&format!("{}.mlp.up_proj.weight", prefix), &l_grads.d_up_proj)
-                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
-                            gpu_trainer
+                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                            hd_channel
                                 .accumulate_gradient(&format!("{}.mlp.down_proj.weight", prefix), &l_grads.d_down_proj)
-                                .map_err(|e| TrainerError::Model(format!("GPU gradient accumulation failed: {e}")))?;
+                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
                             dx = l_grads.dx;
                         }
                         drop(layer_inputs);
 
-                        // Accumulate token embeddings gradient on GPU and drop host buffer immediately
+                        // Accumulate token embeddings gradient and drop host buffer immediately
                         let mut d_embed_tokens =
                             vec![0.0f32; config.vocab_size * config.hidden_size];
                         for (t, &id) in active_tokens.iter().enumerate() {
@@ -1614,10 +1633,10 @@ impl NativeSelfTrainer {
                         }
                         drop(dx);
 
-                        gpu_trainer
+                        hd_channel
                             .accumulate_gradient("model.embed_tokens.weight", &d_embed_tokens)
                             .map_err(|e| {
-                                TrainerError::Model(format!("GPU gradient accumulation failed: {e}"))
+                                TrainerError::Model(format!("Gradient accumulation failed: {e}"))
                             })?;
                         drop(d_embed_tokens);
                     } else {
@@ -1651,7 +1670,7 @@ impl NativeSelfTrainer {
                     let sample_throughput = (valid_targets as f32) / sample_time.max(1e-4);
 
                     let snap = crate::cuda::gpu_trainer::capture_memory_snapshot(
-                        gpu_trainer_opt.as_ref().and_then(|g| g.get_vram_info().ok()),
+                        cuda_compute_dev_opt.as_ref().and_then(|d| d.trainer().lock().ok()?.get_vram_info().ok()),
                     );
                     let vram_str = match (snap.gpu_used_vram_mb, snap.gpu_total_vram_mb) {
                         (Some(u), Some(t)) => format!(" | GPU VRAM: {:.1}/{:.1} MB", u, t),
@@ -1706,7 +1725,8 @@ impl NativeSelfTrainer {
                             }
                         }
 
-                        if let Some(ref mut gpu_trainer) = gpu_trainer_opt {
+                        if let Some(ref dev) = cuda_compute_dev_opt {
+                            let mut gpu_trainer = dev.trainer().lock().map_err(|e| TrainerError::Model(e.to_string()))?;
                             // Inject EWC gradient into accumulated GPU buffers
                             if let (Some(ref anchors), Some(ref importance)) =
                                 (&self.anchor_weights, &self.ewc_importance)
@@ -1815,8 +1835,8 @@ impl NativeSelfTrainer {
                         } else {
                             (batch_lm_loss as f64) / std::f64::consts::LN_2
                         };
-                        let grad_norm = if let Some(ref gpu_trainer) = gpu_trainer_opt {
-                            gpu_trainer.last_grad_norm()
+                        let grad_norm = if let Some(ref dev) = cuda_compute_dev_opt {
+                            dev.trainer().lock().map(|t| t.last_grad_norm()).unwrap_or(0.0)
                         } else {
                             optimizer.last_grad_norm()
                         };
@@ -1846,7 +1866,7 @@ impl NativeSelfTrainer {
                         let elapsed_str = Self::format_duration_hhmmss(train_start_instant.elapsed().as_secs_f64());
 
                         let snap = crate::cuda::gpu_trainer::capture_memory_snapshot(
-                            gpu_trainer_opt.as_ref().and_then(|g| g.get_vram_info().ok()),
+                            cuda_compute_dev_opt.as_ref().and_then(|d| d.trainer().lock().ok()?.get_vram_info().ok()),
                         );
                         let vram_str = match (snap.gpu_used_vram_mb, snap.gpu_total_vram_mb) {
                             (Some(u), Some(t)) => format!(" | GPU VRAM: {:.1}/{:.1} MB", u, t),
@@ -1892,6 +1912,9 @@ impl NativeSelfTrainer {
                         // Update model in-memory with updated weights in-place (zero reallocation!)
                         model.update_weights(&weights)
                             .map_err(|e| TrainerError::Model(e.to_string()))?;
+                        if let Some(ref dev) = cuda_compute_dev_opt {
+                            dev.update_slice_map(model.parameter_slice_map());
+                        }
 
                         // Dynamic milestone and periodic persistent checkpoint saving
                         if let Some(ref cp_dir) = self.checkpoint_dir {
@@ -1906,7 +1929,7 @@ impl NativeSelfTrainer {
                             } else {
                                 compute_model_loss(
                                     &model,
-                                    gpu_trainer_opt.as_ref(),
+                                    &hd_channel,
                                     &val_tokens,
                                     "Step Eval",
                                 ).ok()
@@ -1920,8 +1943,8 @@ impl NativeSelfTrainer {
                             };
 
                             if is_interval_step || is_best {
-                                let opt_moments = if let Some(ref gpu_trainer) = gpu_trainer_opt {
-                                    gpu_trainer.export_optimizer_state().unwrap_or_default()
+                                let opt_moments = if let Some(ref dev) = cuda_compute_dev_opt {
+                                    dev.trainer().lock().map(|t| t.export_optimizer_state().unwrap_or_default()).unwrap_or_default()
                                 } else {
                                     optimizer.export_state()
                                 };
@@ -1986,7 +2009,8 @@ impl NativeSelfTrainer {
                     }
                 }
 
-                if let Some(ref mut gpu_trainer) = gpu_trainer_opt {
+                if let Some(ref dev) = cuda_compute_dev_opt {
+                    let mut gpu_trainer = dev.trainer().lock().map_err(|e| TrainerError::Model(e.to_string()))?;
                     if let (Some(ref anchors), Some(ref importance)) =
                         (&self.anchor_weights, &self.ewc_importance)
                     {
@@ -2083,8 +2107,8 @@ impl NativeSelfTrainer {
                 } else {
                     (batch_lm_loss as f64) / std::f64::consts::LN_2
                 };
-                let grad_norm = if let Some(ref gpu_trainer) = gpu_trainer_opt {
-                    gpu_trainer.last_grad_norm()
+                let grad_norm = if let Some(ref dev) = cuda_compute_dev_opt {
+                    dev.trainer().lock().map(|t| t.last_grad_norm()).unwrap_or(0.0)
                 } else {
                     optimizer.last_grad_norm()
                 };
@@ -2114,7 +2138,7 @@ impl NativeSelfTrainer {
                 let elapsed_str = Self::format_duration_hhmmss(train_start_instant.elapsed().as_secs_f64());
 
                 let snap = crate::cuda::gpu_trainer::capture_memory_snapshot(
-                    gpu_trainer_opt.as_ref().and_then(|g| g.get_vram_info().ok()),
+                    cuda_compute_dev_opt.as_ref().and_then(|d| d.trainer().lock().ok()?.get_vram_info().ok()),
                 );
                 let vram_str = match (snap.gpu_used_vram_mb, snap.gpu_total_vram_mb) {
                     (Some(u), Some(t)) => format!(" | GPU VRAM: {:.1}/{:.1} MB", u, t),
@@ -2151,6 +2175,9 @@ impl NativeSelfTrainer {
                 let _ = std::io::stdout().flush();
 
                 model.update_weights(&weights).map_err(|e| TrainerError::Model(e.to_string()))?;
+                if let Some(ref dev) = cuda_compute_dev_opt {
+                    dev.update_slice_map(model.parameter_slice_map());
+                }
 
                 // Checkpoint at epoch boundary flush
                 if let Some(ref cp_dir) = self.checkpoint_dir {
@@ -2159,7 +2186,7 @@ impl NativeSelfTrainer {
                     } else {
                         compute_model_loss(
                             &model,
-                            gpu_trainer_opt.as_ref(),
+                            &hd_channel,
                             &val_tokens,
                             "Epoch Eval",
                         ).ok()
@@ -2172,8 +2199,8 @@ impl NativeSelfTrainer {
                         _ => false,
                     };
 
-                    let opt_moments = if let Some(ref gpu_trainer) = gpu_trainer_opt {
-                        gpu_trainer.export_optimizer_state().unwrap_or_default()
+                    let opt_moments = if let Some(ref dev) = cuda_compute_dev_opt {
+                        dev.trainer().lock().map(|t| t.export_optimizer_state().unwrap_or_default()).unwrap_or_default()
                     } else {
                         optimizer.export_state()
                     };
@@ -2225,7 +2252,7 @@ impl NativeSelfTrainer {
         } else {
             let fl = compute_model_loss(
                 &model,
-                gpu_trainer_opt.as_ref(),
+                &hd_channel,
                 &val_tokens,
                 "Final Validation",
             )?;
@@ -2291,8 +2318,8 @@ impl NativeSelfTrainer {
         fs::copy(&tokenizer_path, &tok_dest)?;
 
         // Export optimizer state moments so every candidate checkpoint is continuation-ready
-        let opt_moments = if let Some(ref gpu_trainer) = gpu_trainer_opt {
-            gpu_trainer.export_optimizer_state().unwrap_or_default()
+        let opt_moments = if let Some(ref dev) = cuda_compute_dev_opt {
+            dev.trainer().lock().map(|t| t.export_optimizer_state().unwrap_or_default()).unwrap_or_default()
         } else {
             optimizer.export_state()
         };
@@ -2581,190 +2608,9 @@ pub fn promote_directory_atomically(
     }
 }
 
-#[derive(Debug, Default)]
-pub struct ForwardSampleProfile {
-    pub emb_ms: f64,
-    pub rms_input_ms: f64,
-    pub qkv_ms: f64,
-    pub attn_ctx_ms: f64,
-    pub o_proj_ms: f64,
-    pub res_attn_ms: f64,
-    pub rms_post_ms: f64,
-    pub gate_up_ms: f64,
-    pub swiglu_ms: f64,
-    pub down_proj_ms: f64,
-    pub res_mlp_ms: f64,
-    pub final_norm_ms: f64,
-    pub lm_head_ms: f64,
-    pub cross_entropy_ms: f64,
-}
-
-fn forward_hidden_gpu(
-    model: &TaraForCausalLM,
-    gt: &crate::cuda::CudaTrainer,
-    active_tokens: &[u32],
-    hs: usize,
-    seq_len: usize,
-    mut profile: Option<&mut ForwardSampleProfile>,
-) -> Result<Vec<f32>, TrainerError> {
-    let eps = model.config.rms_norm_eps as f32;
-    let inter_size = model.config.intermediate_size;
-    let nh = model.config.num_attention_heads;
-    let nkv = model.config.num_key_value_heads;
-    let hd = model.config.effective_head_dim();
-
-    // 1. Embedding on GPU
-    let t_emb = std::time::Instant::now();
-    let mut hidden = gt.forward_embedding(active_tokens, hs).map_err(|e| {
-        TrainerError::Model(format!("GPU forward_embedding failed: {e}"))
-    })?;
-    if let Some(ref mut p) = profile {
-        p.emb_ms = t_emb.elapsed().as_secs_f64() * 1000.0;
-    }
-
-    // 2. Decoder Layers on GPU
-    for (l_idx, layer) in model.layers.iter().enumerate() {
-        let pfx = format!("model.layers.{l_idx}");
-
-        // Attention block
-        let t_rms1 = std::time::Instant::now();
-        let normed_x = gt
-            .forward_rmsnorm(&format!("{pfx}.input_layernorm.weight"), &hidden, seq_len, hs, eps)
-            .map_err(|e| {
-                TrainerError::Model(format!("GPU input_layernorm forward failed at layer {l_idx}: {e}"))
-            })?;
-        if let Some(ref mut p) = profile {
-            p.rms_input_ms += t_rms1.elapsed().as_secs_f64() * 1000.0;
-        }
-
-        let t_qkv = std::time::Instant::now();
-        let q = gt
-            .forward_linear(&format!("{pfx}.self_attn.q_proj.weight"), &normed_x, seq_len, hs, nh * hd)
-            .map_err(|e| {
-                TrainerError::Model(format!("GPU q_proj forward failed at layer {l_idx}: {e}"))
-            })?;
-        let k = gt
-            .forward_linear(&format!("{pfx}.self_attn.k_proj.weight"), &normed_x, seq_len, hs, nkv * hd)
-            .map_err(|e| {
-                TrainerError::Model(format!("GPU k_proj forward failed at layer {l_idx}: {e}"))
-            })?;
-        let v = gt
-            .forward_linear(&format!("{pfx}.self_attn.v_proj.weight"), &normed_x, seq_len, hs, nkv * hd)
-            .map_err(|e| {
-                TrainerError::Model(format!("GPU v_proj forward failed at layer {l_idx}: {e}"))
-            })?;
-        if let Some(ref mut p) = profile {
-            p.qkv_ms += t_qkv.elapsed().as_secs_f64() * 1000.0;
-        }
-        drop(normed_x);
-
-        let t_ctx = std::time::Instant::now();
-        let context = layer.self_attn.forward_attention_context(&q, &k, &v, seq_len);
-        if let Some(ref mut p) = profile {
-            p.attn_ctx_ms += t_ctx.elapsed().as_secs_f64() * 1000.0;
-        }
-        drop(q);
-        drop(k);
-        drop(v);
-
-        let t_o = std::time::Instant::now();
-        let attn_out = gt
-            .forward_linear(&format!("{pfx}.self_attn.o_proj.weight"), &context, seq_len, nh * hd, hs)
-            .map_err(|e| {
-                TrainerError::Model(format!("GPU o_proj forward failed at layer {l_idx}: {e}"))
-            })?;
-        if let Some(ref mut p) = profile {
-            p.o_proj_ms += t_o.elapsed().as_secs_f64() * 1000.0;
-        }
-        drop(context);
-
-        let t_r1 = std::time::Instant::now();
-        let h = gt.add_residual(&hidden, &attn_out).map_err(|e| {
-            TrainerError::Model(format!("GPU attention add_residual failed at layer {l_idx}: {e}"))
-        })?;
-        if let Some(ref mut p) = profile {
-            p.res_attn_ms += t_r1.elapsed().as_secs_f64() * 1000.0;
-        }
-        drop(hidden);
-        drop(attn_out);
-
-        // MLP block
-        let t_rms2 = std::time::Instant::now();
-        let normed_h = gt
-            .forward_rmsnorm(&format!("{pfx}.post_attention_layernorm.weight"), &h, seq_len, hs, eps)
-            .map_err(|e| {
-                TrainerError::Model(format!("GPU post_attention_layernorm forward failed at layer {l_idx}: {e}"))
-            })?;
-        if let Some(ref mut p) = profile {
-            p.rms_post_ms += t_rms2.elapsed().as_secs_f64() * 1000.0;
-        }
-
-        let t_gu = std::time::Instant::now();
-        let gate = gt
-            .forward_linear(&format!("{pfx}.mlp.gate_proj.weight"), &normed_h, seq_len, hs, inter_size)
-            .map_err(|e| {
-                TrainerError::Model(format!("GPU gate_proj forward failed at layer {l_idx}: {e}"))
-            })?;
-        let up = gt
-            .forward_linear(&format!("{pfx}.mlp.up_proj.weight"), &normed_h, seq_len, hs, inter_size)
-            .map_err(|e| {
-                TrainerError::Model(format!("GPU up_proj forward failed at layer {l_idx}: {e}"))
-            })?;
-        if let Some(ref mut p) = profile {
-            p.gate_up_ms += t_gu.elapsed().as_secs_f64() * 1000.0;
-        }
-        drop(normed_h);
-
-        let t_sw = std::time::Instant::now();
-        let swiglu = gt.forward_swiglu(&gate, &up).map_err(|e| {
-            TrainerError::Model(format!("GPU forward_swiglu failed at layer {l_idx}: {e}"))
-        })?;
-        if let Some(ref mut p) = profile {
-            p.swiglu_ms += t_sw.elapsed().as_secs_f64() * 1000.0;
-        }
-        drop(gate);
-        drop(up);
-
-        let t_dp = std::time::Instant::now();
-        let mlp_out = gt
-            .forward_linear(&format!("{pfx}.mlp.down_proj.weight"), &swiglu, seq_len, inter_size, hs)
-            .map_err(|e| {
-                TrainerError::Model(format!("GPU down_proj forward failed at layer {l_idx}: {e}"))
-            })?;
-        if let Some(ref mut p) = profile {
-            p.down_proj_ms += t_dp.elapsed().as_secs_f64() * 1000.0;
-        }
-        drop(swiglu);
-
-        let t_r2 = std::time::Instant::now();
-        hidden = gt.add_residual(&h, &mlp_out).map_err(|e| {
-            TrainerError::Model(format!("GPU mlp add_residual failed at layer {l_idx}: {e}"))
-        })?;
-        if let Some(ref mut p) = profile {
-            p.res_mlp_ms += t_r2.elapsed().as_secs_f64() * 1000.0;
-        }
-        drop(h);
-        drop(mlp_out);
-    }
-
-    // 3. Final RMSNorm on GPU
-    let t_fn = std::time::Instant::now();
-    let final_normed = gt
-        .forward_rmsnorm("model.norm.weight", &hidden, seq_len, hs, eps)
-        .map_err(|e| {
-            TrainerError::Model(format!("GPU final norm forward failed: {e}"))
-        })?;
-    if let Some(ref mut p) = profile {
-        p.final_norm_ms = t_fn.elapsed().as_secs_f64() * 1000.0;
-    }
-    drop(hidden);
-
-    Ok(final_normed)
-}
-
 fn compute_model_loss(
     model: &TaraForCausalLM,
-    gpu_trainer_opt: Option<&crate::cuda::CudaTrainer>,
+    channel: &tara_hd::ComputeChannel,
     val_tokens: &[(Vec<u32>, usize)],
     stage_desc: &str,
 ) -> Result<f64, TrainerError> {
@@ -2800,49 +2646,25 @@ fn compute_model_loss(
         let active_tokens = &tokens[..seq_len];
         let eff_target_start = (*target_start).min(seq_len);
 
-        let mut profile = if idx == 0 && gpu_trainer_opt.is_some() {
-            Some(ForwardSampleProfile::default())
-        } else {
-            None
-        };
-        let initial_kernel_launches = gpu_trainer_opt.map(|gt| gt.kernel_launch_count()).unwrap_or(0);
-
-        // 1. Forward hidden activations and LM head (GPU-accelerated when CUDA trainer is active, Rayon-parallelized on CPU)
-        let (final_normed, logits) = if let Some(gt) = gpu_trainer_opt {
-            let fnorm = forward_hidden_gpu(model, gt, active_tokens, hs, seq_len, profile.as_mut())?;
-            let t_lm = std::time::Instant::now();
-            let lgs = match gt.forward_lm_head(&fnorm, seq_len, hs, vs) {
-                Ok(l) => l,
-                Err(e) => {
-                    eprintln!(
-                        "[{stage_desc} ERROR] Sample {}/{} failed during [GPU forward_lm_head]: {} (seq_len={}, tokens={})",
-                        idx + 1, total_samples, e, seq_len, orig_len
-                    );
-                    let _ = std::io::stderr().flush();
-                    return Err(TrainerError::Model(format!("GPU validation forward failed: {e}")));
+        // Forward hidden activations and LM head routed through TARA-HD channel
+        let final_normed = model.forward_hidden_channel(active_tokens, channel);
+        let logits = channel
+            .forward_linear(&model.lm_head, &final_normed, seq_len, hs, vs)
+            .unwrap_or_else(|_| {
+                let mut lgs = vec![0.0f32; seq_len * vs];
+                for t in 0..seq_len {
+                    let h_row = &final_normed[t * hs..(t + 1) * hs];
+                    let l_row = &mut lgs[t * vs..(t + 1) * vs];
+                    for (v, val) in l_row.iter_mut().enumerate().take(vs) {
+                        let lm_row = &model.lm_head[v * hs..(v + 1) * hs];
+                        *val = h_row.iter().zip(lm_row.iter()).map(|(&a, &b)| a * b).sum();
+                    }
                 }
-            };
-            if let Some(ref mut p) = profile {
-                p.lm_head_ms = t_lm.elapsed().as_secs_f64() * 1000.0;
-            }
-            (fnorm, lgs)
-        } else {
-            let fnorm = model.forward_hidden(active_tokens);
-            let mut cpu_logits = vec![0.0f32; seq_len * vs];
-            for t in 0..seq_len {
-                let h_row = &fnorm[t * hs..(t + 1) * hs];
-                let l_row = &mut cpu_logits[t * vs..(t + 1) * vs];
-                for (v, val) in l_row.iter_mut().enumerate().take(vs) {
-                    let lm_row = &model.lm_head[v * hs..(v + 1) * hs];
-                    *val = h_row.iter().zip(lm_row.iter()).map(|(&a, &b)| a * b).sum();
-                }
-            }
-            (fnorm, cpu_logits)
-        };
+                lgs
+            });
         drop(final_normed);
 
-        // 3. Compute cross-entropy loss over target tokens (Rayon-parallelized across CPU cores)
-        let t_ce = std::time::Instant::now();
+        // Cross-entropy loss over target tokens (Rayon-parallelized across CPU cores)
         let target_positions: Vec<(usize, usize)> = active_tokens
             .iter()
             .enumerate()
@@ -2878,45 +2700,7 @@ fn compute_model_loss(
             })
             .reduce(|| (0.0f64, 0usize), |a, b| (a.0 + b.0, a.1 + b.1));
 
-        if let Some(ref mut p) = profile {
-            p.cross_entropy_ms = t_ce.elapsed().as_secs_f64() * 1000.0;
-        }
-
-        // Release logits buffer immediately to reclaim memory
         drop(logits);
-
-        let final_kernel_launches = gpu_trainer_opt.map(|gt| gt.kernel_launch_count()).unwrap_or(0);
-        let kernel_delta = final_kernel_launches.saturating_sub(initial_kernel_launches);
-
-        if let Some(p) = profile {
-            let total_layer_gpu_ms = p.rms_input_ms + p.qkv_ms + p.o_proj_ms + p.res_attn_ms
-                + p.rms_post_ms + p.gate_up_ms + p.swiglu_ms + p.down_proj_ms + p.res_mlp_ms;
-            let total_sample_ms = p.emb_ms + total_layer_gpu_ms + p.attn_ctx_ms + p.final_norm_ms + p.lm_head_ms + p.cross_entropy_ms;
-            println!("+----------------------------------------------------------------------------------------------------------+");
-            println!("| [{stage_desc}] Sample 1/{} Device & Kernel Execution Profile (tokens: {}, seq_len: {})                 |", total_samples, orig_len, seq_len);
-            println!("+---------------------------------------+---------------+-------------------------------+----------+-------+");
-            println!("| Operation                             | Device        | Implementation / Kernel       | Launches |   Time|");
-            println!("+---------------------------------------+---------------+-------------------------------+----------+-------+");
-            println!("| Embedding (vocab -> hidden)           | CUDA GPU      | embedding_fwd_f16_kernel      |        1 | {:>5.2}ms|", p.emb_ms);
-            println!("| Decoder Layers (13 layers aggregate): |               |                               |          |       |");
-            println!("|   - Input RMSNorm                     | CUDA GPU      | rms_fwd_f16_kernel            |       13 | {:>5.2}ms|", p.rms_input_ms);
-            println!("|   - Q/K/V Linear Projections          | CUDA GPU      | linear_fwd_f16_kernel         |       39 | {:>5.2}ms|", p.qkv_ms);
-            println!("|   - Attention Context (RoPE + Causal) | CPU (Rayon)   | forward_attention_context     |        0 | {:>5.2}ms|", p.attn_ctx_ms);
-            println!("|   - Output Linear Projection (o_proj) | CUDA GPU      | linear_fwd_f16_kernel         |       13 | {:>5.2}ms|", p.o_proj_ms);
-            println!("|   - Attention Residual Add            | CUDA GPU      | residual_add_kernel           |       13 | {:>5.2}ms|", p.res_attn_ms);
-            println!("|   - Post-Attention RMSNorm            | CUDA GPU      | rms_fwd_f16_kernel            |       13 | {:>5.2}ms|", p.rms_post_ms);
-            println!("|   - Gate & Up Projections (SwiGLU)    | CUDA GPU      | linear_fwd_f16_kernel         |       26 | {:>5.2}ms|", p.gate_up_ms);
-            println!("|   - SwiGLU Activation                 | CUDA GPU      | swiglu_fwd_kernel             |       13 | {:>5.2}ms|", p.swiglu_ms);
-            println!("|   - Down Linear Projection (down_proj)| CUDA GPU      | linear_fwd_f16_kernel         |       13 | {:>5.2}ms|", p.down_proj_ms);
-            println!("|   - MLP Residual Add                  | CUDA GPU      | residual_add_kernel           |       13 | {:>5.2}ms|", p.res_mlp_ms);
-            println!("| Final RMSNorm                         | CUDA GPU      | rms_fwd_f16_kernel            |        1 | {:>5.2}ms|", p.final_norm_ms);
-            println!("| LM Head (hidden -> vocab)             | CUDA GPU      | linear_fwd_f16_kernel         |        1 | {:>5.2}ms|", p.lm_head_ms);
-            println!("| Cross-Entropy Loss Reduction          | CPU (Rayon)   | par_iter parallel reduction   |        0 | {:>5.2}ms|", p.cross_entropy_ms);
-            println!("+---------------------------------------+---------------+-------------------------------+----------+-------+");
-            println!("| Total Verified CUDA Launches: {:>3} (Delta: {:>3}) | Total Sample 1 Duration: {:>7.2}ms                  |", kernel_delta, kernel_delta, total_sample_ms);
-            println!("+----------------------------------------------------------------------------------------------------------+");
-            let _ = std::io::stdout().flush();
-        }
 
         let sample_mean_loss = if sample_targets > 0 {
             sample_loss / sample_targets as f64
@@ -2927,27 +2711,20 @@ fn compute_model_loss(
         total_target_tokens += sample_targets;
 
         let elapsed = sample_start.elapsed().as_secs_f64();
+        let snap = crate::cuda::capture_memory_snapshot(None);
 
-        // Telemetry snapshot: host RSS and GPU VRAM
-        let vram_info = gpu_trainer_opt.and_then(|gt| gt.get_vram_info().ok());
-        let snap = crate::cuda::capture_memory_snapshot(vram_info);
-        let vram_str = if let (Some(used), Some(tot)) = (snap.gpu_used_vram_mb, snap.gpu_total_vram_mb) {
-            format!("{used:.1}/{tot:.1} MB")
-        } else {
-            "N/A".to_string()
-        };
-
-        println!(
-            "[{stage_desc}] Validation sample {}/{}: tokens={}, time={:.3}s, loss={:.4}, Host RSS={:.1} MB, GPU VRAM={}, forward_completed=true",
-            idx + 1,
-            total_samples,
-            seq_len,
-            elapsed,
-            sample_mean_loss,
-            snap.process_rss_mb,
-            vram_str
-        );
-        let _ = std::io::stdout().flush();
+        if idx == 0 || (idx + 1) == total_samples || (idx + 1) % 50 == 0 {
+            println!(
+                "[{stage_desc}] Validation sample {}/{}: tokens={}, time={:.3}s, loss={:.4}, Host RSS={:.1} MB, forward_completed=true",
+                idx + 1,
+                total_samples,
+                seq_len,
+                elapsed,
+                sample_mean_loss,
+                snap.process_rss_mb
+            );
+            let _ = std::io::stdout().flush();
+        }
     }
 
     let overall_elapsed = start_time.elapsed().as_secs_f64();

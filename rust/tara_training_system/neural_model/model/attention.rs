@@ -192,6 +192,42 @@ impl TaraAttention {
         mat_mul(&context, &self.o_proj, seq_len, nh * hd, hs)
     }
 
+    /// Run the attention forward pass through the active hardware compute channel.
+    pub fn forward_channel(
+        &self,
+        hidden_states: &[f32],
+        seq_len: usize,
+        channel: &tara_hd::ComputeChannel,
+    ) -> Vec<f32> {
+        let nh = self.num_heads;
+        let nkv = self.num_kv_heads;
+        let hd = self.head_dim;
+        let hs = self.hidden_size;
+
+        if nkv == 0 || nh == 0 || seq_len == 0 || hd == 0 || hs == 0 {
+            return vec![0.0f32; seq_len * hs];
+        }
+
+        let q = match channel.forward_linear(&self.q_proj, hidden_states, seq_len, hs, nh * hd) {
+            Ok(q) => q,
+            Err(_) => return self.forward(hidden_states, seq_len),
+        };
+        let k = match channel.forward_linear(&self.k_proj, hidden_states, seq_len, hs, nkv * hd) {
+            Ok(k) => k,
+            Err(_) => return self.forward(hidden_states, seq_len),
+        };
+        let v = match channel.forward_linear(&self.v_proj, hidden_states, seq_len, hs, nkv * hd) {
+            Ok(v) => v,
+            Err(_) => return self.forward(hidden_states, seq_len),
+        };
+
+        let context = self.forward_attention_context(&q, &k, &v, seq_len);
+
+        channel
+            .forward_linear(&self.o_proj, &context, seq_len, nh * hd, hs)
+            .unwrap_or_else(|_| mat_mul(&context, &self.o_proj, seq_len, nh * hd, hs))
+    }
+
     /// Compute causal attention context from pre-computed Q, K, V projections.
     /// Used by GPU-accelerated forward pipelines where Q, K, V linear projections
     /// execute on GPU while attention context reduction executes with bounded memory.

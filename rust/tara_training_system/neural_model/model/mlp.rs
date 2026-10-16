@@ -174,6 +174,35 @@ impl TaraMlp {
         )
     }
 
+    /// Apply the SwiGLU MLP to `x` through the active hardware compute channel.
+    pub fn forward_channel(
+        &self,
+        x: &[f32],
+        seq_len: usize,
+        hidden_size: usize,
+        intermediate_size: usize,
+        channel: &tara_hd::ComputeChannel,
+    ) -> Vec<f32> {
+        let gate_raw = match channel.forward_linear(&self.gate_proj, x, seq_len, hidden_size, intermediate_size) {
+            Ok(g) => g,
+            Err(_) => return self.forward(x, seq_len, hidden_size, intermediate_size),
+        };
+        let up = match channel.forward_linear(&self.up_proj, x, seq_len, hidden_size, intermediate_size) {
+            Ok(u) => u,
+            Err(_) => return self.forward(x, seq_len, hidden_size, intermediate_size),
+        };
+        let hidden = match channel.forward_swiglu(&gate_raw, &up) {
+            Ok(h) => h,
+            Err(_) => {
+                let gate: Vec<f32> = gate_raw.iter().map(|&v| silu(v)).collect();
+                gate.iter().zip(up.iter()).map(|(&g, &u)| g * u).collect()
+            }
+        };
+        channel
+            .forward_linear(&self.down_proj, &hidden, seq_len, intermediate_size, hidden_size)
+            .unwrap_or_else(|_| mat_mul(&hidden, &self.down_proj, seq_len, intermediate_size, hidden_size))
+    }
+
     /// Compute gradients for inputs `x` and weights (`gate_proj`, `up_proj`, `down_proj`)
     /// given incoming gradient `dy`.
     ///

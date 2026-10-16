@@ -45,6 +45,24 @@ impl DeviceTarget {
     }
 }
 
+impl From<tara_hd::DeviceKind> for DeviceTarget {
+    fn from(kind: tara_hd::DeviceKind) -> Self {
+        match kind {
+            tara_hd::DeviceKind::Cpu => DeviceTarget::Cpu,
+            _ => DeviceTarget::Gpu,
+        }
+    }
+}
+
+impl From<DeviceTarget> for tara_hd::DeviceKind {
+    fn from(target: DeviceTarget) -> Self {
+        match target {
+            DeviceTarget::Cpu => tara_hd::DeviceKind::Cpu,
+            DeviceTarget::Gpu => tara_hd::DeviceKind::Gpu,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum QuantizationPrecision {
     NoneFp32,

@@ -405,10 +405,16 @@ impl BackendRegistry {
                 let cuda = CUDABackend::try_new(id)?;
                 Ok(Box::new(cuda))
             }
-            BackendPolicy::Auto => match CUDABackend::try_new(PRIMARY_CUDA_DEVICE_ORDINAL) {
-                Ok(cuda) => Ok(Box::new(cuda)),
-                Err(_) => Ok(Box::new(CPUBackend)),
-            },
+            BackendPolicy::Auto => {
+                let inventory = tara_hd::DiscoveredInventory::probe_host();
+                if let Some(gpu) = inventory.gpus.first() {
+                    let ord = gpu.device_id as u32;
+                    if let Ok(cuda) = CUDABackend::try_new(ord) {
+                        return Ok(Box::new(cuda));
+                    }
+                }
+                Ok(Box::new(CPUBackend))
+            }
         }
     }
 
@@ -421,6 +427,29 @@ impl BackendRegistry {
 
     pub fn select_best_backend() -> Box<dyn DeviceBackend> {
         Self::select_backend(BackendPolicy::Auto)
+    }
+}
+
+impl From<BackendPolicy> for tara_hd::SelectionPolicy {
+    fn from(policy: BackendPolicy) -> Self {
+        match policy {
+            BackendPolicy::Auto => tara_hd::SelectionPolicy::Auto,
+            BackendPolicy::CpuOnly => {
+                tara_hd::SelectionPolicy::Explicit(tara_hd::DeviceKind::Cpu, None)
+            }
+            BackendPolicy::Cuda(id) => {
+                tara_hd::SelectionPolicy::Explicit(tara_hd::DeviceKind::Gpu, Some(id as usize))
+            }
+        }
+    }
+}
+
+impl From<DeviceKind> for tara_hd::DeviceKind {
+    fn from(kind: DeviceKind) -> Self {
+        match kind {
+            DeviceKind::Cpu => tara_hd::DeviceKind::Cpu,
+            DeviceKind::Cuda => tara_hd::DeviceKind::Gpu,
+        }
     }
 }
 

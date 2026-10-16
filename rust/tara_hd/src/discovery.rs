@@ -134,52 +134,76 @@ fn probe_cuda_gpus() -> Vec<DeviceCapability> {
 
     let mut discovered = Vec::new();
 
-    // Query index, name, memory.total, memory.free, and compute_cap
-    let output = Command::new("nvidia-smi")
-        .args([
-            "--query-gpu=index,name,memory.total,memory.free,compute_cap",
-            "--format=csv,noheader,nounits",
-        ])
-        .output();
+    let candidates = [
+        "nvidia-smi",
+        r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
+        r"C:\Windows\System32\nvidia-smi.exe",
+        "/usr/bin/nvidia-smi",
+        "/usr/local/cuda/bin/nvidia-smi",
+    ];
 
-    if let Ok(out) = output {
-        if out.status.success() {
-            let stdout_str = String::from_utf8_lossy(&out.stdout);
-            for line in stdout_str.lines() {
-                let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
-                if parts.len() >= 4 {
-                    let index = parts[0].parse::<usize>().unwrap_or(discovered.len());
-                    let name = parts[1].to_string();
-                    let total_mb = parts[2].parse::<u64>().unwrap_or(0);
-                    let free_mb = parts[3].parse::<u64>().unwrap_or(0);
+    for bin in &candidates {
+        if !discovered.is_empty() {
+            break;
+        }
 
-                    // Parse SM compute capability (e.g., "8.0" for A100, "7.5" for T4)
-                    let major_cc = parts
-                        .get(4)
-                        .and_then(|cc| cc.split('.').next())
-                        .and_then(|maj| maj.parse::<u32>().ok())
-                        .unwrap_or(8);
+        // 1. Try querying with compute_cap
+        let mut output = Command::new(bin)
+            .args([
+                "--query-gpu=index,name,memory.total,memory.free,compute_cap",
+                "--format=csv,noheader,nounits",
+            ])
+            .output();
 
-                    let mut supported_precisions = vec![PrecisionMode::Fp32];
-                    if major_cc >= 6 {
-                        supported_precisions.push(PrecisionMode::Fp16);
+        // 2. If compute_cap is not supported on this driver, query without it
+        if output.as_ref().map(|o| !o.status.success()).unwrap_or(true) {
+            output = Command::new(bin)
+                .args([
+                    "--query-gpu=index,name,memory.total,memory.free",
+                    "--format=csv,noheader,nounits",
+                ])
+                .output();
+        }
+
+        if let Ok(out) = output {
+            if out.status.success() {
+                let stdout_str = String::from_utf8_lossy(&out.stdout);
+                for line in stdout_str.lines() {
+                    let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+                    if parts.len() >= 4 {
+                        let index = parts[0].parse::<usize>().unwrap_or(discovered.len());
+                        let name = parts[1].to_string();
+                        let total_mb = parts[2].parse::<u64>().unwrap_or(0);
+                        let free_mb = parts[3].parse::<u64>().unwrap_or(0);
+
+                        // Parse SM compute capability (e.g., "8.0" for A100, "7.5" for T4)
+                        let major_cc = parts
+                            .get(4)
+                            .and_then(|cc| cc.split('.').next())
+                            .and_then(|maj| maj.parse::<u32>().ok())
+                            .unwrap_or(8);
+
+                        let mut supported_precisions = vec![PrecisionMode::Fp32];
+                        if major_cc >= 6 {
+                            supported_precisions.push(PrecisionMode::Fp16);
+                        }
+                        if major_cc >= 8 {
+                            supported_precisions.push(PrecisionMode::Bf16);
+                        }
+
+                        discovered.push(DeviceCapability {
+                            kind: DeviceKind::Gpu,
+                            device_id: index,
+                            name,
+                            backend: "cuda".to_string(),
+                            total_memory_bytes: total_mb.saturating_mul(1024 * 1024),
+                            available_memory_bytes: Some(free_mb.saturating_mul(1024 * 1024)),
+                            supported_precisions,
+                            supports_matrix_multiply: true,
+                            supports_fused_attention: major_cc >= 8,
+                            supports_in_place_optimizer: true,
+                        });
                     }
-                    if major_cc >= 8 {
-                        supported_precisions.push(PrecisionMode::Bf16);
-                    }
-
-                    discovered.push(DeviceCapability {
-                        kind: DeviceKind::Gpu,
-                        device_id: index,
-                        name,
-                        backend: "cuda".to_string(),
-                        total_memory_bytes: total_mb.saturating_mul(1024 * 1024),
-                        available_memory_bytes: Some(free_mb.saturating_mul(1024 * 1024)),
-                        supported_precisions,
-                        supports_matrix_multiply: true,
-                        supports_fused_attention: major_cc >= 8,
-                        supports_in_place_optimizer: true,
-                    });
                 }
             }
         }

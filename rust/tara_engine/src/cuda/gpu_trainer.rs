@@ -159,20 +159,10 @@ pub fn capture_memory_snapshot(vram_info: Option<(usize, usize)>) -> MemorySnaps
             }
         }
 
-        // 2. Host system memory from /proc/meminfo
-        if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
-            for line in meminfo.lines() {
-                if line.starts_with("MemTotal:") {
-                    if let Some(val_kb) = line.split_whitespace().nth(1).and_then(|s| s.parse::<f64>().ok()) {
-                        tot = val_kb / 1024.0;
-                    }
-                } else if line.starts_with("MemAvailable:") {
-                    if let Some(val_kb) = line.split_whitespace().nth(1).and_then(|s| s.parse::<f64>().ok()) {
-                        avail = val_kb / 1024.0;
-                    }
-                }
-            }
-        }
+        // 2. Host system memory directly via TARA-HD authoritative discovery
+        let (total_ram_bytes, avail_ram_bytes_opt) = tara_hd::discovery::query_system_ram_bytes();
+        tot = total_ram_bytes as f64 / (1024.0 * 1024.0);
+        avail = avail_ram_bytes_opt.unwrap_or(total_ram_bytes / 2) as f64 / (1024.0 * 1024.0);
 
         // 3. Cgroup memory limits (v2 or v1)
         let cgroup_limit_paths = [
@@ -249,8 +239,12 @@ pub fn capture_memory_snapshot(vram_info: Option<(usize, usize)>) -> MemorySnaps
     };
 
     #[cfg(not(target_os = "linux"))]
-    let (process_rss_mb, process_hwm_mb, host_total_mb, host_avail_mb, cgroup_limit_mb, cgroup_current_mb, cgroup_oom_kills, cgroup_events_summary) =
-        (0.0f64, 0.0f64, 0.0f64, 0.0f64, None, None, None, None);
+    let (process_rss_mb, process_hwm_mb, host_total_mb, host_avail_mb, cgroup_limit_mb, cgroup_current_mb, cgroup_oom_kills, cgroup_events_summary) = {
+        let (total_ram_bytes, avail_ram_bytes_opt) = tara_hd::discovery::query_system_ram_bytes();
+        let tot = total_ram_bytes as f64 / (1024.0 * 1024.0);
+        let avail = avail_ram_bytes_opt.unwrap_or(total_ram_bytes / 2) as f64 / (1024.0 * 1024.0);
+        (0.0f64, 0.0f64, tot, avail, None, None, None, None)
+    };
 
     #[cfg(target_os = "linux")]
     let (disk_free_mb, disk_total_mb) = {

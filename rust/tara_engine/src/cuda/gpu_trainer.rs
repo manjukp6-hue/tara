@@ -409,6 +409,7 @@ pub struct CudaTrainer {
     step_count: u64,
     last_grad_norm: f32,
     d_norm_sq: CudaBuffer,
+    kernel_launch_count: std::sync::atomic::AtomicU64,
     // Context session (must drop LAST after all device resources are freed)
     session: CudaSession,
 }
@@ -540,8 +541,21 @@ impl CudaTrainer {
             step_count: 0,
             last_grad_norm: 0.0,
             d_norm_sq,
+            kernel_launch_count: std::sync::atomic::AtomicU64::new(0),
             session,
         })
+    }
+
+    #[inline]
+    pub fn record_kernel_launch(&self) {
+        self.kernel_launch_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn kernel_launch_count(&self) -> u64 {
+        self.kernel_launch_count
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn session(&self) -> &CudaSession {
@@ -796,6 +810,7 @@ impl CudaTrainer {
                     .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 5)?;
             }
         }
+        self.record_kernel_launch();
         self.session.synchronize()?;
 
         let mut host_out = vec![0.0f32; seq_len * hs];
@@ -879,6 +894,7 @@ impl CudaTrainer {
                     .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 6)?;
             }
         }
+        self.record_kernel_launch();
         self.session.synchronize()?;
 
         let mut host_out = vec![0.0f32; seq_len * hs];
@@ -964,6 +980,7 @@ impl CudaTrainer {
                     .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 6)?;
             }
         }
+        self.record_kernel_launch();
         self.session.synchronize()?;
 
         let mut host_out = vec![0.0f32; seq_len * out_dim];
@@ -1145,6 +1162,7 @@ impl CudaTrainer {
             self.k_swiglu_fwd
                 .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 4)?;
         }
+        self.record_kernel_launch();
         self.session.synchronize()?;
 
         let mut host_out = vec![0.0f32; n];
@@ -1199,6 +1217,7 @@ impl CudaTrainer {
             self.k_res_add
                 .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 4)?;
         }
+        self.record_kernel_launch();
         self.session.synchronize()?;
 
         let mut host_out = vec![0.0f32; n];
@@ -1305,6 +1324,7 @@ impl CudaTrainer {
                 self.k_norm_sq
                     .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
             }
+            self.record_kernel_launch();
         }
         self.session.synchronize()?;
 
@@ -1441,6 +1461,7 @@ impl CudaTrainer {
                         14,
                     )?;
                 }
+                self.record_kernel_launch();
 
                 if self.stream_optimizer {
                     let d_cw = self.d_chunk_w.as_ref().unwrap();
@@ -1538,6 +1559,7 @@ impl CudaTrainer {
                     self.k_adamw_step
                         .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 13)?;
                 }
+                self.record_kernel_launch();
 
                 if self.stream_optimizer {
                     let d_cw = self.d_chunk_w.as_ref().unwrap();

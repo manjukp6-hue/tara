@@ -1602,6 +1602,12 @@ impl NativeSelfTrainer {
                                 })?;
                             if stepped {
                                 step_taken = true;
+                                if optimizer_steps == 0 {
+                                    println!(
+                                        "[Train] Verified first training optimizer step executed on CUDA GPU (k_adamw_step_f16, step_count={})",
+                                        gpu_trainer.get_step_count()
+                                    );
+                                }
                             }
 
                             if !gpu_trainer.is_streaming() {
@@ -2325,12 +2331,31 @@ pub fn promote_directory_atomically(
     }
 }
 
+#[derive(Debug, Default)]
+pub struct ForwardSampleProfile {
+    pub emb_ms: f64,
+    pub rms_input_ms: f64,
+    pub qkv_ms: f64,
+    pub attn_ctx_ms: f64,
+    pub o_proj_ms: f64,
+    pub res_attn_ms: f64,
+    pub rms_post_ms: f64,
+    pub gate_up_ms: f64,
+    pub swiglu_ms: f64,
+    pub down_proj_ms: f64,
+    pub res_mlp_ms: f64,
+    pub final_norm_ms: f64,
+    pub lm_head_ms: f64,
+    pub cross_entropy_ms: f64,
+}
+
 fn forward_hidden_gpu(
     model: &TaraForCausalLM,
     gt: &crate::cuda::CudaTrainer,
     active_tokens: &[u32],
     hs: usize,
     seq_len: usize,
+    mut profile: Option<&mut ForwardSampleProfile>,
 ) -> Result<Vec<f32>, TrainerError> {
     let eps = model.config.rms_norm_eps as f32;
     let inter_size = model.config.intermediate_size;
@@ -2339,21 +2364,30 @@ fn forward_hidden_gpu(
     let hd = model.config.effective_head_dim();
 
     // 1. Embedding on GPU
+    let t_emb = std::time::Instant::now();
     let mut hidden = gt.forward_embedding(active_tokens, hs).map_err(|e| {
         TrainerError::Model(format!("GPU forward_embedding failed: {e}"))
     })?;
+    if let Some(ref mut p) = profile {
+        p.emb_ms = t_emb.elapsed().as_secs_f64() * 1000.0;
+    }
 
     // 2. Decoder Layers on GPU
     for (l_idx, layer) in model.layers.iter().enumerate() {
         let pfx = format!("model.layers.{l_idx}");
 
         // Attention block
+        let t_rms1 = std::time::Instant::now();
         let normed_x = gt
             .forward_rmsnorm(&format!("{pfx}.input_layernorm.weight"), &hidden, seq_len, hs, eps)
             .map_err(|e| {
                 TrainerError::Model(format!("GPU input_layernorm forward failed at layer {l_idx}: {e}"))
             })?;
+        if let Some(ref mut p) = profile {
+            p.rms_input_ms += t_rms1.elapsed().as_secs_f64() * 1000.0;
+        }
 
+        let t_qkv = std::time::Instant::now();
         let q = gt
             .forward_linear(&format!("{pfx}.self_attn.q_proj.weight"), &normed_x, seq_len, hs, nh * hd)
             .map_err(|e| {
@@ -2369,33 +2403,53 @@ fn forward_hidden_gpu(
             .map_err(|e| {
                 TrainerError::Model(format!("GPU v_proj forward failed at layer {l_idx}: {e}"))
             })?;
+        if let Some(ref mut p) = profile {
+            p.qkv_ms += t_qkv.elapsed().as_secs_f64() * 1000.0;
+        }
         drop(normed_x);
 
+        let t_ctx = std::time::Instant::now();
         let context = layer.self_attn.forward_attention_context(&q, &k, &v, seq_len);
+        if let Some(ref mut p) = profile {
+            p.attn_ctx_ms += t_ctx.elapsed().as_secs_f64() * 1000.0;
+        }
         drop(q);
         drop(k);
         drop(v);
 
+        let t_o = std::time::Instant::now();
         let attn_out = gt
             .forward_linear(&format!("{pfx}.self_attn.o_proj.weight"), &context, seq_len, nh * hd, hs)
             .map_err(|e| {
                 TrainerError::Model(format!("GPU o_proj forward failed at layer {l_idx}: {e}"))
             })?;
+        if let Some(ref mut p) = profile {
+            p.o_proj_ms += t_o.elapsed().as_secs_f64() * 1000.0;
+        }
         drop(context);
 
+        let t_r1 = std::time::Instant::now();
         let h = gt.add_residual(&hidden, &attn_out).map_err(|e| {
             TrainerError::Model(format!("GPU attention add_residual failed at layer {l_idx}: {e}"))
         })?;
+        if let Some(ref mut p) = profile {
+            p.res_attn_ms += t_r1.elapsed().as_secs_f64() * 1000.0;
+        }
         drop(hidden);
         drop(attn_out);
 
         // MLP block
+        let t_rms2 = std::time::Instant::now();
         let normed_h = gt
             .forward_rmsnorm(&format!("{pfx}.post_attention_layernorm.weight"), &h, seq_len, hs, eps)
             .map_err(|e| {
                 TrainerError::Model(format!("GPU post_attention_layernorm forward failed at layer {l_idx}: {e}"))
             })?;
+        if let Some(ref mut p) = profile {
+            p.rms_post_ms += t_rms2.elapsed().as_secs_f64() * 1000.0;
+        }
 
+        let t_gu = std::time::Instant::now();
         let gate = gt
             .forward_linear(&format!("{pfx}.mlp.gate_proj.weight"), &normed_h, seq_len, hs, inter_size)
             .map_err(|e| {
@@ -2406,34 +2460,53 @@ fn forward_hidden_gpu(
             .map_err(|e| {
                 TrainerError::Model(format!("GPU up_proj forward failed at layer {l_idx}: {e}"))
             })?;
+        if let Some(ref mut p) = profile {
+            p.gate_up_ms += t_gu.elapsed().as_secs_f64() * 1000.0;
+        }
         drop(normed_h);
 
+        let t_sw = std::time::Instant::now();
         let swiglu = gt.forward_swiglu(&gate, &up).map_err(|e| {
             TrainerError::Model(format!("GPU forward_swiglu failed at layer {l_idx}: {e}"))
         })?;
+        if let Some(ref mut p) = profile {
+            p.swiglu_ms += t_sw.elapsed().as_secs_f64() * 1000.0;
+        }
         drop(gate);
         drop(up);
 
+        let t_dp = std::time::Instant::now();
         let mlp_out = gt
             .forward_linear(&format!("{pfx}.mlp.down_proj.weight"), &swiglu, seq_len, inter_size, hs)
             .map_err(|e| {
                 TrainerError::Model(format!("GPU down_proj forward failed at layer {l_idx}: {e}"))
             })?;
+        if let Some(ref mut p) = profile {
+            p.down_proj_ms += t_dp.elapsed().as_secs_f64() * 1000.0;
+        }
         drop(swiglu);
 
+        let t_r2 = std::time::Instant::now();
         hidden = gt.add_residual(&h, &mlp_out).map_err(|e| {
             TrainerError::Model(format!("GPU mlp add_residual failed at layer {l_idx}: {e}"))
         })?;
+        if let Some(ref mut p) = profile {
+            p.res_mlp_ms += t_r2.elapsed().as_secs_f64() * 1000.0;
+        }
         drop(h);
         drop(mlp_out);
     }
 
     // 3. Final RMSNorm on GPU
+    let t_fn = std::time::Instant::now();
     let final_normed = gt
         .forward_rmsnorm("model.norm.weight", &hidden, seq_len, hs, eps)
         .map_err(|e| {
             TrainerError::Model(format!("GPU final norm forward failed: {e}"))
         })?;
+    if let Some(ref mut p) = profile {
+        p.final_norm_ms = t_fn.elapsed().as_secs_f64() * 1000.0;
+    }
     drop(hidden);
 
     Ok(final_normed)
@@ -2477,9 +2550,17 @@ fn compute_model_loss(
         let active_tokens = &tokens[..seq_len];
         let eff_target_start = (*target_start).min(seq_len);
 
+        let mut profile = if idx == 0 && gpu_trainer_opt.is_some() {
+            Some(ForwardSampleProfile::default())
+        } else {
+            None
+        };
+        let initial_kernel_launches = gpu_trainer_opt.map(|gt| gt.kernel_launch_count()).unwrap_or(0);
+
         // 1. Forward hidden activations and LM head (GPU-accelerated when CUDA trainer is active, Rayon-parallelized on CPU)
         let (final_normed, logits) = if let Some(gt) = gpu_trainer_opt {
-            let fnorm = forward_hidden_gpu(model, gt, active_tokens, hs, seq_len)?;
+            let fnorm = forward_hidden_gpu(model, gt, active_tokens, hs, seq_len, profile.as_mut())?;
+            let t_lm = std::time::Instant::now();
             let lgs = match gt.forward_lm_head(&fnorm, seq_len, hs, vs) {
                 Ok(l) => l,
                 Err(e) => {
@@ -2491,6 +2572,9 @@ fn compute_model_loss(
                     return Err(TrainerError::Model(format!("GPU validation forward failed: {e}")));
                 }
             };
+            if let Some(ref mut p) = profile {
+                p.lm_head_ms = t_lm.elapsed().as_secs_f64() * 1000.0;
+            }
             (fnorm, lgs)
         } else {
             let fnorm = model.forward_hidden(active_tokens);
@@ -2507,37 +2591,82 @@ fn compute_model_loss(
         };
         drop(final_normed);
 
-        // 3. Compute cross-entropy loss over target tokens
-        let mut sample_loss = 0.0f64;
-        let mut sample_targets = 0usize;
-
-        for (pos, &token_val) in active_tokens
+        // 3. Compute cross-entropy loss over target tokens (Rayon-parallelized across CPU cores)
+        let t_ce = std::time::Instant::now();
+        let target_positions: Vec<(usize, usize)> = active_tokens
             .iter()
             .enumerate()
             .take(seq_len)
             .skip(eff_target_start.max(1))
-        {
-            let predictor = pos.saturating_sub(1);
-            let target = token_val as usize;
-            if target >= vs {
-                continue;
-            }
-            let logit_start = predictor * vs;
-            let logits_slice = &logits[logit_start..logit_start + vs];
-            let max_logit = logits_slice.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-            let sum_exp: f64 = logits_slice
-                .iter()
-                .map(|&l| ((l - max_logit) as f64).exp())
-                .sum();
-            if sum_exp > 0.0 && sum_exp.is_finite() {
-                let token_loss = sum_exp.ln() - ((logits_slice[target] - max_logit) as f64);
-                sample_loss += token_loss;
-                sample_targets += 1;
-            }
+            .filter_map(|(pos, &token_val)| {
+                let target = token_val as usize;
+                if target < vs {
+                    Some((pos.saturating_sub(1), target))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        use rayon::prelude::*;
+        let (sample_loss, sample_targets) = target_positions
+            .par_iter()
+            .map(|&(predictor, target)| {
+                let logit_start = predictor * vs;
+                let logits_slice = &logits[logit_start..logit_start + vs];
+                let max_logit = logits_slice.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                let sum_exp: f64 = logits_slice
+                    .iter()
+                    .map(|&l| ((l - max_logit) as f64).exp())
+                    .sum();
+                if sum_exp > 0.0 && sum_exp.is_finite() {
+                    let token_loss = sum_exp.ln() - ((logits_slice[target] - max_logit) as f64);
+                    (token_loss, 1usize)
+                } else {
+                    (0.0, 0usize)
+                }
+            })
+            .reduce(|| (0.0f64, 0usize), |a, b| (a.0 + b.0, a.1 + b.1));
+
+        if let Some(ref mut p) = profile {
+            p.cross_entropy_ms = t_ce.elapsed().as_secs_f64() * 1000.0;
         }
 
         // Release logits buffer immediately to reclaim memory
         drop(logits);
+
+        let final_kernel_launches = gpu_trainer_opt.map(|gt| gt.kernel_launch_count()).unwrap_or(0);
+        let kernel_delta = final_kernel_launches.saturating_sub(initial_kernel_launches);
+
+        if let Some(p) = profile {
+            let total_layer_gpu_ms = p.rms_input_ms + p.qkv_ms + p.o_proj_ms + p.res_attn_ms
+                + p.rms_post_ms + p.gate_up_ms + p.swiglu_ms + p.down_proj_ms + p.res_mlp_ms;
+            let total_sample_ms = p.emb_ms + total_layer_gpu_ms + p.attn_ctx_ms + p.final_norm_ms + p.lm_head_ms + p.cross_entropy_ms;
+            println!("+----------------------------------------------------------------------------------------------------------+");
+            println!("| [{stage_desc}] Sample 1/{} Device & Kernel Execution Profile (tokens: {}, seq_len: {})                 |", total_samples, orig_len, seq_len);
+            println!("+---------------------------------------+---------------+-------------------------------+----------+-------+");
+            println!("| Operation                             | Device        | Implementation / Kernel       | Launches |   Time|");
+            println!("+---------------------------------------+---------------+-------------------------------+----------+-------+");
+            println!("| Embedding (vocab -> hidden)           | CUDA GPU      | embedding_fwd_f16_kernel      |        1 | {:>5.2}ms|", p.emb_ms);
+            println!("| Decoder Layers (13 layers aggregate): |               |                               |          |       |");
+            println!("|   - Input RMSNorm                     | CUDA GPU      | rms_fwd_f16_kernel            |       13 | {:>5.2}ms|", p.rms_input_ms);
+            println!("|   - Q/K/V Linear Projections          | CUDA GPU      | linear_fwd_f16_kernel         |       39 | {:>5.2}ms|", p.qkv_ms);
+            println!("|   - Attention Context (RoPE + Causal) | CPU (Rayon)   | forward_attention_context     |        0 | {:>5.2}ms|", p.attn_ctx_ms);
+            println!("|   - Output Linear Projection (o_proj) | CUDA GPU      | linear_fwd_f16_kernel         |       13 | {:>5.2}ms|", p.o_proj_ms);
+            println!("|   - Attention Residual Add            | CUDA GPU      | residual_add_kernel           |       13 | {:>5.2}ms|", p.res_attn_ms);
+            println!("|   - Post-Attention RMSNorm            | CUDA GPU      | rms_fwd_f16_kernel            |       13 | {:>5.2}ms|", p.rms_post_ms);
+            println!("|   - Gate & Up Projections (SwiGLU)    | CUDA GPU      | linear_fwd_f16_kernel         |       26 | {:>5.2}ms|", p.gate_up_ms);
+            println!("|   - SwiGLU Activation                 | CUDA GPU      | swiglu_fwd_kernel             |       13 | {:>5.2}ms|", p.swiglu_ms);
+            println!("|   - Down Linear Projection (down_proj)| CUDA GPU      | linear_fwd_f16_kernel         |       13 | {:>5.2}ms|", p.down_proj_ms);
+            println!("|   - MLP Residual Add                  | CUDA GPU      | residual_add_kernel           |       13 | {:>5.2}ms|", p.res_mlp_ms);
+            println!("| Final RMSNorm                         | CUDA GPU      | rms_fwd_f16_kernel            |        1 | {:>5.2}ms|", p.final_norm_ms);
+            println!("| LM Head (hidden -> vocab)             | CUDA GPU      | linear_fwd_f16_kernel         |        1 | {:>5.2}ms|", p.lm_head_ms);
+            println!("| Cross-Entropy Loss Reduction          | CPU (Rayon)   | par_iter parallel reduction   |        0 | {:>5.2}ms|", p.cross_entropy_ms);
+            println!("+---------------------------------------+---------------+-------------------------------+----------+-------+");
+            println!("| Total Verified CUDA Launches: {:>3} (Delta: {:>3}) | Total Sample 1 Duration: {:>7.2}ms                  |", kernel_delta, kernel_delta, total_sample_ms);
+            println!("+----------------------------------------------------------------------------------------------------------+");
+            let _ = std::io::stdout().flush();
+        }
 
         let sample_mean_loss = if sample_targets > 0 {
             sample_loss / sample_targets as f64

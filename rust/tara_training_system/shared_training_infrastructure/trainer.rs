@@ -478,9 +478,14 @@ impl NativeSelfTrainer {
         // Canonical FP32 model weights on host: 4 bytes / param
         let host_model_mb = (total_params * 4) as f64 / (1024.0 * 1024.0);
         // Host optimizer states:
-        // In GPU mode, optimizer states, moments, and chunk buffers are managed on the GPU, requiring 0.0 MB on host.
-        // In CPU mode, gradients (4B) + momentum m (4B) + variance v (4B) = 12 bytes / param reside on host.
-        let host_opt_mb = if is_gpu {
+        // Models with >= 200M parameters run in Streamed Optimizer Mode where moments m (FP16, 2B) and v (FP16, 2B)
+        // are resident in Host RAM to prevent GPU VRAM exhaustion (4 bytes/param total).
+        // Models < 200M on GPU keep moments in VRAM (0.0 MB on host).
+        // On CPU, gradients (4B) + momentum m (4B) + variance v (4B) = 12 bytes/param reside on host.
+        let is_streamed_gpu = is_gpu && total_params >= 200_000_000;
+        let host_opt_mb = if is_streamed_gpu {
+            (total_params * 4) as f64 / (1024.0 * 1024.0)
+        } else if is_gpu {
             0.0
         } else {
             (total_params * 12) as f64 / (1024.0 * 1024.0)
@@ -499,10 +504,12 @@ impl NativeSelfTrainer {
                 (total_params * 4) as f64 / (1024.0 * 1024.0)
             };
             let g_mb = (total_params * 4) as f64 / (1024.0 * 1024.0);
-            let chunk_mb = if total_params >= 200_000_000 {
+            let chunk_mb = if is_streamed_gpu {
+                // 3 chunk buffers (dw, dm, dv) of max_tensor_len in FP32 = 12 bytes / max element
                 (max_tensor_len * 12) as f64 / (1024.0 * 1024.0)
             } else {
-                (total_params * 12) as f64 / (1024.0 * 1024.0)
+                // Resident moments m (4B) + v (4B) = 8 bytes / param
+                (total_params * 8) as f64 / (1024.0 * 1024.0)
             };
             let act_mb = (batch_size * seq_len * 2048 * 8) as f64 / (1024.0 * 1024.0) + 150.0;
             let cuda_overhead_mb = 450.0;
@@ -521,7 +528,7 @@ impl NativeSelfTrainer {
 
         let breakdown = if is_gpu {
             format!(
-                "Host RAM: Model={host_model_mb:.1}MB, Opt={host_opt_mb:.1}MB, Act={host_act_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB | GPU VRAM: Weights={gpu_w_mb:.1}MB, Grads={gpu_g_mb:.1}MB, Chunks={gpu_chunk_mb:.1}MB, Act={gpu_act_mb:.1}MB, Total(+10% Margin)={gpu_total_with_margin:.1}MB (Governing Peak: {governing_peak:.1}MB)",
+                "Host RAM: Model={host_model_mb:.1}MB, Opt(m+v)={host_opt_mb:.1}MB, Act={host_act_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB | GPU VRAM: Weights={gpu_w_mb:.1}MB, Grads={gpu_g_mb:.1}MB, Chunks/States={gpu_chunk_mb:.1}MB, Act={gpu_act_mb:.1}MB, Total(+10% Margin)={gpu_total_with_margin:.1}MB (Governing Peak: {governing_peak:.1}MB)",
             )
         } else {
             format!(
@@ -1127,11 +1134,40 @@ impl NativeSelfTrainer {
             );
             None
         } else {
-            println!(
-                "[Preflight] Evaluating baseline loss across {} held-out validation samples...",
-                val_tokens.len()
-            );
-            let loss = compute_model_loss(&model, &val_tokens);
+            // Optional debugging smoke test (allows 1-2 sample verification when requested)
+            if std::env::var("TARA_VALIDATION_SMOKE_TEST").map(|v| v == "1" || v == "true").unwrap_or(false)
+                || std::env::var("TARA_SMOKE_VAL").map(|v| v == "1" || v == "true").unwrap_or(false)
+            {
+                let smoke_count = 2.min(val_tokens.len());
+                let smoke_val = &val_tokens[..smoke_count];
+                println!("[Preflight Smoke Test] Running {smoke_count}-sample baseline validation smoke test...");
+                let _ = compute_model_loss(
+                    &model,
+                    gpu_trainer_opt.as_ref(),
+                    smoke_val,
+                    "Preflight Smoke",
+                )?;
+                println!("[Preflight Smoke Test] Smoke test passed!");
+            }
+
+            // Full validation across all held-out validation samples (or bounded by TARA_MAX_VAL_SAMPLES if explicitly set)
+            let max_val_override = std::env::var("TARA_MAX_VAL_SAMPLES")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok());
+            let active_val_tokens = if let Some(lim) = max_val_override {
+                let lim = lim.clamp(1, val_tokens.len());
+                println!("[Preflight] Limiting validation samples to {lim} per TARA_MAX_VAL_SAMPLES override");
+                &val_tokens[..lim]
+            } else {
+                &val_tokens[..]
+            };
+
+            let loss = compute_model_loss(
+                &model,
+                gpu_trainer_opt.as_ref(),
+                active_val_tokens,
+                "Preflight",
+            )?;
             println!("[Preflight] Held-out validation baseline loss: {:.4}", loss);
             Some(loss)
         };
@@ -1682,7 +1718,12 @@ impl NativeSelfTrainer {
                             let current_eval_loss = if val_tokens.is_empty() || !should_eval {
                                 None
                             } else {
-                                Some(compute_model_loss(&model, &val_tokens))
+                                compute_model_loss(
+                                    &model,
+                                    gpu_trainer_opt.as_ref(),
+                                    &val_tokens,
+                                    "Step Eval",
+                                ).ok()
                             };
                             let is_best = match current_eval_loss {
                                 Some(loss) if loss < best_loss => {
@@ -1877,7 +1918,12 @@ impl NativeSelfTrainer {
                     let current_eval_loss = if val_tokens.is_empty() {
                         None
                     } else {
-                        Some(compute_model_loss(&model, &val_tokens))
+                        compute_model_loss(
+                            &model,
+                            gpu_trainer_opt.as_ref(),
+                            &val_tokens,
+                            "Epoch Eval",
+                        ).ok()
                     };
                     let is_best = match current_eval_loss {
                         Some(loss) if loss < best_loss => {
@@ -1921,7 +1967,12 @@ impl NativeSelfTrainer {
             println!("[Validation Gate] Held-out validation unavailable (single-sequence boundary). Skipping regression check.");
             None
         } else {
-            let fl = compute_model_loss(&model, &val_tokens);
+            let fl = compute_model_loss(
+                &model,
+                gpu_trainer_opt.as_ref(),
+                &val_tokens,
+                "Final Validation",
+            )?;
             // Validation Gate: reject non-finite loss or severe regression
             if !fl.is_finite() {
                 return Err(TrainerError::Model(format!(
@@ -2274,20 +2325,83 @@ pub fn promote_directory_atomically(
     }
 }
 
-fn compute_model_loss(model: &TaraForCausalLM, training_tokens: &[(Vec<u32>, usize)]) -> f64 {
-    let mut total_loss = 0.0f64;
-    let mut count = 0usize;
+fn compute_model_loss(
+    model: &TaraForCausalLM,
+    gpu_trainer_opt: Option<&crate::cuda::CudaTrainer>,
+    val_tokens: &[(Vec<u32>, usize)],
+    stage_desc: &str,
+) -> Result<f64, TrainerError> {
+    use std::io::Write;
+
+    if val_tokens.is_empty() {
+        return Ok(f64::INFINITY);
+    }
+
     let vs = model.config.vocab_size;
+    let hs = model.config.hidden_size;
+    let max_pos = model.config.max_position_embeddings;
+    let total_samples = val_tokens.len();
 
-    for (tokens, target_start) in training_tokens {
-        let seq_len = tokens.len();
-        let (_, _, logits) = model.forward_with_cache(tokens);
+    let mut total_loss = 0.0f64;
+    let mut total_target_tokens = 0usize;
+    let start_time = std::time::Instant::now();
 
-        for (pos, &token_val) in tokens
+    println!(
+        "[{stage_desc}] Evaluating validation loss across {} samples (context ceiling: {} tokens, micro-batch: 1)...",
+        total_samples, max_pos
+    );
+    let _ = std::io::stdout().flush();
+
+    for (idx, (tokens, target_start)) in val_tokens.iter().enumerate() {
+        let sample_start = std::time::Instant::now();
+        let orig_len = tokens.len();
+        let seq_len = orig_len.min(max_pos);
+        if seq_len == 0 {
+            continue;
+        }
+
+        let active_tokens = &tokens[..seq_len];
+        let eff_target_start = (*target_start).min(seq_len);
+
+        // 1. Forward hidden activations across decoder layers (micro-batch size 1, bounded memory)
+        let final_normed = model.forward_hidden(active_tokens);
+
+        // 2. Forward LM Head (GPU-accelerated when CUDA trainer is active)
+        let logits = if let Some(gt) = gpu_trainer_opt {
+            match gt.forward_lm_head(&final_normed, seq_len, hs, vs) {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!(
+                        "[{stage_desc} ERROR] Sample {}/{} failed during [GPU forward_lm_head]: {} (seq_len={}, tokens={})",
+                        idx + 1, total_samples, e, seq_len, orig_len
+                    );
+                    let _ = std::io::stderr().flush();
+                    return Err(TrainerError::Model(format!("GPU validation forward failed: {e}")));
+                }
+            }
+        } else {
+            let mut cpu_logits = vec![0.0f32; seq_len * vs];
+            for t in 0..seq_len {
+                let h_row = &final_normed[t * hs..(t + 1) * hs];
+                let l_row = &mut cpu_logits[t * vs..(t + 1) * vs];
+                for (v, val) in l_row.iter_mut().enumerate().take(vs) {
+                    let lm_row = &model.lm_head[v * hs..(v + 1) * hs];
+                    *val = h_row.iter().zip(lm_row.iter()).map(|(&a, &b)| a * b).sum();
+                }
+            }
+            cpu_logits
+        };
+        drop(final_normed);
+
+        // 3. Compute cross-entropy loss over target tokens
+        let mut sample_loss = 0.0f64;
+        let mut sample_targets = 0usize;
+
+        for (pos, &token_val) in active_tokens
             .iter()
             .enumerate()
             .take(seq_len)
-            .skip((*target_start).max(1))
+            .skip(eff_target_start.max(1))
         {
             let predictor = pos.saturating_sub(1);
             let target = token_val as usize;
@@ -2303,17 +2417,68 @@ fn compute_model_loss(model: &TaraForCausalLM, training_tokens: &[(Vec<u32>, usi
                 .sum();
             if sum_exp > 0.0 && sum_exp.is_finite() {
                 let token_loss = sum_exp.ln() - ((logits_slice[target] - max_logit) as f64);
-                total_loss += token_loss;
-                count += 1;
+                sample_loss += token_loss;
+                sample_targets += 1;
             }
         }
+
+        // Release logits buffer immediately to reclaim memory
+        drop(logits);
+
+        let sample_mean_loss = if sample_targets > 0 {
+            sample_loss / sample_targets as f64
+        } else {
+            0.0
+        };
+        total_loss += sample_loss;
+        total_target_tokens += sample_targets;
+
+        let elapsed = sample_start.elapsed().as_secs_f64();
+
+        // Telemetry snapshot: host RSS and GPU VRAM
+        let vram_info = gpu_trainer_opt.and_then(|gt| gt.get_vram_info().ok());
+        let snap = crate::cuda::capture_memory_snapshot(vram_info);
+        let vram_str = if let (Some(used), Some(tot)) = (snap.gpu_used_vram_mb, snap.gpu_total_vram_mb) {
+            format!("{used:.1}/{tot:.1} MB")
+        } else {
+            "N/A".to_string()
+        };
+
+        println!(
+            "[{stage_desc}] Validation sample {}/{}: tokens={}, time={:.3}s, loss={:.4}, Host RSS={:.1} MB, GPU VRAM={}, forward_completed=true",
+            idx + 1,
+            total_samples,
+            seq_len,
+            elapsed,
+            sample_mean_loss,
+            snap.process_rss_mb,
+            vram_str
+        );
+        let _ = std::io::stdout().flush();
     }
 
-    if count == 0 {
-        f64::INFINITY
-    } else {
-        total_loss / count as f64
+    let overall_elapsed = start_time.elapsed().as_secs_f64();
+    if total_target_tokens == 0 {
+        return Ok(f64::INFINITY);
     }
+
+    let mean_loss = total_loss / total_target_tokens as f64;
+    let avg_ms = (overall_elapsed * 1000.0) / total_samples as f64;
+    let tok_per_sec = (total_target_tokens as f64) / overall_elapsed.max(1e-4);
+
+    println!(
+        "[{stage_desc} Complete] Evaluated {} samples ({} tokens) in {:.2}s (avg {:.1} ms/sample, {:.1} tok/sec) | Loss: {:.4}",
+        total_samples, total_target_tokens, overall_elapsed, avg_ms, tok_per_sec, mean_loss
+    );
+    let _ = std::io::stdout().flush();
+
+    if !mean_loss.is_finite() || mean_loss <= 0.0 {
+        return Err(TrainerError::Model(format!(
+            "Validation loss is non-finite or non-positive: {mean_loss}"
+        )));
+    }
+
+    Ok(mean_loss)
 }
 
 #[cfg(test)]
@@ -2605,5 +2770,49 @@ mod tests {
         assert_eq!(samples[5].1, "Execute validated path for 'CONVERSATIONAL'");
 
         let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_estimate_memory_footprint_streamed_gpu_accounting() {
+        // 1B model in streamed GPU mode (>= 200M params)
+        let total_params = 995_809_280;
+        let (peak_mb, breakdown) = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
+            total_params,
+            true,  // is_gpu
+            true,  // is_f16
+            2048 * 2048, // max_tensor_len
+            1,     // batch_size
+            512,   // seq_len
+        );
+
+        assert!(peak_mb > 0.0);
+        // Host optimizer moments m+v must be accounted for (approx 3798.7 MB)
+        assert!(breakdown.contains("Opt(m+v)="));
+        assert!(!breakdown.contains("Opt(m+v)=0.0MB"));
+        assert!(breakdown.contains("Host RAM:"));
+        assert!(breakdown.contains("GPU VRAM:"));
+
+        // Smaller model (< 200M params) on GPU keeps moments in VRAM
+        let small_params = 10_000_000;
+        let (_, small_breakdown) = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
+            small_params,
+            true,
+            true,
+            512 * 512,
+            1,
+            512,
+        );
+        assert!(small_breakdown.contains("Opt(m+v)=0.0MB"));
+
+        // CPU mode accounts for gradients + moments on host
+        let (_, cpu_breakdown) = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
+            small_params,
+            false,
+            false,
+            0,
+            1,
+            512,
+        );
+        assert!(cpu_breakdown.contains("Grads+Moments="));
     }
 }

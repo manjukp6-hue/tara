@@ -478,17 +478,10 @@ impl NativeSelfTrainer {
         // Canonical FP32 model weights on host: 4 bytes / param
         let host_model_mb = (total_params * 4) as f64 / (1024.0 * 1024.0);
         // Host optimizer states:
-        // If GPU with streamed optimizer (active for 1B/large models where total VRAM bytes would exceed GPU headroom),
-        // momentum m and variance v reside on host: 8 bytes / param.
-        // If CPU training: grads (4B) + m (4B) + v (4B) = 12 bytes / param.
-        // If standard GPU with resident optimizer: 0 MB on host.
+        // In GPU mode, optimizer states, moments, and chunk buffers are managed on the GPU, requiring 0.0 MB on host.
+        // In CPU mode, gradients (4B) + momentum m (4B) + variance v (4B) = 12 bytes / param reside on host.
         let host_opt_mb = if is_gpu {
-            if total_params >= 200_000_000 {
-                // Streamed optimizer: m (4B) + v (4B) on host
-                (total_params * 8) as f64 / (1024.0 * 1024.0)
-            } else {
-                0.0
-            }
+            0.0
         } else {
             (total_params * 12) as f64 / (1024.0 * 1024.0)
         };
@@ -528,7 +521,7 @@ impl NativeSelfTrainer {
 
         let breakdown = if is_gpu {
             format!(
-                "Host RAM: Model={host_model_mb:.1}MB, Opt(m+v)={host_opt_mb:.1}MB, Act={host_act_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB | GPU VRAM: Weights={gpu_w_mb:.1}MB, Grads={gpu_g_mb:.1}MB, Chunks={gpu_chunk_mb:.1}MB, Act={gpu_act_mb:.1}MB, Total(+10% Margin)={gpu_total_with_margin:.1}MB (Governing Peak: {governing_peak:.1}MB)",
+                "Host RAM: Model={host_model_mb:.1}MB, Opt={host_opt_mb:.1}MB, Act={host_act_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB | GPU VRAM: Weights={gpu_w_mb:.1}MB, Grads={gpu_g_mb:.1}MB, Chunks={gpu_chunk_mb:.1}MB, Act={gpu_act_mb:.1}MB, Total(+10% Margin)={gpu_total_with_margin:.1}MB (Governing Peak: {governing_peak:.1}MB)",
             )
         } else {
             format!(

@@ -1448,7 +1448,14 @@ impl NativeSelfTrainer {
                 let _ = std::io::stdout().flush();
 
                 let (layer_inputs, final_normed, logits) = if let Some(ref gpu_trainer) = gpu_trainer_opt {
-                    let (inputs, fnorm) = model.forward_activations(active_tokens);
+                    let (inputs, fnorm) = forward_activations_gpu(
+                        &model,
+                        gpu_trainer,
+                        active_tokens,
+                        config.hidden_size,
+                        seq_len,
+                        None,
+                    )?;
                     let lgs = gpu_trainer
                         .forward_lm_head(
                             &fnorm,
@@ -2599,19 +2606,21 @@ pub struct ForwardSampleProfile {
     pub cross_entropy_ms: f64,
 }
 
-fn forward_hidden_gpu(
+fn forward_activations_gpu(
     model: &TaraForCausalLM,
     gt: &crate::cuda::CudaTrainer,
     active_tokens: &[u32],
     hs: usize,
     seq_len: usize,
     mut profile: Option<&mut ForwardSampleProfile>,
-) -> Result<Vec<f32>, TrainerError> {
+) -> Result<(Vec<Vec<f32>>, Vec<f32>), TrainerError> {
     let eps = model.config.rms_norm_eps as f32;
     let inter_size = model.config.intermediate_size;
     let nh = model.config.num_attention_heads;
     let nkv = model.config.num_key_value_heads;
     let hd = model.config.effective_head_dim();
+
+    let mut layer_inputs = Vec::with_capacity(model.layers.len() + 1);
 
     // 1. Embedding on GPU
     let t_emb = std::time::Instant::now();
@@ -2621,6 +2630,7 @@ fn forward_hidden_gpu(
     if let Some(ref mut p) = profile {
         p.emb_ms = t_emb.elapsed().as_secs_f64() * 1000.0;
     }
+    layer_inputs.push(hidden.clone());
 
     // 2. Decoder Layers on GPU
     for (l_idx, layer) in model.layers.iter().enumerate() {
@@ -2745,6 +2755,8 @@ fn forward_hidden_gpu(
         }
         drop(h);
         drop(mlp_out);
+
+        layer_inputs.push(hidden.clone());
     }
 
     // 3. Final RMSNorm on GPU
@@ -2759,7 +2771,18 @@ fn forward_hidden_gpu(
     }
     drop(hidden);
 
-    Ok(final_normed)
+    Ok((layer_inputs, final_normed))
+}
+
+fn forward_hidden_gpu(
+    model: &TaraForCausalLM,
+    gt: &crate::cuda::CudaTrainer,
+    active_tokens: &[u32],
+    hs: usize,
+    seq_len: usize,
+    profile: Option<&mut ForwardSampleProfile>,
+) -> Result<Vec<f32>, TrainerError> {
+    forward_activations_gpu(model, gt, active_tokens, hs, seq_len, profile).map(|(_, fnorm)| fnorm)
 }
 
 fn compute_model_loss(

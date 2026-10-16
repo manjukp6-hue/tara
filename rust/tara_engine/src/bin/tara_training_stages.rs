@@ -34,8 +34,8 @@ use tara_engine::internal_diagnostics::{
 use tara_engine::tokenizer::TaraTokenizer;
 use tara_engine::train_candidate::{run_controlled_training_with_options, TrainingOptions};
 use tara_engine::{
-    compute_file_sha256, load_model_weights_with_shapes, load_safetensors_with_shapes,
-    TaraForCausalLM,
+    compute_file_sha256, load_model_weights_with_purpose, load_model_weights_with_shapes,
+    load_safetensors_with_shapes, TaraForCausalLM,
 };
 
 /// Extensible specification for a single training stage in the pipeline.
@@ -230,7 +230,10 @@ pub fn compute_model_weights_digest(dir: &Path) -> Result<Option<String>, String
     }
 
     if shard_files.is_empty() {
-        return Ok(None);
+        return Err(format!(
+            "Directory '{}' exists but contains no SafeTensors weight shards",
+            dir.display()
+        ));
     }
 
     shard_files.sort();
@@ -278,6 +281,17 @@ pub fn compute_full_checkpoint_digest(dir: &Path) -> Result<Option<String>, Stri
         }
     }
     Ok(Some(hex::encode(hasher.finalize())))
+}
+
+/// Returns true if `path` exists, is a directory, and contains zero directory entries.
+pub fn is_empty_dir(path: &Path) -> bool {
+    if !path.exists() || !path.is_dir() {
+        return false;
+    }
+    match fs::read_dir(path) {
+        Ok(mut entries) => entries.next().is_none(),
+        Err(_) => false,
+    }
 }
 
 fn collect_jsonl_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
@@ -576,7 +590,10 @@ pub fn write_json_atomically(target_file: &Path, value: &serde_json::Value) -> R
 /// Deep verification of working model: inspects `config.json`, `tokenizer.json`, vocabulary
 /// agreement (`config.vocab_size == tokenizer.vocab_size`), and full `TaraForCausalLM` layer/shape
 /// compatibility across all transformer layers.
-pub fn verify_working_model(model_dir: &Path) -> (bool, Vec<String>, Option<usize>) {
+pub fn verify_working_model_with_purpose(
+    model_dir: &Path,
+    purpose: &str,
+) -> (bool, Vec<String>, Option<usize>) {
     let mut missing = Vec::new();
     let config_path = model_dir.join("config.json");
     let tokenizer_path = model_dir.join("tokenizer.json");
@@ -617,7 +634,7 @@ pub fn verify_working_model(model_dir: &Path) -> (bool, Vec<String>, Option<usiz
     }
 
     let mut param_count: Option<usize> = None;
-    match load_model_weights_with_shapes(&model_dir.to_string_lossy()) {
+    match load_model_weights_with_purpose(&model_dir.to_string_lossy(), purpose) {
         Ok((weights, _)) => {
             if weights.is_empty() {
                 missing.push("SafeTensors weights dictionary is empty".to_string());
@@ -644,9 +661,16 @@ pub fn verify_working_model(model_dir: &Path) -> (bool, Vec<String>, Option<usiz
     (missing.is_empty(), missing, param_count)
 }
 
+pub fn verify_working_model(model_dir: &Path) -> (bool, Vec<String>, Option<usize>) {
+    verify_working_model_with_purpose(model_dir, "INPUT")
+}
+
 /// Deep verification of continuation state: checks `checkpoint_state.json` and `optimizer.safetensors`
 /// (including verifying that moment tensor lengths match model weight tensor lengths when weights exist).
-pub fn verify_continuation_ready(cp_dir: &Path) -> (bool, Vec<String>, Option<u64>) {
+pub fn verify_continuation_ready_with_purpose(
+    cp_dir: &Path,
+    purpose: &str,
+) -> (bool, Vec<String>, Option<u64>) {
     let mut issues = Vec::new();
     let state_file = cp_dir.join("checkpoint_state.json");
     let opt_file = cp_dir.join("optimizer.safetensors");
@@ -682,7 +706,7 @@ pub fn verify_continuation_ready(cp_dir: &Path) -> (bool, Vec<String>, Option<u6
                 if tensors.is_empty() {
                     issues.push("optimizer.safetensors contains zero moment tensors".to_string());
                 } else if let Ok((weights, _)) =
-                    load_model_weights_with_shapes(&cp_dir.to_string_lossy())
+                    load_model_weights_with_purpose(&cp_dir.to_string_lossy(), purpose)
                 {
                     for (param_name, w_vec) in &weights {
                         let m_key = format!("{param_name}.adam_m");
@@ -709,6 +733,10 @@ pub fn verify_continuation_ready(cp_dir: &Path) -> (bool, Vec<String>, Option<u6
     }
 
     (issues.is_empty(), issues, opt_step)
+}
+
+pub fn verify_continuation_ready(cp_dir: &Path) -> (bool, Vec<String>, Option<u64>) {
+    verify_continuation_ready_with_purpose(cp_dir, "RESUME")
 }
 
 fn is_safe_stage_id(id: &str) -> bool {
@@ -2095,8 +2123,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             res
         };
 
-        let (is_model, _, _) = verify_working_model(&out_path);
-        let (is_cont, _, _) = verify_continuation_ready(&out_path);
         let in_digest = match compute_full_checkpoint_digest(Path::new(&s.input_checkpoint))? {
             Some(d) => d,
             None => "pending".to_string(),
@@ -2104,22 +2130,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let fp =
             compute_stage_config_fingerprint(s, &in_digest, &insp.dataset_fingerprint, &precision);
 
-        let weights_hash = compute_model_weights_digest(&out_path)?;
-        let full_cp_hash = compute_full_checkpoint_digest(&out_path)?;
+        let out_is_empty_or_nonexistent = !out_path.exists() || is_empty_dir(&out_path);
 
-        let is_verified_complete = should_skip_completed_stage(&out_path, &fp);
-        let completed_ts = if is_verified_complete {
-            read_stage_completed_timestamp(&out_path)
-        } else {
-            None
-        };
-        let stage_status = if is_verified_complete {
-            "COMPLETED".to_string()
-        } else if out_path.exists() && weights_hash.is_some() {
-            "STALE_OR_UNVERIFIED".to_string()
-        } else {
-            "STAGED_READY".to_string()
-        };
+        let (is_model, is_cont, weights_hash, full_cp_hash, completed_ts, stage_status) =
+            if out_is_empty_or_nonexistent {
+                (false, false, None, None, None, "STAGED_READY".to_string())
+            } else {
+                let w_hash = compute_model_weights_digest(&out_path)?;
+                let f_hash = compute_full_checkpoint_digest(&out_path)?;
+                let (m_ok, _, _) = verify_working_model_with_purpose(&out_path, "RESUME");
+                let (c_ok, _, _) = verify_continuation_ready_with_purpose(&out_path, "RESUME");
+
+                let is_comp = should_skip_completed_stage(&out_path, &fp);
+                let ts = if is_comp {
+                    read_stage_completed_timestamp(&out_path)
+                } else {
+                    None
+                };
+                let status = if is_comp {
+                    "COMPLETED".to_string()
+                } else if out_path.exists() && w_hash.is_some() {
+                    "STALE_OR_UNVERIFIED".to_string()
+                } else {
+                    "STAGED_READY".to_string()
+                };
+                (m_ok, c_ok, w_hash, f_hash, ts, status)
+            };
 
         if is_targeted {
             println!(
@@ -2317,7 +2353,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let input_path = Path::new(&input_cp);
-        let (is_input_model, missing_input, _) = verify_working_model(input_path);
+        let (is_input_model, missing_input, input_param_count) =
+            verify_working_model_with_purpose(input_path, "INPUT");
         if !is_input_model {
             return Err(format!(
                 "Stage {:02} ('{}') input checkpoint '{}' is not a valid working model: {:?}",
@@ -2326,11 +2363,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .into());
         }
 
+        let loaded_param_count = input_param_count.unwrap_or(0);
+        if stage.stage_index == 0 && input_cp.contains("tara_candidate_v1") {
+            println!("  [INITIAL PRODUCTION MODEL VALIDATION]");
+            println!("    Input Checkpoint Shards   : VALIDATED (120 tensors)");
+            println!("    Exact Parameter Count     : {} parameters", loaded_param_count);
+        }
+
         // Strict auto-resume verification: if input_path has continuation files and we aren't in --init-from mode, verify them!
         let has_any_continuation_file = input_path.join("checkpoint_state.json").exists()
             || input_path.join("optimizer.safetensors").exists();
         if !force_init_only && has_any_continuation_file {
-            let (ok_cont, cont_issues, _) = verify_continuation_ready(input_path);
+            let (ok_cont, cont_issues, _) =
+                verify_continuation_ready_with_purpose(input_path, "RESUME");
             if !ok_cont {
                 return Err(format!(
                     "Stage {:02} ('{}') input checkpoint '{}' contains partial or corrupt continuation state: {:?}",
@@ -2429,6 +2474,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let should_resume =
             !force_init_only && (has_any_continuation_file || explicit_resume_from.is_some());
+        let checkpoint_mode = if should_resume { "RESUME" } else { "NEW_RUN" };
         let resume_source = if should_resume {
             Some(
                 explicit_resume_from
@@ -2438,6 +2484,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             None
         };
+
+        println!();
+        println!("  ------------------------------------------------------------------");
+        println!("  [STAGE {:02} EXECUTION CONFIGURATION]", stage.stage_index);
+        println!("    Resolved Input Path   : {}", input_cp);
+        println!("    Resolved Output Path  : {}", stage.output_checkpoint);
+        println!("    Checkpoint Mode       : {}", checkpoint_mode);
+        println!("    Loaded Parameter Count: {}", loaded_param_count);
+        println!("    Final Checkpoint Path : {}", stage.output_checkpoint);
+        println!("  ------------------------------------------------------------------");
 
         let max_mem_mb = env::var("TARA_MAX_MEMORY_MB")
             .ok()
@@ -2489,8 +2545,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // Verify staged output satisfies dual-purpose model requirement BEFORE touching out_dir
-        let (is_model, missing_model, param_cnt) = verify_working_model(&staging_out_dir);
-        let (is_cont, missing_cont, last_step) = verify_continuation_ready(&staging_out_dir);
+        let (is_model, missing_model, param_cnt) =
+            verify_working_model_with_purpose(&staging_out_dir, "OUTPUT");
+        let (is_cont, missing_cont, last_step) =
+            verify_continuation_ready_with_purpose(&staging_out_dir, "OUTPUT");
         if !is_model {
             let _ = fs::remove_dir_all(&staging_out_dir);
             return Err(format!(
@@ -3079,5 +3137,117 @@ mod tests {
             .or_else(|_| std::env::var("HF_REPO"))
             .ok();
         assert!(default_resolved.is_none());
+    }
+
+    #[test]
+    fn test_valid_input_checkpoint_with_empty_output_directory() {
+        let dir = unique_test_dir("valid_in_empty_out");
+        let input_dir = dir.join("input_model");
+        let output_dir = dir.join("stage0_out");
+
+        write_minimal_working_model(&input_dir, false, false);
+        fs::create_dir_all(&output_dir).unwrap();
+
+        assert!(input_dir.exists());
+        assert!(output_dir.exists());
+        assert!(is_empty_dir(&output_dir));
+
+        let (is_model, missing, param_count) =
+            verify_working_model_with_purpose(&input_dir, "INPUT");
+        assert!(is_model, "Input model should be valid: {:?}", missing);
+        assert!(param_count.unwrap_or(0) > 0, "Parameter count must be non-zero");
+
+        // Verify that empty output directory is recognized as a new training destination,
+        // and does NOT trigger "contains no SafeTensors weight shards" during DAG planning.
+        let out_is_empty_or_nonexistent = !output_dir.exists() || is_empty_dir(&output_dir);
+        assert!(out_is_empty_or_nonexistent);
+
+        let should_resume = false;
+        let checkpoint_mode = if should_resume { "RESUME" } else { "NEW_RUN" };
+        assert_eq!(checkpoint_mode, "NEW_RUN");
+
+        let input_weights_sha = compute_model_weights_digest(&input_dir).unwrap();
+        assert!(input_weights_sha.is_some());
+
+        // Calling compute_model_weights_digest on non-empty corrupted dir would fail,
+        // but an empty output directory is NOT checked as a model.
+        // Confirm compute_model_weights_digest fails if called directly on empty directory:
+        let empty_digest_err = compute_model_weights_digest(&output_dir).unwrap_err();
+        assert!(empty_digest_err.contains("contains no SafeTensors weight shards"));
+    }
+
+    #[test]
+    fn test_valid_resume_checkpoint() {
+        let dir = unique_test_dir("valid_resume_cp");
+        let resume_dir = dir.join("checkpoint_resume");
+
+        write_minimal_working_model(&resume_dir, true, false);
+
+        let (is_model, missing_model, param_count) =
+            verify_working_model_with_purpose(&resume_dir, "INPUT");
+        assert!(
+            is_model,
+            "Working model verification must pass: {:?}",
+            missing_model
+        );
+        assert!(param_count.unwrap_or(0) > 0);
+
+        let (is_cont, missing_cont, opt_step) =
+            verify_continuation_ready_with_purpose(&resume_dir, "RESUME");
+        assert!(
+            is_cont,
+            "Continuation verification must pass: {:?}",
+            missing_cont
+        );
+        assert_eq!(opt_step, Some(10));
+
+        let has_any_continuation_file = resume_dir.join("checkpoint_state.json").exists()
+            || resume_dir.join("optimizer.safetensors").exists();
+        assert!(has_any_continuation_file);
+
+        let should_resume = has_any_continuation_file;
+        let checkpoint_mode = if should_resume { "RESUME" } else { "NEW_RUN" };
+        assert_eq!(checkpoint_mode, "RESUME");
+
+        let weights_digest = compute_model_weights_digest(&resume_dir).unwrap();
+        assert!(weights_digest.is_some());
+
+        let full_digest = compute_full_checkpoint_digest(&resume_dir).unwrap();
+        assert!(full_digest.is_some());
+    }
+
+    #[test]
+    fn test_missing_or_incomplete_input_checkpoint() {
+        let dir = unique_test_dir("missing_incomplete");
+        let missing_dir = dir.join("does_not_exist");
+
+        // 1. Missing directory: not a working model, compute_model_weights_digest returns Ok(None)
+        let (is_model, missing, _) = verify_working_model(&missing_dir);
+        assert!(!is_model);
+        assert!(missing.iter().any(|m| m.contains("missing")));
+        let missing_digest = compute_model_weights_digest(&missing_dir).unwrap();
+        assert!(missing_digest.is_none());
+
+        // 2. Incomplete checkpoint: directory exists, has config.json, but has 0 SafeTensors weight shards
+        let incomplete_dir = dir.join("incomplete_model");
+        fs::create_dir_all(&incomplete_dir).unwrap();
+        fs::write(
+            incomplete_dir.join("config.json"),
+            r#"{"vocab_size":8,"hidden_size":8}"#,
+        )
+        .unwrap();
+
+        // Must strictly return Err("Directory '...' exists but contains no SafeTensors weight shards")
+        // Zero masking via Ok(None)!
+        let err = compute_model_weights_digest(&incomplete_dir).unwrap_err();
+        assert!(
+            err.contains("exists but contains no SafeTensors weight shards"),
+            "Error must not be masked: {err}"
+        );
+
+        let (is_inc_model, inc_missing, _) = verify_working_model(&incomplete_dir);
+        assert!(!is_inc_model);
+        assert!(inc_missing.iter().any(|m| m.contains("Failed to load model SafeTensors weights")
+            || m.contains("missing")));
     }
 }

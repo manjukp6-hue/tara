@@ -34,7 +34,9 @@ use thiserror::Error;
 
 use crate::config::TaraConfig;
 use crate::model::causal_lm::TaraForCausalLM;
-use crate::safetensors::{load_model_weights_with_shapes, load_safetensors_with_shapes};
+use crate::safetensors::{
+    load_model_weights_with_purpose, load_safetensors_with_shapes,
+};
 use crate::tokenizer::TaraTokenizer;
 use crate::trainer::{
     promote_directory_atomically, recover_interrupted_promotion, NativeSelfTrainer, TrainerError,
@@ -243,12 +245,13 @@ pub fn verify_working_model_dir(dir: &Path) -> Result<TaraForCausalLM, String> {
             tok.vocab_size
         ));
     }
-    let (weights, _) = load_model_weights_with_shapes(&dir.to_string_lossy()).map_err(|e| {
-        format!(
-            "Failed to load SafeTensors weights in '{}': {e}",
-            dir.display()
-        )
-    })?;
+    let (weights, _) =
+        load_model_weights_with_purpose(&dir.to_string_lossy(), "INPUT").map_err(|e| {
+            format!(
+                "Failed to load SafeTensors weights in '{}': {e}",
+                dir.display()
+            )
+        })?;
     if weights.is_empty() {
         return Err(format!("Zero weight tensors found in '{}'", dir.display()));
     }
@@ -316,7 +319,7 @@ pub fn verify_continuation_checkpoint_dir(dir: &Path) -> Result<u64, String> {
             )
         })?;
 
-    let (weights, _) = load_model_weights_with_shapes(&dir.to_string_lossy())
+    let (weights, _) = load_model_weights_with_purpose(&dir.to_string_lossy(), "RESUME")
         .map_err(|e| format!("Failed to load model weights in '{}': {e}", dir.display()))?;
     let (opt_tensors, _) =
         load_safetensors_with_shapes(&opt_path.to_string_lossy()).map_err(|e| {

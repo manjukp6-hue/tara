@@ -115,8 +115,9 @@ pub use model_expansion::{
     ArchitectureConstraints, ArchitectureScaler, GrowthMetadata, GrowthType, ModelExpansionEngine,
 };
 pub use safetensors::{
-    compute_sha256, load_model_weights, load_model_weights_with_shapes, load_safetensors,
-    load_safetensors_with_shapes, SafeTensorsError,
+    compute_sha256, load_model_weights, load_model_weights_with_purpose,
+    load_model_weights_with_shapes, load_safetensors, load_safetensors_with_shapes,
+    SafeTensorsError,
 };
 pub use self_update::{ExpansionDecision, SelfUpdateController, SelfUpdateReport, UpdateState};
 pub use skills_evaluator::SkillsEvaluator;

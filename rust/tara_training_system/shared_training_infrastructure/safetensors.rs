@@ -296,23 +296,34 @@ pub fn load_model_weights(model_dir: &str) -> Result<HashMap<String, Vec<f32>>, 
     Ok(load_model_weights_with_shapes(model_dir)?.0)
 }
 
-/// Load model tensors and preserve the dimensions from the source files.
-pub fn load_model_weights_with_shapes(
+/// Load model tensors and preserve dimensions, tracing the loader path and purpose (INPUT, RESUME, or OUTPUT).
+pub fn load_model_weights_with_purpose(
     model_dir: &str,
+    purpose: &str,
 ) -> Result<WeightsWithShapes, SafeTensorsError> {
+    println!("[SafeTensors Loader] Path: '{}' | Purpose: {}", model_dir, purpose);
     let index_path = format!("{}/model.safetensors.index.json", model_dir);
     if std::path::Path::new(&index_path).exists() {
-        load_sharded_weights(model_dir, &index_path)
+        load_sharded_weights_with_purpose(model_dir, &index_path, purpose)
     } else {
         let single_path = format!("{}/model.safetensors", model_dir);
+        println!("[SafeTensors Shard Loader] Shard: '{}' | Purpose: {}", single_path, purpose);
         load_safetensors_with_shapes(&single_path)
     }
 }
 
-/// Load a sharded model from its index file.
-fn load_sharded_weights(
+/// Load model tensors and preserve the dimensions from the source files.
+pub fn load_model_weights_with_shapes(
+    model_dir: &str,
+) -> Result<WeightsWithShapes, SafeTensorsError> {
+    load_model_weights_with_purpose(model_dir, "INPUT")
+}
+
+/// Load a sharded model from its index file with purpose tracing.
+fn load_sharded_weights_with_purpose(
     model_dir: &str,
     index_path: &str,
+    purpose: &str,
 ) -> Result<WeightsWithShapes, SafeTensorsError> {
     let raw = fs::read_to_string(index_path)?;
     let index: serde_json::Value = serde_json::from_str(&raw)?;
@@ -353,6 +364,7 @@ fn load_sharded_weights(
                     "shard path escapes model directory: '{shard}'"
                 )));
             }
+            println!("[SafeTensors Shard Loader] Shard: '{}' | Purpose: {}", full.display(), purpose);
             let loaded = load_safetensors_with_shapes(&full.to_string_lossy())?;
             shard_cache.insert(shard.to_string(), loaded);
         }

@@ -16,7 +16,7 @@ use crate::config::TaraConfig;
 use crate::dataset::compiler::{CompilerError, DynamicDatasetCompiler};
 use crate::model::causal_lm::TaraForCausalLM;
 use crate::safetensors::{
-    compute_sha256, load_model_weights_with_shapes, write_safetensors_sharded, SafeTensorsError,
+    compute_sha256, load_model_weights_with_purpose, write_safetensors_sharded, SafeTensorsError,
 };
 use crate::tokenizer::TaraTokenizer;
 
@@ -874,7 +874,7 @@ impl NativeSelfTrainer {
         println!("[Dataset] Collected {} total samples.", samples.len());
 
         // 3. Load model weights, config, and tokenizer
-        let (mut weights, shapes) = load_model_weights_with_shapes(&self.model_dir)?;
+        let (mut weights, shapes) = load_model_weights_with_purpose(&self.model_dir, "INPUT")?;
         let config_path = format!("{}/config.json", self.model_dir);
         let config = TaraConfig::from_json_file(&config_path)
             .map_err(|e| TrainerError::Model(e.to_string()))?;
@@ -1208,7 +1208,7 @@ impl NativeSelfTrainer {
                     );
 
                     let (resumed_weights, _) =
-                        crate::safetensors::load_model_weights_with_shapes(resume_dir)?;
+                        crate::safetensors::load_model_weights_with_purpose(resume_dir, "RESUME")?;
                     weights = resumed_weights;
                     model = TaraForCausalLM::from_weights_and_config(
                         weights.clone(),

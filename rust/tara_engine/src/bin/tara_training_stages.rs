@@ -2053,6 +2053,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    let mut dataset_inspection_cache: HashMap<PathBuf, DatasetInspection> = HashMap::new();
     let mut stage_metadata_list = Vec::new();
     for s in &stages {
         let out_path = PathBuf::from(&s.output_checkpoint);
@@ -2067,26 +2068,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|idx| idx == s.stage_index)
                 .unwrap_or(false));
 
-        let insp = match inspect_dataset(Path::new(&s.dataset_path)) {
-            Ok(d) => d,
-            Err(e) => {
-                if is_targeted {
-                    return Err(format!(
-                        "Dataset inspection failed for targeted stage '{}': {}",
-                        s.stage_id, e
-                    )
-                    .into());
+        let ds_path = PathBuf::from(&s.dataset_path);
+        let insp = if let Some(cached) = dataset_inspection_cache.get(&ds_path) {
+            cached.clone()
+        } else {
+            let res = match inspect_dataset(&ds_path) {
+                Ok(d) => d,
+                Err(e) => {
+                    if is_targeted {
+                        return Err(format!(
+                            "Dataset inspection failed for targeted stage '{}': {}",
+                            s.stage_id, e
+                        )
+                        .into());
+                    }
+                    DatasetInspection {
+                        jsonl_files: 0,
+                        total_lines: 0,
+                        valid_records: 0,
+                        malformed_records: 0,
+                        empty_lines: 0,
+                        total_bytes: 0,
+                        dataset_fingerprint: "missing_dataset".to_string(),
+                    }
                 }
-                DatasetInspection {
-                    jsonl_files: 0,
-                    total_lines: 0,
-                    valid_records: 0,
-                    malformed_records: 0,
-                    empty_lines: 0,
-                    total_bytes: 0,
-                    dataset_fingerprint: "missing_dataset".to_string(),
-                }
-            }
+            };
+            dataset_inspection_cache.insert(ds_path, res.clone());
+            res
         };
 
         let (is_model, _, _) = verify_working_model(&out_path);

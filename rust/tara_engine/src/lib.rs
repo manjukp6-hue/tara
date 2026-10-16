@@ -137,8 +137,8 @@ pub mod internal_diagnostics {
         write_safetensors_sharded_with_prefix, write_safetensors_with_shapes,
     };
     pub use crate::trainer::{
-        promote_directory_atomically, recover_interrupted_promotion, DynamicAdamW,
-        NativeSelfTrainer, TrainerError, TrainingDevice,
+        promote_directory_atomically, recover_interrupted_promotion, AdamWHyperparams,
+        DynamicAdamW, NativeSelfTrainer, TrainerError, TrainingDevice,
     };
 
     /// Canonical, race-free unique temporary directory generator for integration tests.

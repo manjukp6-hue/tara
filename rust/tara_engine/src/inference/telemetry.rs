@@ -424,17 +424,18 @@ impl TelemetryMonitor {
                 if from_prefetch {
                     // Ensure prefetch_hits never exceeds total prefetched tensors
                     let total_pref = self.prefetched.load(Ordering::SeqCst);
-                    let _ = self.prefetch_hits.fetch_update(
-                        Ordering::SeqCst,
-                        Ordering::SeqCst,
-                        |curr| {
-                            if curr < total_pref {
-                                Some(curr + 1)
-                            } else {
-                                None
-                            }
-                        },
-                    );
+                    let mut curr = self.prefetch_hits.load(Ordering::SeqCst);
+                    while curr < total_pref {
+                        match self.prefetch_hits.compare_exchange_weak(
+                            curr,
+                            curr + 1,
+                            Ordering::SeqCst,
+                            Ordering::SeqCst,
+                        ) {
+                            Ok(_) => break,
+                            Err(actual) => curr = actual,
+                        }
+                    }
                 }
             }
             LookupOutcome::DiskLoad => {

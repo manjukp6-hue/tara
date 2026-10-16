@@ -22,7 +22,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::dpapi::{native_dpapi, SecureKeyStorage};
+#[cfg(windows)]
+use crate::dpapi::native_dpapi;
+use crate::dpapi::SecureKeyStorage;
 use crate::persistence::atomic_write_file_hardened;
 use crate::qr::QrCodeMatrix;
 use crate::recovery::pbkdf2_hmac_sha256;

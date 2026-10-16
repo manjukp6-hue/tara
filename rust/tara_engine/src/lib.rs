@@ -111,7 +111,7 @@ pub use loading_policy::{
     InsufficientMemoryError, LoadingPlan, LoadingPolicyEngine, ModelLoadingStrategy,
     QuantizationPrecision,
 };
-pub use model::TaraForCausalLM;
+pub use model::{ModelGradients, TaraForCausalLM};
 pub use model_expansion::{
     ArchitectureConstraints, ArchitectureScaler, GrowthMetadata, GrowthType, ModelExpansionEngine,
 };

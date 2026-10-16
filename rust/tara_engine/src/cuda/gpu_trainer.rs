@@ -1127,22 +1127,8 @@ impl CudaTrainer {
         res
     }
 
-    /// Execute AdamW optimization step across all parameters directly on GPU,
-    /// updating master weights in `weights` in-place without duplicate host allocations.
-    /// Returns Ok(true) if step was executed, Ok(false) if skipped due to non-finite gradients.
-    pub fn step_adamw_with_weights(
-        &mut self,
-        weights: &mut HashMap<String, Vec<f32>>,
-        lr: f32,
-        beta1: f32,
-        beta2: f32,
-        eps: f32,
-        weight_decay: f32,
-        max_grad_norm: f32,
-    ) -> Result<bool, CudaError> {
-        log_flushed_memory_checkpoint("Before GPU Optimizer Step", self.session.get_memory_info().ok());
-        // High-performance GPU-side global norm reduction: sum of squares across all parameters
-        // Explicitly zero accumulator on GPU before launching reduction kernels
+    /// Compute the current global gradient L2 norm across all parameters on GPU.
+    pub fn compute_grad_norm(&mut self) -> Result<f32, CudaError> {
         let zero_sq = [0.0f32];
         self.session.upload_f32(&self.d_norm_sq, &zero_sq)?;
 
@@ -1167,9 +1153,27 @@ impl CudaTrainer {
 
         let mut host_sq = [0.0f32];
         self.session.download_f32(&self.d_norm_sq, &mut host_sq)?;
-        let total_norm_sq = host_sq[0];
-        let total_norm = total_norm_sq.sqrt();
+        let total_norm = host_sq[0].sqrt();
         self.last_grad_norm = total_norm;
+        Ok(total_norm)
+    }
+
+    /// Execute AdamW optimization step across all parameters directly on GPU,
+    /// updating master weights in `weights` in-place without duplicate host allocations.
+    /// Returns Ok(true) if step was executed, Ok(false) if skipped due to non-finite gradients.
+    pub fn step_adamw_with_weights(
+        &mut self,
+        weights: &mut HashMap<String, Vec<f32>>,
+        lr: f32,
+        beta1: f32,
+        beta2: f32,
+        eps: f32,
+        weight_decay: f32,
+        max_grad_norm: f32,
+    ) -> Result<bool, CudaError> {
+        log_flushed_memory_checkpoint("Before GPU Optimizer Step", self.session.get_memory_info().ok());
+        // High-performance GPU-side global norm reduction: sum of squares across all parameters
+        let total_norm = self.compute_grad_norm()?;
 
         // Non-finite gradient safeguard: if NaN or Inf, zero gradients, do NOT update weights, do NOT increment step_count!
         if !total_norm.is_finite() {
@@ -1192,6 +1196,7 @@ impl CudaTrainer {
             1.0f32
         };
 
+        let block_dim = 128u32;
         for (name, param) in &self.params {
             let grid_dim = (param.len as u32).div_ceil(block_dim);
 

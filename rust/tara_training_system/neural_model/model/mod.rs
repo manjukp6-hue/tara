@@ -10,4 +10,4 @@ pub mod mlp;
 pub mod rms_norm;
 pub mod rope;
 
-pub use causal_lm::TaraForCausalLM;
+pub use causal_lm::{ModelGradients, TaraForCausalLM};

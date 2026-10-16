@@ -2445,7 +2445,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .filter(|&v| v >= 512.0)
-            .unwrap_or(12288.0);
+            .unwrap_or(65536.0);
 
         let options = TrainingOptions {
             curriculum_path: if Path::new(&stage.dataset_path).is_file() {

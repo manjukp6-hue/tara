@@ -137,8 +137,6 @@ pub fn capture_memory_snapshot(vram_info: Option<(usize, usize)>) -> MemorySnaps
     let (process_rss_mb, process_hwm_mb, host_total_mb, host_avail_mb, cgroup_limit_mb, cgroup_current_mb, cgroup_oom_kills, cgroup_events_summary) = {
         let mut rss = 0.0f64;
         let mut hwm = 0.0f64;
-        let mut tot = 0.0f64;
-        let mut avail = 0.0f64;
         let mut limit = None;
         let mut cur = None;
         let mut oom_kills = None;
@@ -161,8 +159,8 @@ pub fn capture_memory_snapshot(vram_info: Option<(usize, usize)>) -> MemorySnaps
 
         // 2. Host system memory directly via TARA-HD authoritative discovery
         let (total_ram_bytes, avail_ram_bytes_opt) = tara_hd::discovery::query_system_ram_bytes();
-        tot = total_ram_bytes as f64 / (1024.0 * 1024.0);
-        avail = avail_ram_bytes_opt.unwrap_or(total_ram_bytes / 2) as f64 / (1024.0 * 1024.0);
+        let tot = total_ram_bytes as f64 / (1024.0 * 1024.0);
+        let avail = avail_ram_bytes_opt.unwrap_or(total_ram_bytes / 2) as f64 / (1024.0 * 1024.0);
 
         // 3. Cgroup memory limits (v2 or v1)
         let cgroup_limit_paths = [

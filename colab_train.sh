@@ -58,7 +58,8 @@ cargo build --release \
     --bin tara_pretraining_gate \
     --bin tara_training_stages \
     --bin manual_trainer \
-    --bin train_candidate
+    --bin train_candidate \
+    --bin tara_model_sharder
 
 # Dynamic Parameter Configuration
 TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-1}"
@@ -93,34 +94,62 @@ mkdir -p storage/models/tara_world_model
 
 HF_MODEL_SOURCE="${HF_MODEL_REPO:-${HF_REPO:-manjukp6/tara}}"
 
-if [ ! -f "storage/models/tara_candidate_v1/model.safetensors.index.json" ] && [ ! -f "storage/models/tara_candidate_v1/model.safetensors" ]; then
+# Verify Neural Model Candidate weights exist on disk
+NEURAL_SHARDS=(storage/models/tara_candidate_v1/*.safetensors)
+if [ ! -e "${NEURAL_SHARDS[0]}" ]; then
     echo "=== [MODEL INGESTION: STREAMING NEURAL MODEL V1 FROM HUGGING FACE] ==="
-    huggingface-cli download "$HF_MODEL_SOURCE" \
-        --include "neural_model_v1/*" \
-        --local-dir storage/models \
-        --repo-type model
-    if [ -d "storage/models/neural_model_v1" ]; then
-        shopt -s nullglob
-        mv storage/models/neural_model_v1/* storage/models/tara_candidate_v1/
-        shopt -u nullglob
-        rmdir storage/models/neural_model_v1
+    HF_NEURAL_DOWNLOADED=0
+    if [ -n "$HF_MODEL_SOURCE" ]; then
+        if huggingface-cli download "$HF_MODEL_SOURCE" \
+            --include "neural_model_v1/*" \
+            --local-dir storage/models \
+            --repo-type model 2>/dev/null; then
+            if [ -d "storage/models/neural_model_v1" ]; then
+                shopt -s nullglob
+                mv storage/models/neural_model_v1/* storage/models/tara_candidate_v1/
+                shopt -u nullglob
+                rmdir storage/models/neural_model_v1
+            fi
+            CHECK_SHARDS=(storage/models/tara_candidate_v1/*.safetensors)
+            if [ -e "${CHECK_SHARDS[0]}" ]; then
+                HF_NEURAL_DOWNLOADED=1
+                echo "Neural Model V1 Ingestion from Hugging Face Verified!"
+            fi
+        fi
     fi
-    echo "Neural Model V1 Ingestion Verified!"
+    if [ "$HF_NEURAL_DOWNLOADED" -eq 0 ]; then
+        echo "=== [INITIALIZING CANDIDATE NEURAL MODEL SAFETENSORS SHARDS] ==="
+        ./target/release/tara_model_sharder --init-fresh --model-dir storage/models/tara_candidate_v1
+    fi
 fi
 
-if [ ! -f "storage/models/tara_world_model/model.safetensors.index.json" ] && [ ! -f "storage/models/tara_world_model/model.safetensors" ]; then
+# Verify World Model weights exist on disk
+WORLD_SHARDS=(storage/models/tara_world_model/*.safetensors)
+if [ ! -e "${WORLD_SHARDS[0]}" ]; then
     echo "=== [MODEL INGESTION: STREAMING WORLD MODEL V1 FROM HUGGING FACE] ==="
-    huggingface-cli download "$HF_MODEL_SOURCE" \
-        --include "world_model_v1/*" \
-        --local-dir storage/models \
-        --repo-type model
-    if [ -d "storage/models/world_model_v1" ]; then
-        shopt -s nullglob
-        mv storage/models/world_model_v1/* storage/models/tara_world_model/
-        shopt -u nullglob
-        rmdir storage/models/world_model_v1
+    HF_WORLD_DOWNLOADED=0
+    if [ -n "$HF_MODEL_SOURCE" ]; then
+        if huggingface-cli download "$HF_MODEL_SOURCE" \
+            --include "world_model_v1/*" \
+            --local-dir storage/models \
+            --repo-type model 2>/dev/null; then
+            if [ -d "storage/models/world_model_v1" ]; then
+                shopt -s nullglob
+                mv storage/models/world_model_v1/* storage/models/tara_world_model/
+                shopt -u nullglob
+                rmdir storage/models/world_model_v1
+            fi
+            CHECK_WORLD=(storage/models/tara_world_model/*.safetensors)
+            if [ -e "${CHECK_WORLD[0]}" ]; then
+                HF_WORLD_DOWNLOADED=1
+                echo "World Model V1 Ingestion from Hugging Face Verified!"
+            fi
+        fi
     fi
-    echo "World Model V1 Ingestion Verified!"
+    if [ "$HF_WORLD_DOWNLOADED" -eq 0 ]; then
+        echo "=== [INITIALIZING WORLD MODEL SAFETENSORS SHARDS] ==="
+        ./target/release/tara_model_sharder --rebuild-world-model --model-dir storage/models/tara_world_model
+    fi
 fi
 
 # Determine active checkpoint root (matches Rust GDRIVE_CHECKPOINT_DIR fallback)

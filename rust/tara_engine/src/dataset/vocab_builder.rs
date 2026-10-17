@@ -916,6 +916,7 @@ mod tests {
             initializer_range: 0.02,
             version: "test".into(),
             model_type: "tara".into(),
+            tie_word_embeddings: None,
         };
         fs::write(
             model_dir.join("config.json"),

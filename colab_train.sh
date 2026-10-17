@@ -31,52 +31,21 @@ fi
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
-# Ensure huggingface-cli is always available so downloads/uploads never fail silently
-if ! command -v huggingface-cli >/dev/null 2>&1; then
-    echo "[SETUP] Installing huggingface_hub CLI..."
-    pip install -q -U "huggingface_hub[cli]"
-fi
-
 # Ensure NVIDIA driver and CUDA libraries are discoverable in Colab / Linux containers
 export LD_LIBRARY_PATH="/usr/lib64-nvidia:/usr/local/cuda/compat:/usr/local/cuda-12.8/compat:${LD_LIBRARY_PATH:-}"
 
-# Helper function for robust streaming downloads from Hugging Face
+# Helper function for robust streaming downloads from Hugging Face using 100% native Rust
 download_hf() {
     local repo_id="$1"
     local repo_type="$2"
-    local pattern="$3"
+    local prefix="$3"
     local local_dir="$4"
-    python3 -c "
-import sys, os
-from huggingface_hub import snapshot_download
-token = os.environ.get('HF_TOKEN') or None
-try:
-    snapshot_download(
-        repo_id='$repo_id',
-        repo_type='$repo_type',
-        allow_patterns=['$pattern'],
-        local_dir='$local_dir',
-        token=token
-    )
-    sys.exit(0)
-except Exception as e:
-    print(f'Download error: {e}', file=sys.stderr)
-    sys.exit(1)
-"
+    ./target/release/tara_hf_downloader \
+        --repo "$repo_id" \
+        --repo-type "$repo_type" \
+        --prefix "$prefix" \
+        --dest "$local_dir"
 }
-
-# Authenticate upfront if HF_TOKEN is present
-if [ -n "${HF_TOKEN:-}" ]; then
-    echo "[AUTH] Authenticating with Hugging Face Hub..."
-    python3 -c "
-import huggingface_hub, os
-try:
-    huggingface_hub.login(token=os.environ['HF_TOKEN'], add_to_git_credential=True)
-    print('Hugging Face Authentication Successful!')
-except Exception as e:
-    print('Hugging Face Login Notice:', e)
-" || true
-fi
 
 # 2. Hardware Inspection & Upfront Binary Compilation
 echo "------------------------------------------------------------------------------"
@@ -95,7 +64,9 @@ cargo build --release \
     --bin tara_training_stages \
     --bin manual_trainer \
     --bin train_candidate \
-    --bin tara_model_sharder
+    --bin tara_model_sharder \
+    --bin tara_hf_downloader \
+    --bin tara_hf_model_uploader
 
 # Dynamic Parameter Configuration
 TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-1}"
@@ -373,13 +344,15 @@ if [ -n "${HF_TOKEN:-}" ] && [ -n "${HF_REPO:-}" ]; then
 
     if [ -n "$FINAL_STAGE_DIR" ] && [ -d "$FINAL_STAGE_DIR" ]; then
         echo "[HUGGING FACE SYNC] Pushing Final Neural Model ($FINAL_STAGE_DIR) to $HF_REPO/neural_model_v1..."
-        huggingface-cli upload "$HF_REPO" "$FINAL_STAGE_DIR" "neural_model_v1" --repo-type model
-    fi
-
-    WORLD_DIR="manual_training/checkpoints"
-    if [ -d "$WORLD_DIR" ] && [ -n "$(ls -A "$WORLD_DIR" 2>/dev/null)" ]; then
+        if [ -d "$WORLD_DIR" ] && [ -n "$(ls -A "$WORLD_DIR" 2>/dev/null)" ]; then
+            echo "[HUGGING FACE SYNC] Including World Model & Joint Checkpoints ($WORLD_DIR)..."
+            ./target/release/tara_hf_model_uploader --repo "$HF_REPO" --neural-dir "$FINAL_STAGE_DIR" --world-dir "$WORLD_DIR"
+        else
+            ./target/release/tara_hf_model_uploader --repo "$HF_REPO" --neural-dir "$FINAL_STAGE_DIR"
+        fi
+    elif [ -d "$WORLD_DIR" ] && [ -n "$(ls -A "$WORLD_DIR" 2>/dev/null)" ]; then
         echo "[HUGGING FACE SYNC] Pushing World Model & Joint Checkpoints to $HF_REPO/world_model_v1..."
-        huggingface-cli upload "$HF_REPO" "$WORLD_DIR" "world_model_v1" --repo-type model
+        ./target/release/tara_hf_model_uploader --repo "$HF_REPO" --world-dir "$WORLD_DIR"
     fi
     echo "[HUGGING FACE SYNC] All artifacts successfully deployed to https://huggingface.co/$HF_REPO"
 else

@@ -1717,8 +1717,8 @@ impl NativeSelfTrainer {
                 );
                 let _ = std::io::stdout().flush();
 
-                let (layer_inputs, final_normed, logits) =
-                    model.forward_with_cache_channel(active_tokens, &hd_channel);
+                let (layer_inputs, layer_activations, final_normed, logits) =
+                    model.forward_with_cache_channel_saved(active_tokens, &hd_channel);
 
                 // Compute d_logits for supervised causal cross-entropy (Rayon-parallelized across token positions)
                 let vs = config.vocab_size;
@@ -1782,11 +1782,10 @@ impl NativeSelfTrainer {
 
                     // Stream gradients directly through TARA-HD channel
                     if hd_channel.is_gpu() {
-                        // Hardware-accelerated LM Head backward projection through TARA-HD channel
-                        let (gpu_dlm, gpu_dnorm) = hd_channel
-                            .backward_linear_named(
-                                "lm_head.weight",
-                                &model.lm_head,
+                        // Hardware-accelerated LM Head backward projection through TARA-HD channel:
+                        // Accumulates gradients directly on GPU, avoiding dense 819.2 MB host buffer download
+                        let (_lm_norm_sq, gpu_dnorm) = hd_channel
+                            .backward_lm_head_accumulate(
                                 &d_logits,
                                 &final_normed,
                                 seq_len,
@@ -1800,14 +1799,6 @@ impl NativeSelfTrainer {
                         // Drop logits and norm activation buffers immediately
                         drop(d_logits);
                         drop(final_normed);
-
-                        // Accumulate LM Head gradient into hardware buffer and drop host buffer immediately
-                        hd_channel
-                            .accumulate_gradient("lm_head.weight", &gpu_dlm)
-                            .map_err(|e| {
-                                TrainerError::Model(format!("Gradient accumulation failed: {e}"))
-                            })?;
-                        drop(gpu_dlm);
 
                         // Backward through RMSNorm with hardware-computed d_final_normed
                         let (mut dx, d_norm) = model.norm.backward(
@@ -1827,10 +1818,15 @@ impl NativeSelfTrainer {
                         drop(d_norm);
 
                         // Backward through decoder layers in reverse order:
-                        // Each layer's gradient is uploaded through TARA-HD and dropped immediately,
-                        // keeping only ONE layer gradient in RAM at a time.
+                        // Uses pre-computed activations to eliminate forward recomputation during backward!
                         for l in (0..model.layers.len()).rev() {
-                            let l_grads = model.layers[l].backward(&dx, &layer_inputs[l], seq_len);
+                            let l_grads = model.layers[l].backward_channel(
+                                &dx,
+                                &layer_inputs[l],
+                                &layer_activations[l],
+                                seq_len,
+                                &hd_channel,
+                            );
 
                             let prefix = format!("model.layers.{}", l);
                             hd_channel
@@ -1926,25 +1922,20 @@ impl NativeSelfTrainer {
                             dx = l_grads.dx;
                         }
                         drop(layer_inputs);
+                        drop(layer_activations);
 
-                        // Accumulate token embeddings gradient and drop host buffer immediately
-                        let mut d_embed_tokens =
-                            vec![0.0f32; config.vocab_size * config.hidden_size];
-                        for (t, &id) in active_tokens.iter().enumerate() {
-                            let id = (id as usize).min(config.vocab_size.saturating_sub(1));
-                            let dx_row = &dx[t * config.hidden_size..(t + 1) * config.hidden_size];
-                            for h in 0..config.hidden_size {
-                                d_embed_tokens[id * config.hidden_size + h] += dx_row[h];
-                            }
-                        }
+                        // Accumulate token embeddings gradient sparsely — ZERO 819.2 MB host buffer allocation!
+                        hd_channel
+                            .accumulate_sparse_embedding_gradient(active_tokens, &dx, config.hidden_size)
+                            .map_err(|e| {
+                                TrainerError::Model(format!("Sparse embedding gradient accumulation failed: {e}"))
+                            })?;
                         drop(dx);
 
-                        hd_channel
-                            .accumulate_gradient("model.embed_tokens.weight", &d_embed_tokens)
-                            .map_err(|e| {
-                                TrainerError::Model(format!("Gradient accumulation failed: {e}"))
-                            })?;
-                        drop(d_embed_tokens);
+                        // Single driver synchronization per micro-step
+                        hd_channel.synchronize().map_err(|e| {
+                            TrainerError::Model(format!("Device synchronize failed: {e}"))
+                        })?;
                     } else {
                         // Full-network CPU analytical backward pass: into_map() moves buffers with zero cloning
                         let model_grads =
@@ -1952,6 +1943,7 @@ impl NativeSelfTrainer {
                         drop(d_logits);
                         drop(final_normed);
                         drop(layer_inputs);
+                        drop(layer_activations);
                         for (k, v) in model_grads.into_map() {
                             let entry = accum_grads
                                 .entry(k)
@@ -2006,9 +1998,14 @@ impl NativeSelfTrainer {
                     drop(d_logits);
                     drop(final_normed);
                     drop(layer_inputs);
+                    drop(layer_activations);
                 }
 
-                if accum_count >= accumulation_steps {
+                let dynamic_token_budget = accumulation_steps * stream_chunk_size.max(256);
+                let should_step = accum_count >= accumulation_steps
+                    || (batch_tokens_count >= dynamic_token_budget && accum_count >= 1);
+
+                if should_step {
                     let mut step_taken = false;
                     let next_step = optimizer_steps + 1;
                     let effective_lr = if warmup_steps > 0 && next_step <= warmup_steps {
@@ -2106,6 +2103,15 @@ impl NativeSelfTrainer {
                                 *val *= factor;
                             }
                         }
+                        if model.is_tied_embeddings() {
+                            if let Some(lm_g) = accum_grads.get("lm_head.weight").cloned() {
+                                if let Some(emb_g) = accum_grads.get_mut("model.embed_tokens.weight") {
+                                    for (e, l) in emb_g.iter_mut().zip(lm_g.iter()) {
+                                        *e += *l;
+                                    }
+                                }
+                            }
+                        }
                         if let (Some(ref anchors), Some(ref importance)) =
                             (&self.anchor_weights, &self.ewc_importance)
                         {
@@ -2137,6 +2143,11 @@ impl NativeSelfTrainer {
                                 max_grad_norm,
                             },
                         );
+                        if model.is_tied_embeddings() {
+                            if let Some(emb_w) = weights.get("model.embed_tokens.weight").cloned() {
+                                weights.insert("lm_head.weight".to_string(), emb_w);
+                            }
+                        }
                         crate::cuda::gpu_trainer::log_flushed_memory_checkpoint(
                             "After CPU Optimizer Step",
                             None,
@@ -2426,6 +2437,15 @@ impl NativeSelfTrainer {
                             *val *= factor;
                         }
                     }
+                    if model.is_tied_embeddings() {
+                        if let Some(lm_g) = accum_grads.get("lm_head.weight").cloned() {
+                            if let Some(emb_g) = accum_grads.get_mut("model.embed_tokens.weight") {
+                                for (e, l) in emb_g.iter_mut().zip(lm_g.iter()) {
+                                    *e += *l;
+                                }
+                            }
+                        }
+                    }
                     if let (Some(ref anchors), Some(ref importance)) =
                         (&self.anchor_weights, &self.ewc_importance)
                     {
@@ -2453,6 +2473,11 @@ impl NativeSelfTrainer {
                             max_grad_norm,
                         },
                     );
+                    if model.is_tied_embeddings() {
+                        if let Some(emb_w) = weights.get("model.embed_tokens.weight").cloned() {
+                            weights.insert("lm_head.weight".to_string(), emb_w);
+                        }
+                    }
                     if stepped {
                         step_taken = true;
                     }
@@ -3181,6 +3206,7 @@ mod tests {
             initializer_range: 0.02,
             version: "test".into(),
             model_type: "tara".into(),
+            tie_word_embeddings: None,
         };
         std::fs::write(
             model_dir.join("config.json"),
@@ -3288,6 +3314,7 @@ mod tests {
             initializer_range: 0.02,
             version: "test".into(),
             model_type: "tara".into(),
+            tie_word_embeddings: None,
         };
         std::fs::write(
             model_dir.join("config.json"),

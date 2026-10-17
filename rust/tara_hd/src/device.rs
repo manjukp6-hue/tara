@@ -256,9 +256,47 @@ pub trait ComputeDevice: Send + Sync + Debug {
         Ok(out)
     }
 
+    /// Wait for all enqueued asynchronous operations on the compute device to complete.
+    fn synchronize(&self) -> Result<(), String> {
+        Ok(())
+    }
+
     /// Accumulate gradient into device parameter buffer.
     fn accumulate_gradient(&self, _param_name: &str, _gradient: &[f32]) -> Result<(), String> {
         Ok(())
+    }
+
+    /// Accumulate embedding gradients sparsely for active tokens only, avoiding dense matrix allocation.
+    fn accumulate_sparse_embedding_gradient(
+        &self,
+        _tokens: &[u32],
+        _dx: &[f32],
+        _hs: usize,
+    ) -> Result<f64, String> {
+        Ok(0.0)
+    }
+
+    /// Backward LM Head projection and chunked/GPU accumulation directly into parameter storage.
+    /// Returns (d_lm_head_l2_norm, d_final_normed).
+    fn backward_lm_head_accumulate(
+        &self,
+        d_logits: &[f32],
+        final_normed: &[f32],
+        seq_len: usize,
+        hs: usize,
+        vs: usize,
+    ) -> Result<(f64, Vec<f32>), String> {
+        let (d_lm_head, d_final_normed) = self.backward_linear(
+            &[],
+            d_logits,
+            final_normed,
+            seq_len,
+            hs,
+            vs,
+        )?;
+        let norm: f64 = d_lm_head.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
+        self.accumulate_gradient("lm_head.weight", &d_lm_head)?;
+        Ok((norm, d_final_normed))
     }
 }
 

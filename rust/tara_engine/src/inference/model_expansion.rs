@@ -839,6 +839,7 @@ impl ArchitectureScaler {
                         initializer_range: 0.02,
                         version: "2.0.0".to_string(),
                         model_type: "tara".to_string(),
+                        tie_word_embeddings: Some(true),
                     });
                 }
             }
@@ -1044,6 +1045,7 @@ mod tests {
             initializer_range: 0.02,
             version: "test".into(),
             model_type: "tara".into(),
+            tie_word_embeddings: None,
         }
     }
 

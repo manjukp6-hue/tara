@@ -184,6 +184,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             initializer_range: 0.02,
             version: "2.0.0".to_string(),
             model_type: "tara".to_string(),
+            tie_word_embeddings: Some(true),
         };
 
         let config_path = model_dir.join("config.json");

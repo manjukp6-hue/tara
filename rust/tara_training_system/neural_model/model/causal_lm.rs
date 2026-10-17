@@ -698,6 +698,98 @@ impl TaraForCausalLM {
         (layer_inputs, final_normed, logits)
     }
 
+    /// Check whether word embeddings and LM head are tied together.
+    pub fn is_tied_embeddings(&self) -> bool {
+        self.config.is_tied()
+            || self.embed_tokens.as_ptr() == self.lm_head.as_ptr()
+            || self.embed_tokens == self.lm_head
+    }
+
+    /// Forward pass through compute channel saving per-layer activations for zero-recomputation backpropagation.
+    pub fn forward_activations_channel_saved(
+        &self,
+        token_ids: &[u32],
+        channel: &tara_hd::ComputeChannel,
+    ) -> (
+        Vec<Vec<f32>>,
+        Vec<super::decoder_layer::DecoderLayerActivations>,
+        Vec<f32>,
+    ) {
+        if token_ids.is_empty() {
+            return (Vec::new(), Vec::new(), Vec::new());
+        }
+        let seq_len = token_ids.len();
+        let hs = self.config.hidden_size;
+        let vs = self.config.vocab_size;
+
+        let x0 = channel
+            .forward_embedding(token_ids, &self.embed_tokens, hs)
+            .unwrap_or_else(|_| {
+                let mut emb = vec![0.0f32; seq_len * hs];
+                for (t, &id) in token_ids.iter().enumerate() {
+                    let id = (id as usize).min(vs.saturating_sub(1));
+                    let src = &self.embed_tokens[id * hs..(id + 1) * hs];
+                    emb[t * hs..(t + 1) * hs].copy_from_slice(src);
+                }
+                emb
+            });
+
+        let mut layer_inputs = Vec::with_capacity(self.layers.len() + 1);
+        let mut layer_activations = Vec::with_capacity(self.layers.len());
+        layer_inputs.push(x0);
+
+        for (l, layer) in self.layers.iter().enumerate() {
+            let (next_x, acts) = layer.forward_channel_with_activations(&layer_inputs[l], seq_len, channel);
+            layer_inputs.push(next_x);
+            layer_activations.push(acts);
+        }
+
+        let final_normed =
+            self.norm
+                .forward_channel(layer_inputs.last().unwrap(), seq_len, hs, channel);
+        (layer_inputs, layer_activations, final_normed)
+    }
+
+    /// Full forward pass returning activations, per-layer saved states, final norm, and logits.
+    pub fn forward_with_cache_channel_saved(
+        &self,
+        token_ids: &[u32],
+        channel: &tara_hd::ComputeChannel,
+    ) -> (
+        Vec<Vec<f32>>,
+        Vec<super::decoder_layer::DecoderLayerActivations>,
+        Vec<f32>,
+        Vec<f32>,
+    ) {
+        let (layer_inputs, layer_activations, final_normed) =
+            self.forward_activations_channel_saved(token_ids, channel);
+        if layer_inputs.is_empty() {
+            return (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        }
+        let seq_len = token_ids.len();
+        let hs = self.config.hidden_size;
+        let vs = self.config.vocab_size;
+
+        let logits = channel
+            .forward_linear(&self.lm_head, &final_normed, seq_len, hs, vs)
+            .unwrap_or_else(|_| {
+                use rayon::prelude::*;
+                let mut lgs = vec![0.0f32; seq_len * vs];
+                lgs.par_chunks_exact_mut(vs)
+                    .enumerate()
+                    .for_each(|(t, l_row)| {
+                        let h_row = &final_normed[t * hs..(t + 1) * hs];
+                        for (v, val) in l_row.iter_mut().enumerate() {
+                            let lm_row = &self.lm_head[v * hs..(v + 1) * hs];
+                            *val = h_row.iter().zip(lm_row.iter()).map(|(&a, &b)| a * b).sum();
+                        }
+                    });
+                lgs
+            });
+
+        (layer_inputs, layer_activations, final_normed, logits)
+    }
+
     /// Return the final normalized hidden state for each input token through TARA-HD channel.
     pub fn forward_hidden_channel(
         &self,
@@ -981,6 +1073,7 @@ mod tests {
             initializer_range: 0.02,
             version: "test".into(),
             model_type: "tara".into(),
+            tie_word_embeddings: None,
         };
 
         let mut weights = HashMap::<String, Vec<f32>>::new();
@@ -1133,6 +1226,7 @@ mod tests {
             initializer_range: 0.02,
             version: "test".into(),
             model_type: "tara".into(),
+            tie_word_embeddings: None,
         };
         let norm = super::super::rms_norm::RmsNorm::new(vec![1.0; 4], 1e-5);
         let model = TaraForCausalLM {
@@ -1167,6 +1261,7 @@ mod tests {
             initializer_range: 0.02,
             version: "test".into(),
             model_type: "tara".into(),
+            tie_word_embeddings: None,
         };
 
         let mut weights = HashMap::<String, Vec<f32>>::new();

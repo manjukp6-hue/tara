@@ -346,4 +346,33 @@ impl ComputeDevice for CudaComputeDevice {
         t.accumulate_gradient(param_name, gradient)
             .map_err(|e| e.to_string())
     }
+
+    fn accumulate_sparse_embedding_gradient(
+        &self,
+        tokens: &[u32],
+        dx: &[f32],
+        hs: usize,
+    ) -> Result<f64, String> {
+        let t = self.trainer.lock().map_err(|e| e.to_string())?;
+        t.accumulate_sparse_embedding_gradient(tokens, dx, hs)
+            .map_err(|e| e.to_string())
+    }
+
+    fn backward_lm_head_accumulate(
+        &self,
+        d_logits: &[f32],
+        final_normed: &[f32],
+        seq_len: usize,
+        hs: usize,
+        vs: usize,
+    ) -> Result<(f64, Vec<f32>), String> {
+        let t = self.trainer.lock().map_err(|e| e.to_string())?;
+        t.backward_lm_head_accumulate(d_logits, final_normed, seq_len, hs, vs)
+            .map_err(|e| e.to_string())
+    }
+
+    fn synchronize(&self) -> Result<(), String> {
+        let t = self.trainer.lock().map_err(|e| e.to_string())?;
+        t.synchronize().map_err(|e| e.to_string())
+    }
 }

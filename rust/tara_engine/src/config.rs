@@ -67,6 +67,10 @@ pub struct TaraConfig {
 
     /// Canonical model type identifier.
     pub model_type: String,
+
+    /// Whether word embeddings and LM head are tied to the same parameter tensor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tie_word_embeddings: Option<bool>,
 }
 
 impl Default for TaraConfig {
@@ -85,11 +89,16 @@ impl Default for TaraConfig {
             initializer_range: 0.02,
             version: "1.0.0".to_string(),
             model_type: "tara".to_string(),
+            tie_word_embeddings: Some(true),
         }
     }
 }
 
 impl TaraConfig {
+    /// Check if word embeddings and LM head are configured to be tied.
+    pub fn is_tied(&self) -> bool {
+        self.tie_word_embeddings.unwrap_or(false)
+    }
     /// Load configuration from a JSON file on disk.
     ///
     /// # Errors

@@ -323,4 +323,31 @@ impl ComputeChannel {
     pub fn accumulate_gradient(&self, param_name: &str, gradient: &[f32]) -> Result<(), String> {
         self.active_device.accumulate_gradient(param_name, gradient)
     }
+
+    /// Dispatch sparse embedding gradient accumulation for active tokens.
+    pub fn accumulate_sparse_embedding_gradient(
+        &self,
+        tokens: &[u32],
+        dx: &[f32],
+        hs: usize,
+    ) -> Result<f64, String> {
+        self.active_device.accumulate_sparse_embedding_gradient(tokens, dx, hs)
+    }
+
+    /// Dispatch backward LM Head projection and chunked/GPU accumulation.
+    pub fn backward_lm_head_accumulate(
+        &self,
+        d_logits: &[f32],
+        final_normed: &[f32],
+        seq_len: usize,
+        hs: usize,
+        vs: usize,
+    ) -> Result<(f64, Vec<f32>), String> {
+        self.active_device.backward_lm_head_accumulate(d_logits, final_normed, seq_len, hs, vs)
+    }
+
+    /// Wait for all enqueued asynchronous operations on the compute device to complete.
+    pub fn synchronize(&self) -> Result<(), String> {
+        self.active_device.synchronize()
+    }
 }

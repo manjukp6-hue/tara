@@ -47,6 +47,30 @@ fn sigmoid_stable(x: f32) -> f32 {
 /// - `B` has shape `[n, k]` (row-major, i.e., stored as k-width rows)
 /// - `C` has shape `[m, n]`
 ///
+#[inline(always)]
+fn dot_product_unrolled(a: &[f32], b: &[f32]) -> f32 {
+    let mut sum0 = 0.0f32;
+    let mut sum1 = 0.0f32;
+    let mut sum2 = 0.0f32;
+    let mut sum3 = 0.0f32;
+    let len = a.len().min(b.len());
+    let chunks = len / 4;
+    let mut i = 0;
+    for _ in 0..chunks {
+        sum0 += a[i] * b[i];
+        sum1 += a[i + 1] * b[i + 1];
+        sum2 += a[i + 2] * b[i + 2];
+        sum3 += a[i + 3] * b[i + 3];
+        i += 4;
+    }
+    let mut rem = 0.0f32;
+    while i < len {
+        rem += a[i] * b[i];
+        i += 1;
+    }
+    (sum0 + sum1) + (sum2 + sum3) + rem
+}
+
 /// This is the standard linear projection `y = x @ W^T` convention used
 /// by PyTorch `nn.Linear`.
 pub fn mat_mul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
@@ -68,12 +92,7 @@ pub fn mat_mul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
                 let a_row = &a[i * k..(i + 1) * k];
                 for j in 0..n {
                     let b_row = &b[j * k..(j + 1) * k];
-                    let sum: f32 = a_row
-                        .iter()
-                        .zip(b_row.iter())
-                        .map(|(&av, &bv)| av * bv)
-                        .sum();
-                    c_row[j] = sum;
+                    c_row[j] = dot_product_unrolled(a_row, b_row);
                 }
             });
     } else {
@@ -82,12 +101,7 @@ pub fn mat_mul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
             let c_row = &mut c[i * n..(i + 1) * n];
             for j in 0..n {
                 let b_row = &b[j * k..(j + 1) * k];
-                let sum: f32 = a_row
-                    .iter()
-                    .zip(b_row.iter())
-                    .map(|(&av, &bv)| av * bv)
-                    .sum();
-                c_row[j] = sum;
+                c_row[j] = dot_product_unrolled(a_row, b_row);
             }
         }
     }

@@ -267,10 +267,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  TARA AUTONOMOUS HUGGING FACE MODEL UPLOADER (NATIVE RUST)");
     println!("================================================================================");
 
-    let repo_id = match env::var("HF_MODEL_REPO") {
-        Ok(r) if !r.trim().is_empty() => r,
+    let args: Vec<String> = env::args().collect();
+    let mut custom_repo = None;
+    let mut custom_neural = None;
+    let mut custom_world = None;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--repo" | "-r" => {
+                if i + 1 < args.len() {
+                    custom_repo = Some(args[i + 1].clone());
+                    i += 1;
+                }
+            }
+            "--neural-dir" | "-n" => {
+                if i + 1 < args.len() {
+                    custom_neural = Some(PathBuf::from(&args[i + 1]));
+                    i += 1;
+                }
+            }
+            "--world-dir" | "-w" => {
+                if i + 1 < args.len() {
+                    custom_world = Some(PathBuf::from(&args[i + 1]));
+                    i += 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let repo_id = match custom_repo.or_else(|| env::var("HF_MODEL_REPO").ok()).or_else(|| env::var("HF_REPO").ok()) {
+        Some(r) if !r.trim().is_empty() => r,
         _ => {
-            eprintln!("Error: HF_MODEL_REPO environment variable must be set (e.g. HF_MODEL_REPO='organization/model-name')");
+            eprintln!("Error: HF_MODEL_REPO environment variable or --repo flag must be set (e.g. --repo 'organization/model-name')");
             std::process::exit(1);
         }
     };
@@ -281,8 +311,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         repo_id
     );
 
-    let neural_dir = PathBuf::from("storage/models/tara_candidate_v1");
-    let world_dir = PathBuf::from("storage/models/tara_world_model");
+    let neural_dir = custom_neural.unwrap_or_else(|| PathBuf::from("storage/models/tara_candidate_v1"));
+    let world_dir = custom_world.unwrap_or_else(|| PathBuf::from("storage/models/tara_world_model"));
 
     const MAX_RECOVERY_CYCLES: usize = 50;
 

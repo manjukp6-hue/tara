@@ -292,6 +292,131 @@ impl TaraDecoderLayer {
             d_down_proj,
         }
     }
+
+    /// Run decoder layer forward pass through active hardware channel and save intermediate activations.
+    pub fn forward_channel_with_activations(
+        &self,
+        x: &[f32],
+        seq_len: usize,
+        channel: &tara_hd::ComputeChannel,
+    ) -> (Vec<f32>, DecoderLayerActivations) {
+        let hs = self.hidden_size;
+
+        let normed_x = self
+            .input_layernorm
+            .forward_channel(x, seq_len, hs, channel);
+        let attn_out = self.self_attn.forward_channel(&normed_x, seq_len, channel);
+        let h = channel.add_residual(x, &attn_out).unwrap_or_else(|_| {
+            x.iter()
+                .zip(attn_out.iter())
+                .map(|(&a, &b)| a + b)
+                .collect()
+        });
+
+        let normed_h = self
+            .post_attention_layernorm
+            .forward_channel(&h, seq_len, hs, channel);
+        let mlp_out =
+            self.mlp
+                .forward_channel(&normed_h, seq_len, hs, self.intermediate_size, channel);
+
+        let out = channel
+            .add_residual(&h, &mlp_out)
+            .unwrap_or_else(|_| h.iter().zip(mlp_out.iter()).map(|(&a, &b)| a + b).collect());
+
+        (
+            out,
+            DecoderLayerActivations {
+                normed_x,
+                attn_out,
+                h,
+                normed_h,
+                mlp_out,
+            },
+        )
+    }
+
+    /// Run full backward pass for this decoder layer using saved forward activations.
+    /// Eliminates CPU forward recomputation completely.
+    pub fn backward_with_activations(
+        &self,
+        dy: &[f32],
+        x: &[f32],
+        acts: &DecoderLayerActivations,
+        seq_len: usize,
+    ) -> LayerGradients {
+        let hs = self.hidden_size;
+
+        // Use saved activations directly with zero forward recomputation
+        let normed_h = &acts.normed_h;
+        let h = &acts.h;
+        let normed_x = &acts.normed_x;
+
+        // 1. Backward through MLP
+        let (d_normed_h, d_gate_proj, d_up_proj, d_down_proj) =
+            self.mlp
+                .backward(dy, normed_h, seq_len, hs, self.intermediate_size);
+
+        // 2. Backward through Post-Attention LayerNorm
+        let (dh_from_mlp, d_post_attention_layernorm) =
+            self.post_attention_layernorm
+                .backward(&d_normed_h, h, seq_len, hs);
+
+        // 3. Accumulate gradient into h (Residual 2 branch)
+        let mut dh = vec![0.0f32; seq_len * hs];
+        for i in 0..seq_len * hs {
+            dh[i] = dh_from_mlp[i] + dy[i];
+        }
+
+        // 4. Backward through Attention
+        let (d_normed_x, d_q_proj, d_k_proj, d_v_proj, d_o_proj) =
+            self.self_attn.backward(&dh, normed_x, seq_len);
+
+        // 5. Backward through Input LayerNorm
+        let (dx_from_attn, d_input_layernorm) =
+            self.input_layernorm.backward(&d_normed_x, x, seq_len, hs);
+
+        // 6. Accumulate gradient into x (Residual 1 branch)
+        let mut dx = vec![0.0f32; seq_len * hs];
+        for i in 0..seq_len * hs {
+            dx[i] = dx_from_attn[i] + dh[i];
+        }
+
+        LayerGradients {
+            dx,
+            d_input_layernorm,
+            d_q_proj,
+            d_k_proj,
+            d_v_proj,
+            d_o_proj,
+            d_post_attention_layernorm,
+            d_gate_proj,
+            d_up_proj,
+            d_down_proj,
+        }
+    }
+
+    /// Run full backward pass for this decoder layer through the compute channel using saved activations.
+    pub fn backward_channel(
+        &self,
+        dy: &[f32],
+        x: &[f32],
+        acts: &DecoderLayerActivations,
+        seq_len: usize,
+        _channel: &tara_hd::ComputeChannel,
+    ) -> LayerGradients {
+        self.backward_with_activations(dy, x, acts, seq_len)
+    }
+}
+
+/// Forward activations saved during forward pass for backpropagation without recomputation.
+#[derive(Debug, Clone)]
+pub struct DecoderLayerActivations {
+    pub normed_x: Vec<f32>,
+    pub attn_out: Vec<f32>,
+    pub h: Vec<f32>,
+    pub normed_h: Vec<f32>,
+    pub mlp_out: Vec<f32>,
 }
 
 /// Gradients computed for a single decoder layer.

@@ -418,10 +418,19 @@ pub struct GpuParamState {
     pub len: usize,
 }
 
+#[derive(Default)]
+pub(crate) struct GpuScratchpads {
+    pub(crate) d_in: Option<CudaBuffer>,
+    pub(crate) d_out: Option<CudaBuffer>,
+    pub(crate) d_accum: Option<CudaBuffer>,
+}
+
 pub struct CudaTrainer {
     // Parameter states resident on GPU (dropped first to free device buffers)
     params: HashMap<String, GpuParamState>,
     pub precision: TrainingPrecision,
+    pub tied_embeddings: bool,
+    pub(crate) scratchpads: std::sync::Mutex<GpuScratchpads>,
     // Streamed optimizer states on host (compact FP16 representation to prevent Host RAM exhaustion)
     h_weights: HashMap<String, Vec<f32>>,
     h_m: HashMap<String, Vec<f16>>,
@@ -602,8 +611,27 @@ impl CudaTrainer {
             last_grad_norm: 0.0,
             d_norm_sq,
             kernel_launch_count: std::sync::atomic::AtomicU64::new(0),
+            tied_embeddings: false,
+            scratchpads: std::sync::Mutex::new(GpuScratchpads::default()),
             session,
         })
+    }
+
+    pub(crate) fn acquire_scratchpad_buffer(
+        session: &CudaSession,
+        buf_opt: &mut Option<CudaBuffer>,
+        elements_needed: usize,
+    ) -> Result<u64, CudaError> {
+        if let Some(ref b) = buf_opt {
+            if b.len_elements >= elements_needed {
+                return Ok(b.dptr);
+            }
+        }
+        let alloc_sz = elements_needed.max(1024);
+        let new_buf = session.allocate_f32(alloc_sz)?;
+        let ptr = new_buf.dptr;
+        *buf_opt = Some(new_buf);
+        Ok(ptr)
     }
 
     #[inline]
@@ -665,7 +693,18 @@ impl CudaTrainer {
         self.d_chunk_v = None;
         self.d_chunk_g = None;
         self.d_chunk_wf16 = None;
+        if let Ok(mut sp) = self.scratchpads.lock() {
+            sp.d_in = None;
+            sp.d_out = None;
+            sp.d_accum = None;
+        }
         self.params.clear();
+
+        // Check if lm_head.weight is tied to model.embed_tokens.weight
+        self.tied_embeddings = weights
+            .get("lm_head.weight")
+            .map(|w| weights.get("model.embed_tokens.weight").map(|ew| ew == w).unwrap_or(false))
+            .unwrap_or(true);
 
         let is_f16 = self.precision == TrainingPrecision::Fp16;
         let total_elements: usize = weights.values().map(|v| v.len()).sum();
@@ -1242,17 +1281,23 @@ impl CudaTrainer {
             (dw.dptr, false)
         };
 
-        let d_in = self.session.allocate_f32(seq_len * hs)?;
-        let d_out = self.session.allocate_f32(seq_len * hs)?;
-
-        self.session.upload_f32(&d_in, input)?;
+        let (dptr_in, dptr_out) = {
+            let mut sp = self.scratchpads.lock().map_err(|e| CudaError::KernelError(e.to_string()))?;
+            let in_out_len = seq_len * hs;
+            let dptr_i = Self::acquire_scratchpad_buffer(&self.session, &mut sp.d_in, in_out_len)?;
+            let dptr_o = Self::acquire_scratchpad_buffer(&self.session, &mut sp.d_out, in_out_len)?;
+            if let Some(ref b_in) = sp.d_in {
+                self.session.upload_f32_slice(b_in, input)?;
+            }
+            (dptr_i, dptr_o)
+        };
 
         let block_dim = 128u32;
         let grid_dim = (seq_len as u32).div_ceil(block_dim);
 
-        let mut arg_in = d_in.dptr;
+        let mut arg_in = dptr_in;
         let mut arg_w = dptr_w;
-        let mut arg_out = d_out.dptr;
+        let mut arg_out = dptr_out;
         let mut arg_eps = eps;
         let mut arg_seq = seq_len as u32;
         let mut arg_hs = hs as u32;
@@ -1286,10 +1331,13 @@ impl CudaTrainer {
             }
         }
         self.record_kernel_launch();
-        self.session.synchronize()?;
 
         let mut host_out = vec![0.0f32; seq_len * hs];
-        self.session.download_f32(&d_out, &mut host_out)?;
+        if let Ok(sp) = self.scratchpads.lock() {
+            if let Some(ref b_out) = sp.d_out {
+                self.session.download_f32_slice(b_out, &mut host_out)?;
+            }
+        }
         Ok(host_out)
     }
 
@@ -1334,17 +1382,24 @@ impl CudaTrainer {
         // Fast path: resident weight and output fits comfortably in free VRAM (<= 25% free VRAM)
         if let Some(dptr_w) = dptr_w_opt {
             if out_bytes <= free_vram / 4 {
-                let d_in = self.session.allocate_f32(seq_len * in_dim)?;
-                let d_out = self.session.allocate_f32(seq_len * out_dim)?;
-
-                self.session.upload_f32(&d_in, input)?;
+                let (dptr_in, dptr_out) = {
+                    let mut sp = self.scratchpads.lock().map_err(|e| CudaError::KernelError(e.to_string()))?;
+                    let in_len = seq_len * in_dim;
+                    let out_len = seq_len * out_dim;
+                    let dptr_i = Self::acquire_scratchpad_buffer(&self.session, &mut sp.d_in, in_len)?;
+                    let dptr_o = Self::acquire_scratchpad_buffer(&self.session, &mut sp.d_out, out_len)?;
+                    if let Some(ref b_in) = sp.d_in {
+                        self.session.upload_f32_slice(b_in, input)?;
+                    }
+                    (dptr_i, dptr_o)
+                };
 
                 let total = (seq_len * out_dim) as u32;
                 let grid_dim = total.div_ceil(block_dim);
 
-                let mut arg_in = d_in.dptr;
+                let mut arg_in = dptr_in;
                 let mut arg_w = dptr_w;
-                let mut arg_out = d_out.dptr;
+                let mut arg_out = dptr_out;
                 let mut arg_seq = seq_len as u32;
                 let mut arg_in_dim = in_dim as u32;
                 let mut arg_out_dim = out_dim as u32;
@@ -1378,10 +1433,13 @@ impl CudaTrainer {
                     }
                 }
                 self.record_kernel_launch();
-                self.session.synchronize()?;
 
                 let mut host_out = vec![0.0f32; seq_len * out_dim];
-                self.session.download_f32(&d_out, &mut host_out)?;
+                if let Ok(sp) = self.scratchpads.lock() {
+                    if let Some(ref b_out) = sp.d_out {
+                        self.session.download_f32_slice(b_out, &mut host_out)?;
+                    }
+                }
                 return Ok(host_out);
             }
         }
@@ -1900,12 +1958,20 @@ impl CudaTrainer {
             let block_dim = 128u32;
             let grid_dim = (param.len as u32).div_ceil(block_dim);
 
-            // Gradients are always accumulated in FP32 to prevent underflow and preserve precision
-            let d_sample = self.session.allocate_f32(grad.len())?;
-            self.session.upload_f32(&d_sample, grad)?;
+            let d_sample_ptr = if let Ok(mut sp) = self.scratchpads.lock() {
+                let ptr = Self::acquire_scratchpad_buffer(&self.session, &mut sp.d_accum, grad.len())?;
+                if let Some(ref b) = sp.d_accum {
+                    self.session.upload_f32_slice(b, grad)?;
+                }
+                ptr
+            } else {
+                let d_sample = self.session.allocate_f32(grad.len())?;
+                self.session.upload_f32(&d_sample, grad)?;
+                d_sample.dptr
+            };
 
             let mut arg_accum = dg.dptr;
-            let mut arg_sample = d_sample.dptr;
+            let mut arg_sample = d_sample_ptr;
             let mut arg_n = param.len as u32;
 
             let mut params = [std::ptr::null_mut(); 16];
@@ -1917,7 +1983,6 @@ impl CudaTrainer {
                     .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
             }
             self.record_kernel_launch();
-            self.session.synchronize()?;
         } else {
             let mut hg_guard = self.h_grad.lock().map_err(|e| {
                 CudaError::KernelError(format!("Mutex lock error on h_grad: {e}"))
@@ -2148,48 +2213,80 @@ impl CudaTrainer {
         offset: usize,
         cur_len: usize,
     ) -> Result<(), CudaError> {
-        let hg_guard = self.h_grad.lock().map_err(|e| {
-            CudaError::KernelError(format!("Mutex lock error on h_grad: {e}"))
-        })?;
-        if let Some(gv) = hg_guard.get(name) {
-            self.session.upload_f32_slice(d_cg, &gv[offset..offset + cur_len])?;
-            return Ok(());
-        }
-        drop(hg_guard);
+        let is_tied = self.tied_embeddings
+            && (name == "lm_head.weight" || name == "model.embed_tokens.weight");
+        let is_sparse_target = name == "model.embed_tokens.weight" || is_tied;
 
-        // Check sparse gradients (e.g. model.embed_tokens.weight)
-        let sparse_guard = self.h_sparse_embed.lock().map_err(|e| {
-            CudaError::KernelError(format!("Mutex lock error on h_sparse_embed: {e}"))
-        })?;
-        if !sparse_guard.is_empty() {
-            let hs = sparse_guard.values().next().map(|v| v.len()).unwrap_or(1);
-            let chunk_start = offset;
-            let chunk_end = offset + cur_len;
-            let mut chunk_buf = vec![0.0f32; cur_len];
-            let mut any_hit = false;
-            for (&row_idx, row_vec) in sparse_guard.iter() {
-                let row_start = row_idx * hs;
-                let row_end = row_start + row_vec.len();
-                let start = row_start.max(chunk_start);
-                let end = row_end.min(chunk_end);
-                if start < end {
-                    let row_offset = start - row_start;
-                    let c_offset = start - chunk_start;
-                    let copy_len = end - start;
-                    chunk_buf[c_offset..c_offset + copy_len]
-                        .copy_from_slice(&row_vec[row_offset..row_offset + copy_len]);
-                    any_hit = true;
+        // If not tied and found directly in h_grad:
+        if !is_sparse_target {
+            let hg_guard = self.h_grad.lock().map_err(|e| {
+                CudaError::KernelError(format!("Mutex lock error on h_grad: {e}"))
+            })?;
+            if let Some(gv) = hg_guard.get(name) {
+                if gv.len() >= offset + cur_len {
+                    self.session
+                        .upload_f32_slice(d_cg, &gv[offset..offset + cur_len])?;
+                    return Ok(());
                 }
             }
-            if any_hit {
-                self.session.upload_f32_slice(d_cg, &chunk_buf)?;
-            } else {
-                self.session.zero_buffer(d_cg)?;
-            }
+            drop(hg_guard);
+            self.session.zero_buffer(d_cg)?;
             return Ok(());
         }
 
-        self.session.zero_buffer(d_cg)?;
+        // For tied embeddings or model.embed_tokens.weight, combine dense h_grad and sparse h_sparse_embed
+        let mut combined_buf = vec![0.0f32; cur_len];
+        let mut has_grad = false;
+
+        if let Ok(hg_guard) = self.h_grad.lock() {
+            if let Some(gv) = hg_guard.get(name) {
+                if gv.len() >= offset + cur_len {
+                    combined_buf.copy_from_slice(&gv[offset..offset + cur_len]);
+                    has_grad = true;
+                }
+            } else if is_tied {
+                let other_name = if name == "lm_head.weight" {
+                    "model.embed_tokens.weight"
+                } else {
+                    "lm_head.weight"
+                };
+                if let Some(gv) = hg_guard.get(other_name) {
+                    if gv.len() >= offset + cur_len {
+                        combined_buf.copy_from_slice(&gv[offset..offset + cur_len]);
+                        has_grad = true;
+                    }
+                }
+            }
+        }
+
+        if let Ok(sparse_guard) = self.h_sparse_embed.lock() {
+            if !sparse_guard.is_empty() {
+                let hs = sparse_guard.values().next().map(|v| v.len()).unwrap_or(1);
+                let chunk_start = offset;
+                let chunk_end = offset + cur_len;
+                for (&row_idx, row_vec) in sparse_guard.iter() {
+                    let row_start = row_idx * hs;
+                    let row_end = row_start + row_vec.len();
+                    let start = row_start.max(chunk_start);
+                    let end = row_end.min(chunk_end);
+                    if start < end {
+                        let row_offset = start - row_start;
+                        let c_offset = start - chunk_start;
+                        let copy_len = end - start;
+                        for i in 0..copy_len {
+                            combined_buf[c_offset + i] += row_vec[row_offset + i];
+                        }
+                        has_grad = true;
+                    }
+                }
+            }
+        }
+
+        if has_grad {
+            self.session.upload_f32_slice(d_cg, &combined_buf)?;
+        } else {
+            self.session.zero_buffer(d_cg)?;
+        }
         Ok(())
     }
 
@@ -2433,6 +2530,9 @@ impl CudaTrainer {
         for (name, param_len, grad_dptr, opt_w_dptr, opt_wf16_dptr, opt_m_dptr, opt_v_dptr) in
             param_keys
         {
+            if self.tied_embeddings && name == "lm_head.weight" {
+                continue;
+            }
             let is_in_weights = weights.contains_key(&name);
 
             if self.stream_optimizer {
@@ -2748,6 +2848,25 @@ impl CudaTrainer {
                             .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 13)?;
                     }
                     self.record_kernel_launch();
+                }
+            }
+        }
+
+        if self.tied_embeddings {
+            if let Some(emb_w) = weights.get("model.embed_tokens.weight").cloned() {
+                weights.insert("lm_head.weight".to_string(), emb_w.clone());
+                if self.h_weights.contains_key("lm_head.weight") {
+                    self.h_weights.insert("lm_head.weight".to_string(), emb_w.clone());
+                }
+                if let Some(lm_param) = self.params.get("lm_head.weight") {
+                    if let Some(ref d_wf16) = lm_param.d_weight_f16 {
+                        let h_f16: Vec<f16> = emb_w.iter().map(|&x| f16::from_f32(x)).collect();
+                        let packed = pack_f16_to_u32(&h_f16);
+                        self.session.upload_u32(d_wf16, &packed)?;
+                    }
+                    if let Some(ref d_w) = lm_param.d_weight {
+                        self.session.upload_f32(d_w, &emb_w)?;
+                    }
                 }
             }
         }

@@ -3068,17 +3068,19 @@ fn compute_model_loss(
         // Forward hidden activations and LM head routed through TARA-HD channel
         let final_normed = model.forward_hidden_channel(active_tokens, channel);
         let logits = channel
-            .forward_linear(&model.lm_head, &final_normed, seq_len, hs, vs)
+            .forward_linear_named("lm_head.weight", &model.lm_head, &final_normed, seq_len, hs, vs)
             .unwrap_or_else(|_| {
+                use rayon::prelude::*;
                 let mut lgs = vec![0.0f32; seq_len * vs];
-                for t in 0..seq_len {
-                    let h_row = &final_normed[t * hs..(t + 1) * hs];
-                    let l_row = &mut lgs[t * vs..(t + 1) * vs];
-                    for (v, val) in l_row.iter_mut().enumerate().take(vs) {
-                        let lm_row = &model.lm_head[v * hs..(v + 1) * hs];
-                        *val = h_row.iter().zip(lm_row.iter()).map(|(&a, &b)| a * b).sum();
-                    }
-                }
+                lgs.par_chunks_exact_mut(vs)
+                    .enumerate()
+                    .for_each(|(t, l_row)| {
+                        let h_row = &final_normed[t * hs..(t + 1) * hs];
+                        for (v, val) in l_row.iter_mut().enumerate() {
+                            let lm_row = &model.lm_head[v * hs..(v + 1) * hs];
+                            *val = h_row.iter().zip(lm_row.iter()).map(|(&a, &b)| a * b).sum();
+                        }
+                    });
                 lgs
             });
         drop(final_normed);

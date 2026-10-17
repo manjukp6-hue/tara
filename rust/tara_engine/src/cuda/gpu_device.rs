@@ -135,7 +135,7 @@ impl ComputeDevice for CudaComputeDevice {
         out_dim: usize,
     ) -> Result<Vec<f32>, String> {
         let t = self.trainer.lock().map_err(|e| e.to_string())?;
-        match t.forward_linear(weight_name, x, seq_len, in_dim, out_dim) {
+        match t.forward_linear_with_slice(weight_name, Some(weight_slice), x, seq_len, in_dim, out_dim) {
             Ok(v) => Ok(v),
             Err(e) => {
                 log::debug!("GPU forward_linear for '{weight_name}' falling back to slice: {e}");
@@ -308,7 +308,7 @@ impl ComputeDevice for CudaComputeDevice {
         out_dim: usize,
     ) -> Result<(Vec<f32>, Vec<f32>), String> {
         let t = self.trainer.lock().map_err(|e| e.to_string())?;
-        match t.backward_linear(weight_name, d_out, x, seq_len, in_dim, out_dim) {
+        match t.backward_linear_with_slice(weight_name, Some(weight_slice), d_out, x, seq_len, in_dim, out_dim) {
             Ok(v) => Ok(v),
             Err(e) => {
                 log::debug!("GPU backward_linear for '{weight_name}' falling back to slice: {e}");

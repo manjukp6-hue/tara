@@ -804,9 +804,8 @@ impl CudaTrainer {
                 if stream_opt {
                     let f16_elements = len.div_ceil(2);
                     let f16_bytes = f16_elements * std::mem::size_of::<f32>();
-                    // Prioritize lm_head.weight or resident layers if within resident budget
-                    let is_resident = (name == "lm_head.weight" || !name.contains("layers."))
-                        && f16_bytes <= resident_vram_budget;
+                    // Allocate on GPU in FP16 for all layers and heads that fit in resident VRAM budget
+                    let is_resident = f16_bytes <= resident_vram_budget;
 
                     let d_wf16 = if is_resident {
                         let dw16 = self.session.allocate_f32(f16_elements)?;
@@ -1388,10 +1387,23 @@ impl CudaTrainer {
     }
 
     /// Forward Linear Projection on GPU: out = input @ weight^T.
-    /// Supports both resident and dynamically streamed weights for arbitrary model scale (1B, 7B, 70B+).
     pub fn forward_linear(
         &self,
         weight_name: &str,
+        input: &[f32],
+        seq_len: usize,
+        in_dim: usize,
+        out_dim: usize,
+    ) -> Result<Vec<f32>, CudaError> {
+        self.forward_linear_with_slice(weight_name, None, input, seq_len, in_dim, out_dim)
+    }
+
+    /// Forward Linear Projection on GPU: out = input @ weight^T.
+    /// Supports both resident and dynamically streamed weights for arbitrary model scale (1B, 7B, 70B+).
+    pub fn forward_linear_with_slice(
+        &self,
+        weight_name: &str,
+        weight_slice_opt: Option<&[f32]>,
         input: &[f32],
         seq_len: usize,
         in_dim: usize,
@@ -1491,7 +1503,7 @@ impl CudaTrainer {
         }
 
         // Dynamically chunked / streamed path for arbitrary model scales (1B, 7B, 70B+)
-        let hw_opt = self.h_weights.get(weight_name);
+        let hw_opt = weight_slice_opt.or_else(|| self.h_weights.get(weight_name).map(|v| v.as_slice()));
         if dptr_w_opt.is_none() && hw_opt.is_none() {
             return Err(CudaError::KernelError(format!(
                 "Weight '{weight_name}' has neither GPU buffer nor host weight copy"
@@ -1594,11 +1606,24 @@ impl CudaTrainer {
         Ok(host_out)
     }
 
-    /// Backward Linear Projection on GPU: computes d_weight and d_input.
-    /// Dynamically tiles across output dimension to scale smoothly across 1B, 7B, 70B+ models without CUDA OOM.
     pub fn backward_linear(
         &self,
         weight_name: &str,
+        d_out: &[f32],
+        input: &[f32],
+        seq_len: usize,
+        in_dim: usize,
+        out_dim: usize,
+    ) -> Result<(Vec<f32>, Vec<f32>), CudaError> {
+        self.backward_linear_with_slice(weight_name, None, d_out, input, seq_len, in_dim, out_dim)
+    }
+
+    /// Backward Linear Projection on GPU: computes d_weight and d_input.
+    /// Dynamically tiles across output dimension to scale smoothly across 1B, 7B, 70B+ models without CUDA OOM.
+    pub fn backward_linear_with_slice(
+        &self,
+        weight_name: &str,
+        weight_slice_opt: Option<&[f32]>,
         d_out: &[f32],
         input: &[f32],
         seq_len: usize,
@@ -1728,7 +1753,7 @@ impl CudaTrainer {
         }
 
         // Dynamically chunked / streamed path for arbitrary model scales (1B, 7B, 70B+)
-        let hw_opt = self.h_weights.get(weight_name);
+        let hw_opt = weight_slice_opt.or_else(|| self.h_weights.get(weight_name).map(|v| v.as_slice()));
         if dptr_w_opt.is_none() && hw_opt.is_none() {
             return Err(CudaError::KernelError(format!(
                 "Weight '{weight_name}' has neither GPU buffer nor host weight copy"

@@ -244,13 +244,36 @@ TRAINER_MODE="${TRAINER_MODE:-python}"
 echo "=== [AUTONOMOUS CLOUD TRAINING PIPELINE (MODE: $TRAINER_MODE)] ==="
 
 if [ "$TRAINER_MODE" = "python" ]; then
-    echo "[TRAINER] Launching High-Throughput PyTorch Cloud GPU Trainer (FP16 / Fused AdamW)..."
+    echo "[TRAINER] Launching High-Throughput PyTorch Cloud GPU Multi-Stage Pipeline..."
+
+    # Stage 0: Foundational Pretraining
     python3 cloud_train.py \
+        --stage-id "stage0_pretraining" \
+        --stage-name "Stage 0: Foundational Pretraining" \
         --model-dir storage/models/tara_candidate_v1 \
         --dataset-dir "$MAIN_DS_DIR" \
         --output-dir "$ACTIVE_CP_DIR/stage0_pretraining" \
         --max-steps "$STAGE_MAX_STEPS" \
         --batch-size "$TRAIN_BATCH_SIZE"
+
+    # Stage 1: Academic & Skills Curriculum (seamlessly chains from Stage 0 best checkpoint)
+    STAGE0_OUT="$ACTIVE_CP_DIR/stage0_pretraining"
+    if [ -d "$ACTIVE_CP_DIR/stage0_pretraining/best_checkpoint" ]; then
+        STAGE0_OUT="$ACTIVE_CP_DIR/stage0_pretraining/best_checkpoint"
+    fi
+
+    CURRICULUM_DS="storage/datasets/curriculum"
+    if [ -d "$CURRICULUM_DS" ] && [ -n "$(ls -A "$CURRICULUM_DS" 2>/dev/null)" ]; then
+        python3 cloud_train.py \
+            --stage-id "stage1_curriculum" \
+            --stage-name "Stage 1: Academic & Skills Curriculum" \
+            --model-dir "$STAGE0_OUT" \
+            --dataset-dir "$CURRICULUM_DS" \
+            --output-dir "$ACTIVE_CP_DIR/stage1_curriculum" \
+            --max-steps "$STAGE_MAX_STEPS" \
+            --batch-size "$TRAIN_BATCH_SIZE"
+    fi
+
     PIPELINE_EXIT=$?
 else
     set +e

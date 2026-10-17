@@ -3,9 +3,15 @@
 TARA Autonomous Cloud Training Engine (Google Colab / Cloud GPU Runner)
 =============================================================================
 Strictly isolated to Cloud Pretraining only (per Project Governance Rule 15).
-Ingests JSONL dataset shards, trains the 1B neural base model on Cloud GPU (FP16/BF16),
-and exports standard `model.safetensors`, `config.json`, and `tokenizer.json`
-for 100% native Rust inference and serving in `tara_engine`.
+Features:
+1. Dynamic Best-Model Checkpointing (tracks historical minimum loss & perplexity).
+2. Automatic Google Drive Mirroring & Disaster Recovery.
+3. Seamless Mid-Way Resumption (restores model weights, optimizer, scaler, step).
+4. Live Loss, Perplexity (PPL), BF16/FP16 precision, LR, GradNorm, Throughput.
+5. Unbounded Extensible Multi-Stage Pipeline (Stages 0..N with dynamic handoff).
+6. Automatic Idempotence & Completion Detection (skips already-trained stages).
+7. Exports standard `model.safetensors`, `config.json`, and `tokenizer.json`
+   for 100% native Rust inference & serving in `tara_engine`.
 =============================================================================
 """
 
@@ -14,8 +20,10 @@ import glob
 import json
 import math
 import os
+import shutil
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -205,7 +213,6 @@ class TaraJsonlDataset(Dataset):
         self.max_seq_len = max_seq_len
 
         print(f"[Dataset] Loading records from {len(file_paths)} shard file(s)...")
-        total_loaded = 0
         for fp in file_paths:
             if not os.path.exists(fp):
                 continue
@@ -221,7 +228,6 @@ class TaraJsonlDataset(Dataset):
                         if not inp_text and not out_text:
                             continue
 
-                        # Tokenize
                         enc_inp = tokenizer.encode(inp_text).ids
                         enc_out = tokenizer.encode(out_text).ids
                         target_start = len(enc_inp)
@@ -232,7 +238,6 @@ class TaraJsonlDataset(Dataset):
 
                         if len(full_ids) >= 4:
                             self.samples.append((full_ids, target_start))
-                            total_loaded += 1
                     except Exception:
                         continue
 
@@ -245,7 +250,6 @@ class TaraJsonlDataset(Dataset):
         ids, target_start = self.samples[idx]
         input_ids = torch.tensor(ids, dtype=torch.long)
         labels = input_ids.clone()
-        # Mask out input tokens so loss is computed strictly on outputs
         eff_start = min(target_start, len(ids))
         labels[:eff_start] = -100
         return input_ids, labels
@@ -266,23 +270,21 @@ def collate_fn(batch):
 
 
 # =============================================================================
-# 3. Model Weight Loading & SafeTensors Exporter
+# 3. Model Weight Loading, Resumption & Checkpoint Export
 # =============================================================================
 
-def load_candidate_weights(model: nn.Module, model_dir: str):
+def load_candidate_weights(model: nn.Module, model_dir: str) -> bool:
     """Loads existing candidate safetensors weights if present, ensuring continuous progression."""
     safetensors_files = sorted(glob.glob(os.path.join(model_dir, "*.safetensors")))
     if not safetensors_files or not HAS_SAFETENSORS:
-        print("[Weights] No existing safetensors shards found or safetensors not installed. Initializing fresh weights.")
-        return
+        return False
 
-    print(f"[Weights] Ingesting {len(safetensors_files)} existing SafeTensors shard(s)...")
+    print(f"[Weights] Ingesting {len(safetensors_files)} existing SafeTensors shard(s) from {model_dir}...")
     state_dict = {}
     for sf in safetensors_files:
         shard_tensors = load_file(sf, device="cpu")
         state_dict.update(shard_tensors)
 
-    # Filter and remap into model
     model_sd = model.state_dict()
     matched = 0
     for k, v in state_dict.items():
@@ -290,13 +292,27 @@ def load_candidate_weights(model: nn.Module, model_dir: str):
             model_sd[k].copy_(v)
             matched += 1
 
-    print(f"[Weights] Successfully restored {matched}/{len(model_sd)} parameter tensors from candidate.")
+    print(f"[Weights] Successfully restored {matched}/{len(model_sd)} parameter tensors.")
+    return matched > 0
 
 
-def export_checkpoint(model: nn.Module, config: dict, tokenizer_path: str, output_dir: str):
-    """Exports trained weights as standard model.safetensors, config.json, tokenizer.json."""
+def save_checkpoint(
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scaler: torch.cuda.amp.GradScaler,
+    config: dict,
+    tokenizer_path: str,
+    output_dir: str,
+    step: int,
+    epoch: int,
+    loss: float,
+    best_loss: float,
+    stage_id: str,
+    is_best: bool = False,
+    is_completed: bool = False,
+):
+    """Exports model weights, optimizer continuation state, and stage metadata."""
     os.makedirs(output_dir, exist_ok=True)
-    print(f"[Export] Saving canonical production checkpoint to: {output_dir}")
 
     # 1. config.json
     with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as f:
@@ -304,78 +320,217 @@ def export_checkpoint(model: nn.Module, config: dict, tokenizer_path: str, outpu
 
     # 2. tokenizer.json
     if os.path.exists(tokenizer_path):
-        import shutil
         shutil.copy2(tokenizer_path, os.path.join(output_dir, "tokenizer.json"))
 
     # 3. model.safetensors
     state_dict = {k: v.contiguous().cpu() for k, v in model.state_dict().items()}
     if HAS_SAFETENSORS:
         save_file(state_dict, os.path.join(output_dir, "model.safetensors"))
-        print("[Export] SafeTensors checkpoint written successfully.")
     else:
         torch.save(state_dict, os.path.join(output_dir, "pytorch_model.bin"))
-        print("[Export] PyTorch model bin written successfully.")
+
+    # 4. Continuation state for mid-way resume
+    continuation_state = {
+        "step": step,
+        "epoch": epoch,
+        "loss": loss,
+        "best_loss": best_loss,
+        "stage_id": stage_id,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "is_completed": is_completed,
+    }
+    with open(os.path.join(output_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
+        json.dump(continuation_state, f, indent=2)
+
+    # 5. Optimizer state for seamless continuation
+    torch.save(
+        {
+            "optimizer": optimizer.state_dict(),
+            "scaler": scaler.state_dict() if scaler else None,
+            "step": step,
+            "best_loss": best_loss,
+        },
+        os.path.join(output_dir, "optimizer_state.pt"),
+    )
+
+    # 6. STAGE_METADATA.json (Idempotence & DAG verification)
+    metadata = {
+        "stage_id": stage_id,
+        "status": "COMPLETED" if is_completed else "IN_PROGRESS",
+        "step": step,
+        "loss": loss,
+        "best_loss": best_loss,
+        "perplexity": math.exp(min(loss, 20.0)),
+        "is_best": is_best,
+        "completed_at_utc": datetime.now(timezone.utc).isoformat() if is_completed else None,
+    }
+    with open(os.path.join(output_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
+
+    tag = "BEST MILESTONE" if is_best else ("COMPLETED" if is_completed else f"STEP {step}")
+    print(f"[Checkpoint] Saved [{tag}] checkpoint -> {output_dir} (Loss: {loss:.4f})")
+
+    # Mirror to Google Drive if active
+    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
+    if os.path.exists("/content/drive/MyDrive"):
+        stage_dir_name = os.path.basename(output_dir)
+        gdrive_target = os.path.join(gdrive_root, stage_dir_name)
+        os.makedirs(gdrive_target, exist_ok=True)
+        try:
+            for fname in ["config.json", "tokenizer.json", "model.safetensors", "checkpoint_state.json", "STAGE_METADATA.json"]:
+                src = os.path.join(output_dir, fname)
+                if os.path.exists(src):
+                    shutil.copy2(src, os.path.join(gdrive_target, fname))
+            print(f"[GDrive Mirror] Successfully backed up [{tag}] to Google Drive: {gdrive_target}")
+        except Exception as e:
+            print(f"[GDrive Mirror Notice] Non-fatal backup warning: {e}")
+
+
+def try_resume_from_checkpoint(
+    checkpoint_dir: str,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scaler: torch.cuda.amp.GradScaler,
+) -> Tuple[int, int, float, bool]:
+    """Attempts to resume from an existing in-progress checkpoint."""
+    state_file = os.path.join(checkpoint_dir, "checkpoint_state.json")
+    opt_file = os.path.join(checkpoint_dir, "optimizer_state.pt")
+    model_file = os.path.join(checkpoint_dir, "model.safetensors")
+
+    if not (os.path.exists(state_file) and os.path.exists(opt_file) and os.path.exists(model_file)):
+        return 0, 0, float("inf"), False
+
+    try:
+        with open(state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+
+        step = state.get("step", 0)
+        epoch = state.get("epoch", 0)
+        best_loss = state.get("best_loss", float("inf"))
+
+        # Load weights
+        if HAS_SAFETENSORS:
+            weights = load_file(model_file, device="cpu")
+            model.load_state_dict(weights, strict=False)
+
+        # Load optimizer
+        opt_data = torch.load(opt_file, map_location="cpu")
+        optimizer.load_state_dict(opt_data["optimizer"])
+        if scaler and opt_data.get("scaler"):
+            scaler.load_state_dict(opt_data["scaler"])
+
+        print("=" * 78)
+        print(f"  [RESUME] Successfully restored in-progress state from {checkpoint_dir}!")
+        print(f"  Resumed Step       : {step}")
+        print(f"  Resumed Epoch      : {epoch}")
+        print(f"  Historical Best Loss: {best_loss:.4f}")
+        print("=" * 78)
+        return step, epoch, best_loss, True
+    except Exception as e:
+        print(f"[Resume Notice] Could not resume from {checkpoint_dir} ({e}). Starting fresh.")
+        return 0, 0, float("inf"), False
+
+
+def check_stage_already_completed(output_dir: str) -> bool:
+    """Checks whether the stage has already completed previously (Idempotence)."""
+    meta_path = os.path.join(output_dir, "STAGE_METADATA.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            if meta.get("status") == "COMPLETED":
+                loss = meta.get("loss", 0.0)
+                step = meta.get("step", 0)
+                print("=" * 78)
+                print(f"  [STAGE DETECTION] Stage is ALREADY COMPLETED (Status: COMPLETED)")
+                print(f"  Directory          : {output_dir}")
+                print(f"  Completed Step     : {step}")
+                print(f"  Final Loss         : {loss:.4f}")
+                print(f"  Skipping redundant training to preserve compute & quota.")
+                print("=" * 78)
+                return True
+        except Exception:
+            pass
+    return False
 
 
 # =============================================================================
-# 4. Main Autonomous Training Loop
+# 4. Main Autonomous Multi-Stage Training Runner
 # =============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(description="TARA Autonomous Cloud Training Pipeline")
-    parser.add_argument("--model-dir", type=str, default="storage/models/tara_candidate_v1", help="Candidate model directory")
+    parser = argparse.ArgumentParser(description="TARA Autonomous Cloud Multi-Stage Training Pipeline")
+    parser.add_argument("--model-dir", type=str, default="storage/models/tara_candidate_v1", help="Candidate / input model directory")
     parser.add_argument("--dataset-dir", type=str, default="storage/datasets/main_dataset_v2", help="Dataset directory")
     parser.add_argument("--output-dir", type=str, default="storage/models/checkpoints/stage0_pretraining", help="Output checkpoint directory")
+    parser.add_argument("--stage-id", type=str, default="stage0_pretraining", help="Unique Stage ID (e.g. stage0, stage1, ... N)")
+    parser.add_argument("--stage-name", type=str, default="Stage 0: Foundational Pretraining", help="Human-readable stage title")
     parser.add_argument("--epochs", type=int, default=1, help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=4, help="Micro-batch size per device")
     parser.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps")
     parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
     parser.add_argument("--max-steps", type=int, default=200, help="Max optimizer steps")
     parser.add_argument("--max-seq-len", type=int, default=256, help="Max sequence length")
+    parser.add_argument("--resume", action="store_true", default=True, help="Auto-resume from existing checkpoint if available")
     args = parser.parse_args()
 
     print("=" * 78)
-    print("  TARA CLOUD TRAINING SYSTEM (HIGH-THROUGHPUT GPU RUNNER)")
+    print(f"  TARA CLOUD MULTI-STAGE TRAINING SYSTEM [{args.stage_name}]")
     print("=" * 78)
 
+    # 1. Idempotence Check
+    if check_stage_already_completed(args.output_dir):
+        sys.exit(0)
+
+    # 2. Hardware Inspection & Precision Selection (BF16 for Ampere+, FP16 for Tesla T4)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(f"[Hardware] Active Device: {device}")
+    precision_str = "FP32"
+    precision_dtype = torch.float32
+
     if torch.cuda.is_available():
         gpu_name = torch.cuda.get_device_name(0)
         vram_mb = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024)
-        print(f"[Hardware] GPU: {gpu_name} | VRAM: {vram_mb:.1f} MB")
+        if torch.cuda.is_bf16_supported():
+            precision_dtype = torch.bfloat16
+            precision_str = "BF16"
+        else:
+            precision_dtype = torch.float16
+            precision_str = "FP16"
+        print(f"[Hardware] GPU: {gpu_name} | VRAM: {vram_mb:.1f} MB | Precision: {precision_str}")
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
+    else:
+        print("[Hardware] No GPU detected. Defaulting to CPU (FP32).")
 
-    # Load configuration
+    # 3. Load Architecture Config
     config_path = os.path.join(args.model_dir, "config.json")
+    if not os.path.exists(config_path):
+        config_path = "storage/models/tara_candidate_v1/config.json"
     if not os.path.exists(config_path):
         print(f"[Error] Missing config.json at {config_path}")
         sys.exit(1)
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
-    print(f"[Architecture] Vocab: {config['vocab_size']}, Hidden: {config['hidden_size']}, Layers: {config['num_hidden_layers']}, Heads: {config['num_attention_heads']}")
-
-    # Load Tokenizer
+    # 4. Load Tokenizer
     tok_path = os.path.join(args.model_dir, "tokenizer.json")
+    if not os.path.exists(tok_path):
+        tok_path = "storage/models/tara_candidate_v1/tokenizer.json"
     if not os.path.exists(tok_path) or not HAS_TOKENIZERS:
-        print(f"[Error] tokenizer.json missing at {tok_path} or tokenizers package not installed.")
+        print(f"[Error] tokenizer.json missing at {tok_path} or tokenizers not installed.")
         sys.exit(1)
     tokenizer = Tokenizer.from_file(tok_path)
-    print(f"[Tokenizer] Loaded vocabulary from {tok_path}")
 
-    # Build Model
+    # 5. Build Model
     model = TaraForCausalLM(config).to(device)
     load_candidate_weights(model, args.model_dir)
 
     total_params = sum(p.numel() for p in model.parameters())
     print(f"[Model] Total parameters: {total_params:,} ({total_params * 4 / 1e6:.1f} MB in FP32)")
 
-    # Find JSONL shards
+    # 6. Ingest Shards
     shard_files = sorted(glob.glob(os.path.join(args.dataset_dir, "*.jsonl")))
     if not shard_files:
-        # Fallback to main_dataset_v1 if v2 is empty
         shard_files = sorted(glob.glob("storage/datasets/main_dataset_v1/*.jsonl"))
     if not shard_files:
         print(f"[Error] No JSONL shards found in {args.dataset_dir} or fallback.")
@@ -388,7 +543,7 @@ def main():
 
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
 
-    # Optimizer with Fused AdamW where supported
+    # 7. Optimizer with Fused AdamW & Scaler
     fused_available = 'fused' in torch.optim.AdamW.__init__.__code__.co_varnames and torch.cuda.is_available()
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -396,24 +551,45 @@ def main():
         betas=(0.9, 0.999),
         eps=1e-8,
         weight_decay=0.01,
-        fused=fused_available
+        fused=fused_available,
     )
-    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
+    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and precision_dtype == torch.float16))
 
-    print(f"[Training] Starting Cloud Training (Batch: {args.batch_size}, Accum: {args.grad_accum}, Max Steps: {args.max_steps})...")
+    # 8. Check for Mid-Way Resume
+    start_step = 0
+    start_epoch = 0
+    best_loss = float("inf")
+    if args.resume:
+        start_step, start_epoch, best_loss, was_resumed = try_resume_from_checkpoint(
+            args.output_dir, model, optimizer, scaler
+        )
+        if start_step >= args.max_steps:
+            print(f"[Resume] Training already completed all {args.max_steps} steps. Finishing.")
+            save_checkpoint(
+                model, optimizer, scaler, config, tok_path, args.output_dir,
+                start_step, start_epoch, best_loss, best_loss, args.stage_id,
+                is_best=False, is_completed=True
+            )
+            sys.exit(0)
+
+    # Setup Best Checkpoint Directory
+    best_cp_dir = os.path.join(args.output_dir, "best_checkpoint")
+
+    print(f"[Training] Launching Training: Epochs={args.epochs}, Batch={args.batch_size}, Accum={args.grad_accum}, Precision={precision_str}, Steps={start_step}..{args.max_steps}")
     model.train()
-    step = 0
+    step = start_step
     running_loss = 0.0
     accum_loss = 0.0
+    ema_loss = None
     t0 = time.time()
 
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         optimizer.zero_grad(set_to_none=True)
         for batch_idx, (inputs, labels) in enumerate(dataloader):
             inputs = inputs.to(device)
             labels = labels.to(device)
 
-            with torch.cuda.amp.autocast(enabled=(device.type == "cuda"), dtype=torch.float16):
+            with torch.cuda.amp.autocast(enabled=(device.type == "cuda"), dtype=precision_dtype):
                 _, loss = model(inputs, labels=labels)
                 loss_scaled = loss / args.grad_accum
 
@@ -428,17 +604,49 @@ def main():
                 optimizer.zero_grad(set_to_none=True)
 
                 step += 1
-                running_loss += accum_loss / args.grad_accum
+                cur_step_loss = accum_loss / args.grad_accum
+                running_loss += cur_step_loss
                 accum_loss = 0.0
 
-                if step % 10 == 0 or step == 1 or step >= args.max_steps:
+                ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
+
+                # Real-Time Telemetry Logging
+                if step % 10 == 0 or step == start_step + 1 or step >= args.max_steps:
                     elapsed = time.time() - t0
-                    cur_loss = running_loss / (10 if step % 10 == 0 and step > 1 else 1)
-                    ppl = math.exp(min(cur_loss, 20.0))
-                    tokens_per_sec = (step * args.batch_size * args.grad_accum * args.max_seq_len) / max(elapsed, 1e-3)
+                    steps_done = step - start_step
+                    ppl = math.exp(min(cur_step_loss, 20.0))
+                    tokens_per_sec = (steps_done * args.batch_size * args.grad_accum * args.max_seq_len) / max(elapsed, 1e-3)
                     vram_used = torch.cuda.memory_allocated() / (1024 * 1024) if torch.cuda.is_available() else 0
-                    print(f"[Step {step:04d}/{args.max_steps}] Loss: {cur_loss:.4f} | PPL: {ppl:.2f} | GradNorm: {grad_norm:.2f} | Speed: {tokens_per_sec:.0f} tok/s | VRAM: {vram_used:.0f} MB")
-                    running_loss = 0.0
+                    vram_total = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024) if torch.cuda.is_available() else 0
+                    cur_lr = optimizer.param_groups[0]["lr"]
+
+                    print(
+                        f"[{args.stage_id} | Step {step:04d}/{args.max_steps}] "
+                        f"Loss: {cur_step_loss:.4f} (EMA: {ema_loss:.4f}) | "
+                        f"PPL: {ppl:.2f} | "
+                        f"LR: {cur_lr:.2e} | "
+                        f"GradNorm: {grad_norm:.2f} | "
+                        f"Speed: {tokens_per_sec:.0f} tok/s | "
+                        f"VRAM: {vram_used:.0f}/{vram_total:.0f} MB ({precision_str})"
+                    )
+
+                # Dynamic Best-Checkpointing Gate
+                if cur_step_loss < best_loss and step >= 10:
+                    best_loss = cur_step_loss
+                    print(f"[{args.stage_id}] >>> NEW HISTORICAL BEST LOSS ACHIEVED: {best_loss:.4f} <<<")
+                    save_checkpoint(
+                        model, optimizer, scaler, config, tok_path, best_cp_dir,
+                        step, epoch, cur_step_loss, best_loss, args.stage_id,
+                        is_best=True, is_completed=False
+                    )
+
+                # Periodic Step Checkpointing for Mid-Way Resilience
+                if step % 100 == 0:
+                    save_checkpoint(
+                        model, optimizer, scaler, config, tok_path, args.output_dir,
+                        step, epoch, cur_step_loss, best_loss, args.stage_id,
+                        is_best=False, is_completed=False
+                    )
 
                 if step >= args.max_steps:
                     break
@@ -446,21 +654,22 @@ def main():
         if step >= args.max_steps:
             break
 
+    total_time = time.time() - t0
+    final_loss = ema_loss if ema_loss is not None else 0.0
     print("=" * 78)
-    print(f"[Training Complete] Finished {step} steps in {time.time() - t0:.1f}s.")
+    print(f"[{args.stage_id} FINISHED] Completed {step} steps in {total_time:.1f}s | Final Loss: {final_loss:.4f} | Best Loss: {best_loss:.4f}")
     print("=" * 78)
 
-    # Export canonical model artifacts for Rust Engine
-    export_checkpoint(model, config, tok_path, args.output_dir)
+    # Final Checkpoint Save with COMPLETED status
+    save_checkpoint(
+        model, optimizer, scaler, config, tok_path, args.output_dir,
+        step, epoch, final_loss, best_loss, args.stage_id,
+        is_best=False, is_completed=True
+    )
 
-    # Sync to Google Drive if active
-    gdrive_dir = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
-    if os.path.exists("/content/drive/MyDrive"):
-        target_gdrive = os.path.join(gdrive_dir, os.path.basename(args.output_dir))
-        export_checkpoint(model, config, tok_path, target_gdrive)
-        print(f"[GDrive] Checkpoint mirrored to {target_gdrive}")
-
-    print("[Success] Model weights ready for 100% native Rust inference & serving!")
+    print(f"[Stage Complete] Production artifacts published to: {args.output_dir}")
+    print(f"[Stage Complete] Best Milestone model archived in: {best_cp_dir}")
+    print("[Success] All weights are 100% compatible with native Rust TARA inference & serving!")
 
 
 if __name__ == "__main__":

@@ -151,8 +151,13 @@ impl MemoryGovernor {
                 };
             }
 
-            // If in Constrained or partial fit: check partial offload
-            if usable_vram >= budget.weights_bytes / 2 || mode == MemoryExecutionMode::ConstrainedMemorySaving {
+            // Minimum viable unit of accelerator execution: at least 1 layer plus workspace and overhead
+            let min_accelerator_layer_budget = (budget.weights_bytes / total_layers.max(1))
+                .saturating_add(budget.workspace_bytes)
+                .saturating_add(budget.overhead_bytes);
+
+            // If in Constrained or partial fit: check partial offload dynamically for any model scale
+            if usable_vram >= min_accelerator_layer_budget || mode == MemoryExecutionMode::ConstrainedMemorySaving {
                 let resident_layers = (total_layers * usable_vram) / total_required.max(1);
                 let resident_layers = resident_layers.clamp(1, total_layers);
                 let host_paged = total_required.saturating_sub(usable_vram);
@@ -178,8 +183,10 @@ impl MemoryGovernor {
             };
         }
 
-        // 3. Fallback: Check if partial paged paging into host RAM works
-        if usable_host_ram >= (budget.weights_bytes / 4) {
+        // 3. Fallback: Check if partial paged paging into host RAM works dynamically
+        let min_host_layer_budget = (budget.weights_bytes / total_layers.max(1))
+            .saturating_add(budget.workspace_bytes);
+        if usable_host_ram >= min_host_layer_budget {
             let resident_layers = (total_layers * usable_host_ram) / total_required.max(1);
             let resident_layers = resident_layers.clamp(1, total_layers);
             return PlacementDecision::PartialOffload {

@@ -826,6 +826,35 @@ impl CudaSession {
         })
     }
 
+    pub fn upload_f32_slice_offset(
+        &self,
+        buffer: &CudaBuffer,
+        offset_elements: usize,
+        data: &[f32],
+    ) -> Result<(), CudaError> {
+        if offset_elements + data.len() > buffer.len_elements {
+            return Err(CudaError::KernelError(format!(
+                "Upload overflow: offset {} + data len {} > buffer capacity {}",
+                offset_elements,
+                data.len(),
+                buffer.len_elements
+            )));
+        }
+        let byte_offset = offset_elements * std::mem::size_of::<f32>();
+        let bytes_to_copy = std::mem::size_of_val(data);
+        self.context.with_context(|| {
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_memcpy_htod)(
+                    buffer.dptr + byte_offset as u64,
+                    data.as_ptr() as *const c_void,
+                    bytes_to_copy
+                )
+            );
+            Ok(())
+        })
+    }
+
     pub fn upload_u32(&self, buffer: &CudaBuffer, data: &[u32]) -> Result<(), CudaError> {
         if data.len() != buffer.len_elements {
             return Err(CudaError::KernelError(format!(
@@ -841,6 +870,57 @@ impl CudaSession {
                     buffer.dptr,
                     data.as_ptr() as *const c_void,
                     buffer.bytes
+                )
+            );
+            Ok(())
+        })
+    }
+
+    pub fn upload_u32_slice(&self, buffer: &CudaBuffer, data: &[u32]) -> Result<(), CudaError> {
+        if data.len() > buffer.len_elements {
+            return Err(CudaError::KernelError(format!(
+                "Upload overflow: data has {} elements, but buffer capacity is only {}",
+                data.len(),
+                buffer.len_elements
+            )));
+        }
+        let bytes_to_copy = std::mem::size_of_val(data);
+        self.context.with_context(|| {
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_memcpy_htod)(
+                    buffer.dptr,
+                    data.as_ptr() as *const c_void,
+                    bytes_to_copy
+                )
+            );
+            Ok(())
+        })
+    }
+
+    pub fn upload_u32_slice_offset(
+        &self,
+        buffer: &CudaBuffer,
+        offset_elements: usize,
+        data: &[u32],
+    ) -> Result<(), CudaError> {
+        if offset_elements + data.len() > buffer.len_elements {
+            return Err(CudaError::KernelError(format!(
+                "Upload overflow: offset {} + data len {} > buffer capacity {}",
+                offset_elements,
+                data.len(),
+                buffer.len_elements
+            )));
+        }
+        let byte_offset = offset_elements * std::mem::size_of::<u32>();
+        let bytes_to_copy = std::mem::size_of_val(data);
+        self.context.with_context(|| {
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_memcpy_htod)(
+                    buffer.dptr + byte_offset as u64,
+                    data.as_ptr() as *const c_void,
+                    bytes_to_copy
                 )
             );
             Ok(())

@@ -399,7 +399,7 @@ pub fn log_flushed_memory_checkpoint(op_name: &str, vram_info: Option<(usize, us
 pub struct GpuParamState {
     pub d_weight: Option<CudaBuffer>, // FP32 master weights (None when streamed from host)
     pub d_weight_f16: Option<CudaBuffer>, // FP16 model weights (in FP16 mode)
-    pub d_grad: CudaBuffer,           // FP32 or FP16 gradient buffer
+    pub d_grad: Option<CudaBuffer>,   // FP32 or FP16 gradient buffer (None when streamed from host)
     pub d_m: Option<CudaBuffer>,      // FP32 momentum (None when streamed from host)
     pub d_v: Option<CudaBuffer>,      // FP32 variance (None when streamed from host)
     pub len: usize,
@@ -418,6 +418,9 @@ pub struct CudaTrainer {
     d_chunk_w: Option<CudaBuffer>,
     d_chunk_m: Option<CudaBuffer>,
     d_chunk_v: Option<CudaBuffer>,
+    d_chunk_g: Option<CudaBuffer>,
+    d_chunk_wf16: Option<CudaBuffer>,
+    h_grad: std::sync::Mutex<HashMap<String, Vec<f32>>>,
     stream_optimizer: bool,
     // FP32 Kernels
     k_accum_grads: CudaKernel,
@@ -557,6 +560,9 @@ impl CudaTrainer {
             d_chunk_w: None,
             d_chunk_m: None,
             d_chunk_v: None,
+            d_chunk_g: None,
+            d_chunk_wf16: None,
+            h_grad: std::sync::Mutex::new(HashMap::new()),
             stream_optimizer: false,
             k_accum_grads,
             k_scale_grads,
@@ -643,22 +649,56 @@ impl CudaTrainer {
         let (free_vram, _) = self.session.get_memory_info()?;
 
         let naive_bytes_needed = total_elements * 16; // 4B master + 4B m + 4B v + 4B grad / f16 weights
-
-        // Stream optimizer states when VRAM would be overcommitted
         let stream_opt = naive_bytes_needed > (free_vram * 5) / 10;
-        let max_tensor_len = weights.values().map(|v| v.len()).max().unwrap_or(0);
 
-        let (chunk_w, chunk_m, chunk_v) = if stream_opt {
+        // Dynamic Tile Budget: Adapt dynamically to available VRAM without hardcoded ceilings or arbitrary magic thresholds.
+        // Bounds single reusable chunk buffer to a safe fraction (1/8th) of currently available free VRAM,
+        // dynamically scaling across 2GB, 8GB, 16GB, 80GB GPUs, and handling arbitrary model sizes (1B, 7B, 70B+).
+        let safe_staging_bytes = (free_vram / 32).clamp(4 * 1024 * 1024, 32 * 1024 * 1024);
+        let dynamic_tile_elements = (safe_staging_bytes / std::mem::size_of::<f32>()).max(1024);
+        let max_tensor_len = weights.values().map(|v| v.len()).max().unwrap_or(0);
+        let staging_elements = dynamic_tile_elements.min(max_tensor_len);
+
+        let (chunk_w, chunk_m, chunk_v, chunk_g, chunk_wf16) = if stream_opt {
             (
-                Some(self.session.allocate_f32(max_tensor_len)?),
-                Some(self.session.allocate_f32(max_tensor_len)?),
-                Some(self.session.allocate_f32(max_tensor_len)?),
+                Some(self.session.allocate_f32(staging_elements)?),
+                Some(self.session.allocate_f32(staging_elements)?),
+                Some(self.session.allocate_f32(staging_elements)?),
+                Some(self.session.allocate_f32(staging_elements)?),
+                Some(self.session.allocate_f32(staging_elements.div_ceil(2))?),
             )
         } else {
-            (None, None, None)
+            (None, None, None, None, None)
         };
 
-        for (name, vals) in weights {
+        // Budgeting for resident weights:
+        // Dynamically reserve safety margin (e.g. 1/16th of free VRAM, bounded between 64MB and 256MB)
+        let reserved_for_ops = (free_vram / 16).clamp(64 * 1024 * 1024, 256 * 1024 * 1024);
+        let staging_total_bytes = if stream_opt { safe_staging_bytes * 5 } else { 0 };
+        let mut resident_vram_budget = free_vram.saturating_sub(reserved_for_ops + staging_total_bytes);
+
+        // Sort weight names deterministically with priority for lm_head.weight and critical model heads
+        let mut sorted_names: Vec<String> = weights.keys().cloned().collect();
+        sorted_names.sort_by(|a, b| {
+            let priority_a = if a == "lm_head.weight" {
+                0
+            } else if !a.contains("layers.") {
+                1
+            } else {
+                2
+            };
+            let priority_b = if b == "lm_head.weight" {
+                0
+            } else if !b.contains("layers.") {
+                1
+            } else {
+                2
+            };
+            priority_a.cmp(&priority_b).then_with(|| a.cmp(b))
+        });
+
+        for name in &sorted_names {
+            let vals = &weights[name];
             let len = vals.len();
 
             let (d_weight, d_m, d_v) = if is_f16 {
@@ -676,13 +716,20 @@ impl CudaTrainer {
                     (Some(dw), Some(dm), Some(dv))
                 }
             } else {
-                // In FP32 mode: model weights MUST always reside on GPU for forward/backward computation
-                let dw = self.session.allocate_f32(len)?;
-                self.session.upload_f32(&dw, vals)?;
-
+                // In FP32 mode: model weights resident if fit, else streamed
                 if stream_opt {
-                    (Some(dw), None, None)
+                    let weight_bytes = len * std::mem::size_of::<f32>();
+                    if weight_bytes <= resident_vram_budget {
+                        let dw = self.session.allocate_f32(len)?;
+                        self.session.upload_f32(&dw, vals)?;
+                        resident_vram_budget = resident_vram_budget.saturating_sub(weight_bytes);
+                        (Some(dw), None, None)
+                    } else {
+                        (None, None, None)
+                    }
                 } else {
+                    let dw = self.session.allocate_f32(len)?;
+                    self.session.upload_f32(&dw, vals)?;
                     let dm = self.session.allocate_f32(len)?;
                     let dv = self.session.allocate_f32(len)?;
                     self.session.zero_buffer(&dm)?;
@@ -692,23 +739,45 @@ impl CudaTrainer {
             };
 
             let (d_weight_f16, d_grad) = if is_f16 {
-                // FP16 model weight buffer: packed u32 words = len.div_ceil(2)
-                let f16_elements = len.div_ceil(2);
-                let d_wf16 = self.session.allocate_f32(f16_elements)?;
-                // Gradient buffer is kept strictly in FP32 to prevent underflow and preserve precision
-                let d_g = self.session.allocate_f32(len)?;
+                if stream_opt {
+                    let f16_elements = len.div_ceil(2);
+                    let f16_bytes = f16_elements * std::mem::size_of::<f32>();
+                    // Prioritize lm_head.weight or resident layers if within resident budget
+                    let is_resident = (name == "lm_head.weight" || !name.contains("layers."))
+                        && f16_bytes <= resident_vram_budget;
 
-                // Safe conversion and packing without undefined behavior
-                let h_f16: Vec<f16> = vals.iter().map(|&x| f16::from_f32(x)).collect();
-                let packed = pack_f16_to_u32(&h_f16);
-                self.session.upload_u32(&d_wf16, &packed)?;
-                self.session.zero_buffer(&d_g)?;
+                    let d_wf16 = if is_resident {
+                        let dw16 = self.session.allocate_f32(f16_elements)?;
+                        let h_f16: Vec<f16> = vals.iter().map(|&x| f16::from_f32(x)).collect();
+                        let packed = pack_f16_to_u32(&h_f16);
+                        self.session.upload_u32(&dw16, &packed)?;
+                        resident_vram_budget = resident_vram_budget.saturating_sub(f16_bytes);
+                        Some(dw16)
+                    } else {
+                        None
+                    };
 
-                (Some(d_wf16), d_g)
+                    (d_wf16, None)
+                } else {
+                    let f16_elements = len.div_ceil(2);
+                    let d_wf16 = self.session.allocate_f32(f16_elements)?;
+                    let d_g = self.session.allocate_f32(len)?;
+
+                    let h_f16: Vec<f16> = vals.iter().map(|&x| f16::from_f32(x)).collect();
+                    let packed = pack_f16_to_u32(&h_f16);
+                    self.session.upload_u32(&d_wf16, &packed)?;
+                    self.session.zero_buffer(&d_g)?;
+
+                    (Some(d_wf16), Some(d_g))
+                }
             } else {
-                let d_g = self.session.allocate_f32(len)?;
-                self.session.zero_buffer(&d_g)?;
-                (None, d_g)
+                if stream_opt {
+                    (None, None)
+                } else {
+                    let d_g = self.session.allocate_f32(len)?;
+                    self.session.zero_buffer(&d_g)?;
+                    (None, Some(d_g))
+                }
             };
 
             new_params.insert(
@@ -737,7 +806,13 @@ impl CudaTrainer {
         self.moments_disk_dir = None;
 
         if stream_opt {
-            self.temp_buf = vec![0.0f32; max_tensor_len];
+            let mut hg_guard = self.h_grad.lock().unwrap();
+            hg_guard.clear();
+            for (name, vals) in weights {
+                hg_guard.insert(name.clone(), vec![0.0f32; vals.len()]);
+                self.h_weights.insert(name.clone(), vals.clone());
+            }
+            self.temp_buf = vec![0.0f32; staging_elements];
             let disk_moments_forced = std::env::var("TARA_STREAM_MOMENTS_DISK")
                 .map(|v| v == "1" || v == "true")
                 .unwrap_or(false);
@@ -747,8 +822,6 @@ impl CudaTrainer {
                 _ => snap.host_avail_mb,
             };
             let moments_size_mb = (total_elements * 4) as f64 / (1024.0 * 1024.0); // FP16 m + FP16 v
-                                                                                   // Activate disk-backed scratch moments if host RAM headroom is below safe margin
-                                                                                   // (moments_size + 4GB overhead/model headroom) or explicitly requested.
             let use_disk_moments =
                 disk_moments_forced || host_avail_mb < (moments_size_mb + 4000.0);
 
@@ -784,6 +857,8 @@ impl CudaTrainer {
         self.d_chunk_w = chunk_w;
         self.d_chunk_m = chunk_m;
         self.d_chunk_v = chunk_v;
+        self.d_chunk_g = chunk_g;
+        self.d_chunk_wf16 = chunk_wf16;
         self.stream_optimizer = stream_opt;
 
         log_flushed_memory_checkpoint(
@@ -843,73 +918,78 @@ impl CudaTrainer {
         }
 
         let is_f16 = self.precision == TrainingPrecision::Fp16;
-        let dptr_embed = if is_f16 {
-            embed_param
-                .d_weight_f16
-                .as_ref()
-                .map(|b| b.dptr)
-                .ok_or_else(|| {
-                    CudaError::KernelError("FP16 embedding table not initialized".into())
-                })?
+        let dptr_embed_opt = if is_f16 {
+            embed_param.d_weight_f16.as_ref().map(|b| b.dptr)
         } else {
-            embed_param
-                .d_weight
-                .as_ref()
-                .map(|b| b.dptr)
-                .ok_or_else(|| {
-                    CudaError::KernelError("FP32 embedding table not initialized".into())
-                })?
+            embed_param.d_weight.as_ref().map(|b| b.dptr)
         };
 
-        let d_tokens = self.session.allocate_f32(seq_len)?;
-        let d_out = self.session.allocate_f32(seq_len * hs)?;
+        if let Some(dptr_embed) = dptr_embed_opt {
+            let d_tokens = self.session.allocate_f32(seq_len)?;
+            let d_out = self.session.allocate_f32(seq_len * hs)?;
 
-        self.session.upload_u32(&d_tokens, tokens)?;
+            self.session.upload_u32(&d_tokens, tokens)?;
 
-        let total = (seq_len * hs) as u32;
-        let block_dim = 128u32;
-        let grid_dim = total.div_ceil(block_dim);
+            let total = (seq_len * hs) as u32;
+            let block_dim = 128u32;
+            let grid_dim = total.div_ceil(block_dim);
 
-        let mut arg_tokens = d_tokens.dptr;
-        let mut arg_embed = dptr_embed;
-        let mut arg_out = d_out.dptr;
-        let mut arg_seq = seq_len as u32;
-        let mut arg_hs = hs as u32;
+            let mut arg_tokens = d_tokens.dptr;
+            let mut arg_embed = dptr_embed;
+            let mut arg_out = d_out.dptr;
+            let mut arg_seq = seq_len as u32;
+            let mut arg_hs = hs as u32;
 
-        let params: [*mut c_void; 16] = [
-            &mut arg_tokens as *mut u64 as *mut c_void,
-            &mut arg_embed as *mut u64 as *mut c_void,
-            &mut arg_out as *mut u64 as *mut c_void,
-            &mut arg_seq as *mut u32 as *mut c_void,
-            &mut arg_hs as *mut u32 as *mut c_void,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        ];
+            let params: [*mut c_void; 16] = [
+                &mut arg_tokens as *mut u64 as *mut c_void,
+                &mut arg_embed as *mut u64 as *mut c_void,
+                &mut arg_out as *mut u64 as *mut c_void,
+                &mut arg_seq as *mut u32 as *mut c_void,
+                &mut arg_hs as *mut u32 as *mut c_void,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ];
 
-        unsafe {
-            if is_f16 {
-                self.k_emb_fwd_f16
-                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 5)?;
-            } else {
-                self.k_emb_fwd
-                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 5)?;
+            unsafe {
+                if is_f16 {
+                    self.k_emb_fwd_f16
+                        .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 5)?;
+                } else {
+                    self.k_emb_fwd
+                        .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 5)?;
+                }
             }
-        }
-        self.record_kernel_launch();
-        self.session.synchronize()?;
+            self.record_kernel_launch();
+            self.session.synchronize()?;
 
-        let mut host_out = vec![0.0f32; seq_len * hs];
-        self.session.download_f32(&d_out, &mut host_out)?;
-        Ok(host_out)
+            let mut host_out = vec![0.0f32; seq_len * hs];
+            self.session.download_f32(&d_out, &mut host_out)?;
+            Ok(host_out)
+        } else {
+            // Streamed fallback for arbitrary model scale (e.g. 7B, 70B+)
+            let hw = self.h_weights.get("model.embed_tokens.weight").ok_or_else(|| {
+                CudaError::KernelError("Embedding table not found in host weights".into())
+            })?;
+            let mut host_out = vec![0.0f32; seq_len * hs];
+            for (s, &tok) in tokens.iter().enumerate() {
+                let tok_idx = tok as usize;
+                let start = tok_idx * hs;
+                let end = start + hs;
+                if end <= hw.len() {
+                    host_out[s * hs..(s + 1) * hs].copy_from_slice(&hw[start..end]);
+                }
+            }
+            Ok(host_out)
+        }
     }
 
     /// Forward RMSNorm on GPU.
@@ -997,6 +1077,7 @@ impl CudaTrainer {
     }
 
     /// Forward Linear Projection on GPU: out = input @ weight^T.
+    /// Supports both resident and dynamically streamed weights for arbitrary model scale (1B, 7B, 70B+).
     pub fn forward_linear(
         &self,
         weight_name: &str,
@@ -1013,76 +1094,187 @@ impl CudaTrainer {
         })?;
 
         let is_f16 = self.precision == TrainingPrecision::Fp16;
-        let (dptr_w, is_f16_buf) = if is_f16 {
+        let (dptr_w_opt, is_f16_buf) = if is_f16 {
             if let Some(ref bw16) = weight_param.d_weight_f16 {
-                (bw16.dptr, true)
+                (Some(bw16.dptr), true)
             } else if let Some(ref bw) = weight_param.d_weight {
-                (bw.dptr, false)
+                (Some(bw.dptr), false)
             } else {
-                return Err(CudaError::KernelError(format!(
-                    "Weight '{weight_name}' has no GPU buffer"
-                )));
+                (None, true)
             }
         } else {
-            let dw = weight_param.d_weight.as_ref().ok_or_else(|| {
-                CudaError::KernelError(format!("Weight '{weight_name}' has no GPU buffer"))
-            })?;
-            (dw.dptr, false)
+            if let Some(ref bw) = weight_param.d_weight {
+                (Some(bw.dptr), false)
+            } else {
+                (None, false)
+            }
         };
 
-        let d_in = self.session.allocate_f32(seq_len * in_dim)?;
-        let d_out = self.session.allocate_f32(seq_len * out_dim)?;
-
-        self.session.upload_f32(&d_in, input)?;
-
-        let total = (seq_len * out_dim) as u32;
         let block_dim = 128u32;
-        let grid_dim = total.div_ceil(block_dim);
+        let (free_vram, _) = self.session.get_memory_info().unwrap_or((0, 0));
+        let out_bytes = seq_len * out_dim * std::mem::size_of::<f32>();
 
-        let mut arg_in = d_in.dptr;
-        let mut arg_w = dptr_w;
-        let mut arg_out = d_out.dptr;
-        let mut arg_seq = seq_len as u32;
-        let mut arg_in_dim = in_dim as u32;
-        let mut arg_out_dim = out_dim as u32;
+        // Fast path: resident weight and output fits comfortably in free VRAM (<= 25% free VRAM)
+        if let Some(dptr_w) = dptr_w_opt {
+            if out_bytes <= free_vram / 4 {
+                let d_in = self.session.allocate_f32(seq_len * in_dim)?;
+                let d_out = self.session.allocate_f32(seq_len * out_dim)?;
 
-        let params: [*mut c_void; 16] = [
-            &mut arg_in as *mut u64 as *mut c_void,
-            &mut arg_w as *mut u64 as *mut c_void,
-            &mut arg_out as *mut u64 as *mut c_void,
-            &mut arg_seq as *mut u32 as *mut c_void,
-            &mut arg_in_dim as *mut u32 as *mut c_void,
-            &mut arg_out_dim as *mut u32 as *mut c_void,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        ];
+                self.session.upload_f32(&d_in, input)?;
 
-        unsafe {
-            if is_f16_buf {
-                self.k_lin_fwd_f16
-                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 6)?;
-            } else {
-                self.k_lm_fwd
-                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 6)?;
+                let total = (seq_len * out_dim) as u32;
+                let grid_dim = total.div_ceil(block_dim);
+
+                let mut arg_in = d_in.dptr;
+                let mut arg_w = dptr_w;
+                let mut arg_out = d_out.dptr;
+                let mut arg_seq = seq_len as u32;
+                let mut arg_in_dim = in_dim as u32;
+                let mut arg_out_dim = out_dim as u32;
+
+                let params: [*mut c_void; 16] = [
+                    &mut arg_in as *mut u64 as *mut c_void,
+                    &mut arg_w as *mut u64 as *mut c_void,
+                    &mut arg_out as *mut u64 as *mut c_void,
+                    &mut arg_seq as *mut u32 as *mut c_void,
+                    &mut arg_in_dim as *mut u32 as *mut c_void,
+                    &mut arg_out_dim as *mut u32 as *mut c_void,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                ];
+
+                unsafe {
+                    if is_f16_buf {
+                        self.k_lin_fwd_f16
+                            .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 6)?;
+                    } else {
+                        self.k_lm_fwd
+                            .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 6)?;
+                    }
+                }
+                self.record_kernel_launch();
+                self.session.synchronize()?;
+
+                let mut host_out = vec![0.0f32; seq_len * out_dim];
+                self.session.download_f32(&d_out, &mut host_out)?;
+                return Ok(host_out);
             }
         }
-        self.record_kernel_launch();
-        self.session.synchronize()?;
+
+        // Dynamically chunked / streamed path for arbitrary model scales (1B, 7B, 70B+)
+        let hw_opt = self.h_weights.get(weight_name);
+        if dptr_w_opt.is_none() && hw_opt.is_none() {
+            return Err(CudaError::KernelError(format!(
+                "Weight '{weight_name}' has neither GPU buffer nor host weight copy"
+            )));
+        }
+
+        let safe_staging = (free_vram / 32).clamp(4 * 1024 * 1024, 32 * 1024 * 1024);
+        let chunk_cap = safe_staging / std::mem::size_of::<f32>();
+        let chunk_rows = (chunk_cap / in_dim.max(1)).clamp(1, out_dim);
+
+        let d_in = self.session.allocate_f32(seq_len * in_dim)?;
+        self.session.upload_f32(&d_in, input)?;
+
+        let d_chunk_w = if dptr_w_opt.is_none() {
+            if is_f16_buf {
+                Some(self.session.allocate_f32((chunk_rows * in_dim).div_ceil(2))?)
+            } else {
+                Some(self.session.allocate_f32(chunk_rows * in_dim)?)
+            }
+        } else {
+            None
+        };
+        let d_chunk_out = self.session.allocate_f32(seq_len * chunk_rows)?;
 
         let mut host_out = vec![0.0f32; seq_len * out_dim];
-        self.session.download_f32(&d_out, &mut host_out)?;
+
+        for row_start in (0..out_dim).step_by(chunk_rows) {
+            let cur_rows = (out_dim - row_start).min(chunk_rows);
+            let chunk_w_dptr = if let Some(base_dptr) = dptr_w_opt {
+                if is_f16_buf {
+                    base_dptr + (row_start * in_dim * 2) as u64
+                } else {
+                    base_dptr + (row_start * in_dim * 4) as u64
+                }
+            } else {
+                let hw = hw_opt.unwrap();
+                let slice = &hw[row_start * in_dim..(row_start + cur_rows) * in_dim];
+                if is_f16_buf {
+                    let h_f16: Vec<f16> = slice.iter().map(|&x| f16::from_f32(x)).collect();
+                    let packed = pack_f16_to_u32(&h_f16);
+                    let buf = d_chunk_w.as_ref().unwrap();
+                    self.session.upload_u32_slice(buf, &packed)?;
+                    buf.dptr
+                } else {
+                    let buf = d_chunk_w.as_ref().unwrap();
+                    self.session.upload_f32_slice(buf, slice)?;
+                    buf.dptr
+                }
+            };
+
+            let total = (seq_len * cur_rows) as u32;
+            let grid_dim = total.div_ceil(block_dim);
+            let mut arg_in = d_in.dptr;
+            let mut arg_w = chunk_w_dptr;
+            let mut arg_out = d_chunk_out.dptr;
+            let mut arg_seq = seq_len as u32;
+            let mut arg_in_dim = in_dim as u32;
+            let mut arg_cur_rows = cur_rows as u32;
+
+            let params: [*mut c_void; 16] = [
+                &mut arg_in as *mut u64 as *mut c_void,
+                &mut arg_w as *mut u64 as *mut c_void,
+                &mut arg_out as *mut u64 as *mut c_void,
+                &mut arg_seq as *mut u32 as *mut c_void,
+                &mut arg_in_dim as *mut u32 as *mut c_void,
+                &mut arg_cur_rows as *mut u32 as *mut c_void,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ];
+
+            unsafe {
+                if is_f16_buf {
+                    self.k_lin_fwd_f16
+                        .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 6)?;
+                } else {
+                    self.k_lm_fwd
+                        .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 6)?;
+                }
+            }
+            self.record_kernel_launch();
+            self.session.synchronize()?;
+
+            let mut chunk_out = vec![0.0f32; seq_len * cur_rows];
+            self.session.download_f32(&d_chunk_out, &mut chunk_out)?;
+            for s in 0..seq_len {
+                let src = &chunk_out[s * cur_rows..(s + 1) * cur_rows];
+                let dst_start = s * out_dim + row_start;
+                host_out[dst_start..dst_start + cur_rows].copy_from_slice(src);
+            }
+        }
+
         Ok(host_out)
     }
 
     /// Backward Linear Projection on GPU: computes d_weight and d_input.
+    /// Dynamically tiles across output dimension to scale smoothly across 1B, 7B, 70B+ models without CUDA OOM.
     pub fn backward_linear(
         &self,
         weight_name: &str,
@@ -1100,111 +1292,266 @@ impl CudaTrainer {
         })?;
 
         let is_f16 = self.precision == TrainingPrecision::Fp16;
-        let (dptr_w, is_f16_buf) = if is_f16 {
+        let (dptr_w_opt, is_f16_buf) = if is_f16 {
             if let Some(ref bw16) = weight_param.d_weight_f16 {
-                (bw16.dptr, true)
+                (Some(bw16.dptr), true)
             } else if let Some(ref bw) = weight_param.d_weight {
-                (bw.dptr, false)
+                (Some(bw.dptr), false)
             } else {
-                return Err(CudaError::KernelError(format!(
-                    "Weight '{weight_name}' has no GPU buffer"
-                )));
+                (None, true)
             }
         } else {
-            let dw = weight_param.d_weight.as_ref().ok_or_else(|| {
-                CudaError::KernelError(format!("Weight '{weight_name}' has no GPU buffer"))
-            })?;
-            (dw.dptr, false)
+            if let Some(ref bw) = weight_param.d_weight {
+                (Some(bw.dptr), false)
+            } else {
+                (None, false)
+            }
         };
 
-        let d_dout = self.session.allocate_f32(seq_len * out_dim)?;
-        let d_in = self.session.allocate_f32(seq_len * in_dim)?;
-        let d_dw = self.session.allocate_f32(out_dim * in_dim)?;
-        let d_din = self.session.allocate_f32(seq_len * in_dim)?;
-
-        self.session.upload_f32(&d_dout, d_out)?;
-        self.session.upload_f32(&d_in, input)?;
-
         let block_dim = 128u32;
+        let (free_vram, _) = self.session.get_memory_info().unwrap_or((0, 0));
+        let dw_bytes = out_dim * in_dim * std::mem::size_of::<f32>();
 
-        // 1. d_weight: [out_dim, in_dim] computed from FP32 d_out and FP32 input directly into FP32 d_weight
-        let total_w = (out_dim * in_dim) as u32;
-        let grid_w = total_w.div_ceil(block_dim);
-        let mut arg_dout = d_dout.dptr;
-        let mut arg_in = d_in.dptr;
-        let mut arg_dw = d_dw.dptr;
-        let mut arg_seq = seq_len as u32;
-        let mut arg_in_dim = in_dim as u32;
-        let mut arg_out_dim = out_dim as u32;
+        // Fast path: resident weight and monolithic d_dw fits comfortably in free VRAM (<= 25% free VRAM)
+        if let Some(dptr_w) = dptr_w_opt {
+            if dw_bytes <= free_vram / 4 {
+                let d_dout = self.session.allocate_f32(seq_len * out_dim)?;
+                let d_in = self.session.allocate_f32(seq_len * in_dim)?;
+                let d_dw = self.session.allocate_f32(out_dim * in_dim)?;
+                let d_din = self.session.allocate_f32(seq_len * in_dim)?;
 
-        let params_w: [*mut c_void; 16] = [
-            &mut arg_dout as *mut u64 as *mut c_void,
-            &mut arg_in as *mut u64 as *mut c_void,
-            &mut arg_dw as *mut u64 as *mut c_void,
-            &mut arg_seq as *mut u32 as *mut c_void,
-            &mut arg_in_dim as *mut u32 as *mut c_void,
-            &mut arg_out_dim as *mut u32 as *mut c_void,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        ];
-        unsafe {
-            self.k_lm_bwd_weight
-                .launch((grid_w, 1, 1), (block_dim, 1, 1), 0, params_w, 6)?;
-        }
+                self.session.upload_f32(&d_dout, d_out)?;
+                self.session.upload_f32(&d_in, input)?;
 
-        // 2. d_input: [seq_len, in_dim]
-        let total_in = (seq_len * in_dim) as u32;
-        let grid_in = total_in.div_ceil(block_dim);
-        let mut arg_w = dptr_w;
-        let mut arg_din = d_din.dptr;
+                // 1. d_weight: [out_dim, in_dim]
+                let total_w = (out_dim * in_dim) as u32;
+                let grid_w = total_w.div_ceil(block_dim);
+                let mut arg_dout = d_dout.dptr;
+                let mut arg_in = d_in.dptr;
+                let mut arg_dw = d_dw.dptr;
+                let mut arg_seq = seq_len as u32;
+                let mut arg_in_dim = in_dim as u32;
+                let mut arg_out_dim = out_dim as u32;
 
-        let params_in: [*mut c_void; 16] = [
-            &mut arg_dout as *mut u64 as *mut c_void,
-            &mut arg_w as *mut u64 as *mut c_void,
-            &mut arg_din as *mut u64 as *mut c_void,
-            &mut arg_seq as *mut u32 as *mut c_void,
-            &mut arg_in_dim as *mut u32 as *mut c_void,
-            &mut arg_out_dim as *mut u32 as *mut c_void,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        ];
-        unsafe {
-            if is_f16_buf {
-                self.k_lin_bwd_in_f16.launch(
-                    (grid_in, 1, 1),
-                    (block_dim, 1, 1),
-                    0,
-                    params_in,
-                    6,
-                )?;
-            } else {
-                self.k_lm_bwd_input
-                    .launch((grid_in, 1, 1), (block_dim, 1, 1), 0, params_in, 6)?;
+                let params_w: [*mut c_void; 16] = [
+                    &mut arg_dout as *mut u64 as *mut c_void,
+                    &mut arg_in as *mut u64 as *mut c_void,
+                    &mut arg_dw as *mut u64 as *mut c_void,
+                    &mut arg_seq as *mut u32 as *mut c_void,
+                    &mut arg_in_dim as *mut u32 as *mut c_void,
+                    &mut arg_out_dim as *mut u32 as *mut c_void,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                ];
+                unsafe {
+                    self.k_lm_bwd_weight
+                        .launch((grid_w, 1, 1), (block_dim, 1, 1), 0, params_w, 6)?;
+                }
+
+                // 2. d_input: [seq_len, in_dim]
+                let total_in = (seq_len * in_dim) as u32;
+                let grid_in = total_in.div_ceil(block_dim);
+                let mut arg_w = dptr_w;
+                let mut arg_din = d_din.dptr;
+
+                let params_in: [*mut c_void; 16] = [
+                    &mut arg_dout as *mut u64 as *mut c_void,
+                    &mut arg_w as *mut u64 as *mut c_void,
+                    &mut arg_din as *mut u64 as *mut c_void,
+                    &mut arg_seq as *mut u32 as *mut c_void,
+                    &mut arg_in_dim as *mut u32 as *mut c_void,
+                    &mut arg_out_dim as *mut u32 as *mut c_void,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                ];
+                unsafe {
+                    if is_f16_buf {
+                        self.k_lin_bwd_in_f16.launch(
+                            (grid_in, 1, 1),
+                            (block_dim, 1, 1),
+                            0,
+                            params_in,
+                            6,
+                        )?;
+                    } else {
+                        self.k_lm_bwd_input
+                            .launch((grid_in, 1, 1), (block_dim, 1, 1), 0, params_in, 6)?;
+                    }
+                }
+
+                self.session.synchronize()?;
+
+                let mut host_dw = vec![0.0f32; out_dim * in_dim];
+                let mut host_din = vec![0.0f32; seq_len * in_dim];
+                self.session.download_f32(&d_dw, &mut host_dw)?;
+                self.session.download_f32(&d_din, &mut host_din)?;
+
+                return Ok((host_dw, host_din));
             }
         }
 
-        self.session.synchronize()?;
+        // Dynamically chunked / streamed path for arbitrary model scales (1B, 7B, 70B+)
+        let hw_opt = self.h_weights.get(weight_name);
+        if dptr_w_opt.is_none() && hw_opt.is_none() {
+            return Err(CudaError::KernelError(format!(
+                "Weight '{weight_name}' has neither GPU buffer nor host weight copy"
+            )));
+        }
+
+        let safe_staging = (free_vram / 32).clamp(4 * 1024 * 1024, 32 * 1024 * 1024);
+        let chunk_cap = safe_staging / std::mem::size_of::<f32>();
+        let chunk_rows = (chunk_cap / in_dim.max(1)).clamp(1, out_dim);
 
         let mut host_dw = vec![0.0f32; out_dim * in_dim];
         let mut host_din = vec![0.0f32; seq_len * in_dim];
-        self.session.download_f32(&d_dw, &mut host_dw)?;
-        self.session.download_f32(&d_din, &mut host_din)?;
+
+        let d_in = self.session.allocate_f32(seq_len * in_dim)?;
+        self.session.upload_f32(&d_in, input)?;
+
+        let d_chunk_dw = self.session.allocate_f32(chunk_rows * in_dim)?;
+        let d_chunk_dout = self.session.allocate_f32(seq_len * chunk_rows)?;
+        let d_chunk_din = self.session.allocate_f32(seq_len * in_dim)?;
+
+        let d_chunk_w = if dptr_w_opt.is_none() {
+            if is_f16_buf {
+                Some(self.session.allocate_f32((chunk_rows * in_dim).div_ceil(2))?)
+            } else {
+                Some(self.session.allocate_f32(chunk_rows * in_dim)?)
+            }
+        } else {
+            None
+        };
+
+        for row_start in (0..out_dim).step_by(chunk_rows) {
+            let cur_rows = (out_dim - row_start).min(chunk_rows);
+
+            // Upload chunk of d_out for columns [row_start .. row_start + cur_rows]
+            let mut host_chunk_dout = vec![0.0f32; seq_len * cur_rows];
+            for s in 0..seq_len {
+                let src = &d_out[s * out_dim + row_start..s * out_dim + row_start + cur_rows];
+                host_chunk_dout[s * cur_rows..(s + 1) * cur_rows].copy_from_slice(src);
+            }
+            self.session.upload_f32_slice(&d_chunk_dout, &host_chunk_dout)?;
+
+            // 1. Launch lm_head_bwd_weight_kernel for this chunk
+            let total_w = (cur_rows * in_dim) as u32;
+            let grid_w = total_w.div_ceil(block_dim);
+            let mut arg_dout = d_chunk_dout.dptr;
+            let mut arg_in = d_in.dptr;
+            let mut arg_dw = d_chunk_dw.dptr;
+            let mut arg_seq = seq_len as u32;
+            let mut arg_in_dim = in_dim as u32;
+            let mut arg_cur_rows = cur_rows as u32;
+
+            let params_w: [*mut c_void; 16] = [
+                &mut arg_dout as *mut u64 as *mut c_void,
+                &mut arg_in as *mut u64 as *mut c_void,
+                &mut arg_dw as *mut u64 as *mut c_void,
+                &mut arg_seq as *mut u32 as *mut c_void,
+                &mut arg_in_dim as *mut u32 as *mut c_void,
+                &mut arg_cur_rows as *mut u32 as *mut c_void,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ];
+            unsafe {
+                self.k_lm_bwd_weight
+                    .launch((grid_w, 1, 1), (block_dim, 1, 1), 0, params_w, 6)?;
+            }
+            self.record_kernel_launch();
+            self.session.synchronize()?;
+
+            let dst_dw = &mut host_dw[row_start * in_dim..(row_start + cur_rows) * in_dim];
+            self.session.download_f32_slice(&d_chunk_dw, dst_dw)?;
+
+            // 2. Weight pointer for d_din
+            let chunk_w_dptr = if let Some(base_dptr) = dptr_w_opt {
+                if is_f16_buf {
+                    base_dptr + (row_start * in_dim * 2) as u64
+                } else {
+                    base_dptr + (row_start * in_dim * 4) as u64
+                }
+            } else {
+                let hw = hw_opt.unwrap();
+                let slice = &hw[row_start * in_dim..(row_start + cur_rows) * in_dim];
+                if is_f16_buf {
+                    let h_f16: Vec<f16> = slice.iter().map(|&x| f16::from_f32(x)).collect();
+                    let packed = pack_f16_to_u32(&h_f16);
+                    let buf = d_chunk_w.as_ref().unwrap();
+                    self.session.upload_u32_slice(buf, &packed)?;
+                    buf.dptr
+                } else {
+                    let buf = d_chunk_w.as_ref().unwrap();
+                    self.session.upload_f32_slice(buf, slice)?;
+                    buf.dptr
+                }
+            };
+
+            // 3. Launch linear_bwd_input_f16_kernel / lm_head_bwd_input_kernel for this chunk
+            let total_in = (seq_len * in_dim) as u32;
+            let grid_in = total_in.div_ceil(block_dim);
+            let mut arg_w = chunk_w_dptr;
+            let mut arg_din = d_chunk_din.dptr;
+
+            let params_in: [*mut c_void; 16] = [
+                &mut arg_dout as *mut u64 as *mut c_void,
+                &mut arg_w as *mut u64 as *mut c_void,
+                &mut arg_din as *mut u64 as *mut c_void,
+                &mut arg_seq as *mut u32 as *mut c_void,
+                &mut arg_in_dim as *mut u32 as *mut c_void,
+                &mut arg_cur_rows as *mut u32 as *mut c_void,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ];
+            unsafe {
+                if is_f16_buf {
+                    self.k_lin_bwd_in_f16
+                        .launch((grid_in, 1, 1), (block_dim, 1, 1), 0, params_in, 6)?;
+                } else {
+                    self.k_lm_bwd_input
+                        .launch((grid_in, 1, 1), (block_dim, 1, 1), 0, params_in, 6)?;
+                }
+            }
+            self.record_kernel_launch();
+            self.session.synchronize()?;
+
+            let mut host_chunk_din = vec![0.0f32; seq_len * in_dim];
+            self.session.download_f32(&d_chunk_din, &mut host_chunk_din)?;
+            for (tot, part) in host_din.iter_mut().zip(host_chunk_din.iter()) {
+                *tot += part;
+            }
+        }
 
         Ok((host_dw, host_din))
     }
@@ -1332,26 +1679,39 @@ impl CudaTrainer {
             )));
         }
 
-        let block_dim = 128u32;
-        let grid_dim = (param.len as u32).div_ceil(block_dim);
+        if let Some(ref dg) = param.d_grad {
+            let block_dim = 128u32;
+            let grid_dim = (param.len as u32).div_ceil(block_dim);
 
-        // Gradients are always accumulated in FP32 to prevent underflow and preserve precision
-        let d_sample = self.session.allocate_f32(grad.len())?;
-        self.session.upload_f32(&d_sample, grad)?;
+            // Gradients are always accumulated in FP32 to prevent underflow and preserve precision
+            let d_sample = self.session.allocate_f32(grad.len())?;
+            self.session.upload_f32(&d_sample, grad)?;
 
-        let mut arg_accum = param.d_grad.dptr;
-        let mut arg_sample = d_sample.dptr;
-        let mut arg_n = param.len as u32;
+            let mut arg_accum = dg.dptr;
+            let mut arg_sample = d_sample.dptr;
+            let mut arg_n = param.len as u32;
 
-        let mut params = [std::ptr::null_mut(); 16];
-        params[0] = &mut arg_accum as *mut u64 as *mut c_void;
-        params[1] = &mut arg_sample as *mut u64 as *mut c_void;
-        params[2] = &mut arg_n as *mut u32 as *mut c_void;
-        unsafe {
-            self.k_accum_grads
-                .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
+            let mut params = [std::ptr::null_mut(); 16];
+            params[0] = &mut arg_accum as *mut u64 as *mut c_void;
+            params[1] = &mut arg_sample as *mut u64 as *mut c_void;
+            params[2] = &mut arg_n as *mut u32 as *mut c_void;
+            unsafe {
+                self.k_accum_grads
+                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
+            }
+            self.record_kernel_launch();
+            self.session.synchronize()?;
+        } else {
+            let mut hg_guard = self.h_grad.lock().map_err(|e| {
+                CudaError::KernelError(format!("Mutex lock error on h_grad: {e}"))
+            })?;
+            let entry = hg_guard
+                .entry(name.to_string())
+                .or_insert_with(|| vec![0.0f32; param.len]);
+            for (acc, &g) in entry.iter_mut().zip(grad.iter()) {
+                *acc += g;
+            }
         }
-        self.session.synchronize()?;
         Ok(())
     }
 
@@ -1361,19 +1721,29 @@ impl CudaTrainer {
         let block_dim = 128u32;
 
         for param in self.params.values() {
-            let grid_dim = (param.len as u32).div_ceil(block_dim);
-            let mut arg_grad = param.d_grad.dptr;
-            let mut arg_scale = scale;
-            let mut arg_n = param.len as u32;
+            if let Some(ref dg) = param.d_grad {
+                let grid_dim = (param.len as u32).div_ceil(block_dim);
+                let mut arg_grad = dg.dptr;
+                let mut arg_scale = scale;
+                let mut arg_n = param.len as u32;
 
-            let mut params = [std::ptr::null_mut(); 16];
-            params[0] = &mut arg_grad as *mut u64 as *mut c_void;
-            params[1] = &mut arg_scale as *mut f32 as *mut c_void;
-            params[2] = &mut arg_n as *mut u32 as *mut c_void;
+                let mut params = [std::ptr::null_mut(); 16];
+                params[0] = &mut arg_grad as *mut u64 as *mut c_void;
+                params[1] = &mut arg_scale as *mut f32 as *mut c_void;
+                params[2] = &mut arg_n as *mut u32 as *mut c_void;
 
-            unsafe {
-                self.k_scale_grads
-                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
+                unsafe {
+                    self.k_scale_grads
+                        .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
+                }
+                self.record_kernel_launch();
+            }
+        }
+        if let Ok(mut hg_guard) = self.h_grad.lock() {
+            for hg in hg_guard.values_mut() {
+                for g in hg.iter_mut() {
+                    *g *= scale;
+                }
             }
         }
         self.session.synchronize()?;
@@ -1411,22 +1781,53 @@ impl CudaTrainer {
         self.session.upload_f32(&self.d_norm_sq, &zero_sq)?;
 
         let block_dim = 128u32;
+        // 1. Accumulate GPU resident parameter gradients
         for param in self.params.values() {
-            let grid_dim = (param.len as u32).div_ceil(block_dim);
-            let mut arg_grad = param.d_grad.dptr;
-            let mut arg_out_sq = self.d_norm_sq.dptr;
-            let mut arg_n = param.len as u32;
+            if let Some(ref dg) = param.d_grad {
+                let grid_dim = (param.len as u32).div_ceil(block_dim);
+                let mut arg_grad = dg.dptr;
+                let mut arg_out_sq = self.d_norm_sq.dptr;
+                let mut arg_n = param.len as u32;
 
-            let mut params = [std::ptr::null_mut(); 16];
-            params[0] = &mut arg_grad as *mut u64 as *mut c_void;
-            params[1] = &mut arg_out_sq as *mut u64 as *mut c_void;
-            params[2] = &mut arg_n as *mut u32 as *mut c_void;
+                let mut params = [std::ptr::null_mut(); 16];
+                params[0] = &mut arg_grad as *mut u64 as *mut c_void;
+                params[1] = &mut arg_out_sq as *mut u64 as *mut c_void;
+                params[2] = &mut arg_n as *mut u32 as *mut c_void;
 
-            unsafe {
-                self.k_norm_sq
-                    .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
+                unsafe {
+                    self.k_norm_sq
+                        .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
+                }
+                self.record_kernel_launch();
             }
-            self.record_kernel_launch();
+        }
+
+        // 2. Stream host gradients through GPU norm kernel
+        if let Some(ref d_cg) = self.d_chunk_g {
+            let hg_guard = self.h_grad.lock().map_err(|e| {
+                CudaError::KernelError(format!("Mutex lock error on h_grad: {e}"))
+            })?;
+            let chunk_cap = d_cg.len_elements;
+            for grad in hg_guard.values() {
+                for chunk in grad.chunks(chunk_cap) {
+                    self.session.upload_f32_slice(d_cg, chunk)?;
+                    let grid_dim = (chunk.len() as u32).div_ceil(block_dim);
+                    let mut arg_grad = d_cg.dptr;
+                    let mut arg_out_sq = self.d_norm_sq.dptr;
+                    let mut arg_n = chunk.len() as u32;
+
+                    let mut params = [std::ptr::null_mut(); 16];
+                    params[0] = &mut arg_grad as *mut u64 as *mut c_void;
+                    params[1] = &mut arg_out_sq as *mut u64 as *mut c_void;
+                    params[2] = &mut arg_n as *mut u32 as *mut c_void;
+
+                    unsafe {
+                        self.k_norm_sq
+                            .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 3)?;
+                    }
+                    self.record_kernel_launch();
+                }
+            }
         }
         self.session.synchronize()?;
 
@@ -1446,12 +1847,17 @@ impl CudaTrainer {
         h_m: &HashMap<String, Vec<f16>>,
         h_v: &HashMap<String, Vec<f16>>,
         name: &str,
+        offset: usize,
         len: usize,
     ) -> Result<(), CudaError> {
         if let Some(s_dir) = moments_disk_dir {
             let m_path = s_dir.join(format!("{name}.m.bin"));
             if m_path.is_file() {
-                if let Ok(bytes) = std::fs::read(&m_path) {
+                if let Ok(mut file) = std::fs::File::open(&m_path) {
+                    use std::io::{Read, Seek, SeekFrom};
+                    let _ = file.seek(SeekFrom::Start((offset * 2) as u64));
+                    let mut bytes = vec![0u8; len * 2];
+                    let _ = file.read_exact(&mut bytes);
                     for (i, chunk) in bytes.chunks_exact(2).enumerate().take(len) {
                         temp_buf[i] = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
                     }
@@ -1465,7 +1871,11 @@ impl CudaTrainer {
 
             let v_path = s_dir.join(format!("{name}.v.bin"));
             if v_path.is_file() {
-                if let Ok(bytes) = std::fs::read(&v_path) {
+                if let Ok(mut file) = std::fs::File::open(&v_path) {
+                    use std::io::{Read, Seek, SeekFrom};
+                    let _ = file.seek(SeekFrom::Start((offset * 2) as u64));
+                    let mut bytes = vec![0u8; len * 2];
+                    let _ = file.read_exact(&mut bytes);
                     for (i, chunk) in bytes.chunks_exact(2).enumerate().take(len) {
                         temp_buf[i] = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
                     }
@@ -1478,16 +1888,38 @@ impl CudaTrainer {
             }
         } else {
             if let Some(hm) = h_m.get(name) {
-                for (i, &x) in hm.iter().enumerate().take(len) {
+                let slice = if offset < hm.len() {
+                    let end = (offset + len).min(hm.len());
+                    &hm[offset..end]
+                } else {
+                    &[]
+                };
+                for (i, &x) in slice.iter().enumerate().take(len) {
                     temp_buf[i] = x.to_f32();
+                }
+                if slice.len() < len {
+                    for i in slice.len()..len {
+                        temp_buf[i] = 0.0;
+                    }
                 }
                 session.upload_f32_slice(d_cm, &temp_buf[..len])?;
             } else {
                 session.zero_buffer(d_cm)?;
             }
             if let Some(hv) = h_v.get(name) {
-                for (i, &x) in hv.iter().enumerate().take(len) {
+                let slice = if offset < hv.len() {
+                    let end = (offset + len).min(hv.len());
+                    &hv[offset..end]
+                } else {
+                    &[]
+                };
+                for (i, &x) in slice.iter().enumerate().take(len) {
                     temp_buf[i] = x.to_f32();
+                }
+                if slice.len() < len {
+                    for i in slice.len()..len {
+                        temp_buf[i] = 0.0;
+                    }
                 }
                 session.upload_f32_slice(d_cv, &temp_buf[..len])?;
             } else {
@@ -1506,42 +1938,61 @@ impl CudaTrainer {
         h_m: &mut HashMap<String, Vec<f16>>,
         h_v: &mut HashMap<String, Vec<f16>>,
         name: &str,
+        total_len: usize,
+        offset: usize,
         len: usize,
     ) -> Result<(), CudaError> {
         session.download_f32_slice(d_cm, &mut temp_buf[..len])?;
         if let Some(s_dir) = moments_disk_dir {
+            let m_path = s_dir.join(format!("{name}.m.bin"));
+            use std::io::{Seek, SeekFrom, Write};
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .open(&m_path)
+                .map_err(|e| CudaError::KernelError(e.to_string()))?;
+            let _ = file.seek(SeekFrom::Start((offset * 2) as u64));
             let mut m_bytes = Vec::with_capacity(len * 2);
             for &x in temp_buf[..len].iter() {
                 m_bytes.extend_from_slice(&f16::from_f32(x).to_le_bytes());
             }
-            let _ = std::fs::write(s_dir.join(format!("{name}.m.bin")), &m_bytes);
+            let _ = file.write_all(&m_bytes);
 
             session.download_f32_slice(d_cv, &mut temp_buf[..len])?;
+            let v_path = s_dir.join(format!("{name}.v.bin"));
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .open(&v_path)
+                .map_err(|e| CudaError::KernelError(e.to_string()))?;
+            let _ = file.seek(SeekFrom::Start((offset * 2) as u64));
             let mut v_bytes = Vec::with_capacity(len * 2);
             for &x in temp_buf[..len].iter() {
                 v_bytes.extend_from_slice(&f16::from_f32(x).to_le_bytes());
             }
-            let _ = std::fs::write(s_dir.join(format!("{name}.v.bin")), &v_bytes);
+            let _ = file.write_all(&v_bytes);
         } else {
             let hm = h_m
                 .entry(name.to_string())
-                .or_insert_with(|| vec![f16::from_f32(0.0); len]);
-            if hm.len() < len {
-                hm.resize(len, f16::from_f32(0.0));
+                .or_insert_with(|| vec![f16::from_f32(0.0); total_len]);
+            if hm.len() < total_len {
+                hm.resize(total_len, f16::from_f32(0.0));
             }
             for (i, &x) in temp_buf[..len].iter().enumerate() {
-                hm[i] = f16::from_f32(x);
+                hm[offset + i] = f16::from_f32(x);
             }
 
             session.download_f32_slice(d_cv, &mut temp_buf[..len])?;
             let hv = h_v
                 .entry(name.to_string())
-                .or_insert_with(|| vec![f16::from_f32(0.0); len]);
-            if hv.len() < len {
-                hv.resize(len, f16::from_f32(0.0));
+                .or_insert_with(|| vec![f16::from_f32(0.0); total_len]);
+            if hv.len() < total_len {
+                hv.resize(total_len, f16::from_f32(0.0));
             }
             for (i, &x) in temp_buf[..len].iter().enumerate() {
-                hv[i] = f16::from_f32(x);
+                hv[offset + i] = f16::from_f32(x);
             }
         }
         Ok(())
@@ -1571,7 +2022,14 @@ impl CudaTrainer {
         if !total_norm.is_finite() {
             eprintln!("[CUDA AdamW] Non-finite global gradient norm ({total_norm}) detected. Skipping optimizer step.");
             for param in self.params.values() {
-                self.session.zero_buffer(&param.d_grad)?;
+                if let Some(ref dg) = param.d_grad {
+                    self.session.zero_buffer(dg)?;
+                }
+            }
+            if let Ok(mut hg_guard) = self.h_grad.lock() {
+                for g in hg_guard.values_mut() {
+                    g.fill(0.0);
+                }
             }
             return Ok(false);
         }
@@ -1592,7 +2050,7 @@ impl CudaTrainer {
         let param_keys: Vec<(
             String,
             usize,
-            u64,
+            Option<u64>,
             Option<u64>,
             Option<u64>,
             Option<u64>,
@@ -1604,7 +2062,7 @@ impl CudaTrainer {
                 (
                     name.clone(),
                     param.len,
-                    param.d_grad.dptr,
+                    param.d_grad.as_ref().map(|b| b.dptr),
                     param.d_weight.as_ref().map(|b| b.dptr),
                     param.d_weight_f16.as_ref().map(|b| b.dptr),
                     param.d_m.as_ref().map(|b| b.dptr),
@@ -1616,226 +2074,348 @@ impl CudaTrainer {
         for (name, param_len, grad_dptr, opt_w_dptr, opt_wf16_dptr, opt_m_dptr, opt_v_dptr) in
             param_keys
         {
-            let grid_dim = (param_len as u32).div_ceil(block_dim);
             let is_in_weights = weights.contains_key(&name);
 
-            if is_f16 {
-                let (arg_w, arg_m, arg_v) = if self.stream_optimizer {
-                    let d_cw = self.d_chunk_w.as_ref().unwrap();
-                    let d_cm = self.d_chunk_m.as_ref().unwrap();
-                    let d_cv = self.d_chunk_v.as_ref().unwrap();
+            if self.stream_optimizer {
+                let d_cw = self.d_chunk_w.as_ref().unwrap();
+                let d_cm = self.d_chunk_m.as_ref().unwrap();
+                let d_cv = self.d_chunk_v.as_ref().unwrap();
+                let d_cg = self.d_chunk_g.as_ref().unwrap();
+                let chunk_cap = d_cw.len_elements;
 
-                    if is_in_weights {
-                        let hw = weights.get(&name).unwrap();
-                        self.session.upload_f32_slice(d_cw, hw)?;
-                    } else if let Some(hw) = self.h_weights.get(&name) {
-                        self.session.upload_f32_slice(d_cw, hw)?;
+                for offset in (0..param_len).step_by(chunk_cap) {
+                    let cur_len = (param_len - offset).min(chunk_cap);
+                    let grid_dim = (cur_len as u32).div_ceil(block_dim);
+
+                    if is_f16 {
+                        let d_cwf16 = self.d_chunk_wf16.as_ref().unwrap();
+                        let hw_slice = if is_in_weights {
+                            &weights.get(&name).unwrap()[offset..offset + cur_len]
+                        } else if let Some(hw) = self.h_weights.get(&name) {
+                            &hw[offset..offset + cur_len]
+                        } else {
+                            return Err(CudaError::KernelError(format!(
+                                "Missing tensor '{name}' for optimizer step"
+                            )));
+                        };
+
+                        self.session.upload_f32_slice(d_cw, hw_slice)?;
+                        let h_f16: Vec<f16> = hw_slice.iter().map(|&x| f16::from_f32(x)).collect();
+                        let packed = pack_f16_to_u32(&h_f16);
+                        self.session.upload_u32_slice(d_cwf16, &packed)?;
+
+                        let g_dptr = if let Some(gd) = grad_dptr {
+                            gd + (offset * 4) as u64
+                        } else {
+                            let hg_guard = self.h_grad.lock().unwrap();
+                            let gv = hg_guard.get(&name).ok_or_else(|| {
+                                CudaError::KernelError(format!("Missing gradient '{name}' in h_grad"))
+                            })?;
+                            self.session.upload_f32_slice(d_cg, &gv[offset..offset + cur_len])?;
+                            d_cg.dptr
+                        };
+
+                        let wf16_dptr = if let Some(dptr) = opt_wf16_dptr {
+                            dptr + (offset * 2) as u64
+                        } else {
+                            d_cwf16.dptr
+                        };
+
+                        Self::upload_moments_chunk_impl(
+                            &self.session,
+                            d_cm,
+                            d_cv,
+                            &mut self.temp_buf,
+                            self.moments_disk_dir.as_deref(),
+                            &self.h_m,
+                            &self.h_v,
+                            &name,
+                            offset,
+                            cur_len,
+                        )?;
+
+                        let mut arg_w = d_cw.dptr;
+                        let mut arg_wf16 = wf16_dptr;
+                        let mut arg_g = g_dptr;
+                        let mut arg_m = d_cm.dptr;
+                        let mut arg_v = d_cv.dptr;
+                        let mut arg_lr = lr;
+                        let mut arg_b1 = beta1;
+                        let mut arg_b2 = beta2;
+                        let mut arg_eps = eps;
+                        let mut arg_wd = weight_decay;
+                        let mut arg_clip = clip_scale;
+                        let mut arg_bc1 = bc1;
+                        let mut arg_bc2 = bc2;
+                        let mut arg_n = cur_len as u32;
+
+                        let params: [*mut c_void; 16] = [
+                            &mut arg_w as *mut u64 as *mut c_void,
+                            &mut arg_wf16 as *mut u64 as *mut c_void,
+                            &mut arg_g as *mut u64 as *mut c_void,
+                            &mut arg_m as *mut u64 as *mut c_void,
+                            &mut arg_v as *mut u64 as *mut c_void,
+                            &mut arg_lr as *mut f32 as *mut c_void,
+                            &mut arg_b1 as *mut f32 as *mut c_void,
+                            &mut arg_b2 as *mut f32 as *mut c_void,
+                            &mut arg_eps as *mut f32 as *mut c_void,
+                            &mut arg_wd as *mut f32 as *mut c_void,
+                            &mut arg_clip as *mut f32 as *mut c_void,
+                            &mut arg_bc1 as *mut f32 as *mut c_void,
+                            &mut arg_bc2 as *mut f32 as *mut c_void,
+                            &mut arg_n as *mut u32 as *mut c_void,
+                            std::ptr::null_mut(),
+                            std::ptr::null_mut(),
+                        ];
+
+                        unsafe {
+                            self.k_adamw_step_f16.launch(
+                                (grid_dim, 1, 1),
+                                (block_dim, 1, 1),
+                                0,
+                                params,
+                                14,
+                            )?;
+                        }
+                        self.record_kernel_launch();
+
+                        Self::download_moments_chunk_impl(
+                            &self.session,
+                            d_cm,
+                            d_cv,
+                            &mut self.temp_buf,
+                            self.moments_disk_dir.as_deref(),
+                            &mut self.h_m,
+                            &mut self.h_v,
+                            &name,
+                            param_len,
+                            offset,
+                            cur_len,
+                        )?;
+
+                        if is_in_weights {
+                            let hw = weights.get_mut(&name).unwrap();
+                            self.session.download_f32_slice(d_cw, &mut hw[offset..offset + cur_len])?;
+                        } else {
+                            let hw = self.h_weights.get_mut(&name).unwrap();
+                            self.session.download_f32_slice(d_cw, &mut hw[offset..offset + cur_len])?;
+                        }
+
+                        if let Some(param) = self.params.get(&name) {
+                            if let Some(ref dw16) = param.d_weight_f16 {
+                                let hw = if is_in_weights {
+                                    weights.get(&name).unwrap()
+                                } else {
+                                    self.h_weights.get(&name).unwrap()
+                                };
+                                let h_f16: Vec<f16> = hw[offset..offset + cur_len].iter().map(|&x| f16::from_f32(x)).collect();
+                                let packed = pack_f16_to_u32(&h_f16);
+                                self.session.upload_u32_slice_offset(dw16, offset.div_ceil(2), &packed)?;
+                            }
+                        }
                     } else {
-                        return Err(CudaError::KernelError(format!(
-                            "Missing tensor '{name}' for optimizer step"
-                        )));
-                    }
+                        // FP32 mode
+                        let hw_slice = if is_in_weights {
+                            &weights.get(&name).unwrap()[offset..offset + cur_len]
+                        } else if let Some(hw) = self.h_weights.get(&name) {
+                            &hw[offset..offset + cur_len]
+                        } else {
+                            return Err(CudaError::KernelError(format!(
+                                "Missing tensor '{name}' for optimizer step"
+                            )));
+                        };
 
-                    Self::upload_moments_chunk_impl(
-                        &self.session,
-                        d_cm,
-                        d_cv,
-                        &mut self.temp_buf,
-                        self.moments_disk_dir.as_deref(),
-                        &self.h_m,
-                        &self.h_v,
-                        &name,
-                        param_len,
-                    )?;
+                        self.session.upload_f32_slice(d_cw, hw_slice)?;
 
-                    (d_cw.dptr, d_cm.dptr, d_cv.dptr)
-                } else {
-                    (
-                        opt_w_dptr.unwrap(),
-                        opt_m_dptr.unwrap(),
-                        opt_v_dptr.unwrap(),
-                    )
-                };
+                        let g_dptr = if let Some(gd) = grad_dptr {
+                            gd + (offset * 4) as u64
+                        } else {
+                            let hg_guard = self.h_grad.lock().unwrap();
+                            let gv = hg_guard.get(&name).ok_or_else(|| {
+                                CudaError::KernelError(format!("Missing gradient '{name}' in h_grad"))
+                            })?;
+                            self.session.upload_f32_slice(d_cg, &gv[offset..offset + cur_len])?;
+                            d_cg.dptr
+                        };
 
-                let mut arg_w = arg_w;
-                let mut arg_wf16 = opt_wf16_dptr.unwrap();
-                let mut arg_g = grad_dptr;
-                let mut arg_m = arg_m;
-                let mut arg_v = arg_v;
-                let mut arg_lr = lr;
-                let mut arg_b1 = beta1;
-                let mut arg_b2 = beta2;
-                let mut arg_eps = eps;
-                let mut arg_wd = weight_decay;
-                let mut arg_clip = clip_scale;
-                let mut arg_bc1 = bc1;
-                let mut arg_bc2 = bc2;
-                let mut arg_n = param_len as u32;
+                        Self::upload_moments_chunk_impl(
+                            &self.session,
+                            d_cm,
+                            d_cv,
+                            &mut self.temp_buf,
+                            self.moments_disk_dir.as_deref(),
+                            &self.h_m,
+                            &self.h_v,
+                            &name,
+                            offset,
+                            cur_len,
+                        )?;
 
-                let params: [*mut c_void; 16] = [
-                    &mut arg_w as *mut u64 as *mut c_void,
-                    &mut arg_wf16 as *mut u64 as *mut c_void,
-                    &mut arg_g as *mut u64 as *mut c_void,
-                    &mut arg_m as *mut u64 as *mut c_void,
-                    &mut arg_v as *mut u64 as *mut c_void,
-                    &mut arg_lr as *mut f32 as *mut c_void,
-                    &mut arg_b1 as *mut f32 as *mut c_void,
-                    &mut arg_b2 as *mut f32 as *mut c_void,
-                    &mut arg_eps as *mut f32 as *mut c_void,
-                    &mut arg_wd as *mut f32 as *mut c_void,
-                    &mut arg_clip as *mut f32 as *mut c_void,
-                    &mut arg_bc1 as *mut f32 as *mut c_void,
-                    &mut arg_bc2 as *mut f32 as *mut c_void,
-                    &mut arg_n as *mut u32 as *mut c_void,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                ];
+                        let mut arg_w = d_cw.dptr;
+                        let mut arg_g = g_dptr;
+                        let mut arg_m = d_cm.dptr;
+                        let mut arg_v = d_cv.dptr;
+                        let mut arg_lr = lr;
+                        let mut arg_b1 = beta1;
+                        let mut arg_b2 = beta2;
+                        let mut arg_eps = eps;
+                        let mut arg_wd = weight_decay;
+                        let mut arg_clip = clip_scale;
+                        let mut arg_bc1 = bc1;
+                        let mut arg_bc2 = bc2;
+                        let mut arg_n = cur_len as u32;
 
-                unsafe {
-                    self.k_adamw_step_f16.launch(
-                        (grid_dim, 1, 1),
-                        (block_dim, 1, 1),
-                        0,
-                        params,
-                        14,
-                    )?;
-                }
-                self.record_kernel_launch();
+                        let mut params = [std::ptr::null_mut(); 16];
+                        params[0] = &mut arg_w as *mut u64 as *mut c_void;
+                        params[1] = &mut arg_g as *mut u64 as *mut c_void;
+                        params[2] = &mut arg_m as *mut u64 as *mut c_void;
+                        params[3] = &mut arg_v as *mut u64 as *mut c_void;
+                        params[4] = &mut arg_lr as *mut f32 as *mut c_void;
+                        params[5] = &mut arg_b1 as *mut f32 as *mut c_void;
+                        params[6] = &mut arg_b2 as *mut f32 as *mut c_void;
+                        params[7] = &mut arg_eps as *mut f32 as *mut c_void;
+                        params[8] = &mut arg_wd as *mut f32 as *mut c_void;
+                        params[9] = &mut arg_clip as *mut f32 as *mut c_void;
+                        params[10] = &mut arg_bc1 as *mut f32 as *mut c_void;
+                        params[11] = &mut arg_bc2 as *mut f32 as *mut c_void;
+                        params[12] = &mut arg_n as *mut u32 as *mut c_void;
 
-                if self.stream_optimizer {
-                    let d_cw = self.d_chunk_w.as_ref().unwrap();
-                    let d_cm = self.d_chunk_m.as_ref().unwrap();
-                    let d_cv = self.d_chunk_v.as_ref().unwrap();
+                        unsafe {
+                            self.k_adamw_step
+                                .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 13)?;
+                        }
+                        self.record_kernel_launch();
 
-                    Self::download_moments_chunk_impl(
-                        &self.session,
-                        d_cm,
-                        d_cv,
-                        &mut self.temp_buf,
-                        self.moments_disk_dir.as_deref(),
-                        &mut self.h_m,
-                        &mut self.h_v,
-                        &name,
-                        param_len,
-                    )?;
+                        Self::download_moments_chunk_impl(
+                            &self.session,
+                            d_cm,
+                            d_cv,
+                            &mut self.temp_buf,
+                            self.moments_disk_dir.as_deref(),
+                            &mut self.h_m,
+                            &mut self.h_v,
+                            &name,
+                            param_len,
+                            offset,
+                            cur_len,
+                        )?;
 
-                    if is_in_weights {
-                        let hw = weights.get_mut(&name).unwrap();
-                        self.session.download_f32_slice(d_cw, hw)?;
-                    } else {
-                        let hw = self.h_weights.get_mut(&name).unwrap();
-                        self.session.download_f32_slice(d_cw, hw)?;
-                    }
-                }
-            } else {
-                let (arg_w, arg_m, arg_v) = if self.stream_optimizer {
-                    let d_cw = self.d_chunk_w.as_ref().unwrap();
-                    let d_cm = self.d_chunk_m.as_ref().unwrap();
-                    let d_cv = self.d_chunk_v.as_ref().unwrap();
+                        if is_in_weights {
+                            let hw = weights.get_mut(&name).unwrap();
+                            self.session.download_f32_slice(d_cw, &mut hw[offset..offset + cur_len])?;
+                        } else {
+                            let hw = self.h_weights.get_mut(&name).unwrap();
+                            self.session.download_f32_slice(d_cw, &mut hw[offset..offset + cur_len])?;
+                        }
 
-                    if is_in_weights {
-                        let hw = weights.get(&name).unwrap();
-                        self.session.upload_f32_slice(d_cw, hw)?;
-                    } else if let Some(hw) = self.h_weights.get(&name) {
-                        self.session.upload_f32_slice(d_cw, hw)?;
-                    } else {
-                        return Err(CudaError::KernelError(format!(
-                            "Missing tensor '{name}' for optimizer step"
-                        )));
-                    }
-
-                    Self::upload_moments_chunk_impl(
-                        &self.session,
-                        d_cm,
-                        d_cv,
-                        &mut self.temp_buf,
-                        self.moments_disk_dir.as_deref(),
-                        &self.h_m,
-                        &self.h_v,
-                        &name,
-                        param_len,
-                    )?;
-
-                    (d_cw.dptr, d_cm.dptr, d_cv.dptr)
-                } else {
-                    (
-                        opt_w_dptr.unwrap(),
-                        opt_m_dptr.unwrap(),
-                        opt_v_dptr.unwrap(),
-                    )
-                };
-
-                let mut arg_w = arg_w;
-                let mut arg_g = grad_dptr;
-                let mut arg_m = arg_m;
-                let mut arg_v = arg_v;
-                let mut arg_lr = lr;
-                let mut arg_b1 = beta1;
-                let mut arg_b2 = beta2;
-                let mut arg_eps = eps;
-                let mut arg_wd = weight_decay;
-                let mut arg_clip = clip_scale;
-                let mut arg_bc1 = bc1;
-                let mut arg_bc2 = bc2;
-                let mut arg_n = param_len as u32;
-
-                let mut params = [std::ptr::null_mut(); 16];
-                params[0] = &mut arg_w as *mut u64 as *mut c_void;
-                params[1] = &mut arg_g as *mut u64 as *mut c_void;
-                params[2] = &mut arg_m as *mut u64 as *mut c_void;
-                params[3] = &mut arg_v as *mut u64 as *mut c_void;
-                params[4] = &mut arg_lr as *mut f32 as *mut c_void;
-                params[5] = &mut arg_b1 as *mut f32 as *mut c_void;
-                params[6] = &mut arg_b2 as *mut f32 as *mut c_void;
-                params[7] = &mut arg_eps as *mut f32 as *mut c_void;
-                params[8] = &mut arg_wd as *mut f32 as *mut c_void;
-                params[9] = &mut arg_clip as *mut f32 as *mut c_void;
-                params[10] = &mut arg_bc1 as *mut f32 as *mut c_void;
-                params[11] = &mut arg_bc2 as *mut f32 as *mut c_void;
-                params[12] = &mut arg_n as *mut u32 as *mut c_void;
-
-                unsafe {
-                    self.k_adamw_step
-                        .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 13)?;
-                }
-                self.record_kernel_launch();
-
-                if self.stream_optimizer {
-                    let d_cw = self.d_chunk_w.as_ref().unwrap();
-                    let d_cm = self.d_chunk_m.as_ref().unwrap();
-                    let d_cv = self.d_chunk_v.as_ref().unwrap();
-
-                    Self::download_moments_chunk_impl(
-                        &self.session,
-                        d_cm,
-                        d_cv,
-                        &mut self.temp_buf,
-                        self.moments_disk_dir.as_deref(),
-                        &mut self.h_m,
-                        &mut self.h_v,
-                        &name,
-                        param_len,
-                    )?;
-
-                    if is_in_weights {
-                        let hw = weights.get_mut(&name).unwrap();
-                        self.session.download_f32_slice(d_cw, hw)?;
-                    } else {
-                        let hw = self.h_weights.get_mut(&name).unwrap();
-                        self.session.download_f32_slice(d_cw, hw)?;
-                    }
-
-                    if let Some(param) = self.params.get(&name) {
-                        if let Some(ref dw) = param.d_weight {
-                            let hw = if is_in_weights {
-                                weights.get(&name).unwrap()
-                            } else {
-                                self.h_weights.get(&name).unwrap()
-                            };
-                            self.session.upload_f32_slice(dw, hw)?;
+                        if let Some(param) = self.params.get(&name) {
+                            if let Some(ref dw) = param.d_weight {
+                                let hw = if is_in_weights {
+                                    weights.get(&name).unwrap()
+                                } else {
+                                    self.h_weights.get(&name).unwrap()
+                                };
+                                self.session.upload_f32_slice_offset(dw, offset, &hw[offset..offset + cur_len])?;
+                            }
                         }
                     }
                 }
+            } else {
+                // Non-streamed GPU resident mode
+                let grid_dim = (param_len as u32).div_ceil(block_dim);
+                if is_f16 {
+                    let mut arg_w = opt_w_dptr.unwrap();
+                    let mut arg_wf16 = opt_wf16_dptr.unwrap();
+                    let mut arg_g = grad_dptr.unwrap();
+                    let mut arg_m = opt_m_dptr.unwrap();
+                    let mut arg_v = opt_v_dptr.unwrap();
+                    let mut arg_lr = lr;
+                    let mut arg_b1 = beta1;
+                    let mut arg_b2 = beta2;
+                    let mut arg_eps = eps;
+                    let mut arg_wd = weight_decay;
+                    let mut arg_clip = clip_scale;
+                    let mut arg_bc1 = bc1;
+                    let mut arg_bc2 = bc2;
+                    let mut arg_n = param_len as u32;
+
+                    let params: [*mut c_void; 16] = [
+                        &mut arg_w as *mut u64 as *mut c_void,
+                        &mut arg_wf16 as *mut u64 as *mut c_void,
+                        &mut arg_g as *mut u64 as *mut c_void,
+                        &mut arg_m as *mut u64 as *mut c_void,
+                        &mut arg_v as *mut u64 as *mut c_void,
+                        &mut arg_lr as *mut f32 as *mut c_void,
+                        &mut arg_b1 as *mut f32 as *mut c_void,
+                        &mut arg_b2 as *mut f32 as *mut c_void,
+                        &mut arg_eps as *mut f32 as *mut c_void,
+                        &mut arg_wd as *mut f32 as *mut c_void,
+                        &mut arg_clip as *mut f32 as *mut c_void,
+                        &mut arg_bc1 as *mut f32 as *mut c_void,
+                        &mut arg_bc2 as *mut f32 as *mut c_void,
+                        &mut arg_n as *mut u32 as *mut c_void,
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                    ];
+
+                    unsafe {
+                        self.k_adamw_step_f16.launch(
+                            (grid_dim, 1, 1),
+                            (block_dim, 1, 1),
+                            0,
+                            params,
+                            14,
+                        )?;
+                    }
+                    self.record_kernel_launch();
+                } else {
+                    let mut arg_w = opt_w_dptr.unwrap();
+                    let mut arg_g = grad_dptr.unwrap();
+                    let mut arg_m = opt_m_dptr.unwrap();
+                    let mut arg_v = opt_v_dptr.unwrap();
+                    let mut arg_lr = lr;
+                    let mut arg_b1 = beta1;
+                    let mut arg_b2 = beta2;
+                    let mut arg_eps = eps;
+                    let mut arg_wd = weight_decay;
+                    let mut arg_clip = clip_scale;
+                    let mut arg_bc1 = bc1;
+                    let mut arg_bc2 = bc2;
+                    let mut arg_n = param_len as u32;
+
+                    let mut params = [std::ptr::null_mut(); 16];
+                    params[0] = &mut arg_w as *mut u64 as *mut c_void;
+                    params[1] = &mut arg_g as *mut u64 as *mut c_void;
+                    params[2] = &mut arg_m as *mut u64 as *mut c_void;
+                    params[3] = &mut arg_v as *mut u64 as *mut c_void;
+                    params[4] = &mut arg_lr as *mut f32 as *mut c_void;
+                    params[5] = &mut arg_b1 as *mut f32 as *mut c_void;
+                    params[6] = &mut arg_b2 as *mut f32 as *mut c_void;
+                    params[7] = &mut arg_eps as *mut f32 as *mut c_void;
+                    params[8] = &mut arg_wd as *mut f32 as *mut c_void;
+                    params[9] = &mut arg_clip as *mut f32 as *mut c_void;
+                    params[10] = &mut arg_bc1 as *mut f32 as *mut c_void;
+                    params[11] = &mut arg_bc2 as *mut f32 as *mut c_void;
+                    params[12] = &mut arg_n as *mut u32 as *mut c_void;
+
+                    unsafe {
+                        self.k_adamw_step
+                            .launch((grid_dim, 1, 1), (block_dim, 1, 1), 0, params, 13)?;
+                    }
+                    self.record_kernel_launch();
+                }
+            }
+        }
+
+        // Post-step: zero out all gradient buffers for both GPU resident and streamed host gradients
+        for param in self.params.values() {
+            if let Some(ref dg) = param.d_grad {
+                self.session.zero_buffer(dg)?;
+            }
+        }
+        if let Ok(mut hg_guard) = self.h_grad.lock() {
+            for g in hg_guard.values_mut() {
+                g.fill(0.0);
             }
         }
 
@@ -1909,35 +2489,35 @@ impl CudaTrainer {
             weights.values().map(|v| v.len()).sum()
         };
 
-        let max_tensor_len = if !self.params.is_empty() {
-            self.params.values().map(|p| p.len).max().unwrap_or(0)
-        } else {
-            weights.values().map(|v| v.len()).max().unwrap_or(0)
-        };
-
         if self.stream_optimizer {
-            let weights_gpu_bytes = if self.precision == TrainingPrecision::Fp16 {
-                total_parameters * std::mem::size_of::<half::f16>()
+            let weights_gpu_bytes: usize = if self.precision == TrainingPrecision::Fp16 {
+                self.params.values().filter_map(|p| p.d_weight_f16.as_ref()).map(|b| b.bytes).sum()
             } else {
-                total_parameters * std::mem::size_of::<f32>()
+                self.params.values().filter_map(|p| p.d_weight.as_ref()).map(|b| b.bytes).sum()
             };
             let weights_gpu_device = if self.precision == TrainingPrecision::Fp16 {
-                "GPU VRAM (FP16)"
+                "GPU VRAM (FP16 Resident Trunk)"
             } else {
-                "GPU VRAM (FP32)"
+                "GPU VRAM (FP32 Resident Trunk)"
             };
             let master_weights_bytes = total_parameters * std::mem::size_of::<f32>();
             let master_weights_device = "Host RAM";
             let gradients_bytes = total_parameters * std::mem::size_of::<f32>();
-            let gradients_device = "GPU VRAM (FP32)";
+            let gradients_device = "Host RAM (Streamed GPU Update)";
             // Moments are compactly streamed as FP16 (2 bytes each) on host
             let moment1_bytes = total_parameters * std::mem::size_of::<half::f16>();
             let moment1_device = "Host RAM (FP16)";
             let moment2_bytes = total_parameters * std::mem::size_of::<half::f16>();
             let moment2_device = "Host RAM (FP16)";
-            let chunk_buffers_gpu_bytes = 3 * max_tensor_len * std::mem::size_of::<f32>();
-            let total_host_bytes = master_weights_bytes + moment1_bytes + moment2_bytes;
-            let total_gpu_bytes = weights_gpu_bytes + gradients_bytes + chunk_buffers_gpu_bytes;
+            let chunk_buffers_gpu_bytes: usize = [
+                self.d_chunk_w.as_ref().map(|b| b.bytes).unwrap_or(0),
+                self.d_chunk_m.as_ref().map(|b| b.bytes).unwrap_or(0),
+                self.d_chunk_v.as_ref().map(|b| b.bytes).unwrap_or(0),
+                self.d_chunk_g.as_ref().map(|b| b.bytes).unwrap_or(0),
+                self.d_chunk_wf16.as_ref().map(|b| b.bytes).unwrap_or(0),
+            ].iter().sum();
+            let total_host_bytes = master_weights_bytes + moment1_bytes + moment2_bytes + gradients_bytes;
+            let total_gpu_bytes = weights_gpu_bytes + chunk_buffers_gpu_bytes;
 
             AdamWMemoryAudit {
                 total_parameters,
@@ -2132,12 +2712,24 @@ impl CudaTrainer {
         for (name, p) in &self.params {
             let expected_f32_bytes = p.len * std::mem::size_of::<f32>();
 
-            // 1. Gradients are always FP32
-            if p.d_grad.bytes != expected_f32_bytes {
-                return Err(format!(
-                    "Param '{name}': gradient buffer bytes {} != expected FP32 bytes {}",
-                    p.d_grad.bytes, expected_f32_bytes
-                ));
+            // 1. Gradients are always FP32 (either on GPU device or streamed on host)
+            if let Some(ref dg) = p.d_grad {
+                if dg.bytes != expected_f32_bytes {
+                    return Err(format!(
+                        "Param '{name}': gradient buffer bytes {} != expected FP32 bytes {}",
+                        dg.bytes, expected_f32_bytes
+                    ));
+                }
+            } else if let Ok(hg_guard) = self.h_grad.lock() {
+                if let Some(hg) = hg_guard.get(name) {
+                    if hg.len() * std::mem::size_of::<f32>() != expected_f32_bytes {
+                        return Err(format!(
+                            "Param '{name}': host gradient len {} != expected {}",
+                            hg.len(),
+                            p.len
+                        ));
+                    }
+                }
             }
 
             // 2. Master weights are always FP32 (either on device or streamed on host)

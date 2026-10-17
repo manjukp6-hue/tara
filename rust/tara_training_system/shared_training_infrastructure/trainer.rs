@@ -1364,10 +1364,19 @@ impl NativeSelfTrainer {
             };
 
         // Compute baseline loss strictly across held-out validation sequences
-        let initial_loss: Option<f64> = if val_tokens.is_empty() {
-            println!(
-                "[Preflight] Skipping baseline validation loss (held-out validation unavailable)."
-            );
+        let skip_preflight = std::env::var("TARA_SKIP_PREFLIGHT_VAL")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
+        let initial_loss: Option<f64> = if val_tokens.is_empty() || skip_preflight {
+            if skip_preflight {
+                println!(
+                    "[Preflight] Skipping baseline validation loss (TARA_SKIP_PREFLIGHT_VAL active) to start training immediately."
+                );
+            } else {
+                println!(
+                    "[Preflight] Skipping baseline validation loss (held-out validation unavailable)."
+                );
+            }
             None
         } else {
             // Optional debugging smoke test (allows 1-2 sample verification when requested)

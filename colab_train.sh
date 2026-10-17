@@ -11,6 +11,16 @@ echo "==========================================================================
 echo "  TARA CLOUD TRAINING SYSTEM (GOOGLE COLAB AUTONOMOUS RUNNER)"
 echo "=============================================================================="
 
+# 0. Proactive Disk Hygiene: Reclaim disk space from stale scratch files, caches, and build artifacts
+echo "[DISK CLEANUP] Reclaiming disk space from previous runs and caches..."
+rm -rf /tmp/tara_moments_* /tmp/tara_* /tmp/tmp* 2>/dev/null || true
+rm -rf target/debug target/release/incremental target/release/.fingerprint 2>/dev/null || true
+rm -rf storage/checkpoints/gpu_step_test_parity 2>/dev/null || true
+rm -rf /root/.cache/huggingface /root/.cache/pip /root/.cache/torch 2>/dev/null || true
+if command -v df >/dev/null 2>&1; then
+    df -h / | awk 'NR==2 {print "[DISK] Available disk space: " $4 " free / " $2 " total (" $5 " used)"}'
+fi
+
 # 1. Enforce Cloud Training Environment Variables for Rust Orchestrator
 # Let AutoMemory determine the safe host memory limit based on cgroup and available RAM
 export TARA_MAX_MEMORY_MB="${TARA_MAX_MEMORY_MB:-}"

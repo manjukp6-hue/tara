@@ -32,11 +32,67 @@ export GDRIVE_CHECKPOINT_DIR="${GDRIVE_CHECKPOINT_DIR:-/content/drive/MyDrive/TA
 export HF_DATASET_REPO="${HF_DATASET_REPO:-${HF_MODEL_REPO:-${HF_REPO:-manjukp6/tara}}}"
 export HF_MODEL_REPO="${HF_MODEL_REPO:-${HF_DATASET_REPO}}"
 
-# Install cloud pretraining Python dependencies quietly
-if command -v pip >/dev/null 2>&1; then
-    pip install -q tokenizers safetensors 2>/dev/null || true
+TRAINER_MODE="${TRAINER_MODE:-python}"
+
+# 1. High-Speed Python Cloud Training Mode (Fast-path: zero compile delay, multi-threaded downloads)
+if [ "$TRAINER_MODE" = "python" ]; then
+    echo "------------------------------------------------------------------------------"
+    echo "[FAST-PATH] High-Speed Python Cloud Pretraining Mode Active (Rule 15 Isolated)"
+    echo "------------------------------------------------------------------------------"
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
+    fi
+
+    if command -v pip >/dev/null 2>&1; then
+        pip install -q tokenizers safetensors huggingface_hub 2>/dev/null || true
+    fi
+
+    if [ -d "/content/drive/MyDrive" ]; then
+        ACTIVE_CP_DIR="$GDRIVE_CHECKPOINT_DIR"
+    else
+        ACTIVE_CP_DIR="storage/models/checkpoints"
+    fi
+    mkdir -p "$ACTIVE_CP_DIR"
+
+    TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-4}"
+    STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-1000}"
+    MAIN_DS_DIR="storage/datasets/main_dataset_v2"
+
+    echo "=== [AUTONOMOUS CLOUD TRAINING PIPELINE: LAUNCHING GPU PRETRAINER] ==="
+    python3 cloud_train.py \
+        --stage-id "stage0_pretraining" \
+        --stage-name "Stage 0: Foundational Pretraining" \
+        --model-dir storage/models/tara_candidate_v1 \
+        --dataset-dir "$MAIN_DS_DIR" \
+        --output-dir "$ACTIVE_CP_DIR/stage0_pretraining" \
+        --max-steps "$STAGE_MAX_STEPS" \
+        --batch-size "$TRAIN_BATCH_SIZE"
+
+    STAGE0_OUT="$ACTIVE_CP_DIR/stage0_pretraining"
+    if [ -d "$ACTIVE_CP_DIR/stage0_pretraining/best_checkpoint" ]; then
+        STAGE0_OUT="$ACTIVE_CP_DIR/stage0_pretraining/best_checkpoint"
+    fi
+
+    CURRICULUM_DS="storage/datasets/curriculum"
+    if [ -d "$CURRICULUM_DS" ] && [ -n "$(ls -A "$CURRICULUM_DS" 2>/dev/null)" ]; then
+        python3 cloud_train.py \
+            --stage-id "stage1_curriculum" \
+            --stage-name "Stage 1: Academic & Skills Curriculum" \
+            --model-dir "$STAGE0_OUT" \
+            --dataset-dir "$CURRICULUM_DS" \
+            --output-dir "$ACTIVE_CP_DIR/stage1_curriculum" \
+            --max-steps "$STAGE_MAX_STEPS" \
+            --batch-size "$TRAIN_BATCH_SIZE"
+    fi
+
+    echo "=============================================================================="
+    echo "  TARA CLOUD TRAINING PIPELINE COMPLETED SUCCESSFULLY!"
+    echo "  Best checkpoints safely preserved to: $ACTIVE_CP_DIR"
+    echo "=============================================================================="
+    exit 0
 fi
 
+# 2. Native Rust Orchestrator Mode (When TRAINER_MODE=rust)
 # Install & Configure Rust Toolchain (Native Engine)
 if ! command -v cargo >/dev/null 2>&1; then
     echo "[SETUP] Installing Native Rust Toolchain..."

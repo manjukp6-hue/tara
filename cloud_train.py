@@ -519,7 +519,75 @@ def print_frontier_comparison_matrix_colored(step: int, cur_loss: float, best_lo
 
 
 # =============================================================================
-# 5. Main Autonomous Multi-Stage Training Runner
+# 5. High-Speed Cloud Asset Ingestion (Hugging Face CDN)
+# =============================================================================
+
+def ensure_remote_assets_available(model_dir: str, dataset_dir: str, repo_id: str = "manjukp6/tara"):
+    """
+    High-Speed Cloud Asset Ingestion via Hugging Face Hub (Pure Python).
+    Downloads base candidate model and dataset shards concurrently with resume support.
+    """
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        print("[Notice] huggingface_hub not installed; relying on existing local files.")
+        return
+
+    os.makedirs(model_dir, exist_ok=True)
+    os.makedirs(dataset_dir, exist_ok=True)
+
+    # 1. Check Model Weights & Config
+    config_file = os.path.join(model_dir, "config.json")
+    safetensor_files = glob.glob(os.path.join(model_dir, "*.safetensors"))
+    if not (os.path.exists(config_file) and len(safetensor_files) > 0):
+        print(f"[High-Speed HF] Downloading Model Candidate from {repo_id}...")
+        try:
+            snapshot_download(
+                repo_id=repo_id,
+                repo_type="model",
+                local_dir=model_dir,
+                allow_patterns=["config.json", "tokenizer.json", "tokenizer_config.json", "*.safetensors", "neural_model_v1/*"],
+                max_workers=8,
+            )
+            sub_dir = os.path.join(model_dir, "neural_model_v1")
+            if os.path.exists(sub_dir):
+                for item in os.listdir(sub_dir):
+                    s = os.path.join(sub_dir, item)
+                    d = os.path.join(model_dir, item)
+                    if not os.path.exists(d):
+                        shutil.move(s, d)
+                shutil.rmtree(sub_dir, ignore_errors=True)
+            print(f"[High-Speed HF] Model candidate assets ready in {model_dir}")
+        except Exception as e:
+            print(f"[Warning] Model candidate download warning: {e}")
+
+    # 2. Check Dataset Shards
+    jsonl_shards = glob.glob(os.path.join(dataset_dir, "*.jsonl"))
+    if len(jsonl_shards) == 0:
+        print(f"[High-Speed HF] Downloading Dataset Shards from {repo_id}...")
+        try:
+            snapshot_download(
+                repo_id=repo_id,
+                repo_type="dataset",
+                local_dir=dataset_dir,
+                allow_patterns=["v2/*.jsonl", "v2/*.json", "*.jsonl"],
+                max_workers=8,
+            )
+            sub_v2 = os.path.join(dataset_dir, "v2")
+            if os.path.exists(sub_v2):
+                for item in os.listdir(sub_v2):
+                    s = os.path.join(sub_v2, item)
+                    d = os.path.join(dataset_dir, item)
+                    if not os.path.exists(d):
+                        shutil.move(s, d)
+                shutil.rmtree(sub_v2, ignore_errors=True)
+            print(f"[High-Speed HF] Dataset shards ready in {dataset_dir}")
+        except Exception as e:
+            print(f"[Warning] Dataset shards download warning: {e}")
+
+
+# =============================================================================
+# 6. Main Autonomous Multi-Stage Training Runner
 # =============================================================================
 
 def main():
@@ -545,6 +613,9 @@ def main():
     # 1. Idempotence Check
     if check_stage_already_completed(args.output_dir):
         sys.exit(0)
+
+    # 2. Fast Asset Verification & Streaming Download (if files missing)
+    ensure_remote_assets_available(args.model_dir, args.dataset_dir)
 
     # 2. Hardware Inspection & Precision Selection (BF16 for Ampere+, FP16 for Tesla T4)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

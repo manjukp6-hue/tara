@@ -610,25 +610,28 @@ def main():
 
                 ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
 
-                # Real-Time Telemetry Logging
-                if step % 10 == 0 or step == start_step + 1 or step >= args.max_steps:
-                    elapsed = time.time() - t0
-                    steps_done = step - start_step
-                    ppl = math.exp(min(cur_step_loss, 20.0))
-                    tokens_per_sec = (steps_done * args.batch_size * args.grad_accum * args.max_seq_len) / max(elapsed, 1e-3)
-                    vram_used = torch.cuda.memory_allocated() / (1024 * 1024) if torch.cuda.is_available() else 0
-                    vram_total = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024) if torch.cuda.is_available() else 0
-                    cur_lr = optimizer.param_groups[0]["lr"]
+                # Real-Time Telemetry Logging (LIVE on EVERY SINGLE STEP with immediate stdout flush)
+                step_duration = max(time.time() - step_last_time, 1e-4) if 'step_last_time' in locals() else 0.5
+                step_last_time = time.time()
+                step_tokens = args.batch_size * args.grad_accum * args.max_seq_len
+                step_speed = step_tokens / step_duration
 
-                    print(
-                        f"[{args.stage_id} | Step {step:04d}/{args.max_steps}] "
-                        f"Loss: {cur_step_loss:.4f} (EMA: {ema_loss:.4f}) | "
-                        f"PPL: {ppl:.2f} | "
-                        f"LR: {cur_lr:.2e} | "
-                        f"GradNorm: {grad_norm:.2f} | "
-                        f"Speed: {tokens_per_sec:.0f} tok/s | "
-                        f"VRAM: {vram_used:.0f}/{vram_total:.0f} MB ({precision_str})"
-                    )
+                ppl = math.exp(min(cur_step_loss, 20.0))
+                cur_lr = optimizer.param_groups[0]["lr"]
+                vram_used = torch.cuda.memory_allocated() / (1024 * 1024) if torch.cuda.is_available() else 0
+                vram_total = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024) if torch.cuda.is_available() else 0
+
+                print(
+                    f"[{args.stage_id} | Step {step:04d}/{args.max_steps}] "
+                    f"Loss: {cur_step_loss:.4f} (EMA: {ema_loss:.4f}) | "
+                    f"PPL: {ppl:.2f} | "
+                    f"Precision: {precision_str} | "
+                    f"LR: {cur_lr:.2e} | "
+                    f"GradNorm: {grad_norm:.2f} | "
+                    f"Speed: {step_speed:.0f} tok/s ({step_duration:.2f}s) | "
+                    f"VRAM: {vram_used:.0f}/{vram_total:.0f} MB",
+                    flush=True
+                )
 
                 # Dynamic Best-Checkpointing Gate
                 if cur_step_loss < best_loss and step >= 10:

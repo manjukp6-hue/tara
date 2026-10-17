@@ -305,7 +305,9 @@ impl TaraDecoderLayer {
         let normed_x = self
             .input_layernorm
             .forward_channel(x, seq_len, hs, channel);
-        let attn_out = self.self_attn.forward_channel(&normed_x, seq_len, channel);
+        let (attn_out, attn_acts) = self
+            .self_attn
+            .forward_channel_with_activations(&normed_x, seq_len, channel);
         let h = channel.add_residual(x, &attn_out).unwrap_or_else(|_| {
             x.iter()
                 .zip(attn_out.iter())
@@ -316,9 +318,9 @@ impl TaraDecoderLayer {
         let normed_h = self
             .post_attention_layernorm
             .forward_channel(&h, seq_len, hs, channel);
-        let mlp_out =
+        let (mlp_out, mlp_acts) =
             self.mlp
-                .forward_channel(&normed_h, seq_len, hs, self.intermediate_size, channel);
+                .forward_channel_with_activations(&normed_h, seq_len, hs, self.intermediate_size, channel);
 
         let out = channel
             .add_residual(&h, &mlp_out)
@@ -332,6 +334,8 @@ impl TaraDecoderLayer {
                 h,
                 normed_h,
                 mlp_out,
+                attn_acts,
+                mlp_acts,
             },
         )
     }
@@ -352,10 +356,16 @@ impl TaraDecoderLayer {
         let h = &acts.h;
         let normed_x = &acts.normed_x;
 
-        // 1. Backward through MLP
+        // 1. Backward through MLP using saved activations
         let (d_normed_h, d_gate_proj, d_up_proj, d_down_proj) =
-            self.mlp
-                .backward(dy, normed_h, seq_len, hs, self.intermediate_size);
+            self.mlp.backward_with_saved_activations(
+                dy,
+                normed_h,
+                &acts.mlp_acts,
+                seq_len,
+                hs,
+                self.intermediate_size,
+            );
 
         // 2. Backward through Post-Attention LayerNorm
         let (dh_from_mlp, d_post_attention_layernorm) =
@@ -368,9 +378,14 @@ impl TaraDecoderLayer {
             dh[i] = dh_from_mlp[i] + dy[i];
         }
 
-        // 4. Backward through Attention
+        // 4. Backward through Attention using saved activations
         let (d_normed_x, d_q_proj, d_k_proj, d_v_proj, d_o_proj) =
-            self.self_attn.backward(&dh, normed_x, seq_len);
+            self.self_attn.backward_with_saved_activations(
+                &dh,
+                normed_x,
+                &acts.attn_acts,
+                seq_len,
+            );
 
         // 5. Backward through Input LayerNorm
         let (dx_from_attn, d_input_layernorm) =
@@ -403,20 +418,89 @@ impl TaraDecoderLayer {
         x: &[f32],
         acts: &DecoderLayerActivations,
         seq_len: usize,
-        _channel: &tara_hd::ComputeChannel,
+        channel: &tara_hd::ComputeChannel,
     ) -> LayerGradients {
-        self.backward_with_activations(dy, x, acts, seq_len)
+        let hs = self.hidden_size;
+        let normed_h = &acts.normed_h;
+        let h = &acts.h;
+        let normed_x = &acts.normed_x;
+
+        // 1. Backward through MLP using saved activations
+        let (d_normed_h, d_gate_proj, d_up_proj, d_down_proj) =
+            self.mlp.backward_with_saved_activations(
+                dy,
+                normed_h,
+                &acts.mlp_acts,
+                seq_len,
+                hs,
+                self.intermediate_size,
+            );
+
+        // 2. Backward through Post-Attention LayerNorm
+        let (dh_from_mlp, d_post_attention_layernorm) =
+            self.post_attention_layernorm
+                .backward(&d_normed_h, h, seq_len, hs);
+
+        // 3. Accumulate gradient into h (Residual 2 branch) via compute channel
+        let dh = channel
+            .add_residual(&dh_from_mlp, dy)
+            .unwrap_or_else(|_| {
+                dh_from_mlp
+                    .iter()
+                    .zip(dy.iter())
+                    .map(|(&a, &b)| a + b)
+                    .collect()
+            });
+
+        // 4. Backward through Attention using saved activations
+        let (d_normed_x, d_q_proj, d_k_proj, d_v_proj, d_o_proj) =
+            self.self_attn.backward_with_saved_activations(
+                &dh,
+                normed_x,
+                &acts.attn_acts,
+                seq_len,
+            );
+
+        // 5. Backward through Input LayerNorm
+        let (dx_from_attn, d_input_layernorm) =
+            self.input_layernorm.backward(&d_normed_x, x, seq_len, hs);
+
+        // 6. Accumulate gradient into x (Residual 1 branch) via compute channel
+        let dx = channel
+            .add_residual(&dx_from_attn, &dh)
+            .unwrap_or_else(|_| {
+                dx_from_attn
+                    .iter()
+                    .zip(dh.iter())
+                    .map(|(&a, &b)| a + b)
+                    .collect()
+            });
+
+        LayerGradients {
+            dx,
+            d_input_layernorm,
+            d_q_proj,
+            d_k_proj,
+            d_v_proj,
+            d_o_proj,
+            d_post_attention_layernorm,
+            d_gate_proj,
+            d_up_proj,
+            d_down_proj,
+        }
     }
 }
 
 /// Forward activations saved during forward pass for backpropagation without recomputation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DecoderLayerActivations {
     pub normed_x: Vec<f32>,
     pub attn_out: Vec<f32>,
     pub h: Vec<f32>,
     pub normed_h: Vec<f32>,
     pub mlp_out: Vec<f32>,
+    pub attn_acts: super::attention::AttentionActivations,
+    pub mlp_acts: super::mlp::MlpActivations,
 }
 
 /// Gradients computed for a single decoder layer.

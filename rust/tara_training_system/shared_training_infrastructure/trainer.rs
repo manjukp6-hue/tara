@@ -2014,6 +2014,7 @@ impl NativeSelfTrainer {
                         learning_rate
                     };
 
+                    let is_tied = config.is_tied();
                     let mut weights = model.into_weights_map();
 
                     // Calculate Continual Learning (EWC) penalty & gradient
@@ -2103,7 +2104,7 @@ impl NativeSelfTrainer {
                                 *val *= factor;
                             }
                         }
-                        if model.is_tied_embeddings() {
+                        if is_tied {
                             if let Some(lm_g) = accum_grads.get("lm_head.weight").cloned() {
                                 if let Some(emb_g) = accum_grads.get_mut("model.embed_tokens.weight") {
                                     for (e, l) in emb_g.iter_mut().zip(lm_g.iter()) {
@@ -2143,7 +2144,7 @@ impl NativeSelfTrainer {
                                 max_grad_norm,
                             },
                         );
-                        if model.is_tied_embeddings() {
+                        if is_tied {
                             if let Some(emb_w) = weights.get("model.embed_tokens.weight").cloned() {
                                 weights.insert("lm_head.weight".to_string(), emb_w);
                             }
@@ -2231,7 +2232,7 @@ impl NativeSelfTrainer {
                     let running_loss_display = running_avg_loss.unwrap_or(batch_lm_loss);
 
                     println!(
-                            "[{stage_label} | Step {:>4}/{}{}] Total Loss: {:.4} | LM Loss: {:.4} (Running: {:.4}) | PPL: {:.2} | BPB: {:.4} | Aux/EWC: {:.4} | Grad Norm: {:.4} | LR: {:.6} | Throughput: {:.1} tok/s | Step Time: {:.2}s | Elapsed: {}{}{} | Host RSS: {:.1} MB{}",
+                            "[{stage_label} | Step {:>4}/{}{}] Total Loss: {:.4} | LM Loss: {:.4} (Running: {:.4}) | PPL: {:.2} | BPB: {:.4} | Aux/EWC: {:.4} | Grad Norm: {:.4} | LR: {:.6} | Throughput: {:.1} tok/s | Step Time: {:.2}s | Elapsed: {}{} | Host RSS: {:.1} MB{}",
                             optimizer_steps,
                             max_str,
                             step_pct_str,
@@ -2247,7 +2248,6 @@ impl NativeSelfTrainer {
                             batch_time_sec,
                             elapsed_str,
                             eta_str,
-                            vram_str,
                             snap.process_rss_mb,
                             vram_str
                         );
@@ -2366,6 +2366,7 @@ impl NativeSelfTrainer {
                     learning_rate
                 };
 
+                let is_tied = config.is_tied();
                 let mut weights = model.into_weights_map();
 
                 let mut ewc_loss = 0.0f32;
@@ -2437,7 +2438,7 @@ impl NativeSelfTrainer {
                             *val *= factor;
                         }
                     }
-                    if model.is_tied_embeddings() {
+                    if is_tied {
                         if let Some(lm_g) = accum_grads.get("lm_head.weight").cloned() {
                             if let Some(emb_g) = accum_grads.get_mut("model.embed_tokens.weight") {
                                 for (e, l) in emb_g.iter_mut().zip(lm_g.iter()) {
@@ -2473,7 +2474,7 @@ impl NativeSelfTrainer {
                             max_grad_norm,
                         },
                     );
-                    if model.is_tied_embeddings() {
+                    if is_tied {
                         if let Some(emb_w) = weights.get("model.embed_tokens.weight").cloned() {
                             weights.insert("lm_head.weight".to_string(), emb_w);
                         }
@@ -2551,7 +2552,7 @@ impl NativeSelfTrainer {
                 let running_loss_display = running_avg_loss.unwrap_or(batch_lm_loss);
 
                 println!(
-                    "[{stage_label} | Step {:>4}/{}{} (Epoch Flush)] Total Loss: {:.4} | LM Loss: {:.4} (Running: {:.4}) | PPL: {:.2} | BPB: {:.4} | Aux/EWC: {:.4} | Grad Norm: {:.4} | LR: {:.6} | Throughput: {:.1} tok/s | Step Time: {:.2}s | Elapsed: {}{}{} | Host RSS: {:.1} MB{}",
+                    "[{stage_label} | Step {:>4}/{}{} (Epoch Flush)] Total Loss: {:.4} | LM Loss: {:.4} (Running: {:.4}) | PPL: {:.2} | BPB: {:.4} | Aux/EWC: {:.4} | Grad Norm: {:.4} | LR: {:.6} | Throughput: {:.1} tok/s | Step Time: {:.2}s | Elapsed: {}{} | Host RSS: {:.1} MB{}",
                     optimizer_steps,
                     max_str,
                     step_pct_str,
@@ -2567,7 +2568,6 @@ impl NativeSelfTrainer {
                     batch_time_sec,
                     elapsed_str,
                     eta_str,
-                    vram_str,
                     snap.process_rss_mb,
                     vram_str
                 );

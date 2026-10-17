@@ -335,6 +335,7 @@ if [ -n "${HF_TOKEN:-}" ] && [ -n "${HF_REPO:-}" ]; then
 
     # Locate the highest completed stage directory dynamically (unbounded N stages)
     FINAL_STAGE_DIR=""
+    WORLD_DIR="manual_training/checkpoints"
     if [ -d "$ACTIVE_CP_DIR" ]; then
         for meta_file in $(find "$ACTIVE_CP_DIR" -maxdepth 2 -type f -name "STAGE_METADATA.json" 2>/dev/null | sort -V -r); do
             FINAL_STAGE_DIR="$(dirname "$meta_file")"

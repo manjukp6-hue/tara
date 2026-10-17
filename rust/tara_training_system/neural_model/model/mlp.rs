@@ -249,23 +249,106 @@ impl TaraMlp {
             })
     }
 
-    /// Compute gradients for inputs `x` and weights (`gate_proj`, `up_proj`, `down_proj`)
-    /// given incoming gradient `dy`.
-    ///
-    /// Returns `(dx, d_gate_proj, d_up_proj, d_down_proj)`.
-    pub fn backward(
+    /// Forward pass through the MLP returning output and saved intermediate activations.
+    pub fn forward_with_activations(
         &self,
-        dy: &[f32],
         x: &[f32],
         seq_len: usize,
         hidden_size: usize,
         intermediate_size: usize,
-    ) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
-        // Forward activations needed for backprop
+    ) -> (Vec<f32>, MlpActivations) {
         let gate_raw = mat_mul(x, &self.gate_proj, seq_len, hidden_size, intermediate_size);
         let gate: Vec<f32> = gate_raw.iter().map(|&v| silu(v)).collect();
         let up = mat_mul(x, &self.up_proj, seq_len, hidden_size, intermediate_size);
         let hidden: Vec<f32> = gate.iter().zip(up.iter()).map(|(&g, &u)| g * u).collect();
+        let out = mat_mul(
+            &hidden,
+            &self.down_proj,
+            seq_len,
+            intermediate_size,
+            hidden_size,
+        );
+        (
+            out,
+            MlpActivations {
+                gate_raw,
+                gate,
+                up,
+                hidden,
+            },
+        )
+    }
+
+    /// Forward pass through the active compute channel returning output and saved activations.
+    pub fn forward_channel_with_activations(
+        &self,
+        x: &[f32],
+        seq_len: usize,
+        hidden_size: usize,
+        intermediate_size: usize,
+        channel: &tara_hd::ComputeChannel,
+    ) -> (Vec<f32>, MlpActivations) {
+        let gate_raw = match channel.forward_linear(
+            &self.gate_proj,
+            x,
+            seq_len,
+            hidden_size,
+            intermediate_size,
+        ) {
+            Ok(g) => g,
+            Err(_) => return self.forward_with_activations(x, seq_len, hidden_size, intermediate_size),
+        };
+        let up = match channel.forward_linear(&self.up_proj, x, seq_len, hidden_size, intermediate_size) {
+            Ok(u) => u,
+            Err(_) => return self.forward_with_activations(x, seq_len, hidden_size, intermediate_size),
+        };
+        let gate: Vec<f32> = gate_raw.iter().map(|&v| silu(v)).collect();
+        let hidden = match channel.forward_swiglu(&gate_raw, &up) {
+            Ok(h) => h,
+            Err(_) => gate.iter().zip(up.iter()).map(|(&g, &u)| g * u).collect(),
+        };
+        let out = channel
+            .forward_linear(
+                &self.down_proj,
+                &hidden,
+                seq_len,
+                intermediate_size,
+                hidden_size,
+            )
+            .unwrap_or_else(|_| {
+                mat_mul(
+                    &hidden,
+                    &self.down_proj,
+                    seq_len,
+                    intermediate_size,
+                    hidden_size,
+                )
+            });
+        (
+            out,
+            MlpActivations {
+                gate_raw,
+                gate,
+                up,
+                hidden,
+            },
+        )
+    }
+
+    /// Compute gradients using saved forward activations, eliminating forward pass recomputations completely.
+    pub fn backward_with_saved_activations(
+        &self,
+        dy: &[f32],
+        x: &[f32],
+        acts: &MlpActivations,
+        seq_len: usize,
+        hidden_size: usize,
+        intermediate_size: usize,
+    ) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+        let gate = &acts.gate;
+        let up = &acts.up;
+        let hidden = &acts.hidden;
+        let gate_raw = &acts.gate_raw;
 
         // 1. d_down_proj = dy^T @ hidden: shape [hidden_size, intermediate_size]
         let mut d_down_proj = vec![0.0f32; hidden_size * intermediate_size];
@@ -363,6 +446,31 @@ impl TaraMlp {
 
         (dx, d_gate_proj, d_up_proj, d_down_proj)
     }
+
+    /// Compute gradients for inputs `x` and weights (`gate_proj`, `up_proj`, `down_proj`)
+    /// given incoming gradient `dy`.
+    ///
+    /// Returns `(dx, d_gate_proj, d_up_proj, d_down_proj)`.
+    pub fn backward(
+        &self,
+        dy: &[f32],
+        x: &[f32],
+        seq_len: usize,
+        hidden_size: usize,
+        intermediate_size: usize,
+    ) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+        let (_, acts) = self.forward_with_activations(x, seq_len, hidden_size, intermediate_size);
+        self.backward_with_saved_activations(dy, x, &acts, seq_len, hidden_size, intermediate_size)
+    }
+}
+
+/// Forward activations saved for backpropagation without forward recomputation.
+#[derive(Debug, Clone, Default)]
+pub struct MlpActivations {
+    pub gate_raw: Vec<f32>,
+    pub gate: Vec<f32>,
+    pub up: Vec<f32>,
+    pub hidden: Vec<f32>,
 }
 
 #[cfg(test)]

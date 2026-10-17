@@ -370,9 +370,4 @@ impl ComputeDevice for CudaComputeDevice {
         t.backward_lm_head_accumulate(d_logits, final_normed, seq_len, hs, vs)
             .map_err(|e| e.to_string())
     }
-
-    fn synchronize(&self) -> Result<(), String> {
-        let t = self.trainer.lock().map_err(|e| e.to_string())?;
-        t.synchronize().map_err(|e| e.to_string())
-    }
 }

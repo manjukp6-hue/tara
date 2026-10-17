@@ -1027,6 +1027,50 @@ impl CudaSession {
         })
     }
 
+    pub fn download_f32_slice_offset(
+        &self,
+        buffer: &CudaBuffer,
+        offset_elements: usize,
+        out: &mut [f32],
+    ) -> Result<(), CudaError> {
+        if offset_elements + out.len() > buffer.len_elements {
+            return Err(CudaError::KernelError(format!(
+                "Download overflow: offset {} + out len {} > buffer capacity {}",
+                offset_elements,
+                out.len(),
+                buffer.len_elements
+            )));
+        }
+        let byte_offset = offset_elements * std::mem::size_of::<f32>();
+        let bytes_to_copy = std::mem::size_of_val(out);
+        self.context.with_context(|| {
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_memcpy_dtoh)(
+                    out.as_mut_ptr() as *mut c_void,
+                    buffer.dptr + byte_offset as u64,
+                    bytes_to_copy
+                )
+            );
+            Ok(())
+        })
+    }
+
+    pub fn copy_dtod_ptrs(
+        &self,
+        dst_dptr: u64,
+        src_dptr: u64,
+        bytes: usize,
+    ) -> Result<(), CudaError> {
+        self.context.with_context(|| {
+            check_cu!(
+                self.context.driver,
+                (self.context.driver.fn_memcpy_dtod)(dst_dptr, src_dptr, bytes)
+            );
+            Ok(())
+        })
+    }
+
     pub fn synchronize(&self) -> Result<(), CudaError> {
         self.context.with_context(|| {
             check_cu!(

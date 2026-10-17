@@ -256,11 +256,6 @@ pub trait ComputeDevice: Send + Sync + Debug {
         Ok(out)
     }
 
-    /// Wait for all enqueued asynchronous operations on the compute device to complete.
-    fn synchronize(&self) -> Result<(), String> {
-        Ok(())
-    }
-
     /// Accumulate gradient into device parameter buffer.
     fn accumulate_gradient(&self, _param_name: &str, _gradient: &[f32]) -> Result<(), String> {
         Ok(())

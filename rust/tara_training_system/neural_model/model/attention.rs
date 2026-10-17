@@ -401,26 +401,22 @@ impl TaraAttention {
         mat_mul(&context, &self.o_proj, 1, nh * hd, hs)
     }
 
-    /// Compute analytical gradients for inputs and attention projection weights:
-    /// `(dx, d_q_proj, d_k_proj, d_v_proj, d_o_proj)`.
-    pub fn backward(&self, dy: &[f32], hidden_states: &[f32], seq_len: usize) -> AttentionGrads {
+    /// Run the attention forward pass returning output and saved intermediate activations.
+    pub fn forward_with_activations(
+        &self,
+        hidden_states: &[f32],
+        seq_len: usize,
+    ) -> (Vec<f32>, AttentionActivations) {
         let nh = self.num_heads;
         let nkv = self.num_kv_heads;
         let hd = self.head_dim;
         let hs = self.hidden_size;
 
         if nkv == 0 || nh == 0 || seq_len == 0 || hd == 0 || hs == 0 {
-            return (
-                vec![0.0f32; seq_len * hs],
-                vec![0.0f32; self.q_proj.len()],
-                vec![0.0f32; self.k_proj.len()],
-                vec![0.0f32; self.v_proj.len()],
-                vec![0.0f32; self.o_proj.len()],
-            );
+            return (vec![0.0f32; seq_len * hs], AttentionActivations::default());
         }
         let kv_groups = (nh / nkv.max(1)).max(1);
 
-        // Forward activations
         let q = mat_mul(hidden_states, &self.q_proj, seq_len, hs, nh * hd);
         let k = mat_mul(hidden_states, &self.k_proj, seq_len, hs, nkv * hd);
         let v = mat_mul(hidden_states, &self.v_proj, seq_len, hs, nkv * hd);
@@ -487,6 +483,166 @@ impl TaraAttention {
                     }
                 }
             });
+
+        let out = mat_mul(&context, &self.o_proj, seq_len, nh * hd, hs);
+        (
+            out,
+            AttentionActivations {
+                q,
+                k,
+                v,
+                q_rot,
+                k_exp,
+                v_exp,
+                attn_weights,
+                context,
+            },
+        )
+    }
+
+    /// Run the attention forward pass through the active compute channel returning output and saved activations.
+    pub fn forward_channel_with_activations(
+        &self,
+        hidden_states: &[f32],
+        seq_len: usize,
+        channel: &tara_hd::ComputeChannel,
+    ) -> (Vec<f32>, AttentionActivations) {
+        let nh = self.num_heads;
+        let nkv = self.num_kv_heads;
+        let hd = self.head_dim;
+        let hs = self.hidden_size;
+
+        if nkv == 0 || nh == 0 || seq_len == 0 || hd == 0 || hs == 0 {
+            return (vec![0.0f32; seq_len * hs], AttentionActivations::default());
+        }
+        let kv_groups = (nh / nkv.max(1)).max(1);
+
+        let q = match channel.forward_linear(&self.q_proj, hidden_states, seq_len, hs, nh * hd) {
+            Ok(q) => q,
+            Err(_) => return self.forward_with_activations(hidden_states, seq_len),
+        };
+        let k = match channel.forward_linear(&self.k_proj, hidden_states, seq_len, hs, nkv * hd) {
+            Ok(k) => k,
+            Err(_) => return self.forward_with_activations(hidden_states, seq_len),
+        };
+        let v = match channel.forward_linear(&self.v_proj, hidden_states, seq_len, hs, nkv * hd) {
+            Ok(v) => v,
+            Err(_) => return self.forward_with_activations(hidden_states, seq_len),
+        };
+
+        let (cos, sin) = self.rotary_emb.get_cos_sin(seq_len);
+        let dims = RotaryDimensions {
+            seq_len,
+            num_heads_q: nh,
+            num_heads_k: nkv,
+            head_dim: hd,
+        };
+        let (q_rot, k_rot) = RotaryEmbedding::apply_rotary_emb(&q, &k, &cos, &sin, dims);
+
+        let mut k_exp = vec![0.0f32; seq_len * nh * hd];
+        let mut v_exp = vec![0.0f32; seq_len * nh * hd];
+        for pos in 0..seq_len {
+            for h in 0..nh {
+                let kv_head = h / kv_groups;
+                let src_k = pos * nkv * hd + kv_head * hd;
+                let src_v = pos * nkv * hd + kv_head * hd;
+                let dst = pos * nh * hd + h * hd;
+                k_exp[dst..dst + hd].copy_from_slice(&k_rot[src_k..src_k + hd]);
+                v_exp[dst..dst + hd].copy_from_slice(&v[src_v..src_v + hd]);
+            }
+        }
+
+        let scale = (hd as f32).sqrt().recip();
+        let mut attn_weights = vec![0.0f32; nh * seq_len * seq_len];
+        attn_weights
+            .par_chunks_exact_mut(seq_len * seq_len)
+            .enumerate()
+            .for_each(|(h, h_attn)| {
+                for i in 0..seq_len {
+                    let qi = &q_rot[i * nh * hd + h * hd..i * nh * hd + (h + 1) * hd];
+                    let row = &mut h_attn[i * seq_len..(i + 1) * seq_len];
+                    for j in 0..=i {
+                        let kj = &k_exp[j * nh * hd + h * hd..j * nh * hd + (h + 1) * hd];
+                        let dot: f32 = qi.iter().zip(kj.iter()).map(|(&a, &b)| a * b).sum();
+                        row[j] = dot * scale;
+                    }
+                    for j in (i + 1)..seq_len {
+                        row[j] = f32::NEG_INFINITY;
+                    }
+                }
+            });
+        softmax_inplace(&mut attn_weights, nh, seq_len);
+
+        let mut context = vec![0.0f32; seq_len * nh * hd];
+        context
+            .par_chunks_exact_mut(nh * hd)
+            .enumerate()
+            .for_each(|(i, ctx_i)| {
+                for h in 0..nh {
+                    let out_slice = &mut ctx_i[h * hd..(h + 1) * hd];
+                    let w_row = &attn_weights[h * seq_len * seq_len + i * seq_len..];
+                    for j in 0..=i {
+                        let w = w_row[j];
+                        if w > 0.0 {
+                            let vj = &v_exp[j * nh * hd + h * hd..j * nh * hd + (h + 1) * hd];
+                            for (o, &vi) in out_slice.iter_mut().zip(vj.iter()) {
+                                *o += w * vi;
+                            }
+                        }
+                    }
+                }
+            });
+
+        let out = channel
+            .forward_linear(&self.o_proj, &context, seq_len, nh * hd, hs)
+            .unwrap_or_else(|_| mat_mul(&context, &self.o_proj, seq_len, nh * hd, hs));
+
+        (
+            out,
+            AttentionActivations {
+                q,
+                k,
+                v,
+                q_rot,
+                k_exp,
+                v_exp,
+                attn_weights,
+                context,
+            },
+        )
+    }
+
+    /// Compute analytical gradients for inputs and attention projection weights using saved activations.
+    /// Completely eliminates forward recomputation during backward pass.
+    pub fn backward_with_saved_activations(
+        &self,
+        dy: &[f32],
+        hidden_states: &[f32],
+        acts: &AttentionActivations,
+        seq_len: usize,
+    ) -> AttentionGrads {
+        let nh = self.num_heads;
+        let nkv = self.num_kv_heads;
+        let hd = self.head_dim;
+        let hs = self.hidden_size;
+
+        if nkv == 0 || nh == 0 || seq_len == 0 || hd == 0 || hs == 0 {
+            return (
+                vec![0.0f32; seq_len * hs],
+                vec![0.0f32; self.q_proj.len()],
+                vec![0.0f32; self.k_proj.len()],
+                vec![0.0f32; self.v_proj.len()],
+                vec![0.0f32; self.o_proj.len()],
+            );
+        }
+        let kv_groups = (nh / nkv.max(1)).max(1);
+
+        let q_rot = &acts.q_rot;
+        let k_exp = &acts.k_exp;
+        let v_exp = &acts.v_exp;
+        let attn_weights = &acts.attn_weights;
+        let context = &acts.context;
+        let scale = (hd as f32).sqrt().recip();
 
         // 1. Output projection backward:
         // dy: [seq_len, hs], context: [seq_len, nh * hd]
@@ -643,6 +799,7 @@ impl TaraAttention {
         }
 
         // 6. RoPE backward:
+        let (cos, sin) = self.rotary_emb.get_cos_sin(seq_len);
         let dims = RotaryDimensions {
             seq_len,
             num_heads_q: nh,
@@ -725,6 +882,26 @@ impl TaraAttention {
 
         (dx, d_q_proj, d_k_proj, d_v_proj, d_o_proj)
     }
+
+    /// Compute analytical gradients for inputs and attention projection weights:
+    /// `(dx, d_q_proj, d_k_proj, d_v_proj, d_o_proj)`.
+    pub fn backward(&self, dy: &[f32], hidden_states: &[f32], seq_len: usize) -> AttentionGrads {
+        let (_, acts) = self.forward_with_activations(hidden_states, seq_len);
+        self.backward_with_saved_activations(dy, hidden_states, &acts, seq_len)
+    }
+}
+
+/// Forward activations saved for attention backward pass without forward recomputation.
+#[derive(Debug, Clone, Default)]
+pub struct AttentionActivations {
+    pub q: Vec<f32>,
+    pub k: Vec<f32>,
+    pub v: Vec<f32>,
+    pub q_rot: Vec<f32>,
+    pub k_exp: Vec<f32>,
+    pub v_exp: Vec<f32>,
+    pub attn_weights: Vec<f32>,
+    pub context: Vec<f32>,
 }
 
 /// In-place causal softmax over `[nh, seq, seq]` attention weights.

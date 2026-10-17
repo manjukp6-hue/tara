@@ -25,7 +25,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     try:
@@ -50,10 +50,78 @@ except ImportError:
     HAS_SAFETENSORS = False
 
 try:
-    from tokenizers import Tokenizer
+    from tokenizers import Tokenizer as HFTokenizer
     HAS_TOKENIZERS = True
 except ImportError:
     HAS_TOKENIZERS = False
+
+
+class TokenizerOutput:
+    def __init__(self, ids: List[int]):
+        self.ids = ids
+
+    def __iter__(self):
+        return iter(self.ids)
+
+    def __len__(self):
+        return len(self.ids)
+
+    def __getitem__(self, idx):
+        return self.ids[idx]
+
+
+class TaraNativeTokenizer:
+    """Native Python implementation of TARA's Tokenizer matching rust/tara_engine/src/tokenizer.rs."""
+    def __init__(self, vocab_map: Dict[str, int]):
+        self.token_to_id = vocab_map
+        self.id_to_token = {v: k for k, v in vocab_map.items()}
+        self.vocab_size = len(vocab_map)
+        self.max_token_len = max((len(k) for k in vocab_map.keys()), default=1)
+        self.unk_id = vocab_map.get("<|unk|>", vocab_map.get("<unk>", 0))
+        self.pad_id = vocab_map.get("<|pad|>", vocab_map.get("<pad>", 0))
+        self.eos_id = vocab_map.get("<|eos|>", vocab_map.get("<eos>", 1))
+
+    @classmethod
+    def from_file(cls, path: str):
+        # 1. First check if it is TARA's native format {"vocab": {...}} or direct dict
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and "vocab" in data and isinstance(data["vocab"], dict):
+                return cls(data["vocab"])
+            elif isinstance(data, dict) and len(data) > 0 and all(isinstance(v, int) for v in list(data.values())[:10]):
+                return cls(data)
+        except Exception:
+            pass
+
+        # 2. Fallback to Hugging Face Tokenizer if available
+        if HAS_TOKENIZERS:
+            try:
+                return HFTokenizer.from_file(path)
+            except Exception:
+                pass
+        raise ValueError(f"Could not load valid tokenizer from {path}")
+
+    def encode(self, text: str) -> TokenizerOutput:
+        ids = []
+        n = len(text)
+        i = 0
+        while i < n:
+            matched = False
+            for length in range(min(self.max_token_len, n - i), 0, -1):
+                sub = text[i:i + length]
+                if sub in self.token_to_id:
+                    ids.append(self.token_to_id[sub])
+                    i += length
+                    matched = True
+                    break
+            if not matched:
+                ids.append(self.unk_id)
+                i += 1
+        return TokenizerOutput(ids)
+
+    def decode(self, ids: List[int]) -> str:
+        return "".join(self.id_to_token.get(i, "") for i in ids)
 
 
 # =============================================================================
@@ -218,7 +286,7 @@ class TaraForCausalLM(nn.Module):
 # =============================================================================
 
 class TaraJsonlDataset(Dataset):
-    def __init__(self, file_paths: List[str], tokenizer: Tokenizer, max_seq_len: int = 256):
+    def __init__(self, file_paths: List[str], tokenizer: Any, max_seq_len: int = 256):
         self.samples: List[Tuple[List[int], int]] = []
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
@@ -651,10 +719,15 @@ def main():
     tok_path = os.path.join(args.model_dir, "tokenizer.json")
     if not os.path.exists(tok_path):
         tok_path = "storage/models/tara_candidate_v1/tokenizer.json"
-    if not os.path.exists(tok_path) or not HAS_TOKENIZERS:
-        print(f"[Error] tokenizer.json missing at {tok_path} or tokenizers not installed.")
+    if not os.path.exists(tok_path):
+        print(f"[Error] tokenizer.json missing at {tok_path}")
         sys.exit(1)
-    tokenizer = Tokenizer.from_file(tok_path)
+    try:
+        tokenizer = TaraNativeTokenizer.from_file(tok_path)
+        print(f"[Tokenizer] Successfully loaded TARA Tokenizer ({tokenizer.vocab_size:,} vocabulary tokens)")
+    except Exception as e:
+        print(f"[Error] Failed to load tokenizer from {tok_path}: {e}")
+        sys.exit(1)
 
     # 5. Build Model
     model = TaraForCausalLM(config).to(device)

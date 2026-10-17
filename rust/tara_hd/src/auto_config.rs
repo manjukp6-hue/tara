@@ -57,6 +57,13 @@ pub struct AutoTrainingConfig {
     /// Derived as: safety_pct × min(host_ram_available, cgroup_available_if_set).
     /// Trainers must use this as `max_memory_mb` when the user has not set an explicit ceiling.
     pub max_memory_mb: f64,
+    /// Total device (GPU/TPU) VRAM in MB. Zero when running purely on CPU.
+    pub device_vram_total_mb: f64,
+    /// Available device (GPU/TPU) VRAM in MB. Zero when running purely on CPU.
+    pub device_vram_available_mb: f64,
+    /// Safe device (GPU/TPU) VRAM ceiling in MB (available VRAM * safety fraction).
+    /// Zero when running purely on CPU.
+    pub max_device_vram_mb: f64,
 }
 
 impl AutoTrainingConfig {
@@ -190,6 +197,22 @@ impl AutoTrainingConfig {
 
         let max_memory_mb = (effective_available_mb * host_ram_safety_pct / 100.0).max(512.0);
 
+        // ── Device memory budget (GPU/TPU) ───────────────────────────────────────
+        let (device_vram_total_mb, device_vram_available_mb, max_device_vram_mb) = match device_kind {
+            DeviceKind::Gpu | DeviceKind::Tpu | DeviceKind::Custom(_) if total_mem_bytes > 0 => {
+                let tot_mb = total_mem_bytes as f64 / (1024.0 * 1024.0);
+                let av_mb = avail_mem_bytes as f64 / (1024.0 * 1024.0);
+                let vram_safety_pct: f64 = env::var("TARA_VRAM_SAFETY_PCT")
+                    .ok()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(85.0)
+                    .clamp(50.0, 95.0);
+                let safe_mb = (av_mb.min(tot_mb) * vram_safety_pct / 100.0).max(512.0);
+                (tot_mb, av_mb, safe_mb)
+            }
+            _ => (0.0, 0.0, 0.0),
+        };
+
         // ── Telemetry summary ────────────────────────────────────────────────────
         let effective_batch = batch_size * grad_accum_steps;
         let mem_gb = total_mem_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
@@ -202,8 +225,18 @@ impl AutoTrainingConfig {
         } else {
             String::new()
         };
+        let vram_telemetry_str = if device_vram_total_mb > 0.0 {
+            format!(
+                " | VRAM: {:.1} GB / {:.1} GB avail (Ceiling: {:.0} MB)",
+                device_vram_available_mb / 1024.0,
+                device_vram_total_mb / 1024.0,
+                max_device_vram_mb
+            )
+        } else {
+            String::new()
+        };
         let telemetry = format!(
-            "[AutoMemory] Device: {} | HostRAMTotal: {:.1} GB | HostRAMAvail: {:.1} GB{} | Precision: {} | Batch: {} | SeqLen: {} | GradAccum: {} | EffBatch: {} | LR: {:.1e} | Warmup: {} | MemCeiling: {:.0} MB",
+            "[AutoMemory] Device: {}{vram_telemetry_str} | HostRAMTotal: {:.1} GB | HostRAMAvail: {:.1} GB{} | Precision: {} | Batch: {} | SeqLen: {} | GradAccum: {} | EffBatch: {} | LR: {:.1e} | Warmup: {} | HostCeiling: {:.0} MB",
             device_label,
             host_ram_total_mb / 1024.0,
             host_ram_available_mb / 1024.0,
@@ -234,6 +267,9 @@ impl AutoTrainingConfig {
             cgroup_limit_mb,
             cgroup_available_mb,
             max_memory_mb,
+            device_vram_total_mb,
+            device_vram_available_mb,
+            max_device_vram_mb,
         }
     }
 
@@ -317,6 +353,16 @@ impl AutoTrainingConfig {
             cgroup_limit_mb: self.cgroup_limit_mb,
             cgroup_available_mb: self.cgroup_available_mb,
             max_memory_mb: self.max_memory_mb,
+            device_vram_total_mb: live_total_bytes as f64 / (1024.0 * 1024.0),
+            device_vram_available_mb: live_free_bytes as f64 / (1024.0 * 1024.0),
+            max_device_vram_mb: {
+                let vram_safety_pct: f64 = env::var("TARA_VRAM_SAFETY_PCT")
+                    .ok()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(85.0)
+                    .clamp(50.0, 95.0);
+                (live_free_bytes as f64 / (1024.0 * 1024.0) * vram_safety_pct / 100.0).max(512.0)
+            },
         })
     }
 

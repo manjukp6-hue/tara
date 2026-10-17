@@ -201,3 +201,125 @@ impl StreamBufferPool {
         self.pool.len()
     }
 }
+
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use crate::event::{CancellationToken, MemoryFlowGovernor, StreamEvent};
+
+/// Universal, hardware-agnostic stream engine for TARA-HD.
+/// Connects chat token generation, training iterations, and data flow across CPU, GPU, and TPU
+/// with thread-safe cancellation and bounded memory flow control.
+#[derive(Debug, Clone)]
+pub struct UniversalStreamEngine {
+    governor: MemoryFlowGovernor,
+    cancel_token: CancellationToken,
+}
+
+impl Default for UniversalStreamEngine {
+    fn default() -> Self {
+        Self::new(32 * 1024 * 1024) // 32 MB default in-flight byte capacity
+    }
+}
+
+impl UniversalStreamEngine {
+    /// Create a universal stream engine with custom in-flight byte budget.
+    pub fn new(max_in_flight_bytes: usize) -> Self {
+        Self {
+            governor: MemoryFlowGovernor::new(max_in_flight_bytes),
+            cancel_token: CancellationToken::new(),
+        }
+    }
+
+    /// Access the cooperative cancellation token.
+    pub fn cancellation_token(&self) -> &CancellationToken {
+        &self.cancel_token
+    }
+
+    /// Access memory flow governor.
+    pub fn governor(&self) -> &MemoryFlowGovernor {
+        &self.governor
+    }
+
+    /// Open a bounded, synchronous event stream channel.
+    /// Returns (Sender, Receiver) pair with backpressure enforcement.
+    pub fn open_stream(
+        &self,
+        bounded_queue_depth: usize,
+    ) -> (UniversalStreamSender, UniversalStreamReceiver) {
+        let (tx, rx) = sync_channel(bounded_queue_depth.max(1));
+        let sender = UniversalStreamSender {
+            tx,
+            governor: self.governor.clone(),
+            cancel_token: self.cancel_token.clone(),
+        };
+        let receiver = UniversalStreamReceiver {
+            rx,
+            governor: self.governor.clone(),
+            cancel_token: self.cancel_token.clone(),
+        };
+        (sender, receiver)
+    }
+}
+
+/// Producer side of the universal stream pipeline.
+#[derive(Debug, Clone)]
+pub struct UniversalStreamSender {
+    tx: SyncSender<StreamEvent>,
+    governor: MemoryFlowGovernor,
+    cancel_token: CancellationToken,
+}
+
+impl UniversalStreamSender {
+    /// Send an event downstream.
+    /// Blocks if queue is full (Backpressure) or fails immediately if cancelled.
+    pub fn send(&self, event: StreamEvent) -> Result<(), String> {
+        if self.cancel_token.is_cancelled() {
+            return Err("Stream processing cancelled by consumer".to_string());
+        }
+
+        let bytes = event.estimated_bytes();
+        // Track byte footprint in the flow governor
+        self.governor.try_acquire(bytes);
+
+        self.tx
+            .send(event)
+            .map_err(|e| format!("Stream destination closed: {}", e))
+    }
+
+    /// Check if stream has been cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel_token.is_cancelled()
+    }
+}
+
+/// Consumer side of the universal stream pipeline.
+pub struct UniversalStreamReceiver {
+    rx: Receiver<StreamEvent>,
+    governor: MemoryFlowGovernor,
+    cancel_token: CancellationToken,
+}
+
+impl UniversalStreamReceiver {
+    /// Receive next event from the stream.
+    /// Automatically releases memory permits back to the governor as events are consumed.
+    pub fn recv(&self) -> Result<StreamEvent, String> {
+        match self.rx.recv() {
+            Ok(event) => {
+                let bytes = event.estimated_bytes();
+                self.governor.release(bytes);
+                Ok(event)
+            }
+            Err(e) => Err(format!("Stream source disconnected: {}", e)),
+        }
+    }
+
+    /// Cooperative cancellation triggered by the consumer.
+    pub fn cancel(&self) {
+        self.cancel_token.cancel();
+    }
+
+    /// Check if stream has been cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel_token.is_cancelled()
+    }
+}
+

@@ -176,12 +176,27 @@ fn probe_cuda_gpus() -> Vec<DeviceCapability> {
                         let total_mb = parts[2].parse::<u64>().unwrap_or(0);
                         let free_mb = parts[3].parse::<u64>().unwrap_or(0);
 
-                        // Parse SM compute capability (e.g., "8.0" for A100, "7.5" for T4)
+                        // Parse SM compute capability if reported by modern drivers.
+                        // If driver does not report compute_cap, do NOT assume modern Ampere (8).
+                        // Infer from GPU model name or default conservatively to 5 (Maxwell/Pascal baseline)
+                        // to prevent fake/illegal hardware claims like native BF16 on older GPUs.
                         let major_cc = parts
                             .get(4)
                             .and_then(|cc| cc.split('.').next())
                             .and_then(|maj| maj.parse::<u32>().ok())
-                            .unwrap_or(8);
+                            .unwrap_or_else(|| {
+                                let lower = name.to_lowercase();
+                                if lower.contains("a100") || lower.contains("h100") || lower.contains("rtx 30") || lower.contains("rtx 40") {
+                                    8
+                                } else if lower.contains("t4") || lower.contains("rtx 20") || lower.contains("gtx 16") {
+                                    7
+                                } else if lower.contains("gtx 10") || lower.contains("p100") {
+                                    6
+                                } else {
+                                    // Default conservatively for GTX 900 series / Maxwell (CC 5)
+                                    5
+                                }
+                            });
 
                         let mut supported_precisions = vec![PrecisionMode::Fp32];
                         if major_cc >= 6 {
@@ -428,4 +443,79 @@ pub fn query_system_ram_bytes() -> (u64, Option<u64>) {
 
     // Nominal fallback if OS query is restricted
     (16 * 1024 * 1024 * 1024, None)
+}
+
+#[cfg(windows)]
+#[repr(C)]
+struct ProcessMemoryCounters {
+    cb: u32,
+    page_fault_count: u32,
+    peak_working_set_size: usize,
+    working_set_size: usize,
+    quota_peak_paged_pool_usage: usize,
+    quota_paged_pool_usage: usize,
+    quota_peak_non_paged_pool_usage: usize,
+    quota_non_paged_pool_usage: usize,
+    pagefile_usage: usize,
+    peak_pagefile_usage: usize,
+}
+
+#[cfg(windows)]
+#[link(name = "psapi")]
+extern "system" {
+    fn GetCurrentProcess() -> *mut std::ffi::c_void;
+    fn GetProcessMemoryInfo(
+        process: *mut std::ffi::c_void,
+        ppsmx: *mut ProcessMemoryCounters,
+        cb: u32,
+    ) -> i32;
+}
+
+/// Query authentic OS-level current and peak working set memory in bytes for the active process.
+pub fn query_process_memory_bytes() -> (usize, usize) {
+    #[cfg(windows)]
+    {
+        unsafe {
+            let mut pmc = ProcessMemoryCounters {
+                cb: std::mem::size_of::<ProcessMemoryCounters>() as u32,
+                page_fault_count: 0,
+                peak_working_set_size: 0,
+                working_set_size: 0,
+                quota_peak_paged_pool_usage: 0,
+                quota_paged_pool_usage: 0,
+                quota_peak_non_paged_pool_usage: 0,
+                quota_non_paged_pool_usage: 0,
+                pagefile_usage: 0,
+                peak_pagefile_usage: 0,
+            };
+            let process = GetCurrentProcess();
+            if GetProcessMemoryInfo(process, &mut pmc, pmc.cb) != 0 {
+                return (pmc.working_set_size, pmc.peak_working_set_size);
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(status) = fs::read_to_string("/proc/self/status") {
+            let mut vmrss: usize = 0;
+            let mut vmhwm: usize = 0;
+            for line in status.lines() {
+                if line.starts_with("VmRSS:") {
+                    if let Some(kb) = line.split_whitespace().nth(1).and_then(|s| s.parse::<usize>().ok()) {
+                        vmrss = kb * 1024;
+                    }
+                } else if line.starts_with("VmHWM:") {
+                    if let Some(kb) = line.split_whitespace().nth(1).and_then(|s| s.parse::<usize>().ok()) {
+                        vmhwm = kb * 1024;
+                    }
+                }
+            }
+            if vmrss > 0 {
+                return (vmrss, vmhwm);
+            }
+        }
+    }
+
+    (0, 0)
 }

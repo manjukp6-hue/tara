@@ -122,6 +122,33 @@ impl ComputeChannel {
         self.active_device.stream_helper()
     }
 
+    /// Open a hardware-agnostic universal stream engine across CPU, GPU, or TPU.
+    pub fn universal_stream(&self, max_in_flight_bytes: usize) -> crate::streaming::UniversalStreamEngine {
+        crate::streaming::UniversalStreamEngine::new(max_in_flight_bytes)
+    }
+
+    /// Capture live dynamic telemetry for the active device.
+    pub fn live_telemetry(&self) -> crate::telemetry::RuntimeTelemetrySnapshot {
+        let vram_static = if self.is_gpu() {
+            self.inventory.gpus.first().map(|g| g.total_memory_bytes as usize)
+        } else {
+            None
+        };
+        crate::telemetry::LiveTelemetryProvider::capture(self.device_kind().clone(), vram_static)
+    }
+
+    /// Evaluate memory placement (FullResident, PartialOffload, or CapacityExceeded)
+    /// based on live telemetry and model budget.
+    pub fn evaluate_placement(
+        &self,
+        budget: &crate::memory_governor::ModelMemoryBudget,
+        mode: crate::memory_governor::MemoryExecutionMode,
+        total_layers: usize,
+    ) -> crate::memory_governor::PlacementDecision {
+        let telemetry = self.live_telemetry();
+        crate::memory_governor::MemoryGovernor::evaluate_placement(budget, &telemetry, mode, total_layers)
+    }
+
     /// Return active device category.
     pub fn device_kind(&self) -> &DeviceKind {
         self.active_device.kind()

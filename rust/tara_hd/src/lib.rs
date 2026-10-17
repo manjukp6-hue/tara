@@ -4,16 +4,25 @@ pub mod auto_config;
 pub mod channel;
 pub mod device;
 pub mod discovery;
+pub mod event;
+pub mod memory_governor;
 pub mod streaming;
+pub mod telemetry;
 pub mod types;
 
 pub use auto_config::AutoTrainingConfig;
 pub use channel::ComputeChannel;
 pub use device::{ComputeDevice, CpuDevice, CudaDevice, CustomDevice, TpuDevice};
 pub use discovery::DiscoveredInventory;
+pub use event::{CancellationToken, MemoryFlowGovernor, StreamEvent};
+pub use memory_governor::{
+    MemoryExecutionMode, MemoryGovernor, ModelMemoryBudget, PlacementDecision,
+};
 pub use streaming::{
     CpuStreamHelper, SequenceChunkIterator, StreamBufferPool, StreamConfig, StreamWindow,
+    UniversalStreamEngine, UniversalStreamReceiver, UniversalStreamSender,
 };
+pub use telemetry::{LiveTelemetryProvider, RuntimeTelemetrySnapshot};
 pub use types::{DeviceCapability, DeviceKind, PrecisionMode, SelectionPolicy, TaraError};
 
 #[cfg(test)]

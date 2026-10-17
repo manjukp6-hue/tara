@@ -477,7 +477,23 @@ impl NativeSelfTrainer {
         self.grad_clip_norm = Some(gcn);
         self
     }
+}
 
+/// Detailed memory footprint breakdown across physical hardware memory domains.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrainingMemoryFootprint {
+    /// Projected Host RAM required in MB (including safety margin).
+    pub host_ram_mb: f64,
+    /// Projected Device (GPU/TPU) VRAM required in MB (including safety margin).
+    /// Zero when pure CPU training.
+    pub device_vram_mb: f64,
+    /// Highest memory consumption across active pools in MB.
+    pub governing_peak_mb: f64,
+    /// Diagnostic breakdown string detailing per-component memory allocations.
+    pub breakdown: String,
+}
+
+impl NativeSelfTrainer {
     /// Set an explicit maximum memory ceiling in megabytes.
     pub fn with_max_memory_mb(mut self, mb: f64) -> Self {
         self.max_memory_mb = mb;
@@ -495,7 +511,7 @@ impl NativeSelfTrainer {
         batch_size: usize,
         seq_len: usize,
         hidden_size: usize,
-    ) -> (f64, String) {
+    ) -> TrainingMemoryFootprint {
         // Use the actual model hidden_size from config to compute activation buffer sizes.
         // Callers must pass config.hidden_size; using a stale assumption here would produce
         // incorrect estimates as model architectures change.
@@ -575,10 +591,6 @@ impl NativeSelfTrainer {
         };
 
         // Governing peak: both host RAM AND GPU VRAM must be within limits.
-        // We report the maximum (worst case) so callers can check against a single ceiling.
-        // Critical: host RAM must be checked separately — the OOM killer operates on host
-        // cgroup limits independently of GPU VRAM. A model that fits GPU VRAM can still
-        // trigger host OOM when optimizer moments are allocated during the first step.
         let governing_peak = if is_gpu {
             host_total_with_margin.max(gpu_total_with_margin)
         } else {
@@ -587,7 +599,7 @@ impl NativeSelfTrainer {
 
         let breakdown = if is_gpu {
             format!(
-                "Host RAM: Model={host_model_mb:.1}MB, {opt_tag}, Act={host_act_mb:.1}MB, Overhead={host_overhead_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB | GPU VRAM: Weights={gpu_w_mb:.1}MB, Grads={gpu_g_mb:.1}MB, Chunks/States={gpu_chunk_mb:.1}MB, Act={gpu_act_mb:.1}MB, Total(+10% Margin)={gpu_total_with_margin:.1}MB | Governing Peak: {governing_peak:.1}MB",
+                "Host RAM: Model={host_model_mb:.1}MB, {opt_tag}, Act={host_act_mb:.1}MB, Overhead={host_overhead_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB | GPU VRAM: Weights={gpu_w_mb:.1}MB, Grads={gpu_g_mb:.1}MB, Chunks/States={gpu_chunk_mb:.1}MB, Act={gpu_act_mb:.1}MB, Total(+10% Margin)={gpu_total_with_margin:.1}MB",
             )
         } else {
             format!(
@@ -595,14 +607,20 @@ impl NativeSelfTrainer {
             )
         };
 
-        (governing_peak, breakdown)
+        TrainingMemoryFootprint {
+            host_ram_mb: host_total_with_margin,
+            device_vram_mb: gpu_total_with_margin,
+            governing_peak_mb: governing_peak,
+            breakdown,
+        }
     }
 
     /// Calculate projected training memory footprint in MB given total parameter count.
     /// Uses a representative hidden_size of 2048 as a conservative estimate when config is unavailable.
     /// For accurate estimates, use `estimate_memory_footprint_mb_detailed` with the actual config.hidden_size.
     pub fn estimate_memory_footprint_mb(total_params: usize) -> f64 {
-        Self::estimate_memory_footprint_mb_detailed(total_params, false, false, 0, 1, 512, 2048).0
+        Self::estimate_memory_footprint_mb_detailed(total_params, false, false, 0, 1, 512, 2048)
+            .governing_peak_mb
     }
 
     /// Return the current trainer status (last cycle time, epoch count, etc.).
@@ -1044,7 +1062,7 @@ impl NativeSelfTrainer {
         let effective_batch_for_preflight = self.batch_size.unwrap_or(auto_cfg.batch_size);
         let effective_seq_for_preflight = auto_cfg.seq_len;
 
-        let (projected_mb, memory_breakdown) = Self::estimate_memory_footprint_mb_detailed(
+        let footprint = Self::estimate_memory_footprint_mb_detailed(
             total_params,
             is_gpu,
             is_f16,
@@ -1053,20 +1071,30 @@ impl NativeSelfTrainer {
             effective_seq_for_preflight,
             config.hidden_size,
         );
-        // Effective memory safety ceiling:
-        // Base admission control strictly on effective cgroup memory limit and available host RAM.
-        // User overrides via --max-memory-mb are clamped to detected container capacity to prevent
-        // fatal OOM kills, unless TARA_FORCE_UNSAFE_MEMORY=1 is explicitly declared.
+        // Effective memory safety ceilings:
+        // Host RAM admission control is based strictly on effective cgroup memory limit and available host RAM.
+        // Device VRAM admission control is based strictly on physical accelerator VRAM capacity and available budget.
+        // User overrides via --max-memory-mb apply to host memory, unless TARA_FORCE_UNSAFE_MEMORY=1 is explicitly declared.
         let default_max_memory_mb: f64 = 65536.0;
         let force_unsafe_memory = std::env::var("TARA_FORCE_UNSAFE_MEMORY")
             .map(|v| v == "1" || v == "true")
             .unwrap_or(false);
-        let effective_max_memory_mb = if force_unsafe_memory {
+        let effective_host_max_memory_mb = if force_unsafe_memory {
             self.max_memory_mb
         } else if (self.max_memory_mb - default_max_memory_mb).abs() < 1.0 {
             auto_cfg.max_memory_mb
         } else {
             self.max_memory_mb.min(auto_cfg.max_memory_mb)
+        };
+
+        let effective_device_max_vram_mb = if force_unsafe_memory {
+            f64::MAX
+        } else if auto_cfg.max_device_vram_mb > 0.0 {
+            auto_cfg.max_device_vram_mb
+        } else if is_gpu {
+            (auto_cfg.device_vram_total_mb * 0.90).max(4096.0)
+        } else {
+            0.0
         };
 
         let host_summary_str = if auto_cfg.cgroup_limit_mb > 0.0 {
@@ -1085,11 +1113,22 @@ impl NativeSelfTrainer {
         };
 
         println!(
-            "[Memory Preflight] Estimated training memory: {projected_mb:.1} MB (Safety ceiling: {:.1} MB | {host_summary_str})",
-            effective_max_memory_mb,
+            "[Memory Preflight] Host RAM: projected {:.1} MB (Safety ceiling: {:.1} MB | {host_summary_str})",
+            footprint.host_ram_mb, effective_host_max_memory_mb,
         );
-        println!("[Memory Preflight] Detailed breakdown: {memory_breakdown}");
-        if projected_mb > effective_max_memory_mb {
+        if is_gpu {
+            println!(
+                "[Memory Preflight] Device VRAM: projected {:.1} MB (Safety ceiling: {:.1} MB | Total: {:.1} MB, Avail: {:.1} MB)",
+                footprint.device_vram_mb,
+                effective_device_max_vram_mb,
+                auto_cfg.device_vram_total_mb,
+                auto_cfg.device_vram_available_mb,
+            );
+        }
+        println!("[Memory Preflight] Detailed breakdown: {}", footprint.breakdown);
+
+        // Preflight Admission Gate 1: Host System RAM / cgroup container memory limit
+        if footprint.host_ram_mb > effective_host_max_memory_mb {
             let host_ram_str = if auto_cfg.host_ram_total_mb > 0.0 {
                 format!(
                     "{:.0} MB (avail: {:.0} MB)",
@@ -1107,15 +1146,24 @@ impl NativeSelfTrainer {
                 String::new()
             };
             return Err(TrainerError::Model(format!(
-                "Projected training memory {projected_mb:.1} MB exceeds safety ceiling \
-                {effective_max_memory_mb:.1} MB (detected host RAM: {host_ram_str}{cgroup_detail}). \
-                This model requires more memory than available — AdamW moments alone need \
-                {:.0} MB for {} params. \
-                Options: (1) use a smaller model, (2) set TARA_HOST_RAM_MB env var to your actual \
-                available RAM, (3) set TARA_HOST_RAM_SAFETY_PCT to a higher value (risky). \
-                Breakdown: {memory_breakdown}",
-                (total_params as f64 * 8.0) / (1024.0 * 1024.0),
-                total_params,
+                "Projected Host RAM requirement {:.1} MB exceeds host safety ceiling \
+                {effective_host_max_memory_mb:.1} MB (detected host RAM: {host_ram_str}{cgroup_detail}). \
+                Breakdown: {}",
+                footprint.host_ram_mb,
+                footprint.breakdown,
+            )));
+        }
+
+        // Preflight Admission Gate 2: Device Accelerator VRAM (when GPU active)
+        if is_gpu && footprint.device_vram_mb > effective_device_max_vram_mb {
+            return Err(TrainerError::Model(format!(
+                "Projected Device VRAM requirement {:.1} MB exceeds device safety ceiling \
+                {effective_device_max_vram_mb:.1} MB (detected VRAM total: {:.0} MB, avail: {:.0} MB). \
+                Breakdown: {}",
+                footprint.device_vram_mb,
+                auto_cfg.device_vram_total_mb,
+                auto_cfg.device_vram_available_mb,
+                footprint.breakdown,
             )));
         }
 
@@ -3384,7 +3432,7 @@ mod tests {
     fn test_estimate_memory_footprint_streamed_gpu_accounting() {
         // ~1B model on GPU: verify host RAM correctly accounts for optimizer moments
         let total_params = 995_809_280;
-        let (peak_mb, breakdown) = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
+        let footprint = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
             total_params,
             true,        // is_gpu
             true,        // is_f16
@@ -3394,14 +3442,16 @@ mod tests {
             2048,        // hidden_size — representative for ~1B parameter transformer
         );
 
-        assert!(peak_mb > 0.0);
-        assert!(breakdown.contains("Opt("), "breakdown was: {breakdown}");
-        assert!(breakdown.contains("Host RAM:"));
-        assert!(breakdown.contains("GPU VRAM:"));
+        assert!(footprint.governing_peak_mb > 0.0);
+        assert!(footprint.host_ram_mb > 0.0);
+        assert!(footprint.device_vram_mb > 0.0);
+        assert!(footprint.breakdown.contains("Opt("), "breakdown was: {}", footprint.breakdown);
+        assert!(footprint.breakdown.contains("Host RAM:"));
+        assert!(footprint.breakdown.contains("GPU VRAM:"));
 
         // Small GPU model (~10M params) has resident moments in GPU VRAM
         let small_params = 10_000_000;
-        let (_, small_breakdown) = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
+        let small_footprint = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
             small_params,
             true,
             true,
@@ -3411,12 +3461,12 @@ mod tests {
             512, // hidden_size — representative for small model
         );
         assert!(
-            small_breakdown.contains("Opt(GPU VRAM resident)="),
-            "breakdown was: {small_breakdown}"
+            small_footprint.breakdown.contains("Opt(GPU VRAM resident)="),
+            "breakdown was: {}", small_footprint.breakdown
         );
 
         // CPU mode accounts for gradients + moments on host
-        let (_, cpu_breakdown) = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
+        let cpu_footprint = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
             small_params,
             false,
             false,
@@ -3426,8 +3476,8 @@ mod tests {
             512, // hidden_size — representative for small model
         );
         assert!(
-            cpu_breakdown.contains("Grads+Moments(fp32)="),
-            "CPU breakdown was: {cpu_breakdown}"
+            cpu_footprint.breakdown.contains("Grads+Moments(fp32)="),
+            "CPU breakdown was: {}", cpu_footprint.breakdown
         );
     }
 
@@ -3451,8 +3501,8 @@ mod tests {
         // Default safety pct is 85%: 4096 * 0.85 = 3481.6 MB
         assert!((auto_cfg.max_memory_mb - 3481.6).abs() < 1.0);
 
-        // Preflight estimate for 950M model: peak ~4.9 GB > 3481.6 MB safety ceiling
-        let (projected_mb, _) = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
+        // Preflight estimate for 950M model: host RAM ~4.9 GB > 3481.6 MB safety ceiling
+        let footprint = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
             950_000_000,
             true,
             true,
@@ -3462,9 +3512,42 @@ mod tests {
             2048,
         );
         assert!(
-            projected_mb > auto_cfg.max_memory_mb,
-            "950M model ({projected_mb} MB) must exceed 4GB container ceiling ({:.1} MB)",
+            footprint.host_ram_mb > auto_cfg.max_memory_mb,
+            "950M model host RAM requirement ({} MB) must exceed 4GB container ceiling ({:.1} MB)",
+            footprint.host_ram_mb,
             auto_cfg.max_memory_mb
         );
+    }
+
+    #[test]
+    fn test_dual_pool_independent_admission() {
+        // Verify that ~1B model on 15 GB GPU with 12 GB Host RAM safely admits:
+        // Host RAM: ~4.9 GB <= 6.3 GB ceiling (Passes)
+        // GPU VRAM: ~9.5 GB <= 12.6 GB ceiling (Passes)
+        // Simulate Colab environment where host RAM budget triggers disk moments
+        std::env::set_var("TARA_STREAM_MOMENTS_DISK", "1");
+        let total_params = 995_809_280;
+        let footprint = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
+            total_params,
+            true,        // is_gpu
+            true,        // is_f16
+            2048 * 2048, // max_tensor_len
+            32,          // batch_size
+            64,          // seq_len
+            2048,        // hidden_size
+        );
+        std::env::remove_var("TARA_STREAM_MOMENTS_DISK");
+
+        // Host RAM usage must be around 4.9 - 5.0 GB (with 15% margin)
+        assert!(footprint.host_ram_mb < 6000.0, "Host RAM was: {:.1} MB", footprint.host_ram_mb);
+        // GPU VRAM usage must be around 9.5 GB (with 10% margin)
+        assert!(footprint.device_vram_mb < 11000.0, "GPU VRAM was: {:.1} MB", footprint.device_vram_mb);
+
+        // Simulated Colab T4 (15 GB VRAM) + 12 GB Host RAM
+        let host_ceiling_mb = 7467.0 * 0.85; // 6347 MB
+        let vram_ceiling_mb = 14912.0 * 0.85; // 12675 MB
+
+        assert!(footprint.host_ram_mb <= host_ceiling_mb, "Host RAM must fit inside host ceiling");
+        assert!(footprint.device_vram_mb <= vram_ceiling_mb, "GPU VRAM must fit inside VRAM ceiling");
     }
 }

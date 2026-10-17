@@ -12,7 +12,8 @@ echo "  TARA CLOUD TRAINING SYSTEM (GOOGLE COLAB AUTONOMOUS RUNNER)"
 echo "=============================================================================="
 
 # 0. Proactive Disk Hygiene: Reclaim disk space from stale scratch files, caches, and unused debug builds
-echo "[DISK CLEANUP] Reclaiming disk space from previous runs and caches..."
+echo "[DISK CLEANUP] Reclaiming disk space and stopping any stale processes..."
+killall -9 tara_training_stages tara_gpu_step_test manual_trainer 2>/dev/null || true
 rm -rf /tmp/tara_moments_* /tmp/tara_* /tmp/tmp* 2>/dev/null || true
 rm -rf target/debug 2>/dev/null || true
 rm -rf storage/checkpoints/gpu_step_test_parity 2>/dev/null || true
@@ -25,7 +26,7 @@ fi
 # Let AutoMemory determine the safe host memory limit based on cgroup and available RAM
 export TARA_MAX_MEMORY_MB="${TARA_MAX_MEMORY_MB:-}"
 export TARA_MAX_SEQ_LEN="${TARA_MAX_SEQ_LEN:-128}"
-export TARA_MAX_VAL_SAMPLES="${TARA_MAX_VAL_SAMPLES:-10}"
+export TARA_MAX_VAL_SAMPLES="${TARA_MAX_VAL_SAMPLES:-5}"
 export GDRIVE_CHECKPOINT_DIR="${GDRIVE_CHECKPOINT_DIR:-/content/drive/MyDrive/TARA_CHECKPOINTS}"
 export HF_DATASET_REPO="${HF_DATASET_REPO:-${HF_MODEL_REPO:-${HF_REPO:-manjukp6/tara}}}"
 export HF_MODEL_REPO="${HF_MODEL_REPO:-${HF_DATASET_REPO}}"

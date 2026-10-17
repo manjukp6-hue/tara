@@ -669,8 +669,8 @@ fn main() {
     // Milestone 9: Backward Pass with Streamed Layer-by-Layer Gradient Accumulation
     log_flushed_memory_checkpoint("07_PRE_LM_HEAD_BACKWARD", vram_info);
     println!("[GPU Step Test] Running Backward LM Head on GPU...");
-    let (gpu_dlm, gpu_dnorm) =
-        match gpu_trainer.backward_lm_head(&d_logits, &final_normed, seq_len, hs, vs) {
+    let (d_lm_norm, gpu_dnorm) =
+        match gpu_trainer.backward_lm_head_accumulate(&d_logits, &final_normed, seq_len, hs, vs) {
             Ok(res) => res,
             Err(e) => {
                 eprintln!("[GPU Step Test] FATAL: GPU backward LM head failed: {e}");
@@ -679,11 +679,6 @@ fn main() {
         };
     drop(d_logits);
 
-    let d_lm_norm: f64 = gpu_dlm
-        .iter()
-        .map(|&x| (x as f64) * (x as f64))
-        .sum::<f64>()
-        .sqrt();
     let d_norm_norm: f64 = gpu_dnorm
         .iter()
         .map(|&x| (x as f64) * (x as f64))
@@ -708,19 +703,9 @@ fn main() {
     let mut host_sq_sum = 0.0f64;
     let mut accumulated_tensor_count = 0usize;
 
-    // Accumulate LM Head gradient onto GPU immediately and free host buffer
-    host_sq_sum += gpu_dlm
-        .iter()
-        .map(|&x| (x as f64) * (x as f64))
-        .sum::<f64>();
-    if let Err(e) = gpu_trainer.accumulate_gradient("lm_head.weight", &gpu_dlm) {
-        eprintln!(
-            "[GPU Step Test] FATAL: Failed to accumulate gradient for 'lm_head.weight' on GPU: {e}"
-        );
-        exit(1);
-    }
+    // LM Head gradient was accumulated directly during backward_lm_head_accumulate
+    host_sq_sum += d_lm_norm * d_lm_norm;
     accumulated_tensor_count += 1;
-    drop(gpu_dlm);
 
     println!("[GPU Step Test] Running Backward through Final RMSNorm...");
     let (mut dx, d_norm) =
@@ -833,38 +818,28 @@ fn main() {
     // Milestone 10: Backward Pass through Token Embeddings
     log_flushed_memory_checkpoint("09_PRE_EMBEDDING_BACKWARD", vram_info);
     println!("[GPU Step Test] Running Backward through Token Embeddings...");
-    let mut d_embed_tokens = vec![0.0f32; vs * hs];
-    for (t, &id) in micro_batch_tokens.iter().enumerate() {
-        let id = (id as usize).min(vs.saturating_sub(1));
-        let dx_row = &dx[t * hs..(t + 1) * hs];
-        for h in 0..hs {
-            d_embed_tokens[id * hs + h] += dx_row[h];
+    let emb_grad_norm = match gpu_trainer.accumulate_sparse_embedding_gradient(
+        &micro_batch_tokens,
+        &dx,
+        hs,
+    ) {
+        Ok(norm) => norm,
+        Err(e) => {
+            eprintln!("[GPU Step Test] FATAL: Failed to accumulate sparse embedding gradient on GPU: {e}");
+            exit(1);
         }
-    }
+    };
     drop(dx);
     drop(layer_inputs);
 
-    let emb_grad_norm: f64 = d_embed_tokens
-        .iter()
-        .map(|&x| (x as f64) * (x as f64))
-        .sum::<f64>()
-        .sqrt();
     println!("[GPU Step Test] [Backward Trace] Token Embeddings Backward: d_embed_tokens L2 Norm = {:.6}", emb_grad_norm);
     if !emb_grad_norm.is_finite() || emb_grad_norm <= 0.0 {
         eprintln!("[GPU Step Test] FATAL: Token embeddings gradient must be non-zero and finite (got {emb_grad_norm})");
         exit(1);
     }
 
-    host_sq_sum += d_embed_tokens
-        .iter()
-        .map(|&x| (x as f64) * (x as f64))
-        .sum::<f64>();
-    if let Err(e) = gpu_trainer.accumulate_gradient("model.embed_tokens.weight", &d_embed_tokens) {
-        eprintln!("[GPU Step Test] FATAL: Failed to accumulate gradient for 'model.embed_tokens.weight' on GPU: {e}");
-        exit(1);
-    }
+    host_sq_sum += emb_grad_norm * emb_grad_norm;
     accumulated_tensor_count += 1;
-    drop(d_embed_tokens);
 
     let vram_info = gpu_trainer.get_vram_info().ok();
     log_flushed_memory_checkpoint("09_POST_EMBEDDING_BACKWARD", vram_info);

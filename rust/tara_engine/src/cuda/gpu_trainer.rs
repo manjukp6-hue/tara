@@ -179,76 +179,89 @@ pub fn capture_memory_snapshot(vram_info: Option<(usize, usize)>) -> MemorySnaps
         let tot = total_ram_bytes as f64 / (1024.0 * 1024.0);
         let avail = avail_ram_bytes_opt.unwrap_or(total_ram_bytes / 2) as f64 / (1024.0 * 1024.0);
 
-        // 3. Cgroup memory limits (v2 or v1)
-        let cgroup_limit_paths = [
-            "/sys/fs/cgroup/memory.max",
-            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
-        ];
-        for p in cgroup_limit_paths {
-            if let Ok(content) = std::fs::read_to_string(p) {
-                let trimmed = content.trim();
-                if trimmed != "max" {
-                    if let Ok(bytes) = trimmed.parse::<f64>() {
-                        if bytes < 1e15 {
-                            limit = Some(bytes / (1024.0 * 1024.0));
+        // 3. Resolve actual process cgroup path on Linux (supporting container sub-cgroups like /jupyter-children)
+        let mut cgroup_dirs = Vec::new();
+        if let Ok(proc_cgroup) = std::fs::read_to_string("/proc/self/cgroup") {
+            for line in proc_cgroup.lines() {
+                if let Some(subpath) = line.strip_prefix("0::") {
+                    let p = std::path::Path::new("/sys/fs/cgroup").join(subpath.trim_start_matches('/'));
+                    if p.is_dir() {
+                        cgroup_dirs.push(p);
+                    }
+                }
+                let parts: Vec<&str> = line.split(':').collect();
+                if parts.len() == 3 && parts[1].split(',').any(|c| c == "memory") {
+                    let p = std::path::Path::new("/sys/fs/cgroup/memory").join(parts[2].trim_start_matches('/'));
+                    if p.is_dir() {
+                        cgroup_dirs.push(p);
+                    }
+                }
+            }
+        }
+        cgroup_dirs.push(std::path::PathBuf::from("/sys/fs/cgroup"));
+        cgroup_dirs.push(std::path::PathBuf::from("/sys/fs/cgroup/memory"));
+
+        for c_dir in &cgroup_dirs {
+            for fname in ["memory.max", "memory.limit_in_bytes"] {
+                if let Ok(content) = std::fs::read_to_string(c_dir.join(fname)) {
+                    let trimmed = content.trim();
+                    if trimmed != "max" {
+                        if let Ok(bytes) = trimmed.parse::<f64>() {
+                            if bytes < 1e15 {
+                                limit = Some(bytes / (1024.0 * 1024.0));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if limit.is_some() {
+                for fname in ["memory.current", "memory.usage_in_bytes"] {
+                    if let Ok(content) = std::fs::read_to_string(c_dir.join(fname)) {
+                        if let Ok(bytes) = content.trim().parse::<f64>() {
+                            cur = Some(bytes / (1024.0 * 1024.0));
                             break;
                         }
                     }
                 }
-            }
-        }
-
-        let cgroup_cur_paths = [
-            "/sys/fs/cgroup/memory.current",
-            "/sys/fs/cgroup/memory/memory.usage_in_bytes",
-        ];
-        for p in cgroup_cur_paths {
-            if let Ok(content) = std::fs::read_to_string(p) {
-                if let Ok(bytes) = content.trim().parse::<f64>() {
-                    cur = Some(bytes / (1024.0 * 1024.0));
-                    break;
-                }
-            }
-        }
-
-        // 4. Cgroup memory events (v2: memory.events, v1: memory.oom_control)
-        if let Ok(content) = std::fs::read_to_string("/sys/fs/cgroup/memory.events") {
-            let mut summary_parts = Vec::new();
-            for line in content.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() == 2 {
-                    if parts[0] == "oom_kill" {
-                        if let Ok(k) = parts[1].parse::<u64>() {
-                            oom_kills = Some(k);
-                            summary_parts.push(format!("oom_kill={k}"));
+                if let Ok(content) = std::fs::read_to_string(c_dir.join("memory.events")) {
+                    let mut summary_parts = Vec::new();
+                    for line in content.lines() {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() == 2 {
+                            if parts[0] == "oom_kill" {
+                                if let Ok(k) = parts[1].parse::<u64>() {
+                                    oom_kills = Some(k);
+                                    summary_parts.push(format!("oom_kill={k}"));
+                                }
+                            } else if parts[0] == "oom" || parts[0] == "max" || parts[0] == "high" {
+                                summary_parts.push(format!("{}={}", parts[0], parts[1]));
+                            }
                         }
-                    } else if parts[0] == "oom" || parts[0] == "max" || parts[0] == "high" {
-                        summary_parts.push(format!("{}={}", parts[0], parts[1]));
+                    }
+                    if !summary_parts.is_empty() {
+                        events_summary = Some(summary_parts.join(" "));
+                    }
+                } else if let Ok(content) = std::fs::read_to_string(c_dir.join("memory.oom_control")) {
+                    let mut summary_parts = Vec::new();
+                    for line in content.lines() {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() == 2 {
+                            if parts[0] == "oom_kill" {
+                                if let Ok(k) = parts[1].parse::<u64>() {
+                                    oom_kills = Some(k);
+                                    summary_parts.push(format!("oom_kill={k}"));
+                                }
+                            } else if parts[0] == "under_oom" {
+                                summary_parts.push(format!("under_oom={}", parts[1]));
+                            }
+                        }
+                    }
+                    if !summary_parts.is_empty() {
+                        events_summary = Some(summary_parts.join(" "));
                     }
                 }
-            }
-            if !summary_parts.is_empty() {
-                events_summary = Some(summary_parts.join(" "));
-            }
-        } else if let Ok(content) =
-            std::fs::read_to_string("/sys/fs/cgroup/memory/memory.oom_control")
-        {
-            let mut summary_parts = Vec::new();
-            for line in content.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() == 2 {
-                    if parts[0] == "oom_kill" {
-                        if let Ok(k) = parts[1].parse::<u64>() {
-                            oom_kills = Some(k);
-                            summary_parts.push(format!("oom_kill={k}"));
-                        }
-                    } else if parts[0] == "under_oom" {
-                        summary_parts.push(format!("under_oom={}", parts[1]));
-                    }
-                }
-            }
-            if !summary_parts.is_empty() {
-                events_summary = Some(summary_parts.join(" "));
+                break;
             }
         }
 
@@ -421,6 +434,7 @@ pub struct CudaTrainer {
     d_chunk_g: Option<CudaBuffer>,
     d_chunk_wf16: Option<CudaBuffer>,
     h_grad: std::sync::Mutex<HashMap<String, Vec<f32>>>,
+    h_sparse_embed: std::sync::Mutex<HashMap<usize, Vec<f32>>>,
     stream_optimizer: bool,
     // FP32 Kernels
     k_accum_grads: CudaKernel,
@@ -563,6 +577,7 @@ impl CudaTrainer {
             d_chunk_g: None,
             d_chunk_wf16: None,
             h_grad: std::sync::Mutex::new(HashMap::new()),
+            h_sparse_embed: std::sync::Mutex::new(HashMap::new()),
             stream_optimizer: false,
             k_accum_grads,
             k_scale_grads,
@@ -898,6 +913,200 @@ impl CudaTrainer {
         vs: usize,
     ) -> Result<(Vec<f32>, Vec<f32>), CudaError> {
         self.backward_linear("lm_head.weight", d_logits, final_normed, seq_len, hs, vs)
+    }
+
+    /// Streamed backward pass through LM Head on GPU that accumulates weight gradients directly into
+    /// host gradient storage without allocating an intermediate monolithic 819.2 MB vector.
+    /// Returns (d_lm_head_norm, d_final_normed).
+    pub fn backward_lm_head_accumulate(
+        &self,
+        d_logits: &[f32],
+        final_normed: &[f32],
+        seq_len: usize,
+        hs: usize,
+        vs: usize,
+    ) -> Result<(f64, Vec<f32>), CudaError> {
+        use std::ffi::c_void;
+        let weight_name = "lm_head.weight";
+        let weight_param = self.params.get(weight_name).ok_or_else(|| {
+            CudaError::KernelError(format!("Weight '{weight_name}' not found in GPU parameters"))
+        })?;
+
+        let is_f16 = self.precision == TrainingPrecision::Fp16;
+        let (dptr_w_opt, is_f16_buf) = if is_f16 {
+            if let Some(ref bw16) = weight_param.d_weight_f16 {
+                (Some(bw16.dptr), true)
+            } else if let Some(ref bw) = weight_param.d_weight {
+                (Some(bw.dptr), false)
+            } else {
+                (None, true)
+            }
+        } else {
+            if let Some(ref bw) = weight_param.d_weight {
+                (Some(bw.dptr), false)
+            } else {
+                (None, false)
+            }
+        };
+
+        let block_dim = 128u32;
+        let (free_vram, _) = self.session.get_memory_info().unwrap_or((0, 0));
+        let out_dim = vs;
+        let in_dim = hs;
+
+        let safe_staging = (free_vram / 32).clamp(4 * 1024 * 1024, 32 * 1024 * 1024);
+        let chunk_cap = safe_staging / std::mem::size_of::<f32>();
+        let chunk_rows = (chunk_cap / in_dim.max(1)).clamp(1, out_dim);
+
+        let d_in = self.session.allocate_f32(seq_len * in_dim)?;
+        self.session.upload_f32(&d_in, final_normed)?;
+
+        let d_chunk_dw = self.session.allocate_f32(chunk_rows * in_dim)?;
+        let d_chunk_dout = self.session.allocate_f32(seq_len * chunk_rows)?;
+        let d_chunk_din = self.session.allocate_f32(seq_len * in_dim)?;
+
+        let d_chunk_w = if dptr_w_opt.is_none() {
+            if is_f16_buf {
+                Some(self.session.allocate_f32((chunk_rows * in_dim).div_ceil(2))?)
+            } else {
+                Some(self.session.allocate_f32(chunk_rows * in_dim)?)
+            }
+        } else {
+            None
+        };
+
+        let mut host_din = vec![0.0f32; seq_len * in_dim];
+        let mut total_dw_sq = 0.0f64;
+
+        let mut hg_guard = self.h_grad.lock().map_err(|e| {
+            CudaError::KernelError(format!("Mutex lock error on h_grad: {e}"))
+        })?;
+        let entry = hg_guard
+            .entry(weight_name.to_string())
+            .or_insert_with(|| vec![0.0f32; out_dim * in_dim]);
+
+        let mut host_chunk_dw = vec![0.0f32; chunk_rows * in_dim];
+
+        for row_start in (0..out_dim).step_by(chunk_rows) {
+            let cur_rows = (out_dim - row_start).min(chunk_rows);
+
+            let mut host_chunk_dout = vec![0.0f32; seq_len * cur_rows];
+            for s in 0..seq_len {
+                let src = &d_logits[s * out_dim + row_start..s * out_dim + row_start + cur_rows];
+                host_chunk_dout[s * cur_rows..(s + 1) * cur_rows].copy_from_slice(src);
+            }
+            self.session.upload_f32_slice(&d_chunk_dout, &host_chunk_dout)?;
+
+            let total_w = (cur_rows * in_dim) as u32;
+            let grid_w = total_w.div_ceil(block_dim);
+            let mut arg_dout = d_chunk_dout.dptr;
+            let mut arg_in = d_in.dptr;
+            let mut arg_dw = d_chunk_dw.dptr;
+            let mut arg_seq = seq_len as u32;
+            let mut arg_in_dim = in_dim as u32;
+            let mut arg_cur_rows = cur_rows as u32;
+
+            let params_w: [*mut c_void; 16] = [
+                &mut arg_dout as *mut u64 as *mut c_void,
+                &mut arg_in as *mut u64 as *mut c_void,
+                &mut arg_dw as *mut u64 as *mut c_void,
+                &mut arg_seq as *mut u32 as *mut c_void,
+                &mut arg_in_dim as *mut u32 as *mut c_void,
+                &mut arg_cur_rows as *mut u32 as *mut c_void,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ];
+
+            unsafe {
+                self.k_lm_bwd_weight
+                    .launch((grid_w, 1, 1), (block_dim, 1, 1), 0, params_w, 6)?;
+            }
+            self.record_kernel_launch();
+
+            let chunk_w_dptr = if let Some(base_dptr) = dptr_w_opt {
+                if is_f16_buf {
+                    base_dptr + (row_start * in_dim * 2) as u64
+                } else {
+                    base_dptr + (row_start * in_dim * 4) as u64
+                }
+            } else {
+                let hw = self.h_weights.get(weight_name).unwrap();
+                let slice = &hw[row_start * in_dim..(row_start + cur_rows) * in_dim];
+                if is_f16_buf {
+                    let h_f16: Vec<f16> = slice.iter().map(|&x| f16::from_f32(x)).collect();
+                    let packed = pack_f16_to_u32(&h_f16);
+                    let buf = d_chunk_w.as_ref().unwrap();
+                    self.session.upload_u32_slice(buf, &packed)?;
+                    buf.dptr
+                } else {
+                    let buf = d_chunk_w.as_ref().unwrap();
+                    self.session.upload_f32_slice(buf, slice)?;
+                    buf.dptr
+                }
+            };
+
+            let total_in = (seq_len * in_dim) as u32;
+            let grid_in = total_in.div_ceil(block_dim);
+            let mut arg_w = chunk_w_dptr;
+            let mut arg_din = d_chunk_din.dptr;
+
+            let params_in: [*mut c_void; 16] = [
+                &mut arg_dout as *mut u64 as *mut c_void,
+                &mut arg_w as *mut u64 as *mut c_void,
+                &mut arg_din as *mut u64 as *mut c_void,
+                &mut arg_seq as *mut u32 as *mut c_void,
+                &mut arg_in_dim as *mut u32 as *mut c_void,
+                &mut arg_cur_rows as *mut u32 as *mut c_void,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ];
+
+            unsafe {
+                if is_f16_buf {
+                    self.k_lin_bwd_in_f16
+                        .launch((grid_in, 1, 1), (block_dim, 1, 1), 0, params_in, 6)?;
+                } else {
+                    self.k_lm_bwd_input
+                        .launch((grid_in, 1, 1), (block_dim, 1, 1), 0, params_in, 6)?;
+                }
+            }
+            self.record_kernel_launch();
+            self.session.synchronize()?;
+
+            let chunk_len = cur_rows * in_dim;
+            self.session.download_f32_slice(&d_chunk_dw, &mut host_chunk_dw[..chunk_len])?;
+            let dst_slice = &mut entry[row_start * in_dim..row_start * in_dim + chunk_len];
+            for (dst, &src) in dst_slice.iter_mut().zip(&host_chunk_dw[..chunk_len]) {
+                *dst += src;
+                let v = src as f64;
+                total_dw_sq += v * v;
+            }
+
+            let mut host_chunk_din = vec![0.0f32; seq_len * in_dim];
+            self.session.download_f32(&d_chunk_din, &mut host_chunk_din)?;
+            for (tot, part) in host_din.iter_mut().zip(host_chunk_din.iter()) {
+                *tot += part;
+            }
+        }
+
+        let d_lm_norm = total_dw_sq.sqrt();
+        Ok((d_lm_norm, host_din))
     }
 
     /// Forward embedding lookup on GPU.
@@ -1726,12 +1935,13 @@ impl CudaTrainer {
     /// Accumulate embedding gradients sparsely and dynamically for any sequence length (tokens.len()).
     /// Never allocates a full dense [vocab_size * hidden_size] matrix (e.g. 819.2 MB for 100K vocab).
     /// Dynamically slices and updates only the active token rows present in the batch.
+    /// Returns the deterministic L2 norm of the embedding gradients as f64.
     pub fn accumulate_sparse_embedding_gradient(
         &self,
         tokens: &[u32],
         dx: &[f32],
         hs: usize,
-    ) -> Result<(), CudaError> {
+    ) -> Result<f64, CudaError> {
         let name = "model.embed_tokens.weight";
         let seq_len = tokens.len();
         if dx.len() != seq_len * hs {
@@ -1749,6 +1959,8 @@ impl CudaTrainer {
         })?;
         let vs = param.len / hs.max(1);
 
+        let mut row_sq_sum = 0.0f64;
+
         if let Some(ref dg) = param.d_grad {
             // GPU resident gradient buffer: upload each active token's gradient row directly
             for (t, &token_id) in tokens.iter().enumerate() {
@@ -1757,32 +1969,39 @@ impl CudaTrainer {
                     let offset = id * hs;
                     let dx_row = &dx[t * hs..(t + 1) * hs];
                     self.session.upload_f32_slice_offset(dg, offset, dx_row)?;
-                }
-            }
-        } else {
-            // Streamed host gradient mirror: accumulate directly in-place into active token rows
-            let mut hg_guard = self.h_grad.lock().map_err(|e| {
-                CudaError::KernelError(format!("Mutex lock error on h_grad: {e}"))
-            })?;
-            let entry = hg_guard
-                .entry(name.to_string())
-                .or_insert_with(|| vec![0.0f32; param.len]);
-
-            for (t, &token_id) in tokens.iter().enumerate() {
-                let id = token_id as usize;
-                let offset = id * hs;
-                if offset + hs <= entry.len() {
-                    let dx_row = &dx[t * hs..(t + 1) * hs];
-                    for h in 0..hs {
-                        entry[offset + h] += dx_row[h];
+                    for &val in dx_row {
+                        let v = val as f64;
+                        row_sq_sum += v * v;
                     }
                 }
             }
+        } else {
+            // Streamed sparse gradient accumulation: store ONLY active token embedding rows in h_sparse_embed
+            // Avoids allocating 819.2 MB dense gradient vector for 100K vocabulary when only ~16 tokens are active.
+            let mut sparse_guard = self.h_sparse_embed.lock().map_err(|e| {
+                CudaError::KernelError(format!("Mutex lock error on h_sparse_embed: {e}"))
+            })?;
+            for (t, &token_id) in tokens.iter().enumerate() {
+                let id = token_id as usize;
+                if id < vs {
+                    let dx_row = &dx[t * hs..(t + 1) * hs];
+                    let row = sparse_guard.entry(id).or_insert_with(|| vec![0.0f32; hs]);
+                    for h in 0..hs {
+                        row[h] += dx_row[h];
+                    }
+                }
+            }
+            for row in sparse_guard.values() {
+                for &val in row {
+                    let v = val as f64;
+                    row_sq_sum += v * v;
+                }
+            }
         }
-        Ok(())
+        Ok(row_sq_sum.sqrt())
     }
 
-    /// Scale accumulated gradients by 1.0 / count across all parameters on GPU.
+    /// Scale accumulated gradients by 1.0 / count across all parameters on GPU and Host.
     pub fn scale_accumulated_gradients(&self, count: usize) -> Result<(), CudaError> {
         let scale = 1.0f32 / (count.max(1) as f32);
         let block_dim = 128u32;
@@ -1809,6 +2028,13 @@ impl CudaTrainer {
         if let Ok(mut hg_guard) = self.h_grad.lock() {
             for hg in hg_guard.values_mut() {
                 for g in hg.iter_mut() {
+                    *g *= scale;
+                }
+            }
+        }
+        if let Ok(mut sparse_guard) = self.h_sparse_embed.lock() {
+            for row in sparse_guard.values_mut() {
+                for g in row.iter_mut() {
                     *g *= scale;
                 }
             }
@@ -1897,9 +2123,74 @@ impl CudaTrainer {
             }
         }
 
+        // 3. Accumulate sparse embedding gradients with deterministic sorted token keys
+        if let Ok(sparse_guard) = self.h_sparse_embed.lock() {
+            let mut sorted_keys: Vec<&usize> = sparse_guard.keys().collect();
+            sorted_keys.sort();
+            for key in sorted_keys {
+                let row = &sparse_guard[key];
+                for &val in row {
+                    let v64 = val as f64;
+                    total_sq_f64 += v64 * v64;
+                }
+            }
+        }
+
         let total_norm = (total_sq_f64 as f32).sqrt();
         self.last_grad_norm = total_norm;
         Ok(total_norm)
+    }
+
+    fn upload_gradient_chunk(
+        &self,
+        d_cg: &CudaBuffer,
+        name: &str,
+        offset: usize,
+        cur_len: usize,
+    ) -> Result<(), CudaError> {
+        let hg_guard = self.h_grad.lock().map_err(|e| {
+            CudaError::KernelError(format!("Mutex lock error on h_grad: {e}"))
+        })?;
+        if let Some(gv) = hg_guard.get(name) {
+            self.session.upload_f32_slice(d_cg, &gv[offset..offset + cur_len])?;
+            return Ok(());
+        }
+        drop(hg_guard);
+
+        // Check sparse gradients (e.g. model.embed_tokens.weight)
+        let sparse_guard = self.h_sparse_embed.lock().map_err(|e| {
+            CudaError::KernelError(format!("Mutex lock error on h_sparse_embed: {e}"))
+        })?;
+        if !sparse_guard.is_empty() {
+            let hs = sparse_guard.values().next().map(|v| v.len()).unwrap_or(1);
+            let chunk_start = offset;
+            let chunk_end = offset + cur_len;
+            let mut chunk_buf = vec![0.0f32; cur_len];
+            let mut any_hit = false;
+            for (&row_idx, row_vec) in sparse_guard.iter() {
+                let row_start = row_idx * hs;
+                let row_end = row_start + row_vec.len();
+                let start = row_start.max(chunk_start);
+                let end = row_end.min(chunk_end);
+                if start < end {
+                    let row_offset = start - row_start;
+                    let c_offset = start - chunk_start;
+                    let copy_len = end - start;
+                    chunk_buf[c_offset..c_offset + copy_len]
+                        .copy_from_slice(&row_vec[row_offset..row_offset + copy_len]);
+                    any_hit = true;
+                }
+            }
+            if any_hit {
+                self.session.upload_f32_slice(d_cg, &chunk_buf)?;
+            } else {
+                self.session.zero_buffer(d_cg)?;
+            }
+            return Ok(());
+        }
+
+        self.session.zero_buffer(d_cg)?;
+        Ok(())
     }
 
     fn upload_moments_chunk_impl(
@@ -2095,6 +2386,9 @@ impl CudaTrainer {
                     g.fill(0.0);
                 }
             }
+            if let Ok(mut sparse_guard) = self.h_sparse_embed.lock() {
+                sparse_guard.clear();
+            }
             return Ok(false);
         }
 
@@ -2172,11 +2466,7 @@ impl CudaTrainer {
                         let g_dptr = if let Some(gd) = grad_dptr {
                             gd + (offset * 4) as u64
                         } else {
-                            let hg_guard = self.h_grad.lock().unwrap();
-                            let gv = hg_guard.get(&name).ok_or_else(|| {
-                                CudaError::KernelError(format!("Missing gradient '{name}' in h_grad"))
-                            })?;
-                            self.session.upload_f32_slice(d_cg, &gv[offset..offset + cur_len])?;
+                            self.upload_gradient_chunk(d_cg, &name, offset, cur_len)?;
                             d_cg.dptr
                         };
 
@@ -2286,11 +2576,7 @@ impl CudaTrainer {
                         let g_dptr = if let Some(gd) = grad_dptr {
                             gd + (offset * 4) as u64
                         } else {
-                            let hg_guard = self.h_grad.lock().unwrap();
-                            let gv = hg_guard.get(&name).ok_or_else(|| {
-                                CudaError::KernelError(format!("Missing gradient '{name}' in h_grad"))
-                            })?;
-                            self.session.upload_f32_slice(d_cg, &gv[offset..offset + cur_len])?;
+                            self.upload_gradient_chunk(d_cg, &name, offset, cur_len)?;
                             d_cg.dptr
                         };
 
@@ -2466,7 +2752,7 @@ impl CudaTrainer {
             }
         }
 
-        // Post-step: zero out all gradient buffers for both GPU resident and streamed host gradients
+        // Post-step: zero out all gradient buffers for both GPU resident, streamed host, and sparse gradients
         for param in self.params.values() {
             if let Some(ref dg) = param.d_grad {
                 self.session.zero_buffer(dg)?;
@@ -2476,6 +2762,9 @@ impl CudaTrainer {
             for g in hg_guard.values_mut() {
                 g.fill(0.0);
             }
+        }
+        if let Ok(mut sparse_guard) = self.h_sparse_embed.lock() {
+            sparse_guard.clear();
         }
 
         self.session.synchronize()?;
@@ -2533,7 +2822,7 @@ impl CudaTrainer {
         Ok(())
     }
 
-    /// Download accumulated gradient for a specific parameter (from GPU buffer or host mirror).
+    /// Download accumulated gradient for a specific parameter (from GPU buffer, host mirror, or sparse rows).
     pub fn download_gradient(&self, name: &str) -> Result<Vec<f32>, CudaError> {
         if let Some(param) = self.params.get(name) {
             if let Some(ref dg) = param.d_grad {
@@ -2545,6 +2834,21 @@ impl CudaTrainer {
         if let Ok(hg_guard) = self.h_grad.lock() {
             if let Some(hg) = hg_guard.get(name) {
                 return Ok(hg.clone());
+            }
+        }
+        if let Ok(sparse_guard) = self.h_sparse_embed.lock() {
+            if !sparse_guard.is_empty() {
+                if let Some(param) = self.params.get(name) {
+                    let hs = sparse_guard.values().next().map(|v| v.len()).unwrap_or(1);
+                    let mut out = vec![0.0f32; param.len];
+                    for (&row_idx, row_vec) in sparse_guard.iter() {
+                        let offset = row_idx * hs;
+                        if offset + row_vec.len() <= out.len() {
+                            out[offset..offset + row_vec.len()].copy_from_slice(row_vec);
+                        }
+                    }
+                    return Ok(out);
+                }
             }
         }
         Err(CudaError::KernelError(format!("Gradient for '{name}' not found")))

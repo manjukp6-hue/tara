@@ -2971,7 +2971,18 @@ pub fn promote_directory_atomically(
         fs::rename(target_dir, &backup_path)?;
     }
 
-    match fs::rename(staging_dir, target_dir) {
+    let mut rename_res = fs::rename(staging_dir, target_dir);
+    if rename_res.is_err() {
+        for attempt in 1..=10 {
+            std::thread::sleep(std::time::Duration::from_millis(50 * attempt));
+            rename_res = fs::rename(staging_dir, target_dir);
+            if rename_res.is_ok() {
+                break;
+            }
+        }
+    }
+
+    match rename_res {
         Ok(()) => {
             if backup_path.exists() {
                 let _ = fs::remove_dir_all(&backup_path);

@@ -11,10 +11,10 @@ echo "==========================================================================
 echo "  TARA CLOUD TRAINING SYSTEM (GOOGLE COLAB AUTONOMOUS RUNNER)"
 echo "=============================================================================="
 
-# 0. Proactive Disk Hygiene: Reclaim disk space from stale scratch files, caches, and build artifacts
+# 0. Proactive Disk Hygiene: Reclaim disk space from stale scratch files, caches, and unused debug builds
 echo "[DISK CLEANUP] Reclaiming disk space from previous runs and caches..."
 rm -rf /tmp/tara_moments_* /tmp/tara_* /tmp/tmp* 2>/dev/null || true
-rm -rf target/debug target/release/incremental target/release/.fingerprint 2>/dev/null || true
+rm -rf target/debug 2>/dev/null || true
 rm -rf storage/checkpoints/gpu_step_test_parity 2>/dev/null || true
 rm -rf /root/.cache/huggingface /root/.cache/pip /root/.cache/torch 2>/dev/null || true
 if command -v df >/dev/null 2>&1; then
@@ -25,6 +25,7 @@ fi
 # Let AutoMemory determine the safe host memory limit based on cgroup and available RAM
 export TARA_MAX_MEMORY_MB="${TARA_MAX_MEMORY_MB:-}"
 export TARA_MAX_SEQ_LEN="${TARA_MAX_SEQ_LEN:-128}"
+export TARA_MAX_VAL_SAMPLES="${TARA_MAX_VAL_SAMPLES:-10}"
 export GDRIVE_CHECKPOINT_DIR="${GDRIVE_CHECKPOINT_DIR:-/content/drive/MyDrive/TARA_CHECKPOINTS}"
 export HF_DATASET_REPO="${HF_DATASET_REPO:-${HF_MODEL_REPO:-${HF_REPO:-manjukp6/tara}}}"
 export HF_MODEL_REPO="${HF_MODEL_REPO:-${HF_DATASET_REPO}}"
@@ -224,7 +225,7 @@ TIME_CMD=""
 if [ -x "/usr/bin/time" ]; then
     TIME_CMD="/usr/bin/time -v"
 elif command -v apt-get >/dev/null 2>&1; then
-    apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq time >/dev/null 2>&1
+    apt-get install -y -qq time >/dev/null 2>&1 || (apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq time >/dev/null 2>&1)
     if [ -x "/usr/bin/time" ]; then
         TIME_CMD="/usr/bin/time -v"
     fi

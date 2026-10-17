@@ -149,13 +149,14 @@ fn main() {
     let (final_ws_bytes, final_peak_bytes) = tara_hd::discovery::query_process_memory_bytes();
     let final_ws_mib = final_ws_bytes as f64 / (1024.0 * 1024.0);
     let final_peak_mib = final_peak_bytes as f64 / (1024.0 * 1024.0);
-    let ram_delta_mib = final_ws_mib - initial_ws_mib;
+    let raw_byte_delta = (final_ws_bytes as i64) - (initial_ws_bytes as i64);
+    let ram_delta_mib = (raw_byte_delta as f64) / (1024.0 * 1024.0);
 
     println!("   -> Processed Rounds:        {} iterations", total_rounds);
     println!("   -> Total Streamed Items:    {} tokens", total_processed);
     println!("   -> Elapsed Time:            {:.2?}", elapsed_stress);
     println!("   -> Final OS Process RAM:    {:.2} MiB Working Set (Peak: {:.2} MiB)", final_ws_mib, final_peak_mib);
-    println!("   -> Net Process RAM Delta:   {:.2} MiB across 20,000 stream items", ram_delta_mib);
+    println!("   -> Net Process RAM Delta:   {:.4} MiB ({} raw bytes delta across 20,000 stream items)", ram_delta_mib, raw_byte_delta);
     println!("   -> In-Flight Leak Check:    {} bytes (Zero-leak verified)", stress_engine.governor().current_in_flight_bytes());
     assert_eq!(stress_engine.governor().current_in_flight_bytes(), 0, "No memory leak permitted after 1000 rounds");
     // Verify OS-level memory did not bloat out of control (delta under 10MB across 20k events)

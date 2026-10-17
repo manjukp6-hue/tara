@@ -1,10 +1,10 @@
 {
-  "timestamp_utc": "1791880255",
+  "timestamp_utc": "2026-10-17T07:26:48Z",
   "model_path": "storage/models/tara_candidate_v1",
   "dataset_path": "storage/datasets/curriculum",
-  "model_config_sha256": "50cb80d3514dd58727767cc2f279feb521add465e136939389eeab093419a48c",
+  "model_config_sha256": "0215c346f86a044311cd6434ee25657e1d8d32de6087a5f62f7cf7fe5846ef05",
   "tokenizer_sha256": "b9a6498e6ed702960658026d791abbb81c72a24eacfaea44584b08d009099449",
-  "dataset_fingerprint_sha256": "ae963af98111869e6bb873457ca8dac3697292f79fcb6e95eb6f8fb1f3279a42",
+  "dataset_fingerprint_sha256": "d493e4586d685eb56d4f90aeb07181867369e8fae26582a987090f68b84417ec",
   "tokenizer_audit": {
     "vocab_size": 100000,
     "max_token_len": 24,
@@ -28,15 +28,20 @@
   },
   "model_weights_audit": {
     "model_dir": "storage/models/tara_candidate_v1",
-    "num_layers": 22,
+    "num_layers": 13,
     "hidden_size": 2048,
     "intermediate_size": 5632,
     "num_attention_heads": 64,
     "num_kv_heads": 16,
-    "total_tensors_in_index": 201,
-    "total_bytes_reported": 5606580224,
+    "total_tensors_in_index": 120,
+    "total_bytes_reported": 1991618560,
     "is_sharded": true,
     "status": "VERIFIED_PASSED"
+  },
+  "hf_dataset_verification": {
+    "repo_id": "manjukp6/tara",
+    "remote_verified": true,
+    "status": "VERIFIED_LOCAL_PROVENANCE"
   },
   "authorization_status": "AUTHORIZED",
   "authorized_by": "TARA Pre-Training Authorization Gate (Native Rust)"

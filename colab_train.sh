@@ -32,6 +32,11 @@ export GDRIVE_CHECKPOINT_DIR="${GDRIVE_CHECKPOINT_DIR:-/content/drive/MyDrive/TA
 export HF_DATASET_REPO="${HF_DATASET_REPO:-${HF_MODEL_REPO:-${HF_REPO:-manjukp6/tara}}}"
 export HF_MODEL_REPO="${HF_MODEL_REPO:-${HF_DATASET_REPO}}"
 
+# Install cloud pretraining Python dependencies quietly
+if command -v pip >/dev/null 2>&1; then
+    pip install -q tokenizers safetensors 2>/dev/null || true
+fi
+
 # Install & Configure Rust Toolchain (Native Engine)
 if ! command -v cargo >/dev/null 2>&1; then
     echo "[SETUP] Installing Native Rust Toolchain..."
@@ -234,19 +239,33 @@ if [ ! -d "$SCALE_DS_DIR" ] || [ -z "$(ls -A "$SCALE_DS_DIR" 2>/dev/null)" ]; th
     SCALE_DS_DIR="$MAIN_DS_DIR"
 fi
 
-echo "=== [AUTONOMOUS EXTENSIBLE MULTI-STAGE TRAINING PIPELINE] ==="
-set +e
-./target/release/tara_training_stages \
-    --all-stages \
-    --checkpoints-dir "$ACTIVE_CP_DIR" \
-    --main-dataset-dir "$MAIN_DS_DIR" \
-    --scale-dir "$SCALE_DS_DIR" \
-    --device auto \
-    --precision auto \
-    --batch-size "$TRAIN_BATCH_SIZE" \
-    --max-steps "$STAGE_MAX_STEPS"
-PIPELINE_EXIT=$?
-set -e
+# 6. Execute Autonomous Multi-Stage Cloud Pretraining Pipeline
+TRAINER_MODE="${TRAINER_MODE:-python}"
+echo "=== [AUTONOMOUS CLOUD TRAINING PIPELINE (MODE: $TRAINER_MODE)] ==="
+
+if [ "$TRAINER_MODE" = "python" ]; then
+    echo "[TRAINER] Launching High-Throughput PyTorch Cloud GPU Trainer (FP16 / Fused AdamW)..."
+    python3 cloud_train.py \
+        --model-dir storage/models/tara_candidate_v1 \
+        --dataset-dir "$MAIN_DS_DIR" \
+        --output-dir "$ACTIVE_CP_DIR/stage0_pretraining" \
+        --max-steps "$STAGE_MAX_STEPS" \
+        --batch-size "$TRAIN_BATCH_SIZE"
+    PIPELINE_EXIT=$?
+else
+    set +e
+    ./target/release/tara_training_stages \
+        --all-stages \
+        --checkpoints-dir "$ACTIVE_CP_DIR" \
+        --main-dataset-dir "$MAIN_DS_DIR" \
+        --scale-dir "$SCALE_DS_DIR" \
+        --device auto \
+        --precision auto \
+        --batch-size "$TRAIN_BATCH_SIZE" \
+        --max-steps "$STAGE_MAX_STEPS"
+    PIPELINE_EXIT=$?
+    set -e
+fi
 
 if [ $PIPELINE_EXIT -ne 0 ]; then
     echo "=============================================================================="

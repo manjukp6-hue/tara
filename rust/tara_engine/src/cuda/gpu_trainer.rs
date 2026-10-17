@@ -868,11 +868,8 @@ impl CudaTrainer {
         self.moments_disk_dir = None;
 
         if stream_opt {
-            let mut hg_guard = self.h_grad.lock().unwrap();
-            hg_guard.clear();
-            for (name, vals) in weights {
-                hg_guard.insert(name.clone(), vec![0.0f32; vals.len()]);
-                self.h_weights.insert(name.clone(), vals.clone());
+            if let Ok(mut hg_guard) = self.h_grad.lock() {
+                hg_guard.clear();
             }
             self.temp_buf = vec![0.0f32; staging_elements];
             let disk_moments_forced = std::env::var("TARA_STREAM_MOMENTS_DISK")

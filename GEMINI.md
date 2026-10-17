@@ -76,10 +76,18 @@
    - Do NOT expose secret keys, private keys, tokens, credentials, or developer/creator identities in source code, README files, documentation, or hardcoded strings.
    - All sensitive secrets must be managed securely through encrypted storage or runtime environment parameters, never committed directly into code or text files.
 
-15. **ZERO PYTHON TOOLS, ZERO TEMPORARY PYTHON SCRIPTS — 100% PURE NATIVE RUST WORKFLOW**:
-   - Strictly ZERO Python tools, zero Python scripts, and zero temporary `.py` files permitted anywhere in the workspace or operational workflow.
-   - All tools, scripts, utilities, verification checkers, dataset splitters, tokenizers, benchmarks, audits, and pipelines must be written and executed 100% in native Rust (`cargo`, compiled Rust binaries, native Rust integration tests).
-   - Every dataset, security, and runtime verification must execute directly through compiled native Rust binaries.
+15. **PURE NATIVE RUST ENGINE & WORKFLOW — STRICT PYTHON ISOLATION FOR CLOUD PRETRAINING ONLY & NATIVE RUST LORA FOR AUTONOMOUS SELF-UPGRADE**:
+   - **Strict Python Cloud Pretraining Isolation (Zero Python in Main Systems)**:
+     * Python is permitted EXCLUSIVELY inside cloud/Colab training scripts for initial foundational pretraining of the large-scale base neural model.
+     * Strictly ZERO Python permitted in any main systems: zero Python in `tara_engine`, `tara_core`, `tara_server`, `tara_hd`, runtime inference, CLI, tokenizers, compilers, or dataset engines.
+     * Cloud training outputs standard immutable `model.safetensors`, `config.json`, and `tokenizer.json` artifacts, which are ingested directly into the native Rust runtime with zero Python dependency.
+   - **100% Native Rust Production, Serving & Tooling**:
+     * Production inference, HTTP APIs, serving, tokenization, dataset verification, security checkers, audits, benchmarks, and CLI utilities must execute 100% in native Rust (`cargo`, compiled Rust binaries).
+     * Zero Python runtime dependencies permitted on developer or user deployment environments.
+   - **Autonomous Self-Upgrade via Native Rust LoRA (Low-Rank Adaptation)**:
+     * All post-pretraining self-upgrade, skill evolution, experiential adaptation (Stage 2 Ability Training & Stage 3 Continual Adaptation), and autonomous fine-tuning must execute 100% natively in Rust.
+     * Autonomous self-upgrade uses mathematically pure **Low-Rank Adaptation (LoRA: $\Delta W = B \times A$)** and adapter heads implemented directly in `tara_engine` and `tara_hd`.
+     * LoRA operates locally on CPU or GPU with a minimal memory footprint (bounded to 30–50 MB), zero catastrophic forgetting, zero external AI connection, and zero Python dependencies.
 
 16. **NO HARDCODED NUMBERS OR STATIC LIMITS — FULL DYNAMIC EXTENSIBILITY**:
    - Absolutely NO hardcoding of arbitrary numbers, static capacity caps, magic thresholds, fixed stage limits, or rigid counts across the entire codebase.

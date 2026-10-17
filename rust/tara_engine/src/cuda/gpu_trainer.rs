@@ -2424,13 +2424,18 @@ impl CudaTrainer {
             if m_path.is_file() {
                 if let Ok(mut file) = std::fs::File::open(&m_path) {
                     use std::io::{Read, Seek, SeekFrom};
-                    let _ = file.seek(SeekFrom::Start((offset * 2) as u64));
-                    let mut bytes = vec![0u8; len * 2];
-                    let _ = file.read_exact(&mut bytes);
-                    for (i, chunk) in bytes.chunks_exact(2).enumerate().take(len) {
-                        temp_buf[i] = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
+                    let _ = file.seek(SeekFrom::Start((offset * std::mem::size_of::<f32>()) as u64));
+                    let bytes = unsafe {
+                        std::slice::from_raw_parts_mut(
+                            temp_buf.as_mut_ptr() as *mut u8,
+                            len * std::mem::size_of::<f32>(),
+                        )
+                    };
+                    if file.read_exact(bytes).is_ok() {
+                        session.upload_f32_slice(d_cm, &temp_buf[..len])?;
+                    } else {
+                        session.zero_buffer(d_cm)?;
                     }
-                    session.upload_f32_slice(d_cm, &temp_buf[..len])?;
                 } else {
                     session.zero_buffer(d_cm)?;
                 }
@@ -2442,13 +2447,18 @@ impl CudaTrainer {
             if v_path.is_file() {
                 if let Ok(mut file) = std::fs::File::open(&v_path) {
                     use std::io::{Read, Seek, SeekFrom};
-                    let _ = file.seek(SeekFrom::Start((offset * 2) as u64));
-                    let mut bytes = vec![0u8; len * 2];
-                    let _ = file.read_exact(&mut bytes);
-                    for (i, chunk) in bytes.chunks_exact(2).enumerate().take(len) {
-                        temp_buf[i] = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
+                    let _ = file.seek(SeekFrom::Start((offset * std::mem::size_of::<f32>()) as u64));
+                    let bytes = unsafe {
+                        std::slice::from_raw_parts_mut(
+                            temp_buf.as_mut_ptr() as *mut u8,
+                            len * std::mem::size_of::<f32>(),
+                        )
+                    };
+                    if file.read_exact(bytes).is_ok() {
+                        session.upload_f32_slice(d_cv, &temp_buf[..len])?;
+                    } else {
+                        session.zero_buffer(d_cv)?;
                     }
-                    session.upload_f32_slice(d_cv, &temp_buf[..len])?;
                 } else {
                     session.zero_buffer(d_cv)?;
                 }
@@ -2521,12 +2531,15 @@ impl CudaTrainer {
                 .write(true)
                 .open(&m_path)
                 .map_err(|e| CudaError::KernelError(e.to_string()))?;
-            let _ = file.seek(SeekFrom::Start((offset * 2) as u64));
-            let mut m_bytes = Vec::with_capacity(len * 2);
-            for &x in temp_buf[..len].iter() {
-                m_bytes.extend_from_slice(&f16::from_f32(x).to_le_bytes());
-            }
-            let _ = file.write_all(&m_bytes);
+            let _ = file.seek(SeekFrom::Start((offset * std::mem::size_of::<f32>()) as u64));
+            let bytes = unsafe {
+                std::slice::from_raw_parts(
+                    temp_buf.as_ptr() as *const u8,
+                    len * std::mem::size_of::<f32>(),
+                )
+            };
+            file.write_all(bytes)
+                .map_err(|e| CudaError::KernelError(e.to_string()))?;
 
             session.download_f32_slice(d_cv, &mut temp_buf[..len])?;
             let v_path = s_dir.join(format!("{name}.v.bin"));
@@ -2536,12 +2549,15 @@ impl CudaTrainer {
                 .write(true)
                 .open(&v_path)
                 .map_err(|e| CudaError::KernelError(e.to_string()))?;
-            let _ = file.seek(SeekFrom::Start((offset * 2) as u64));
-            let mut v_bytes = Vec::with_capacity(len * 2);
-            for &x in temp_buf[..len].iter() {
-                v_bytes.extend_from_slice(&f16::from_f32(x).to_le_bytes());
-            }
-            let _ = file.write_all(&v_bytes);
+            let _ = file.seek(SeekFrom::Start((offset * std::mem::size_of::<f32>()) as u64));
+            let bytes = unsafe {
+                std::slice::from_raw_parts(
+                    temp_buf.as_ptr() as *const u8,
+                    len * std::mem::size_of::<f32>(),
+                )
+            };
+            file.write_all(bytes)
+                .map_err(|e| CudaError::KernelError(e.to_string()))?;
         } else {
             let hm = h_m
                 .entry(name.to_string())
@@ -2644,11 +2660,25 @@ impl CudaTrainer {
             .collect();
         param_keys.sort_by(|a, b| a.0.cmp(&b.0));
 
-        for (name, param_len, grad_dptr, opt_w_dptr, opt_wf16_dptr, opt_m_dptr, opt_v_dptr) in
-            param_keys
+        let total_tensors = param_keys.len();
+        let log_interval = (total_tensors / 10).max(1);
+
+        for (idx, (name, param_len, grad_dptr, opt_w_dptr, opt_wf16_dptr, opt_m_dptr, opt_v_dptr)) in
+            param_keys.into_iter().enumerate()
         {
             if self.tied_embeddings && name == "lm_head.weight" {
                 continue;
+            }
+            if idx % log_interval == 0 || idx + 1 == total_tensors {
+                use std::io::Write;
+                println!(
+                    "[CUDA AdamW] Step progress: tensor {}/{} ('{}', {} params)...",
+                    idx + 1,
+                    total_tensors,
+                    name,
+                    param_len
+                );
+                let _ = std::io::stdout().flush();
             }
             let is_in_weights = weights.contains_key(&name);
 
@@ -2676,9 +2706,6 @@ impl CudaTrainer {
                         };
 
                         self.session.upload_f32_slice(d_cw, hw_slice)?;
-                        let h_f16: Vec<f16> = hw_slice.iter().map(|&x| f16::from_f32(x)).collect();
-                        let packed = pack_f16_to_u32(&h_f16);
-                        self.session.upload_u32_slice(d_cwf16, &packed)?;
 
                         let g_dptr = if let Some(gd) = grad_dptr {
                             gd + (offset * 4) as u64
@@ -2993,11 +3020,9 @@ impl CudaTrainer {
             }
 
             if self.stream_optimizer {
-                if let Some(emb_w) = weights.get("model.embed_tokens.weight").cloned() {
-                    weights.insert("lm_head.weight".to_string(), emb_w.clone());
-                    if self.h_weights.contains_key("lm_head.weight") {
-                        self.h_weights.insert("lm_head.weight".to_string(), emb_w);
-                    }
+                if let Some(emb_w) = weights.get("model.embed_tokens.weight") {
+                    let emb_vec = emb_w.clone();
+                    weights.insert("lm_head.weight".to_string(), emb_vec);
                 }
             }
         }
@@ -3134,11 +3159,16 @@ impl CudaTrainer {
             let master_weights_device = "Host RAM";
             let gradients_bytes = total_parameters * std::mem::size_of::<f32>();
             let gradients_device = "Host RAM (Streamed GPU Update)";
-            // Moments are compactly streamed as FP16 (2 bytes each) on host
-            let moment1_bytes = total_parameters * std::mem::size_of::<half::f16>();
-            let moment1_device = "Host RAM (FP16)";
-            let moment2_bytes = total_parameters * std::mem::size_of::<half::f16>();
-            let moment2_device = "Host RAM (FP16)";
+            let (moment1_bytes, moment1_device, moment2_bytes, moment2_device) = if self.moments_disk_dir.is_some() {
+                (0, "Disk-Backed Scratch (0 MB Host RAM)", 0, "Disk-Backed Scratch (0 MB Host RAM)")
+            } else {
+                (
+                    total_parameters * std::mem::size_of::<half::f16>(),
+                    "Host RAM (FP16)",
+                    total_parameters * std::mem::size_of::<half::f16>(),
+                    "Host RAM (FP16)",
+                )
+            };
             let chunk_buffers_gpu_bytes: usize = [
                 self.d_chunk_w.as_ref().map(|b| b.bytes).unwrap_or(0),
                 self.d_chunk_m.as_ref().map(|b| b.bytes).unwrap_or(0),
@@ -3230,15 +3260,21 @@ impl CudaTrainer {
                 let m_path = s_dir.join(format!("{name}.m.bin"));
                 let mut m = vec![0.0f32; param.len];
                 if let Ok(bytes) = std::fs::read(&m_path) {
-                    for (i, chunk) in bytes.chunks_exact(2).enumerate().take(param.len) {
-                        m[i] = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
+                    if bytes.len() >= param.len * std::mem::size_of::<f32>() {
+                        let f32_slice: &[f32] = unsafe {
+                            std::slice::from_raw_parts(bytes.as_ptr() as *const f32, param.len)
+                        };
+                        m.copy_from_slice(f32_slice);
                     }
                 }
                 let v_path = s_dir.join(format!("{name}.v.bin"));
                 let mut v = vec![0.0f32; param.len];
                 if let Ok(bytes) = std::fs::read(&v_path) {
-                    for (i, chunk) in bytes.chunks_exact(2).enumerate().take(param.len) {
-                        v[i] = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
+                    if bytes.len() >= param.len * std::mem::size_of::<f32>() {
+                        let f32_slice: &[f32] = unsafe {
+                            std::slice::from_raw_parts(bytes.as_ptr() as *const f32, param.len)
+                        };
+                        v.copy_from_slice(f32_slice);
                     }
                 }
                 out.insert(name.clone(), (m, v));
@@ -3285,17 +3321,21 @@ impl CudaTrainer {
             }
 
             if let Some(ref s_dir) = self.moments_disk_dir {
-                let mut m_bytes = Vec::with_capacity(param.len * 2);
-                for &x in m {
-                    m_bytes.extend_from_slice(&f16::from_f32(x).to_le_bytes());
-                }
-                let _ = std::fs::write(s_dir.join(format!("{name}.m.bin")), &m_bytes);
+                let m_bytes = unsafe {
+                    std::slice::from_raw_parts(
+                        m.as_ptr() as *const u8,
+                        param.len * std::mem::size_of::<f32>(),
+                    )
+                };
+                let _ = std::fs::write(s_dir.join(format!("{name}.m.bin")), m_bytes);
 
-                let mut v_bytes = Vec::with_capacity(param.len * 2);
-                for &x in v {
-                    v_bytes.extend_from_slice(&f16::from_f32(x).to_le_bytes());
-                }
-                let _ = std::fs::write(s_dir.join(format!("{name}.v.bin")), &v_bytes);
+                let v_bytes = unsafe {
+                    std::slice::from_raw_parts(
+                        v.as_ptr() as *const u8,
+                        param.len * std::mem::size_of::<f32>(),
+                    )
+                };
+                let _ = std::fs::write(s_dir.join(format!("{name}.v.bin")), v_bytes);
             } else if self.stream_optimizer {
                 let m_f16: Vec<f16> = m.iter().map(|&x| f16::from_f32(x)).collect();
                 let v_f16: Vec<f16> = v.iter().map(|&x| f16::from_f32(x)).collect();
@@ -3437,11 +3477,11 @@ impl CudaTrainer {
                 let v_path = s_dir.join(format!("{name}.v.bin"));
                 let m_ok = !m_path.exists()
                     || std::fs::metadata(&m_path)
-                        .map(|md| md.len() as usize == p.len * 2)
+                        .map(|md| md.len() as usize == expected_f32_bytes)
                         .unwrap_or(false);
                 let v_ok = !v_path.exists()
                     || std::fs::metadata(&v_path)
-                        .map(|md| md.len() as usize == p.len * 2)
+                        .map(|md| md.len() as usize == expected_f32_bytes)
                         .unwrap_or(false);
                 if !m_ok || !v_ok {
                     return Err(format!(

@@ -413,6 +413,7 @@ pub struct CudaTrainer {
     h_weights: HashMap<String, Vec<f32>>,
     h_m: HashMap<String, Vec<f16>>,
     h_v: HashMap<String, Vec<f16>>,
+    moments_disk_dir: Option<std::path::PathBuf>,
     temp_buf: Vec<f32>,
     d_chunk_w: Option<CudaBuffer>,
     d_chunk_m: Option<CudaBuffer>,
@@ -551,6 +552,7 @@ impl CudaTrainer {
             h_weights: HashMap::new(),
             h_m: HashMap::new(),
             h_v: HashMap::new(),
+            moments_disk_dir: None,
             temp_buf: Vec::new(),
             d_chunk_w: None,
             d_chunk_m: None,
@@ -729,15 +731,52 @@ impl CudaTrainer {
         self.h_weights.clear();
         self.h_m.clear();
         self.h_v.clear();
+        if let Some(ref dir) = self.moments_disk_dir {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        self.moments_disk_dir = None;
+
         if stream_opt {
             self.temp_buf = vec![0.0f32; max_tensor_len];
-            // Eagerly preallocate moment buffers on host so memory is accounted for up front,
-            // avoiding mid-training allocation spikes during the first optimizer step.
-            for (name, vals) in weights {
-                self.h_m
-                    .insert(name.clone(), vec![f16::from_f32(0.0); vals.len()]);
-                self.h_v
-                    .insert(name.clone(), vec![f16::from_f32(0.0); vals.len()]);
+            let disk_moments_forced = std::env::var("TARA_STREAM_MOMENTS_DISK")
+                .map(|v| v == "1" || v == "true")
+                .unwrap_or(false);
+            let snap = capture_memory_snapshot(self.session.get_memory_info().ok());
+            let host_avail_mb = match (snap.cgroup_limit_mb, snap.cgroup_current_mb) {
+                (Some(lim), Some(cur)) if lim > cur => snap.host_avail_mb.min(lim - cur),
+                _ => snap.host_avail_mb,
+            };
+            let moments_size_mb = (total_elements * 4) as f64 / (1024.0 * 1024.0); // FP16 m + FP16 v
+                                                                                   // Activate disk-backed scratch moments if host RAM headroom is below safe margin
+                                                                                   // (moments_size + 4GB overhead/model headroom) or explicitly requested.
+            let use_disk_moments =
+                disk_moments_forced || host_avail_mb < (moments_size_mb + 4000.0);
+
+            if use_disk_moments {
+                let s_dir = std::env::var("TARA_SCRATCH_DIR")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|_| {
+                        std::env::temp_dir().join(format!("tara_moments_{}", std::process::id()))
+                    });
+                let _ = std::fs::create_dir_all(&s_dir);
+                println!(
+                    "[CudaTrainer] Host RAM budget tight ({host_avail_mb:.1} MB avail < {:.1} MB threshold for in-memory moments). \
+                     Activating Chunked Disk-Backed Moments Scratch Storage at '{}' (Saves {moments_size_mb:.1} MB host RAM).",
+                    moments_size_mb + 4000.0,
+                    s_dir.display()
+                );
+                self.moments_disk_dir = Some(s_dir);
+            } else {
+                println!(
+                    "[CudaTrainer] Sufficient Host RAM ({host_avail_mb:.1} MB avail). Using In-Memory FP16 Streamed Moments ({moments_size_mb:.1} MB).",
+                );
+                // Preallocate moment buffers on host so memory is accounted for up front
+                for (name, vals) in weights {
+                    self.h_m
+                        .insert(name.clone(), vec![f16::from_f32(0.0); vals.len()]);
+                    self.h_v
+                        .insert(name.clone(), vec![f16::from_f32(0.0); vals.len()]);
+                }
             }
         } else {
             self.temp_buf = Vec::new();
@@ -1398,6 +1437,116 @@ impl CudaTrainer {
         Ok(total_norm)
     }
 
+    fn upload_moments_chunk_impl(
+        session: &CudaSession,
+        d_cm: &CudaBuffer,
+        d_cv: &CudaBuffer,
+        temp_buf: &mut [f32],
+        moments_disk_dir: Option<&std::path::Path>,
+        h_m: &HashMap<String, Vec<f16>>,
+        h_v: &HashMap<String, Vec<f16>>,
+        name: &str,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        if let Some(s_dir) = moments_disk_dir {
+            let m_path = s_dir.join(format!("{name}.m.bin"));
+            if m_path.is_file() {
+                if let Ok(bytes) = std::fs::read(&m_path) {
+                    for (i, chunk) in bytes.chunks_exact(2).enumerate().take(len) {
+                        temp_buf[i] = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
+                    }
+                    session.upload_f32_slice(d_cm, &temp_buf[..len])?;
+                } else {
+                    session.zero_buffer(d_cm)?;
+                }
+            } else {
+                session.zero_buffer(d_cm)?;
+            }
+
+            let v_path = s_dir.join(format!("{name}.v.bin"));
+            if v_path.is_file() {
+                if let Ok(bytes) = std::fs::read(&v_path) {
+                    for (i, chunk) in bytes.chunks_exact(2).enumerate().take(len) {
+                        temp_buf[i] = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
+                    }
+                    session.upload_f32_slice(d_cv, &temp_buf[..len])?;
+                } else {
+                    session.zero_buffer(d_cv)?;
+                }
+            } else {
+                session.zero_buffer(d_cv)?;
+            }
+        } else {
+            if let Some(hm) = h_m.get(name) {
+                for (i, &x) in hm.iter().enumerate().take(len) {
+                    temp_buf[i] = x.to_f32();
+                }
+                session.upload_f32_slice(d_cm, &temp_buf[..len])?;
+            } else {
+                session.zero_buffer(d_cm)?;
+            }
+            if let Some(hv) = h_v.get(name) {
+                for (i, &x) in hv.iter().enumerate().take(len) {
+                    temp_buf[i] = x.to_f32();
+                }
+                session.upload_f32_slice(d_cv, &temp_buf[..len])?;
+            } else {
+                session.zero_buffer(d_cv)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn download_moments_chunk_impl(
+        session: &CudaSession,
+        d_cm: &CudaBuffer,
+        d_cv: &CudaBuffer,
+        temp_buf: &mut [f32],
+        moments_disk_dir: Option<&std::path::Path>,
+        h_m: &mut HashMap<String, Vec<f16>>,
+        h_v: &mut HashMap<String, Vec<f16>>,
+        name: &str,
+        len: usize,
+    ) -> Result<(), CudaError> {
+        session.download_f32_slice(d_cm, &mut temp_buf[..len])?;
+        if let Some(s_dir) = moments_disk_dir {
+            let mut m_bytes = Vec::with_capacity(len * 2);
+            for &x in temp_buf[..len].iter() {
+                m_bytes.extend_from_slice(&f16::from_f32(x).to_le_bytes());
+            }
+            let _ = std::fs::write(s_dir.join(format!("{name}.m.bin")), &m_bytes);
+
+            session.download_f32_slice(d_cv, &mut temp_buf[..len])?;
+            let mut v_bytes = Vec::with_capacity(len * 2);
+            for &x in temp_buf[..len].iter() {
+                v_bytes.extend_from_slice(&f16::from_f32(x).to_le_bytes());
+            }
+            let _ = std::fs::write(s_dir.join(format!("{name}.v.bin")), &v_bytes);
+        } else {
+            let hm = h_m
+                .entry(name.to_string())
+                .or_insert_with(|| vec![f16::from_f32(0.0); len]);
+            if hm.len() < len {
+                hm.resize(len, f16::from_f32(0.0));
+            }
+            for (i, &x) in temp_buf[..len].iter().enumerate() {
+                hm[i] = f16::from_f32(x);
+            }
+
+            session.download_f32_slice(d_cv, &mut temp_buf[..len])?;
+            let hv = h_v
+                .entry(name.to_string())
+                .or_insert_with(|| vec![f16::from_f32(0.0); len]);
+            if hv.len() < len {
+                hv.resize(len, f16::from_f32(0.0));
+            }
+            for (i, &x) in temp_buf[..len].iter().enumerate() {
+                hv[i] = f16::from_f32(x);
+            }
+        }
+        Ok(())
+    }
+
     /// Execute AdamW optimization step across all parameters directly on GPU,
     /// updating master weights in `weights` in-place without duplicate host allocations.
     /// Returns Ok(true) if step was executed, Ok(false) if skipped due to non-finite gradients.
@@ -1440,8 +1589,35 @@ impl CudaTrainer {
         };
 
         let block_dim = 128u32;
-        for (name, param) in &self.params {
-            let grid_dim = (param.len as u32).div_ceil(block_dim);
+        let param_keys: Vec<(
+            String,
+            usize,
+            u64,
+            Option<u64>,
+            Option<u64>,
+            Option<u64>,
+            Option<u64>,
+        )> = self
+            .params
+            .iter()
+            .map(|(name, param)| {
+                (
+                    name.clone(),
+                    param.len,
+                    param.d_grad.dptr,
+                    param.d_weight.as_ref().map(|b| b.dptr),
+                    param.d_weight_f16.as_ref().map(|b| b.dptr),
+                    param.d_m.as_ref().map(|b| b.dptr),
+                    param.d_v.as_ref().map(|b| b.dptr),
+                )
+            })
+            .collect();
+
+        for (name, param_len, grad_dptr, opt_w_dptr, opt_wf16_dptr, opt_m_dptr, opt_v_dptr) in
+            param_keys
+        {
+            let grid_dim = (param_len as u32).div_ceil(block_dim);
+            let is_in_weights = weights.contains_key(&name);
 
             if is_f16 {
                 let (arg_w, arg_m, arg_v) = if self.stream_optimizer {
@@ -1449,48 +1625,41 @@ impl CudaTrainer {
                     let d_cm = self.d_chunk_m.as_ref().unwrap();
                     let d_cv = self.d_chunk_v.as_ref().unwrap();
 
-                    let hw = if let Some(w) = weights.get_mut(name) {
-                        w
-                    } else if let Some(w) = self.h_weights.get_mut(name) {
-                        w
+                    if is_in_weights {
+                        let hw = weights.get(&name).unwrap();
+                        self.session.upload_f32_slice(d_cw, hw)?;
+                    } else if let Some(hw) = self.h_weights.get(&name) {
+                        self.session.upload_f32_slice(d_cw, hw)?;
                     } else {
                         return Err(CudaError::KernelError(format!(
                             "Missing tensor '{name}' for optimizer step"
                         )));
-                    };
+                    }
 
-                    self.session.upload_f32_slice(d_cw, hw)?;
-                    if let Some(hm) = self.h_m.get(name) {
-                        for (i, &x) in hm.iter().enumerate().take(param.len) {
-                            self.temp_buf[i] = x.to_f32();
-                        }
-                        self.session
-                            .upload_f32_slice(d_cm, &self.temp_buf[..param.len])?;
-                    } else {
-                        self.session.zero_buffer(d_cm)?;
-                    }
-                    if let Some(hv) = self.h_v.get(name) {
-                        for (i, &x) in hv.iter().enumerate().take(param.len) {
-                            self.temp_buf[i] = x.to_f32();
-                        }
-                        self.session
-                            .upload_f32_slice(d_cv, &self.temp_buf[..param.len])?;
-                    } else {
-                        self.session.zero_buffer(d_cv)?;
-                    }
+                    Self::upload_moments_chunk_impl(
+                        &self.session,
+                        d_cm,
+                        d_cv,
+                        &mut self.temp_buf,
+                        self.moments_disk_dir.as_deref(),
+                        &self.h_m,
+                        &self.h_v,
+                        &name,
+                        param_len,
+                    )?;
 
                     (d_cw.dptr, d_cm.dptr, d_cv.dptr)
                 } else {
                     (
-                        param.d_weight.as_ref().unwrap().dptr,
-                        param.d_m.as_ref().unwrap().dptr,
-                        param.d_v.as_ref().unwrap().dptr,
+                        opt_w_dptr.unwrap(),
+                        opt_m_dptr.unwrap(),
+                        opt_v_dptr.unwrap(),
                     )
                 };
 
                 let mut arg_w = arg_w;
-                let mut arg_wf16 = param.d_weight_f16.as_ref().unwrap().dptr;
-                let mut arg_g = param.d_grad.dptr;
+                let mut arg_wf16 = opt_wf16_dptr.unwrap();
+                let mut arg_g = grad_dptr;
                 let mut arg_m = arg_m;
                 let mut arg_v = arg_v;
                 let mut arg_lr = lr;
@@ -1501,7 +1670,7 @@ impl CudaTrainer {
                 let mut arg_clip = clip_scale;
                 let mut arg_bc1 = bc1;
                 let mut arg_bc2 = bc2;
-                let mut arg_n = param.len as u32;
+                let mut arg_n = param_len as u32;
 
                 let params: [*mut c_void; 16] = [
                     &mut arg_w as *mut u64 as *mut c_void,
@@ -1538,39 +1707,24 @@ impl CudaTrainer {
                     let d_cm = self.d_chunk_m.as_ref().unwrap();
                     let d_cv = self.d_chunk_v.as_ref().unwrap();
 
-                    let hw = if let Some(w) = weights.get_mut(name) {
-                        w
+                    Self::download_moments_chunk_impl(
+                        &self.session,
+                        d_cm,
+                        d_cv,
+                        &mut self.temp_buf,
+                        self.moments_disk_dir.as_deref(),
+                        &mut self.h_m,
+                        &mut self.h_v,
+                        &name,
+                        param_len,
+                    )?;
+
+                    if is_in_weights {
+                        let hw = weights.get_mut(&name).unwrap();
+                        self.session.download_f32_slice(d_cw, hw)?;
                     } else {
-                        self.h_weights.get_mut(name).unwrap()
-                    };
-
-                    self.session.download_f32_slice(d_cw, hw)?;
-
-                    // Download updated moments and store compactly as FP16 in-place (no heap reallocation)
-                    self.session
-                        .download_f32_slice(d_cm, &mut self.temp_buf[..param.len])?;
-                    let hm = self
-                        .h_m
-                        .entry(name.clone())
-                        .or_insert_with(|| vec![f16::from_f32(0.0); param.len]);
-                    if hm.len() < param.len {
-                        hm.resize(param.len, f16::from_f32(0.0));
-                    }
-                    for (i, &x) in self.temp_buf[..param.len].iter().enumerate() {
-                        hm[i] = f16::from_f32(x);
-                    }
-
-                    self.session
-                        .download_f32_slice(d_cv, &mut self.temp_buf[..param.len])?;
-                    let hv = self
-                        .h_v
-                        .entry(name.clone())
-                        .or_insert_with(|| vec![f16::from_f32(0.0); param.len]);
-                    if hv.len() < param.len {
-                        hv.resize(param.len, f16::from_f32(0.0));
-                    }
-                    for (i, &x) in self.temp_buf[..param.len].iter().enumerate() {
-                        hv[i] = f16::from_f32(x);
+                        let hw = self.h_weights.get_mut(&name).unwrap();
+                        self.session.download_f32_slice(d_cw, hw)?;
                     }
                 }
             } else {
@@ -1579,47 +1733,40 @@ impl CudaTrainer {
                     let d_cm = self.d_chunk_m.as_ref().unwrap();
                     let d_cv = self.d_chunk_v.as_ref().unwrap();
 
-                    let hw = if let Some(w) = weights.get_mut(name) {
-                        w
-                    } else if let Some(w) = self.h_weights.get_mut(name) {
-                        w
+                    if is_in_weights {
+                        let hw = weights.get(&name).unwrap();
+                        self.session.upload_f32_slice(d_cw, hw)?;
+                    } else if let Some(hw) = self.h_weights.get(&name) {
+                        self.session.upload_f32_slice(d_cw, hw)?;
                     } else {
                         return Err(CudaError::KernelError(format!(
                             "Missing tensor '{name}' for optimizer step"
                         )));
-                    };
+                    }
 
-                    self.session.upload_f32_slice(d_cw, hw)?;
-                    if let Some(hm) = self.h_m.get(name) {
-                        for (i, &x) in hm.iter().enumerate().take(param.len) {
-                            self.temp_buf[i] = x.to_f32();
-                        }
-                        self.session
-                            .upload_f32_slice(d_cm, &self.temp_buf[..param.len])?;
-                    } else {
-                        self.session.zero_buffer(d_cm)?;
-                    }
-                    if let Some(hv) = self.h_v.get(name) {
-                        for (i, &x) in hv.iter().enumerate().take(param.len) {
-                            self.temp_buf[i] = x.to_f32();
-                        }
-                        self.session
-                            .upload_f32_slice(d_cv, &self.temp_buf[..param.len])?;
-                    } else {
-                        self.session.zero_buffer(d_cv)?;
-                    }
+                    Self::upload_moments_chunk_impl(
+                        &self.session,
+                        d_cm,
+                        d_cv,
+                        &mut self.temp_buf,
+                        self.moments_disk_dir.as_deref(),
+                        &self.h_m,
+                        &self.h_v,
+                        &name,
+                        param_len,
+                    )?;
 
                     (d_cw.dptr, d_cm.dptr, d_cv.dptr)
                 } else {
                     (
-                        param.d_weight.as_ref().unwrap().dptr,
-                        param.d_m.as_ref().unwrap().dptr,
-                        param.d_v.as_ref().unwrap().dptr,
+                        opt_w_dptr.unwrap(),
+                        opt_m_dptr.unwrap(),
+                        opt_v_dptr.unwrap(),
                     )
                 };
 
                 let mut arg_w = arg_w;
-                let mut arg_g = param.d_grad.dptr;
+                let mut arg_g = grad_dptr;
                 let mut arg_m = arg_m;
                 let mut arg_v = arg_v;
                 let mut arg_lr = lr;
@@ -1630,7 +1777,7 @@ impl CudaTrainer {
                 let mut arg_clip = clip_scale;
                 let mut arg_bc1 = bc1;
                 let mut arg_bc2 = bc2;
-                let mut arg_n = param.len as u32;
+                let mut arg_n = param_len as u32;
 
                 let mut params = [std::ptr::null_mut(); 16];
                 params[0] = &mut arg_w as *mut u64 as *mut c_void;
@@ -1658,43 +1805,35 @@ impl CudaTrainer {
                     let d_cm = self.d_chunk_m.as_ref().unwrap();
                     let d_cv = self.d_chunk_v.as_ref().unwrap();
 
-                    let hw = if let Some(w) = weights.get_mut(name) {
-                        w
+                    Self::download_moments_chunk_impl(
+                        &self.session,
+                        d_cm,
+                        d_cv,
+                        &mut self.temp_buf,
+                        self.moments_disk_dir.as_deref(),
+                        &mut self.h_m,
+                        &mut self.h_v,
+                        &name,
+                        param_len,
+                    )?;
+
+                    if is_in_weights {
+                        let hw = weights.get_mut(&name).unwrap();
+                        self.session.download_f32_slice(d_cw, hw)?;
                     } else {
-                        self.h_weights.get_mut(name).unwrap()
-                    };
-
-                    self.session.download_f32_slice(d_cw, hw)?;
-
-                    // Download updated moments and store compactly as FP16 in-place (no heap reallocation)
-                    self.session
-                        .download_f32_slice(d_cm, &mut self.temp_buf[..param.len])?;
-                    let hm = self
-                        .h_m
-                        .entry(name.clone())
-                        .or_insert_with(|| vec![f16::from_f32(0.0); param.len]);
-                    if hm.len() < param.len {
-                        hm.resize(param.len, f16::from_f32(0.0));
-                    }
-                    for (i, &x) in self.temp_buf[..param.len].iter().enumerate() {
-                        hm[i] = f16::from_f32(x);
+                        let hw = self.h_weights.get_mut(&name).unwrap();
+                        self.session.download_f32_slice(d_cw, hw)?;
                     }
 
-                    self.session
-                        .download_f32_slice(d_cv, &mut self.temp_buf[..param.len])?;
-                    let hv = self
-                        .h_v
-                        .entry(name.clone())
-                        .or_insert_with(|| vec![f16::from_f32(0.0); param.len]);
-                    if hv.len() < param.len {
-                        hv.resize(param.len, f16::from_f32(0.0));
-                    }
-                    for (i, &x) in self.temp_buf[..param.len].iter().enumerate() {
-                        hv[i] = f16::from_f32(x);
-                    }
-
-                    if let Some(ref dw) = param.d_weight {
-                        self.session.upload_f32_slice(dw, hw)?;
+                    if let Some(param) = self.params.get(&name) {
+                        if let Some(ref dw) = param.d_weight {
+                            let hw = if is_in_weights {
+                                weights.get(&name).unwrap()
+                            } else {
+                                self.h_weights.get(&name).unwrap()
+                            };
+                            self.session.upload_f32_slice(dw, hw)?;
+                        }
                     }
                 }
             }
@@ -1876,7 +2015,25 @@ impl CudaTrainer {
     /// Export optimizer states (m, v) for persistent checkpointing.
     pub fn export_optimizer_state(&self) -> Result<OptimizerStateMap, CudaError> {
         let mut out = HashMap::new();
-        if self.stream_optimizer {
+        if let Some(ref s_dir) = self.moments_disk_dir {
+            for (name, param) in &self.params {
+                let m_path = s_dir.join(format!("{name}.m.bin"));
+                let mut m = vec![0.0f32; param.len];
+                if let Ok(bytes) = std::fs::read(&m_path) {
+                    for (i, chunk) in bytes.chunks_exact(2).enumerate().take(param.len) {
+                        m[i] = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
+                    }
+                }
+                let v_path = s_dir.join(format!("{name}.v.bin"));
+                let mut v = vec![0.0f32; param.len];
+                if let Ok(bytes) = std::fs::read(&v_path) {
+                    for (i, chunk) in bytes.chunks_exact(2).enumerate().take(param.len) {
+                        v[i] = f16::from_le_bytes([chunk[0], chunk[1]]).to_f32();
+                    }
+                }
+                out.insert(name.clone(), (m, v));
+            }
+        } else if self.stream_optimizer {
             for (name, m_f16) in &self.h_m {
                 let m: Vec<f32> = m_f16.iter().map(|&x| x.to_f32()).collect();
                 let v: Vec<f32> = if let Some(v_f16) = self.h_v.get(name) {
@@ -1917,7 +2074,19 @@ impl CudaTrainer {
                 )));
             }
 
-            if self.stream_optimizer {
+            if let Some(ref s_dir) = self.moments_disk_dir {
+                let mut m_bytes = Vec::with_capacity(param.len * 2);
+                for &x in m {
+                    m_bytes.extend_from_slice(&f16::from_f32(x).to_le_bytes());
+                }
+                let _ = std::fs::write(s_dir.join(format!("{name}.m.bin")), &m_bytes);
+
+                let mut v_bytes = Vec::with_capacity(param.len * 2);
+                for &x in v {
+                    v_bytes.extend_from_slice(&f16::from_f32(x).to_le_bytes());
+                }
+                let _ = std::fs::write(s_dir.join(format!("{name}.v.bin")), &v_bytes);
+            } else if self.stream_optimizer {
                 let m_f16: Vec<f16> = m.iter().map(|&x| f16::from_f32(x)).collect();
                 let v_f16: Vec<f16> = v.iter().map(|&x| f16::from_f32(x)).collect();
                 self.h_m.insert(name.clone(), m_f16);
@@ -1999,12 +2168,28 @@ impl CudaTrainer {
                         dm.bytes, dv.bytes, expected_f32_bytes
                     ));
                 }
+            } else if let Some(ref s_dir) = self.moments_disk_dir {
+                let m_path = s_dir.join(format!("{name}.m.bin"));
+                let v_path = s_dir.join(format!("{name}.v.bin"));
+                let m_ok = !m_path.exists()
+                    || std::fs::metadata(&m_path)
+                        .map(|md| md.len() as usize == p.len * 2)
+                        .unwrap_or(false);
+                let v_ok = !v_path.exists()
+                    || std::fs::metadata(&v_path)
+                        .map(|md| md.len() as usize == p.len * 2)
+                        .unwrap_or(false);
+                if !m_ok || !v_ok {
+                    return Err(format!(
+                        "Param '{name}': corrupted disk-backed Adam m/v scratch buffer"
+                    ));
+                }
             } else {
                 let hm_ok = self.h_m.get(name).map(|v| v.len()) == Some(p.len);
                 let hv_ok = self.h_v.get(name).map(|v| v.len()) == Some(p.len);
                 if !hm_ok || !hv_ok {
                     return Err(format!(
-                        "Param '{name}': missing or mismatched FP32 host Adam m/v buffers"
+                        "Param '{name}': missing or mismatched host Adam m/v buffers"
                     ));
                 }
             }
@@ -2035,6 +2220,14 @@ impl CudaTrainer {
             }
         }
         Ok(())
+    }
+}
+
+impl Drop for CudaTrainer {
+    fn drop(&mut self) {
+        if let Some(ref dir) = self.moments_disk_dir {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }
 

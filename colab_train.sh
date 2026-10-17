@@ -12,8 +12,8 @@ echo "  TARA CLOUD TRAINING SYSTEM (GOOGLE COLAB AUTONOMOUS RUNNER)"
 echo "=============================================================================="
 
 # 1. Enforce Cloud Training Environment Variables for Rust Orchestrator
-export TARA_CLOUD_TRAINING=1
-export TARA_MAX_MEMORY_MB="${TARA_MAX_MEMORY_MB:-14336}"
+# Let AutoMemory determine the safe host memory limit based on cgroup and available RAM
+export TARA_MAX_MEMORY_MB="${TARA_MAX_MEMORY_MB:-}"
 export TARA_MAX_SEQ_LEN="${TARA_MAX_SEQ_LEN:-128}"
 export GDRIVE_CHECKPOINT_DIR="${GDRIVE_CHECKPOINT_DIR:-/content/drive/MyDrive/TARA_CHECKPOINTS}"
 export HF_DATASET_REPO="${HF_DATASET_REPO:-${HF_MODEL_REPO:-${HF_REPO:-manjukp6/tara}}}"

@@ -502,28 +502,45 @@ impl NativeSelfTrainer {
         let hs = hidden_size.max(1);
 
         // 1. Host RAM Breakdown:
-        // Canonical FP32 model weights on host: 4 bytes / param
+        // Canonical FP32 model weights on host: 4 bytes / param (single copy via from_weights_move)
         let host_model_mb = (total_params * 4) as f64 / (1024.0 * 1024.0);
         // Host optimizer states:
-        // DynamicAdamW always stores fp32 first and second moments (m and v) on host RAM
-        // regardless of compute precision — this is required for numerical stability during
-        // AdamW bias-correction. Cost: 4 bytes (m) + 4 bytes (v) = 8 bytes per parameter.
-        //
-        // For GPU training, the full weight tensor (fp32 master copy) + both moment tensors
-        // are resident on host at the same time during the optimizer step.
-        // For CPU training, gradients (4B) + m (4B) + v (4B) = 12 bytes/param resident.
-        //
-        // The 200M threshold marks large models where GPU VRAM chunk-streaming is used;
-        // it does NOT reduce host-side moment memory — moments are always on host for GPU.
         let streamed_optimizer_threshold: usize = 200_000_000;
         let is_streamed_gpu = is_gpu && total_params >= streamed_optimizer_threshold;
-        let host_opt_mb = if is_gpu {
-            // fp32 m (4B) + fp32 v (4B) = 8 bytes per param on host for all GPU models.
-            // This is the actual DynamicAdamW allocation — previously underestimated as 4B.
-            (total_params * 8) as f64 / (1024.0 * 1024.0)
+        let disk_moments_forced = std::env::var("TARA_STREAM_MOMENTS_DISK")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
+        let moments_size_mb = (total_params * 4) as f64 / (1024.0 * 1024.0);
+        let snap = crate::cuda::gpu_trainer::capture_memory_snapshot(None);
+        let host_avail_mb = match (snap.cgroup_limit_mb, snap.cgroup_current_mb) {
+            (Some(lim), Some(cur)) if lim > cur => snap.host_avail_mb.min(lim - cur),
+            _ => snap.host_avail_mb,
+        };
+        let will_use_disk_moments =
+            is_streamed_gpu && (disk_moments_forced || host_avail_mb < (moments_size_mb + 4000.0));
+
+        let (host_opt_mb, opt_tag) = if is_gpu {
+            if will_use_disk_moments {
+                // Chunked disk-backed moments: only active transfer chunk in host memory (12 MB)
+                (12.0f64, format!("Opt(disk-streamed chunk)={:.1}MB", 12.0))
+            } else if is_streamed_gpu {
+                // Compact FP16 streamed moments in host RAM: 2B (m) + 2B (v) = 4B per param
+                (
+                    moments_size_mb,
+                    format!("Opt(m+v fp16)={moments_size_mb:.1}MB"),
+                )
+            } else {
+                // Non-streamed: moments live in GPU VRAM
+                (0.0f64, "Opt(GPU VRAM resident)=0.0MB".to_string())
+            }
         } else {
-            // CPU: gradients (4B) + m (4B) + v (4B) = 12 bytes/param
-            (total_params * 12) as f64 / (1024.0 * 1024.0)
+            (
+                (total_params * 12) as f64 / (1024.0 * 1024.0),
+                format!(
+                    "Grads+Moments(fp32)={:.1}MB",
+                    (total_params * 12) as f64 / (1024.0 * 1024.0)
+                ),
+            )
         };
         // Activations & cache buffers on host: micro-batch activations across transformer layers.
         // Layer count factor of 14 covers: q,k,v,o projections + gate,up,down MLP + 2x norms +
@@ -570,11 +587,11 @@ impl NativeSelfTrainer {
 
         let breakdown = if is_gpu {
             format!(
-                "Host RAM: Model={host_model_mb:.1}MB, Opt(m+v fp32)={host_opt_mb:.1}MB, Act={host_act_mb:.1}MB, Overhead={host_overhead_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB | GPU VRAM: Weights={gpu_w_mb:.1}MB, Grads={gpu_g_mb:.1}MB, Chunks/States={gpu_chunk_mb:.1}MB, Act={gpu_act_mb:.1}MB, Total(+10% Margin)={gpu_total_with_margin:.1}MB | Governing Peak: {governing_peak:.1}MB",
+                "Host RAM: Model={host_model_mb:.1}MB, {opt_tag}, Act={host_act_mb:.1}MB, Overhead={host_overhead_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB | GPU VRAM: Weights={gpu_w_mb:.1}MB, Grads={gpu_g_mb:.1}MB, Chunks/States={gpu_chunk_mb:.1}MB, Act={gpu_act_mb:.1}MB, Total(+10% Margin)={gpu_total_with_margin:.1}MB | Governing Peak: {governing_peak:.1}MB",
             )
         } else {
             format!(
-                "Host RAM: Model={host_model_mb:.1}MB, Grads+Moments(fp32)={host_opt_mb:.1}MB, Act={host_act_mb:.1}MB, Overhead={host_overhead_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB",
+                "Host RAM: Model={host_model_mb:.1}MB, {opt_tag}, Act={host_act_mb:.1}MB, Overhead={host_overhead_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB",
             )
         };
 
@@ -966,7 +983,7 @@ impl NativeSelfTrainer {
         println!("[Dataset] Collected {} total samples.", samples.len());
 
         // 3. Load model weights, config, and tokenizer
-        let (mut weights, shapes) = load_model_weights_with_purpose(&self.model_dir, "INPUT")?;
+        let (weights, shapes) = load_model_weights_with_purpose(&self.model_dir, "INPUT")?;
         let config_path = format!("{}/config.json", self.model_dir);
         let config = TaraConfig::from_json_file(&config_path)
             .map_err(|e| TrainerError::Model(e.to_string()))?;
@@ -1037,15 +1054,19 @@ impl NativeSelfTrainer {
             config.hidden_size,
         );
         // Effective memory safety ceiling:
-        // When the user has explicitly set --max-memory-mb, respect it unconditionally.
-        // When at default (65536 MB), use the auto-derived ceiling from actual host RAM
-        // so that preflight catches host OOM conditions before the optimizer step.
+        // Base admission control strictly on effective cgroup memory limit and available host RAM.
+        // User overrides via --max-memory-mb are clamped to detected container capacity to prevent
+        // fatal OOM kills, unless TARA_FORCE_UNSAFE_MEMORY=1 is explicitly declared.
         let default_max_memory_mb: f64 = 65536.0;
-        let effective_max_memory_mb = if (self.max_memory_mb - default_max_memory_mb).abs() < 1.0 {
-            // User did not explicitly override — use host-RAM-aware auto ceiling.
+        let force_unsafe_memory = std::env::var("TARA_FORCE_UNSAFE_MEMORY")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
+        let effective_max_memory_mb = if force_unsafe_memory {
+            self.max_memory_mb
+        } else if (self.max_memory_mb - default_max_memory_mb).abs() < 1.0 {
             auto_cfg.max_memory_mb
         } else {
-            self.max_memory_mb
+            self.max_memory_mb.min(auto_cfg.max_memory_mb)
         };
 
         let host_summary_str = if auto_cfg.cgroup_limit_mb > 0.0 {
@@ -1206,7 +1227,16 @@ impl NativeSelfTrainer {
                         println!("{}", refined.telemetry);
                         auto_cfg = refined;
                     }
-                    match t.register_weights(&weights) {
+                    crate::cuda::gpu_trainer::log_flushed_memory_checkpoint(
+                        "PRE_GPU_WEIGHT_REGISTRATION",
+                        t.get_vram_info().ok(),
+                    );
+                    let reg_res = t.register_weights(&weights);
+                    crate::cuda::gpu_trainer::log_flushed_memory_checkpoint(
+                        "POST_GPU_WEIGHT_REGISTRATION",
+                        t.get_vram_info().ok(),
+                    );
+                    match reg_res {
                         Ok(()) => Some(t),
                         Err(e) => {
                             if matches!(self.device, tara_hd::SelectionPolicy::Explicit(..)) {
@@ -1259,8 +1289,15 @@ impl NativeSelfTrainer {
             None
         };
 
-        // Construct canonical in-memory model without duplicate weights map allocation
-        let mut model = TaraForCausalLM::from_weights_ref(&weights, &config, &self.model_dir)
+        // Eagerly pre-allocate moments if running on CPU before moving weights ownership
+        let mut optimizer = if gpu_trainer_opt.is_none() {
+            DynamicAdamW::with_preallocated_moments(&weights)
+        } else {
+            DynamicAdamW::new()
+        };
+
+        // Construct canonical in-memory model by moving ownership of weights (zero duplicate memory!)
+        let mut model = TaraForCausalLM::from_weights_move(weights, &config, &self.model_dir)
             .map_err(|e| TrainerError::Model(e.to_string()))?;
 
         // Connect CudaComputeDevice into TARA-HD ComputeChannel as Single Source of Truth
@@ -1331,15 +1368,6 @@ impl NativeSelfTrainer {
             .unwrap_or_default();
         // is_gpu was resolved earlier alongside auto_cfg computation.
         let precision_label = format!("{:?}", hd_channel.precision());
-
-        // Eagerly pre-allocate moments if running on CPU to prevent unbudgeted memory spikes
-        // at the first optimizer step. If running on GPU with CUDA, moments are managed
-        // by CudaTrainer (either resident in VRAM or pre-allocated in streamed FP16 buffers).
-        let mut optimizer = if cuda_compute_dev_opt.is_none() {
-            DynamicAdamW::with_preallocated_moments(&weights)
-        } else {
-            DynamicAdamW::new()
-        };
         // Hyperparameter resolution: user-supplied values are authoritative.
         // When the user has not explicitly set a value (None), the auto-derived value
         // from AutoTrainingConfig — computed from actual device memory via TARA-HD —
@@ -1451,17 +1479,12 @@ impl NativeSelfTrainer {
 
                     let (resumed_weights, _) =
                         crate::safetensors::load_model_weights_with_purpose(resume_dir, "RESUME")?;
-                    weights = resumed_weights;
-                    model
-                        .update_weights(&weights)
-                        .map_err(|e| TrainerError::Model(e.to_string()))?;
                     if let Some(ref dev) = cuda_compute_dev_opt {
                         let mut t = dev
                             .trainer()
                             .lock()
                             .map_err(|e| TrainerError::Model(e.to_string()))?;
-                        let _ = t.register_weights(&weights);
-                        dev.update_slice_map(model.parameter_slice_map());
+                        let _ = t.register_weights(&resumed_weights);
                     }
 
                     // Restore and strictly validate optimizer state moments
@@ -1497,7 +1520,7 @@ impl NativeSelfTrainer {
                                 entry.1 = v;
                             }
                         }
-                        for (param_name, w_vec) in &weights {
+                        for (param_name, w_vec) in &resumed_weights {
                             if let Some((m_vec, v_vec)) = loaded_moments.get(param_name) {
                                 if m_vec.len() != w_vec.len() || v_vec.len() != w_vec.len() {
                                     return Err(TrainerError::Model(format!(
@@ -1525,6 +1548,15 @@ impl NativeSelfTrainer {
                         }
                         optimizer.load_state(loaded_moments);
                         optimizer.set_step(optimizer_steps as u64);
+                        model = TaraForCausalLM::from_weights_move(
+                            resumed_weights,
+                            &config,
+                            &self.model_dir,
+                        )
+                        .map_err(|e| TrainerError::Model(e.to_string()))?;
+                        if let Some(ref dev) = cuda_compute_dev_opt {
+                            dev.update_slice_map(model.parameter_slice_map());
+                        }
                         println!("[Checkpoint] Successfully restored optimizer moments and step count ({optimizer_steps}).");
                     } else if self.resume_from.is_some() {
                         return Err(TrainerError::Model(format!(
@@ -1937,6 +1969,8 @@ impl NativeSelfTrainer {
                         learning_rate
                     };
 
+                    let mut weights = model.into_weights_map();
+
                     // Calculate Continual Learning (EWC) penalty & gradient
                     let mut ewc_loss = 0.0f32;
                     if let (Some(ref anchors), Some(ref importance)) =
@@ -1999,9 +2033,13 @@ impl NativeSelfTrainer {
                             step_taken = true;
                             if optimizer_steps == 0 {
                                 println!(
-                                        "[Train] Verified first training optimizer step executed on CUDA GPU (k_adamw_step_f16, step_count={})",
-                                        gpu_trainer.get_step_count()
-                                    );
+                                    "[Train] Verified first training optimizer step executed on CUDA GPU (k_adamw_step_f16, step_count={})",
+                                    gpu_trainer.get_step_count()
+                                );
+                                crate::cuda::gpu_trainer::log_flushed_memory_checkpoint(
+                                    "FIRST_OPTIMIZER_UPDATE",
+                                    gpu_trainer.get_vram_info().ok(),
+                                );
                             }
                         }
 
@@ -2163,9 +2201,8 @@ impl NativeSelfTrainer {
                     batch_bytes_count = 0;
                     step_start_instant = std::time::Instant::now();
 
-                    // Update model in-memory with updated weights in-place (zero reallocation!)
-                    model
-                        .update_weights(&weights)
+                    // Reconstruct model in-memory with updated weights without cloning
+                    model = TaraForCausalLM::from_weights_move(weights, &config, &self.model_dir)
                         .map_err(|e| TrainerError::Model(e.to_string()))?;
                     if let Some(ref dev) = cuda_compute_dev_opt {
                         dev.update_slice_map(model.parameter_slice_map());
@@ -2202,6 +2239,13 @@ impl NativeSelfTrainer {
                             } else {
                                 optimizer.export_state()
                             };
+                            let weights = model.into_weights_map();
+                            crate::cuda::gpu_trainer::log_flushed_memory_checkpoint(
+                                "PRE_CHECKPOINT_SERIALIZATION",
+                                cuda_compute_dev_opt
+                                    .as_ref()
+                                    .and_then(|d| d.trainer().lock().ok()?.get_vram_info().ok()),
+                            );
                             Self::save_checkpoint_state_bundle(CheckpointBundleConfig {
                                 cp_dir,
                                 model_dir: &self.model_dir,
@@ -2216,6 +2260,21 @@ impl NativeSelfTrainer {
                                 is_best,
                                 val_tokens_empty: val_tokens.is_empty(),
                             })?;
+                            crate::cuda::gpu_trainer::log_flushed_memory_checkpoint(
+                                "POST_CHECKPOINT_SERIALIZATION",
+                                cuda_compute_dev_opt
+                                    .as_ref()
+                                    .and_then(|d| d.trainer().lock().ok()?.get_vram_info().ok()),
+                            );
+                            model = TaraForCausalLM::from_weights_move(
+                                weights,
+                                &config,
+                                &self.model_dir,
+                            )
+                            .map_err(|e| TrainerError::Model(e.to_string()))?;
+                            if let Some(ref dev) = cuda_compute_dev_opt {
+                                dev.update_slice_map(model.parameter_slice_map());
+                            }
                             let eval_str = current_eval_loss
                                 .map(|l| format!("{:.4}", l))
                                 .unwrap_or_else(|| "N/A".to_string());
@@ -2247,6 +2306,8 @@ impl NativeSelfTrainer {
                 } else {
                     learning_rate
                 };
+
+                let mut weights = model.into_weights_map();
 
                 let mut ewc_loss = 0.0f32;
                 if let (Some(ref anchors), Some(ref importance)) =
@@ -2289,19 +2350,21 @@ impl NativeSelfTrainer {
                             TrainerError::Model(format!("GPU gradient scaling failed: {e}"))
                         })?;
                     let stepped = gpu_trainer
-                        .step_adamw(effective_lr, beta1, beta2, eps, weight_decay, max_grad_norm)
+                        .step_adamw_with_weights(
+                            &mut weights,
+                            effective_lr,
+                            beta1,
+                            beta2,
+                            eps,
+                            weight_decay,
+                            max_grad_norm,
+                        )
                         .map_err(|e| TrainerError::Model(format!("GPU AdamW step failed: {e}")))?;
                     if stepped {
                         step_taken = true;
                     }
 
-                    if let Some(ref_w) = gpu_trainer.streamed_weights() {
-                        for (name, hw) in ref_w {
-                            if let Some(dest) = weights.get_mut(name) {
-                                dest.copy_from_slice(hw);
-                            }
-                        }
-                    } else {
+                    if !gpu_trainer.is_streaming() {
                         gpu_trainer
                             .download_weights_into(&mut weights)
                             .map_err(|e| {
@@ -2437,8 +2500,7 @@ impl NativeSelfTrainer {
                 );
                 let _ = std::io::stdout().flush();
 
-                model
-                    .update_weights(&weights)
+                model = TaraForCausalLM::from_weights_move(weights, &config, &self.model_dir)
                     .map_err(|e| TrainerError::Model(e.to_string()))?;
                 if let Some(ref dev) = cuda_compute_dev_opt {
                     dev.update_slice_map(model.parameter_slice_map());
@@ -2467,6 +2529,7 @@ impl NativeSelfTrainer {
                     } else {
                         optimizer.export_state()
                     };
+                    let weights = model.into_weights_map();
                     Self::save_checkpoint_state_bundle(CheckpointBundleConfig {
                         cp_dir,
                         model_dir: &self.model_dir,
@@ -2481,6 +2544,11 @@ impl NativeSelfTrainer {
                         is_best,
                         val_tokens_empty: val_tokens.is_empty(),
                     })?;
+                    model = TaraForCausalLM::from_weights_move(weights, &config, &self.model_dir)
+                        .map_err(|e| TrainerError::Model(e.to_string()))?;
+                    if let Some(ref dev) = cuda_compute_dev_opt {
+                        dev.update_slice_map(model.parameter_slice_map());
+                    }
                     let eval_str = current_eval_loss
                         .map(|l| format!("{:.4}", l))
                         .unwrap_or_else(|| "N/A".to_string());
@@ -2564,6 +2632,8 @@ impl NativeSelfTrainer {
 
         let staging_dir = format!("{}.staging_{}", target_candidate_dir, now_stamp);
         fs::create_dir_all(&staging_dir)?;
+
+        let weights = model.into_weights_map();
 
         // Write sharded or single SafeTensors into staging directory (100 MB canonical boundary)
         let shard_files =
@@ -2899,7 +2969,11 @@ fn compute_model_loss(
     for (idx, (tokens, target_start)) in val_tokens.iter().enumerate() {
         let sample_start = std::time::Instant::now();
         let orig_len = tokens.len();
-        let seq_len = orig_len.min(max_pos);
+        let val_seq_ceiling = std::env::var("TARA_MAX_VAL_SEQ_LEN")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(256);
+        let seq_len = orig_len.min(max_pos).min(val_seq_ceiling);
         if seq_len == 0 {
             continue;
         }
@@ -3308,7 +3382,7 @@ mod tests {
 
     #[test]
     fn test_estimate_memory_footprint_streamed_gpu_accounting() {
-        // ~1B model on GPU: verify host RAM correctly accounts for fp32 AdamW moments
+        // ~1B model on GPU: verify host RAM correctly accounts for optimizer moments
         let total_params = 995_809_280;
         let (peak_mb, breakdown) = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
             total_params,
@@ -3321,21 +3395,11 @@ mod tests {
         );
 
         assert!(peak_mb > 0.0);
-        // Host optimizer moments are fp32 m+v for ALL GPU models (8 bytes/param).
-        // The breakdown string uses "Opt(m+v fp32)=" to reflect this correction.
-        assert!(
-            breakdown.contains("Opt(m+v fp32)="),
-            "breakdown was: {breakdown}"
-        );
-        // For ~1B params, host moments = 1B × 8 bytes = ~7629 MB — must be non-zero.
-        assert!(
-            !breakdown.contains("Opt(m+v fp32)=0.0MB"),
-            "large model moments must be non-zero"
-        );
+        assert!(breakdown.contains("Opt("), "breakdown was: {breakdown}");
         assert!(breakdown.contains("Host RAM:"));
         assert!(breakdown.contains("GPU VRAM:"));
 
-        // Small GPU model (~10M params) also carries fp32 moments on host (corrected behaviour).
+        // Small GPU model (~10M params) has resident moments in GPU VRAM
         let small_params = 10_000_000;
         let (_, small_breakdown) = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
             small_params,
@@ -3346,14 +3410,9 @@ mod tests {
             512,
             512, // hidden_size — representative for small model
         );
-        // small model: 10M × 8 bytes = ~76 MB host moments — must be non-zero.
         assert!(
-            small_breakdown.contains("Opt(m+v fp32)="),
+            small_breakdown.contains("Opt(GPU VRAM resident)="),
             "breakdown was: {small_breakdown}"
-        );
-        assert!(
-            !small_breakdown.contains("Opt(m+v fp32)=0.0MB"),
-            "small model moments must be non-zero too"
         );
 
         // CPU mode accounts for gradients + moments on host
@@ -3382,17 +3441,17 @@ mod tests {
         )
         .expect("CPU channel must resolve");
 
-        // Set an explicit TARA_HOST_RAM_MB to simulate a constrained environment (e.g., 8 GB container)
-        std::env::set_var("TARA_HOST_RAM_MB", "8192");
+        // Set an explicit TARA_HOST_RAM_MB to simulate a constrained environment (e.g., 4 GB container)
+        std::env::set_var("TARA_HOST_RAM_MB", "4096");
         let auto_cfg = tara_hd::AutoTrainingConfig::compute(&channel, 100_000_000, 1024, 24, 500);
         std::env::remove_var("TARA_HOST_RAM_MB");
 
-        assert_eq!(auto_cfg.host_ram_total_mb, 8192.0);
-        assert_eq!(auto_cfg.host_ram_available_mb, 8192.0);
-        // Default safety pct is 85%: 8192 * 0.85 = 6963.2 MB
-        assert!((auto_cfg.max_memory_mb - 6963.2).abs() < 1.0);
+        assert_eq!(auto_cfg.host_ram_total_mb, 4096.0);
+        assert_eq!(auto_cfg.host_ram_available_mb, 4096.0);
+        // Default safety pct is 85%: 4096 * 0.85 = 3481.6 MB
+        assert!((auto_cfg.max_memory_mb - 3481.6).abs() < 1.0);
 
-        // Preflight estimate for 950M model: peak ~15 GB > 6963 MB safety ceiling
+        // Preflight estimate for 950M model: peak ~4.9 GB > 3481.6 MB safety ceiling
         let (projected_mb, _) = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
             950_000_000,
             true,
@@ -3404,7 +3463,7 @@ mod tests {
         );
         assert!(
             projected_mb > auto_cfg.max_memory_mb,
-            "950M model ({projected_mb} MB) must exceed 8GB container ceiling ({:.1} MB)",
+            "950M model ({projected_mb} MB) must exceed 4GB container ceiling ({:.1} MB)",
             auto_cfg.max_memory_mb
         );
     }

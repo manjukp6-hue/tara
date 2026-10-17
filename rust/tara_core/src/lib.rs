@@ -16,11 +16,6 @@ pub mod sandbox;
 pub use destruction::{DestructionReport, SecureDestructionEngine};
 pub use governance::{CreatorAuthority, Identity, Role};
 pub use memory::{MemoryEngine, MemoryRecord, MemoryType};
-pub use tara_security::path_security;
-pub use tara_security::path_security::{
-    canonical_containment, check_lexical_traversal, is_symlink_escaping, normalize_path,
-    validate_sandbox_path, PathSecurityError,
-};
 pub use permissions::{Capability, PermissionEngine};
 pub use protocol::{CoreProtocolHandler, CoreRequest, CoreResponse};
 pub use robotics::{ActuatorJoint, KalmanStateEstimator, PidController, RoboticsHal};
@@ -30,3 +25,8 @@ pub use runtime::{
     Worker,
 };
 pub use sandbox::{ExecutionResult, ExecutionSandbox, SandboxPolicy};
+pub use tara_security::path_security;
+pub use tara_security::path_security::{
+    canonical_containment, check_lexical_traversal, is_symlink_escaping, normalize_path,
+    validate_sandbox_path, PathSecurityError,
+};

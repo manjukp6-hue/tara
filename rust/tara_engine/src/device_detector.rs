@@ -166,7 +166,8 @@ impl DeviceCapabilityDetector {
             }
         }
 
-        50 * GB
+        // Disk free space is genuinely unknown — return 0 so callers can detect and handle it
+        0
     }
 
     /// Detects GPU availability, vendor, and free VRAM via TARA-HD dynamic hardware discovery.
@@ -175,13 +176,37 @@ impl DeviceCapabilityDetector {
         if let Some(gpu) = inventory.gpus.first() {
             let total = gpu.total_memory_bytes;
             let free = gpu.available_memory_bytes.unwrap_or(total).min(total);
+
+            // Infer vendor from the GPU device name string.
+            // TARA-HD stores the raw device name from nvidia-smi or the environment;
+            // we classify based on known vendor identifiers in the name.
+            let name_lc = gpu.name.to_ascii_lowercase();
+            let vendor =
+                if name_lc.contains("amd") || name_lc.contains("radeon") || name_lc.contains("rx ")
+                {
+                    "AMD"
+                } else if name_lc.contains("intel") || name_lc.contains("arc ") {
+                    "Intel"
+                } else if name_lc.contains("apple")
+                    || name_lc.contains("m1")
+                    || name_lc.contains("m2")
+                    || name_lc.contains("m3")
+                {
+                    "Apple"
+                } else if gpu.backend == "cuda" {
+                    // CUDA backend without other vendor markers defaults to NVIDIA
+                    "NVIDIA"
+                } else {
+                    "Unknown"
+                };
+
             return GpuInfo {
                 available: true,
-                vendor: "NVIDIA".into(),
+                vendor: vendor.into(),
                 device_name: gpu.name.clone(),
                 total_vram_bytes: total,
                 free_vram_bytes: free,
-                gpu_type: "CUDA".into(),
+                gpu_type: gpu.backend.to_ascii_uppercase(),
                 device_index: gpu.device_id as u32,
             };
         }

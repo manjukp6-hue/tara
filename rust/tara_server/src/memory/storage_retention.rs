@@ -145,7 +145,10 @@ impl StorageRetentionManager {
                         }
                     }
                     Err(e) => {
-                        errors.push(format!("domain {domain_name} dir {}: {e}", current_dir.display()));
+                        errors.push(format!(
+                            "domain {domain_name} dir {}: {e}",
+                            current_dir.display()
+                        ));
                     }
                 }
             }
@@ -396,8 +399,7 @@ impl StorageRetentionManager {
 
     fn active_artifact_location(&self) -> Option<String> {
         let root_str = self.repo_root.to_str().unwrap_or(".");
-        crate::learning::model_registry::ModelRegistry::new(root_str)
-            .get_active_version_location()
+        crate::learning::model_registry::ModelRegistry::new(root_str).get_active_version_location()
     }
 
     /// Returns the total disk usage of the knowledge and model storage directories in bytes.

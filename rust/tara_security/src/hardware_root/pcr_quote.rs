@@ -10,17 +10,19 @@ use byteorder::{BigEndian, ByteOrder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::cryptography::{CryptoUtils, Ed25519Verifier, Es256Verifier, Rs256Verifier, SignatureVerifier};
 use super::{CoseAlgorithm, TPM_GENERATED_VALUE};
+use crate::cryptography::{
+    CryptoUtils, Ed25519Verifier, Es256Verifier, Rs256Verifier, SignatureVerifier,
+};
 
 pub const TPM_ST_ATTEST_QUOTE: u16 = 0x8018;
 
 /// A TPM 2.0 Quote statement submitted by a client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TpmPcrQuoteStatement {
-    pub attest_data: Vec<u8>,       // Serialized TPMS_ATTEST
-    pub quote_signature: Vec<u8>,   // AIK signature over attest_data
-    pub aik_public_key: Vec<u8>,    // Attestation Identity Key
+    pub attest_data: Vec<u8>,             // Serialized TPMS_ATTEST
+    pub quote_signature: Vec<u8>,         // AIK signature over attest_data
+    pub aik_public_key: Vec<u8>,          // Attestation Identity Key
     pub pcr_values: HashMap<u32, String>, // Claimed PCR values: index -> hex digest
     pub algorithm: CoseAlgorithm,
 }
@@ -52,7 +54,10 @@ impl TpmPcrQuoteVerifier {
         // 1. Check Magic (0xFF544347)
         let magic = BigEndian::read_u32(&attest[0..4]);
         if magic != TPM_GENERATED_VALUE {
-            return Err(format!("TPM quote magic mismatch: expected 0x{:08X}, got 0x{:08X}", TPM_GENERATED_VALUE, magic));
+            return Err(format!(
+                "TPM quote magic mismatch: expected 0x{:08X}, got 0x{:08X}",
+                TPM_GENERATED_VALUE, magic
+            ));
         }
 
         // 2. Check Type (TPM_ST_ATTEST_QUOTE = 0x8018)
@@ -107,7 +112,10 @@ impl TpmPcrQuoteVerifier {
 
         // Verify nonce binding (freshness against replay)
         if !CryptoUtils::constant_time_eq(extra_data, expected_nonce) {
-            return Err("TpmQuoteNonceMismatch: Qualifying data in quote does not match server challenge".into());
+            return Err(
+                "TpmQuoteNonceMismatch: Qualifying data in quote does not match server challenge"
+                    .into(),
+            );
         }
 
         // Skip clockInfo (17 bytes) + firmwareVersion (8 bytes)
@@ -163,7 +171,9 @@ impl TpmPcrQuoteVerifier {
 
         // 6. Verify claimed PCR values against trusted baseline and quote pcrSelect
         if baseline_pcrs.is_empty() {
-            return Err("TpmQuoteBaselineMissing: Baseline PCR map cannot be empty (FailClosed)".into());
+            return Err(
+                "TpmQuoteBaselineMissing: Baseline PCR map cannot be empty (FailClosed)".into(),
+            );
         }
         if selected_pcr_indices.len() != baseline_pcrs.len() {
             return Err(format!(
@@ -174,7 +184,10 @@ impl TpmPcrQuoteVerifier {
         }
         for sel_idx in &selected_pcr_indices {
             if !baseline_pcrs.contains_key(sel_idx) {
-                return Err(format!("PcrSelectionUnexpected: Quote selected unbaseline PCR {}", sel_idx));
+                return Err(format!(
+                    "PcrSelectionUnexpected: Quote selected unbaseline PCR {}",
+                    sel_idx
+                ));
             }
         }
 
@@ -184,12 +197,16 @@ impl TpmPcrQuoteVerifier {
                 return Err(format!("PcrSelectionMismatch: Mandatory baseline PCR {} was not selected in quote pcrSelect", idx));
             }
             if let Some(claimed_hash) = statement.pcr_values.get(idx) {
-                if !CryptoUtils::constant_time_eq(claimed_hash.as_bytes(), baseline_hash.as_bytes()) {
+                if !CryptoUtils::constant_time_eq(claimed_hash.as_bytes(), baseline_hash.as_bytes())
+                {
                     return Err(format!("PcrMeasurementMismatch: PCR {} claimed [{}] does not match trusted baseline [{}] (Host Integrity Breached)", idx, claimed_hash, baseline_hash));
                 }
                 verified_indices.push(*idx);
             } else {
-                return Err(format!("PcrMeasurementMissing: Mandatory baseline PCR {} was not included in quote", idx));
+                return Err(format!(
+                    "PcrMeasurementMissing: Mandatory baseline PCR {} was not included in quote",
+                    idx
+                ));
             }
         }
 
@@ -197,7 +214,9 @@ impl TpmPcrQuoteVerifier {
         verified_indices.sort_unstable();
         let mut composite_preimage = Vec::new();
         for idx in &verified_indices {
-            let hex_str = statement.pcr_values.get(idx)
+            let hex_str = statement
+                .pcr_values
+                .get(idx)
                 .ok_or_else(|| format!("PCR {idx} missing in statement"))?;
             let raw_bytes = hex::decode(hex_str)
                 .map_err(|e| format!("Invalid hex encoding for PCR {idx} digest: {e}"))?;
@@ -295,25 +314,40 @@ mod tests {
         };
 
         // 1. Valid quote succeeds with trusted AIK
-        let res = TpmPcrQuoteVerifier::verify_quote(&statement, &trusted_aik, nonce, &baseline_pcrs);
-        assert!(res.is_ok(), "Authentic TPM PCR quote must verify: {:?}", res.err());
+        let res =
+            TpmPcrQuoteVerifier::verify_quote(&statement, &trusted_aik, nonce, &baseline_pcrs);
+        assert!(
+            res.is_ok(),
+            "Authentic TPM PCR quote must verify: {:?}",
+            res.err()
+        );
         let outcome = res.unwrap();
         assert!(outcome.is_verified);
         assert_eq!(outcome.verified_pcrs, vec![0, 7]);
 
         // 2. Untrusted / mismatched AIK fails closed (fixes finding #4)
-        let bad_aik_res = TpmPcrQuoteVerifier::verify_quote(&statement, &[0xeeu8; 32], nonce, &baseline_pcrs);
+        let bad_aik_res =
+            TpmPcrQuoteVerifier::verify_quote(&statement, &[0xeeu8; 32], nonce, &baseline_pcrs);
         assert!(bad_aik_res.is_err(), "Untrusted AIK must fail closed");
 
         // 3. Mismatched nonce fails closed
-        let bad_nonce_res = TpmPcrQuoteVerifier::verify_quote(&statement, &trusted_aik, b"wrong_nonce", &baseline_pcrs);
+        let bad_nonce_res = TpmPcrQuoteVerifier::verify_quote(
+            &statement,
+            &trusted_aik,
+            b"wrong_nonce",
+            &baseline_pcrs,
+        );
         assert!(bad_nonce_res.is_err(), "Mismatched nonce must fail closed");
 
         // 4. Forged PCR baseline fails closed
         let mut tampered_baseline = baseline_pcrs.clone();
         tampered_baseline.insert(0, hex::encode([0xffu8; 32]));
-        let bad_pcr_res = TpmPcrQuoteVerifier::verify_quote(&statement, &trusted_aik, nonce, &tampered_baseline);
-        assert!(bad_pcr_res.is_err(), "Mismatched PCR measurement must fail closed");
+        let bad_pcr_res =
+            TpmPcrQuoteVerifier::verify_quote(&statement, &trusted_aik, nonce, &tampered_baseline);
+        assert!(
+            bad_pcr_res.is_err(),
+            "Mismatched PCR measurement must fail closed"
+        );
 
         // 5. Forged composite hash fails closed
         let mut forged_attest = attest;
@@ -327,7 +361,11 @@ mod tests {
             pcr_values,
             algorithm: CoseAlgorithm::EdDsa,
         };
-        let forged_res = TpmPcrQuoteVerifier::verify_quote(&forged_stmt, &trusted_aik, nonce, &baseline_pcrs);
-        assert!(forged_res.is_err(), "Forged composite hash must fail closed");
+        let forged_res =
+            TpmPcrQuoteVerifier::verify_quote(&forged_stmt, &trusted_aik, nonce, &baseline_pcrs);
+        assert!(
+            forged_res.is_err(),
+            "Forged composite hash must fail closed"
+        );
     }
 }

@@ -43,7 +43,11 @@ impl CapabilitySynthesizer {
         }
 
         let clean_name = tool_name.trim().replace(['/', '\\', '.', ' ', '-'], "_");
-        if clean_name.is_empty() || !clean_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        if clean_name.is_empty()
+            || !clean_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
             return Err(
                 "tool_name contains invalid characters (only ASCII alphanumeric and '_' allowed)"
                     .into(),
@@ -199,7 +203,8 @@ mod tests {
         let kb = GlobalKnowledgeBase::new(&tmp_dir.to_string_lossy());
 
         // 1. Unauthorized
-        let unauth = synth.synthesize_tool_capability(&kb, "my_tool", "pub fn run() {}", "desc", false);
+        let unauth =
+            synth.synthesize_tool_capability(&kb, "my_tool", "pub fn run() {}", "desc", false);
         assert!(unauth.is_err());
         assert!(unauth.unwrap_err().contains("Unauthorized"));
 
@@ -223,7 +228,9 @@ mod tests {
             true,
         );
         assert!(dangerous.is_err());
-        assert!(dangerous.unwrap_err().contains("disallowed dangerous patterns"));
+        assert!(dangerous
+            .unwrap_err()
+            .contains("disallowed dangerous patterns"));
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 }

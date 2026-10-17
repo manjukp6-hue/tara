@@ -23,7 +23,10 @@ impl PrincipalId {
         Self::with_namespace("default", name)
     }
 
-    pub fn with_namespace(namespace: impl Into<String>, name: impl Into<String>) -> Result<Self, String> {
+    pub fn with_namespace(
+        namespace: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Result<Self, String> {
         let ns = namespace.into().trim().to_lowercase();
         let nm = name.into().trim().to_string();
 
@@ -33,14 +36,23 @@ impl PrincipalId {
         if nm.is_empty() || nm.len() > 128 {
             return Err("PrincipalId name must be 1-128 characters".into());
         }
-        if !ns.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        if !ns
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
             return Err("PrincipalId namespace contains invalid characters".into());
         }
-        if !nm.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '@' || c == '.') {
+        if !nm
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '@' || c == '.')
+        {
             return Err("PrincipalId name contains invalid characters".into());
         }
 
-        Ok(Self { namespace: ns, name: nm })
+        Ok(Self {
+            namespace: ns,
+            name: nm,
+        })
     }
 
     pub fn namespace(&self) -> &str {
@@ -73,7 +85,10 @@ impl DeviceId {
         if trimmed.is_empty() || trimmed.len() > 128 {
             return Err("DeviceId must be between 1 and 128 characters".into());
         }
-        if !trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ':') {
+        if !trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ':')
+        {
             return Err("DeviceId contains invalid characters".into());
         }
         Ok(Self(trimmed.to_string()))
@@ -152,46 +167,83 @@ impl SecurityAction {
     pub fn new(namespace: impl Into<String>, verb: impl Into<String>) -> Result<Self, String> {
         let ns = namespace.into().trim().to_lowercase();
         let vb = verb.into().trim().to_lowercase();
-        if ns.is_empty() || ns.len() > 64 || !ns.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        if ns.is_empty()
+            || ns.len() > 64
+            || !ns
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
             return Err("Invalid action namespace".into());
         }
-        if vb.is_empty() || vb.len() > 64 || !vb.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        if vb.is_empty()
+            || vb.len() > 64
+            || !vb
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
             return Err("Invalid action verb".into());
         }
-        Ok(Self { namespace: ns, verb: vb })
+        Ok(Self {
+            namespace: ns,
+            verb: vb,
+        })
     }
 
     // Canonical built-in actions
     pub fn execute_task() -> Self {
-        Self { namespace: "core".into(), verb: "execute_task".into() }
+        Self {
+            namespace: "core".into(),
+            verb: "execute_task".into(),
+        }
     }
 
     pub fn rotate_authority_key() -> Self {
-        Self { namespace: "authority".into(), verb: "rotate_key".into() }
+        Self {
+            namespace: "authority".into(),
+            verb: "rotate_key".into(),
+        }
     }
 
     pub fn configure_policy() -> Self {
-        Self { namespace: "policy".into(), verb: "configure".into() }
+        Self {
+            namespace: "policy".into(),
+            verb: "configure".into(),
+        }
     }
 
     pub fn read_protected_resource() -> Self {
-        Self { namespace: "storage".into(), verb: "read".into() }
+        Self {
+            namespace: "storage".into(),
+            verb: "read".into(),
+        }
     }
 
     pub fn write_protected_resource() -> Self {
-        Self { namespace: "storage".into(), verb: "write".into() }
+        Self {
+            namespace: "storage".into(),
+            verb: "write".into(),
+        }
     }
 
     pub fn lift_lockdown() -> Self {
-        Self { namespace: "authority".into(), verb: "lift_lockdown".into() }
+        Self {
+            namespace: "authority".into(),
+            verb: "lift_lockdown".into(),
+        }
     }
 
     pub fn enroll_device() -> Self {
-        Self { namespace: "device".into(), verb: "enroll".into() }
+        Self {
+            namespace: "device".into(),
+            verb: "enroll".into(),
+        }
     }
 
     pub fn revoke_device() -> Self {
-        Self { namespace: "device".into(), verb: "revoke".into() }
+        Self {
+            namespace: "device".into(),
+            verb: "revoke".into(),
+        }
     }
 
     pub fn namespace(&self) -> &str {
@@ -240,13 +292,26 @@ impl SecurityResource {
         if ns.contains(':') || i.contains(':') {
             return Err("InvalidResourceIdentifier: Colons (':') are reserved delimiters and forbidden inside namespace or id".into());
         }
-        if !ns.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
-            return Err("Resource namespace contains invalid characters (allowed: [a-z0-9_-])".into());
+        if !ns
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return Err(
+                "Resource namespace contains invalid characters (allowed: [a-z0-9_-])".into(),
+            );
         }
-        if !i.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '/') {
-            return Err("Resource id contains invalid characters (allowed: [a-zA-Z0-9_.-/])".into());
+        if !i
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '/')
+        {
+            return Err(
+                "Resource id contains invalid characters (allowed: [a-zA-Z0-9_.-/])".into(),
+            );
         }
-        Ok(Self::NamedEntity { namespace: ns, id: i })
+        Ok(Self::NamedEntity {
+            namespace: ns,
+            id: i,
+        })
     }
 
     pub fn path(p: impl AsRef<Path>) -> Result<Self, String> {
@@ -274,7 +339,9 @@ impl SecurityResource {
             Self::AuditStore => "tara:res:audit_store".into(),
             Self::DeviceRegistry => "tara:res:device_registry".into(),
             Self::AuthorityRoot => "tara:res:authority_root".into(),
-            Self::FilesystemPath(p) => format!("tara:res:fs:{}", p.to_string_lossy().replace('\\', "/")),
+            Self::FilesystemPath(p) => {
+                format!("tara:res:fs:{}", p.to_string_lossy().replace('\\', "/"))
+            }
             Self::NamedEntity { namespace, id } => format!("tara:res:{}:{}", namespace, id),
         }
     }
@@ -313,7 +380,10 @@ impl PrincipalRole {
             return Err("Role name must be between 1 and 64 characters".into());
         }
         if !r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            return Err("Role name must contain only uppercase alphanumeric characters and underscores".into());
+            return Err(
+                "Role name must contain only uppercase alphanumeric characters and underscores"
+                    .into(),
+            );
         }
         Ok(Self(r))
     }
@@ -433,34 +503,54 @@ impl VerifiedPrincipal {
         const MAX_CLAIM_VALUE_BYTES: usize = 4096;
 
         if claims.len() > MAX_CLAIMS_COUNT {
-            return Err(format!("ClaimsCountExceeded: {} claims exceeds maximum limit of {}", claims.len(), MAX_CLAIMS_COUNT));
+            return Err(format!(
+                "ClaimsCountExceeded: {} claims exceeds maximum limit of {}",
+                claims.len(),
+                MAX_CLAIMS_COUNT
+            ));
         }
 
         for (k, v) in &claims {
             if k.is_empty() || k.len() > MAX_CLAIM_KEY_LEN {
-                return Err(format!("ClaimKeyInvalid: Key length {} exceeds maximum limit of {}", k.len(), MAX_CLAIM_KEY_LEN));
+                return Err(format!(
+                    "ClaimKeyInvalid: Key length {} exceeds maximum limit of {}",
+                    k.len(),
+                    MAX_CLAIM_KEY_LEN
+                ));
             }
             let val_str = v.to_string();
             if val_str.len() > MAX_CLAIM_VALUE_BYTES {
-                return Err(format!("ClaimValueTooLarge: Claim '{}' value size {} exceeds limit of {}", k, val_str.len(), MAX_CLAIM_VALUE_BYTES));
+                return Err(format!(
+                    "ClaimValueTooLarge: Claim '{}' value size {} exceeds limit of {}",
+                    k,
+                    val_str.len(),
+                    MAX_CLAIM_VALUE_BYTES
+                ));
             }
         }
 
         // Creator Root assurance gate: Creator privileges CANNOT be minted without verified cryptographic proof witness
         if role == PrincipalRole::creator() || assurance_level >= AssuranceLevel::CREATOR_ROOT {
-            let s_id = claims.get("session_id").and_then(|s| s.as_str()).unwrap_or("");
-            let has_valid_session_proof = claims.get("session_proof").and_then(|v| v.as_str()).map(|hex_proof| {
-                if let Ok(bytes) = hex::decode(hex_proof.trim()) {
-                    if bytes.len() == 32 {
-                        let expected = compute_session_proof(&id.as_str(), s_id);
-                        constant_time_eq(&bytes, &expected)
+            let s_id = claims
+                .get("session_id")
+                .and_then(|s| s.as_str())
+                .unwrap_or("");
+            let has_valid_session_proof = claims
+                .get("session_proof")
+                .and_then(|v| v.as_str())
+                .map(|hex_proof| {
+                    if let Ok(bytes) = hex::decode(hex_proof.trim()) {
+                        if bytes.len() == 32 {
+                            let expected = compute_session_proof(&id.as_str(), s_id);
+                            constant_time_eq(&bytes, &expected)
+                        } else {
+                            false
+                        }
                     } else {
                         false
                     }
-                } else {
-                    false
-                }
-            }).unwrap_or(false);
+                })
+                .unwrap_or(false);
 
             if !has_valid_session_proof {
                 return Err("UnauthorizedPrincipalConstruction: Creator privileges require an authentic cryptographic session proof witness".into());
@@ -477,7 +567,6 @@ impl VerifiedPrincipal {
             claims,
         })
     }
-
 
     pub fn id(&self) -> &PrincipalId {
         &self.id
@@ -508,7 +597,8 @@ impl VerifiedPrincipal {
     }
 
     pub fn is_creator_root(&self) -> bool {
-        self.role == PrincipalRole::creator() && self.assurance_level >= AssuranceLevel::CREATOR_ROOT
+        self.role == PrincipalRole::creator()
+            && self.assurance_level >= AssuranceLevel::CREATOR_ROOT
     }
 }
 
@@ -581,8 +671,8 @@ static AUTHORITY_KEY: std::sync::LazyLock<[u8; 32]> = std::sync::LazyLock::new(|
 
 /// Compute a cryptographic HMAC-SHA256 session proof witness for an authentic creator session.
 pub(crate) fn compute_session_proof(actor_id: &str, session_id: &str) -> [u8; 32] {
-    let mut signer =
-        crate::cryptography::HmacSha256Signer::new(&*AUTHORITY_KEY).expect("HMAC accepts 32-byte key");
+    let mut signer = crate::cryptography::HmacSha256Signer::new(&*AUTHORITY_KEY)
+        .expect("HMAC accepts 32-byte key");
     signer.update(b"CREATOR_SESSION_PROOF_V1:");
     signer.update(actor_id.as_bytes());
     signer.update(b":");
@@ -637,8 +727,8 @@ impl AuthenticatedPrincipal {
             AuthenticatedRole::User => "USER",
             AuthenticatedRole::Untrusted => "UNTRUSTED",
         };
-        let mut signer =
-            crate::cryptography::HmacSha256Signer::new(&*AUTHORITY_KEY).expect("HMAC accepts 32-byte key");
+        let mut signer = crate::cryptography::HmacSha256Signer::new(&*AUTHORITY_KEY)
+            .expect("HMAC accepts 32-byte key");
         signer.update(actor_id.as_bytes());
         signer.update(b":");
         signer.update(role_str.as_bytes());
@@ -752,9 +842,7 @@ impl AuthenticatedPrincipal {
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn mint_creator_for_test(
-        session_id: impl Into<String>,
-    ) -> Result<Self, String> {
+    pub fn mint_creator_for_test(session_id: impl Into<String>) -> Result<Self, String> {
         let s_id = session_id.into();
         let proof = compute_session_proof_hex(CANONICAL_CREATOR_ID, &s_id);
         Self::mint_creator(CANONICAL_CREATOR_ID, s_id, &proof)
@@ -871,7 +959,10 @@ impl AuthenticatedPrincipal {
 
     pub fn has_capability(&self, capability: &str) -> bool {
         self.verify_authority()
-            && (self.capabilities.iter().any(|c| c == capability || c == "all")
+            && (self
+                .capabilities
+                .iter()
+                .any(|c| c == capability || c == "all")
                 || self.is_creator())
     }
 
@@ -963,7 +1054,6 @@ impl TryFrom<&AuthenticatedPrincipal> for VerifiedPrincipal {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -984,11 +1074,17 @@ mod tests {
             1000,
             empty_claims,
         );
-        assert!(res.is_err(), "Creator principal without verified_via must fail closed");
+        assert!(
+            res.is_err(),
+            "Creator principal without verified_via must fail closed"
+        );
 
         // 2. Creator role with unapproved claim value must FAIL CLOSED
         let mut forged_claims = HashMap::new();
-        forged_claims.insert("verified_via".into(), serde_json::json!("arbitrary_unauthenticated_string"));
+        forged_claims.insert(
+            "verified_via".into(),
+            serde_json::json!("arbitrary_unauthenticated_string"),
+        );
         let res_forged = VerifiedPrincipal::construct_verified(
             pid.clone(),
             PrincipalRole::creator(),
@@ -1005,7 +1101,10 @@ mod tests {
         let proof = compute_session_proof_hex(&pid.as_str(), "sess_123");
         valid_claims.insert("session_id".into(), serde_json::json!("sess_123"));
         valid_claims.insert("session_proof".into(), serde_json::json!(proof));
-        valid_claims.insert("verified_via".into(), serde_json::json!("authenticated_creator_session"));
+        valid_claims.insert(
+            "verified_via".into(),
+            serde_json::json!("authenticated_creator_session"),
+        );
         let res_valid = VerifiedPrincipal::construct_verified(
             pid.clone(),
             PrincipalRole::creator(),
@@ -1031,7 +1130,10 @@ mod tests {
             1000,
             HashMap::new(),
         );
-        assert!(user_res.is_ok(), "Standard user does not require root witness");
+        assert!(
+            user_res.is_ok(),
+            "Standard user does not require root witness"
+        );
     }
 
     #[test]
@@ -1042,16 +1144,19 @@ mod tests {
             "session_123",
             "authenticated_creator_session",
         );
-        assert!(res_bypass.is_err(), "Arbitrary string bypass must be rejected");
+        assert!(
+            res_bypass.is_err(),
+            "Arbitrary string bypass must be rejected"
+        );
 
         // 2. Authentic proof witness must SUCCEED
         let valid_proof = compute_session_proof_hex(CANONICAL_CREATOR_ID, "session_123");
-        let res_valid = AuthenticatedPrincipal::mint_creator(
-            CANONICAL_CREATOR_ID,
-            "session_123",
-            &valid_proof,
+        let res_valid =
+            AuthenticatedPrincipal::mint_creator(CANONICAL_CREATOR_ID, "session_123", &valid_proof);
+        assert!(
+            res_valid.is_ok(),
+            "Authentic cryptographic session proof must succeed"
         );
-        assert!(res_valid.is_ok(), "Authentic cryptographic session proof must succeed");
         let principal = res_valid.unwrap();
         assert!(principal.verify_authority());
         assert!(principal.is_creator());

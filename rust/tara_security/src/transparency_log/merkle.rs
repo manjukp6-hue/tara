@@ -26,7 +26,12 @@ pub struct SignedTreeHead {
 
 impl SignedTreeHead {
     pub fn compute_sth_digest(tree_size: u64, timestamp: u64, root_hash: &[u8; 32]) -> [u8; 32] {
-        let preimage = format!("RFC6962_STH|{}|{}|{}", tree_size, timestamp, hex::encode(root_hash));
+        let preimage = format!(
+            "RFC6962_STH|{}|{}|{}",
+            tree_size,
+            timestamp,
+            hex::encode(root_hash)
+        );
         CryptoUtils::sha256(preimage.as_bytes())
     }
 
@@ -146,7 +151,10 @@ impl MerkleTree {
 
     /// Append a new event leaf hash to the Merkle tree and return the new root.
     pub fn append_leaf(&self, leaf_hash: [u8; 32]) -> Result<([u8; 32], u64), String> {
-        let mut leaves = self.leaf_hashes.write().map_err(|_| "Merkle lock poisoned")?;
+        let mut leaves = self
+            .leaf_hashes
+            .write()
+            .map_err(|_| "Merkle lock poisoned")?;
         leaves.push(leaf_hash);
         let count = leaves.len() as u64;
         let root = Self::calculate_sub_root(&leaves)?;
@@ -155,7 +163,10 @@ impl MerkleTree {
 
     /// Current root hash of the tree.
     pub fn root_hash(&self) -> Result<[u8; 32], String> {
-        let leaves = self.leaf_hashes.read().map_err(|_| "Merkle lock poisoned")?;
+        let leaves = self
+            .leaf_hashes
+            .read()
+            .map_err(|_| "Merkle lock poisoned")?;
         if leaves.is_empty() {
             return Ok(CryptoUtils::sha256(&[]));
         }
@@ -164,7 +175,10 @@ impl MerkleTree {
 
     /// Root hash of the tree at a historical size.
     pub fn root_hash_for_size(&self, size: usize) -> Result<[u8; 32], String> {
-        let leaves = self.leaf_hashes.read().map_err(|_| "Merkle lock poisoned")?;
+        let leaves = self
+            .leaf_hashes
+            .read()
+            .map_err(|_| "Merkle lock poisoned")?;
         if size > leaves.len() {
             return Err("Requested size exceeds leaf count".into());
         }
@@ -199,7 +213,10 @@ impl MerkleTree {
         // 1. Verify STH signature strictly against trusted anchor (ID-03)
         sth.verify_signature_against_key(trusted_log_public_key)?;
 
-        let mut trusted_heads = self.trusted_tree_heads.write().map_err(|_| "STH lock poisoned")?;
+        let mut trusted_heads = self
+            .trusted_tree_heads
+            .write()
+            .map_err(|_| "STH lock poisoned")?;
 
         // 2. Rollback & Fork checks against previously committed trusted checkpoints
         if let Some(prev) = trusted_heads.last() {
@@ -236,8 +253,14 @@ impl MerkleTree {
     }
 
     /// Generate a cryptographic Inclusion Proof for a leaf at `leaf_index`.
-    pub fn generate_inclusion_proof(&self, leaf_index: u64) -> Result<MerkleInclusionProof, String> {
-        let leaves = self.leaf_hashes.read().map_err(|_| "Merkle lock poisoned")?;
+    pub fn generate_inclusion_proof(
+        &self,
+        leaf_index: u64,
+    ) -> Result<MerkleInclusionProof, String> {
+        let leaves = self
+            .leaf_hashes
+            .read()
+            .map_err(|_| "Merkle lock poisoned")?;
         let tree_size = leaves.len() as u64;
 
         if leaf_index >= tree_size {
@@ -293,13 +316,23 @@ impl MerkleTree {
         if CryptoUtils::constant_time_eq(expected_root, &computed_root) {
             Ok(())
         } else {
-            Err("InclusionProofVerificationFailed: Computed root does not match expected root".into())
+            Err(
+                "InclusionProofVerificationFailed: Computed root does not match expected root"
+                    .into(),
+            )
         }
     }
 
     /// Generate an RFC 6962 Consistency Proof between tree size M and tree size N.
-    pub fn generate_consistency_proof(&self, m: u64, n: u64) -> Result<MerkleConsistencyProof, String> {
-        let leaves = self.leaf_hashes.read().map_err(|_| "Merkle lock poisoned")?;
+    pub fn generate_consistency_proof(
+        &self,
+        m: u64,
+        n: u64,
+    ) -> Result<MerkleConsistencyProof, String> {
+        let leaves = self
+            .leaf_hashes
+            .read()
+            .map_err(|_| "Merkle lock poisoned")?;
         if m == 0 || m > n || n > leaves.len() as u64 {
             return Err("Invalid tree sizes for consistency proof".into());
         }
@@ -332,27 +365,40 @@ impl MerkleTree {
             return if proof.consistency_path.is_empty() {
                 Ok(())
             } else {
-                Err("ConsistencyProofError: Proof path must be empty when old tree size is 0".into())
+                Err(
+                    "ConsistencyProofError: Proof path must be empty when old tree size is 0"
+                        .into(),
+                )
             };
         }
 
         if old_size == new_size {
             if !CryptoUtils::constant_time_eq(old_root, new_root) {
-                return Err("ConsistencyProofError: Identical tree sizes have conflicting roots".into());
+                return Err(
+                    "ConsistencyProofError: Identical tree sizes have conflicting roots".into(),
+                );
             }
             return if proof.consistency_path.is_empty() {
                 Ok(())
             } else {
-                Err("ConsistencyProofError: Proof path must be empty when tree sizes are identical".into())
+                Err(
+                    "ConsistencyProofError: Proof path must be empty when tree sizes are identical"
+                        .into(),
+                )
             };
         }
 
         if old_size > new_size {
-            return Err("ConsistencyProofError: Old tree size cannot exceed new tree size (Rollback)".into());
+            return Err(
+                "ConsistencyProofError: Old tree size cannot exceed new tree size (Rollback)"
+                    .into(),
+            );
         }
 
         if proof.consistency_path.is_empty() {
-            return Err("ConsistencyProofError: Consistency path cannot be empty for expanding tree".into());
+            return Err(
+                "ConsistencyProofError: Consistency path cannot be empty for expanding tree".into(),
+            );
         }
 
         // Verify consistency traversal
@@ -371,11 +417,16 @@ impl MerkleTree {
         }
 
         if !CryptoUtils::constant_time_eq(&computed_old, old_root) {
-            return Err("ConsistencyProofFailed: Computed old root does not match trusted old root".into());
+            return Err(
+                "ConsistencyProofFailed: Computed old root does not match trusted old root".into(),
+            );
         }
 
         if !CryptoUtils::constant_time_eq(&computed_new, new_root) {
-            return Err("ConsistencyProofFailed: Computed new root does not match candidate new root".into());
+            return Err(
+                "ConsistencyProofFailed: Computed new root does not match candidate new root"
+                    .into(),
+            );
         }
 
         Ok(())
@@ -400,12 +451,7 @@ impl MerkleTree {
         Ok(Self::hash_children(&left_root, &right_root))
     }
 
-    fn build_inclusion_path(
-        leaves: &[[u8; 32]],
-        m: u64,
-        n: u64,
-        path: &mut Vec<[u8; 32]>,
-    ) {
+    fn build_inclusion_path(leaves: &[[u8; 32]], m: u64, n: u64, path: &mut Vec<[u8; 32]>) {
         if m >= n || n <= 1 {
             return;
         }
@@ -443,7 +489,13 @@ impl MerkleTree {
             Self::build_consistency_path(&leaves[..k as usize], m, k, start_from_old, path);
         } else {
             path.push(Self::calculate_sub_root(&leaves[..k as usize]).unwrap());
-            Self::build_consistency_path(&leaves[k as usize..n as usize], m - k, n - k, false, path);
+            Self::build_consistency_path(
+                &leaves[k as usize..n as usize],
+                m - k,
+                n - k,
+                false,
+                path,
+            );
         }
     }
 
@@ -516,7 +568,8 @@ fn eval_consistency_path(
         let right_sub_root = path[*path_idx];
         *path_idx += 1;
 
-        let (left_old, left_new) = eval_consistency_path(m, k, start_from_old, path, path_idx, old_root)?;
+        let (left_old, left_new) =
+            eval_consistency_path(m, k, start_from_old, path, path_idx, old_root)?;
         let new_root = MerkleTree::hash_children(&left_new, &right_sub_root);
         Ok((left_old, new_root))
     } else {
@@ -526,7 +579,8 @@ fn eval_consistency_path(
         let left_sub_root = path[*path_idx];
         *path_idx += 1;
 
-        let (right_old, right_new) = eval_consistency_path(m - k, n - k, false, path, path_idx, old_root)?;
+        let (right_old, right_new) =
+            eval_consistency_path(m - k, n - k, false, path, path_idx, old_root)?;
         let old_root_computed = MerkleTree::hash_children(&left_sub_root, &right_old);
         let new_root_computed = MerkleTree::hash_children(&left_sub_root, &right_new);
         Ok((old_root_computed, new_root_computed))

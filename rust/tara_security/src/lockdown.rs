@@ -66,7 +66,8 @@ pub struct LockdownRecord {
 
 impl LockdownRecord {
     pub fn compute_hmac(&self, hmac_key: &[u8]) -> String {
-        let mut signer = crate::cryptography::HmacSha256Signer::new(hmac_key).expect("HMAC accepts key");
+        let mut signer =
+            crate::cryptography::HmacSha256Signer::new(hmac_key).expect("HMAC accepts key");
         signer.update(self.current_state.as_bytes());
         signer.update(b":");
         signer.update(&self.crypto_failure_count.to_be_bytes());
@@ -110,7 +111,11 @@ pub type LockdownCoordinator = ProgressiveLockdownCoordinator;
 impl ProgressiveLockdownCoordinator {
     pub fn new<P: AsRef<Path>>(base_dir: P, hmac_key: [u8; 32]) -> Self {
         let dir = base_dir.as_ref().to_path_buf();
-        let state_file = dir.join("storage").join("vault").join("access").join("lockdown_state.json");
+        let state_file = dir
+            .join("storage")
+            .join("vault")
+            .join("access")
+            .join("lockdown_state.json");
         if let Some(parent) = state_file.parent() {
             let _ = fs::create_dir_all(parent);
         }
@@ -149,7 +154,9 @@ impl ProgressiveLockdownCoordinator {
                 crypto_failure_count: 10,
                 biometric_failure_count: 10,
                 temporary_locked_until: None,
-                lockdown_reason: Some("State file corrupted or HMAC signature invalid (FailClosed)".into()),
+                lockdown_reason: Some(
+                    "State file corrupted or HMAC signature invalid (FailClosed)".into(),
+                ),
                 write_block_active: true,
                 hmac_signature: String::new(),
             };
@@ -158,12 +165,14 @@ impl ProgressiveLockdownCoordinator {
         // If path does NOT exist, check if parent directory has established security records.
         // If security records exist but lockdown state was deleted, fail closed (prevents lockdown reset via file deletion).
         if let Some(parent) = path.parent() {
-            let watermark_path = crate::dpapi::get_os_isolated_watermark_path("creator_authority_initialized");
-            let was_previously_initialized = crate::dpapi::load_monotonic_watermark(&watermark_path)
-                .ok()
-                .flatten()
-                .map(|val| val > 0)
-                .unwrap_or(false);
+            let watermark_path =
+                crate::dpapi::get_os_isolated_watermark_path("creator_authority_initialized");
+            let was_previously_initialized =
+                crate::dpapi::load_monotonic_watermark(&watermark_path)
+                    .ok()
+                    .flatten()
+                    .map(|val| val > 0)
+                    .unwrap_or(false);
 
             let has_established_security = was_previously_initialized
                 || parent.join("access_seal.json").exists()
@@ -219,7 +228,10 @@ impl ProgressiveLockdownCoordinator {
     }
 
     pub fn record_failure(&self, is_biometric: bool) -> Result<(), String> {
-        let mut guard = self.state.lock().map_err(|_| "Lockdown state mutex poisoned")?;
+        let mut guard = self
+            .state
+            .lock()
+            .map_err(|_| "Lockdown state mutex poisoned")?;
         if is_biometric {
             guard.biometric_failure_count = guard.biometric_failure_count.saturating_add(1);
         } else {
@@ -236,7 +248,10 @@ impl ProgressiveLockdownCoordinator {
                 guard.current_state = LockdownState::Lockdown.as_str().to_string();
             }
             guard.write_block_active = true;
-            guard.lockdown_reason = Some(format!("Progressive escalation: {} failed attempts", total_failures));
+            guard.lockdown_reason = Some(format!(
+                "Progressive escalation: {} failed attempts",
+                total_failures
+            ));
         } else if total_failures >= 5 {
             guard.temporary_locked_until = Some(now + 900); // 15 min
             guard.lockdown_reason = Some("Temporary backoff: 5+ failed attempts".into());
@@ -247,12 +262,16 @@ impl ProgressiveLockdownCoordinator {
 
         guard.hmac_signature = guard.compute_hmac(&self.hmac_key);
         self.persist_state(&guard)?;
-        self.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
 
     pub fn record_success(&self) -> Result<(), String> {
-        let mut guard = self.state.lock().map_err(|_| "Lockdown state mutex poisoned")?;
+        let mut guard = self
+            .state
+            .lock()
+            .map_err(|_| "Lockdown state mutex poisoned")?;
         if guard.current_state == LockdownState::Normal.as_str() {
             guard.crypto_failure_count = 0;
             guard.biometric_failure_count = 0;
@@ -260,19 +279,24 @@ impl ProgressiveLockdownCoordinator {
             guard.lockdown_reason = None;
             guard.hmac_signature = guard.compute_hmac(&self.hmac_key);
             self.persist_state(&guard)?;
-            self.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.generation
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
         Ok(())
     }
 
     pub fn trigger_lockdown(&self, reason: &str) -> Result<(), String> {
-        let mut guard = self.state.lock().map_err(|_| "Lockdown state mutex poisoned")?;
+        let mut guard = self
+            .state
+            .lock()
+            .map_err(|_| "Lockdown state mutex poisoned")?;
         guard.current_state = LockdownState::Lockdown.as_str().to_string();
         guard.write_block_active = true;
         guard.lockdown_reason = Some(reason.to_string());
         guard.hmac_signature = guard.compute_hmac(&self.hmac_key);
         self.persist_state(&guard)?;
-        self.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
 
@@ -353,11 +377,16 @@ impl ProgressiveLockdownCoordinator {
     }
 
     pub fn clear_lockdown_internal(&self) -> Result<(), String> {
-        let mut guard = self.state.lock().map_err(|_| "Lockdown state mutex poisoned")?;
+        let mut guard = self
+            .state
+            .lock()
+            .map_err(|_| "Lockdown state mutex poisoned")?;
         if guard.current_state == LockdownState::Destroying.as_str()
             || guard.current_state == LockdownState::Destroyed.as_str()
         {
-            return Err("LockdownClearDenied: Cannot clear terminal DESTROYING/DESTROYED state".into());
+            return Err(
+                "LockdownClearDenied: Cannot clear terminal DESTROYING/DESTROYED state".into(),
+            );
         }
         guard.current_state = LockdownState::Normal.as_str().to_string();
         guard.crypto_failure_count = 0;
@@ -367,7 +396,8 @@ impl ProgressiveLockdownCoordinator {
         guard.write_block_active = false;
         guard.hmac_signature = guard.compute_hmac(&self.hmac_key);
         self.persist_state(&guard)?;
-        self.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
 
@@ -376,8 +406,8 @@ impl ProgressiveLockdownCoordinator {
     }
 
     fn persist_state(&self, record: &LockdownRecord) -> Result<(), String> {
-        let data = serde_json::to_vec_pretty(record)
-            .map_err(|e| format!("Serialization error: {e}"))?;
+        let data =
+            serde_json::to_vec_pretty(record).map_err(|e| format!("Serialization error: {e}"))?;
         crate::persistence::atomic_write_file_hardened(&self.state_file, &data)
     }
 }
@@ -403,7 +433,8 @@ mod tests {
 
     #[test]
     fn test_lockdown_coordinator_refuses_clear_when_destroying_or_destroyed() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_lockdown_test_{}", rand::random::<u64>()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_lockdown_test_{}", rand::random::<u64>()));
         let coord = LockdownCoordinator::new(&temp_dir, [7u8; 32]);
 
         // Manually transition to DESTROYING
@@ -417,7 +448,9 @@ mod tests {
         // Clearing must be refused
         let res = coord.clear_lockdown_internal();
         assert!(res.is_err());
-        assert!(res.unwrap_err().contains("Cannot clear terminal DESTROYING/DESTROYED state"));
+        assert!(res
+            .unwrap_err()
+            .contains("Cannot clear terminal DESTROYING/DESTROYED state"));
 
         // Failures must not downgrade DESTROYING to LOCKDOWN
         for _ in 0..12 {
@@ -439,10 +472,11 @@ mod tests {
         // Clearing must be refused
         let res_destroyed = coord.clear_lockdown_internal();
         assert!(res_destroyed.is_err());
-        assert!(res_destroyed.unwrap_err().contains("Cannot clear terminal DESTROYING/DESTROYED state"));
+        assert!(res_destroyed
+            .unwrap_err()
+            .contains("Cannot clear terminal DESTROYING/DESTROYED state"));
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
-

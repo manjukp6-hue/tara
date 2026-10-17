@@ -76,7 +76,8 @@ impl IpcSecurityEnvelope {
         preimage.extend_from_slice(target_role.allowed_privilege_level().as_bytes());
         preimage.extend_from_slice(message_nonce.as_bytes());
         preimage.extend_from_slice(&epoch_secs.to_le_bytes());
-        let cap_bytes = serde_json::to_vec(&capability_token).map_err(|e| format!("Serialization error: {e}"))?;
+        let cap_bytes = serde_json::to_vec(&capability_token)
+            .map_err(|e| format!("Serialization error: {e}"))?;
         preimage.extend_from_slice(&cap_bytes);
         preimage.extend_from_slice(&payload_bytes);
 
@@ -112,7 +113,10 @@ impl IpcSecurityEnvelope {
         // 2. Verify clock skew / freshness
         let diff = (current_epoch_secs as i64 - self.timestamp_epoch_secs as i64).unsigned_abs();
         if diff > max_clock_skew_secs {
-            return Err(format!("IpcReplayOrSkewViolation: Envelope timestamp skew ({}s) exceeds max allowed", diff));
+            return Err(format!(
+                "IpcReplayOrSkewViolation: Envelope timestamp skew ({}s) exceeds max allowed",
+                diff
+            ));
         }
 
         // 3. Verify cryptographic HMAC signature over payload and capability token
@@ -121,7 +125,8 @@ impl IpcSecurityEnvelope {
         preimage.extend_from_slice(self.target_role.allowed_privilege_level().as_bytes());
         preimage.extend_from_slice(self.message_nonce.as_bytes());
         preimage.extend_from_slice(&self.timestamp_epoch_secs.to_le_bytes());
-        let cap_bytes = serde_json::to_vec(&self.capability_token).map_err(|e| format!("Serialization error: {e}"))?;
+        let cap_bytes = serde_json::to_vec(&self.capability_token)
+            .map_err(|e| format!("Serialization error: {e}"))?;
         preimage.extend_from_slice(&cap_bytes);
         preimage.extend_from_slice(&self.payload_bytes);
 
@@ -163,14 +168,20 @@ impl AntiReplayCache {
         max_skew_secs: u64,
         current_epoch_secs: u64,
     ) -> Result<(), String> {
-        let mut map = self.seen_nonces.lock().map_err(|_| "Replay cache mutex poisoned")?;
+        let mut map = self
+            .seen_nonces
+            .lock()
+            .map_err(|_| "Replay cache mutex poisoned")?;
 
         // Purge expired nonces
         let cutoff = current_epoch_secs.saturating_sub(max_skew_secs);
         map.retain(|_, ts| *ts >= cutoff);
 
         if map.contains_key(nonce) {
-            return Err(format!("IpcReplayAttackDetected: Nonce '{}' has already been processed", nonce));
+            return Err(format!(
+                "IpcReplayAttackDetected: Nonce '{}' has already been processed",
+                nonce
+            ));
         }
 
         // Strict DoS defense: never evict unexpired nonces to make room
@@ -185,7 +196,9 @@ impl AntiReplayCache {
 
 /// Secure IPC Message Bus coordinating authenticated communication across isolated process roles.
 pub struct SecureIpcBus {
-    mailboxes: std::sync::RwLock<std::collections::HashMap<ProcessRole, std::collections::VecDeque<IpcSecurityEnvelope>>>,
+    mailboxes: std::sync::RwLock<
+        std::collections::HashMap<ProcessRole, std::collections::VecDeque<IpcSecurityEnvelope>>,
+    >,
     replay_cache: AntiReplayCache,
 }
 
@@ -198,10 +211,22 @@ impl Default for SecureIpcBus {
 impl SecureIpcBus {
     pub fn new() -> Self {
         let mut mailboxes = std::collections::HashMap::new();
-        mailboxes.insert(ProcessRole::InferenceEngine, std::collections::VecDeque::new());
-        mailboxes.insert(ProcessRole::NetworkGateway, std::collections::VecDeque::new());
-        mailboxes.insert(ProcessRole::SecurityAuthority, std::collections::VecDeque::new());
-        mailboxes.insert(ProcessRole::StorageBroker, std::collections::VecDeque::new());
+        mailboxes.insert(
+            ProcessRole::InferenceEngine,
+            std::collections::VecDeque::new(),
+        );
+        mailboxes.insert(
+            ProcessRole::NetworkGateway,
+            std::collections::VecDeque::new(),
+        );
+        mailboxes.insert(
+            ProcessRole::SecurityAuthority,
+            std::collections::VecDeque::new(),
+        );
+        mailboxes.insert(
+            ProcessRole::StorageBroker,
+            std::collections::VecDeque::new(),
+        );
 
         Self {
             mailboxes: std::sync::RwLock::new(mailboxes),
@@ -211,9 +236,15 @@ impl SecureIpcBus {
 
     /// Dispatches an authenticated envelope into the recipient role's queue.
     pub fn dispatch(&self, envelope: IpcSecurityEnvelope) -> Result<(), String> {
-        let mut guard = self.mailboxes.write().map_err(|_| "Mailbox lock poisoned")?;
+        let mut guard = self
+            .mailboxes
+            .write()
+            .map_err(|_| "Mailbox lock poisoned")?;
         let queue = guard.get_mut(&envelope.target_role).ok_or_else(|| {
-            format!("No mailbox registered for target role {:?}", envelope.target_role)
+            format!(
+                "No mailbox registered for target role {:?}",
+                envelope.target_role
+            )
         })?;
         queue.push_back(envelope);
         Ok(())
@@ -227,14 +258,22 @@ impl SecureIpcBus {
         max_clock_skew_secs: u64,
         current_epoch_secs: u64,
     ) -> Result<Option<IpcSecurityEnvelope>, String> {
-        let mut guard = self.mailboxes.write().map_err(|_| "Mailbox lock poisoned")?;
-        let queue = guard.get_mut(&target_role).ok_or_else(|| {
-            format!("No mailbox registered for role {:?}", target_role)
-        })?;
+        let mut guard = self
+            .mailboxes
+            .write()
+            .map_err(|_| "Mailbox lock poisoned")?;
+        let queue = guard
+            .get_mut(&target_role)
+            .ok_or_else(|| format!("No mailbox registered for role {:?}", target_role))?;
 
         if let Some(envelope) = queue.pop_front() {
             // 1. Verify cryptographic boundary and intended recipient
-            envelope.verify_boundary(target_role, shared_ipc_key, max_clock_skew_secs, current_epoch_secs)?;
+            envelope.verify_boundary(
+                target_role,
+                shared_ipc_key,
+                max_clock_skew_secs,
+                current_epoch_secs,
+            )?;
 
             // 2. Anti-replay verification
             self.replay_cache.check_and_record(
@@ -307,7 +346,12 @@ impl IpcEndpoint {
         max_clock_skew_secs: u64,
         current_epoch_secs: u64,
     ) -> Result<Option<IpcSecurityEnvelope>, String> {
-        self.bus.receive(self.role, &self.shared_key, max_clock_skew_secs, current_epoch_secs)
+        self.bus.receive(
+            self.role,
+            &self.shared_key,
+            max_clock_skew_secs,
+            current_epoch_secs,
+        )
     }
 }
 
@@ -328,9 +372,12 @@ mod tests {
             b"trusted_payload".to_vec(),
             &shared_key,
             1000,
-        ).unwrap();
+        )
+        .unwrap();
 
-        assert!(envelope.verify_boundary(ProcessRole::InferenceEngine, &shared_key, 60, 1000).is_ok());
+        assert!(envelope
+            .verify_boundary(ProcessRole::InferenceEngine, &shared_key, 60, 1000)
+            .is_ok());
 
         envelope.capability_token.token_id = "token_swapped_evil".to_string();
 
@@ -339,4 +386,3 @@ mod tests {
         assert!(err.unwrap_err().contains("Envelope HMAC signature invalid"));
     }
 }
-

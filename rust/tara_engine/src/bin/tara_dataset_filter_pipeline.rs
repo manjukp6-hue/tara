@@ -81,10 +81,16 @@ fn maybe_remove_raw_file(path: &Path) -> std::io::Result<()> {
     if std::env::var("TARA_DELETE_RAW_SOURCES").as_deref() == Ok("1") {
         if path.exists() {
             fs::remove_file(path)?;
-            println!(">>> Deleted raw file (TARA_DELETE_RAW_SOURCES=1): {:?}", path);
+            println!(
+                ">>> Deleted raw file (TARA_DELETE_RAW_SOURCES=1): {:?}",
+                path
+            );
         }
     } else {
-        println!(">>> Retained raw source file (set TARA_DELETE_RAW_SOURCES=1 to auto-delete): {:?}", path);
+        println!(
+            ">>> Retained raw source file (set TARA_DELETE_RAW_SOURCES=1 to auto-delete): {:?}",
+            path
+        );
     }
     Ok(())
 }
@@ -148,10 +154,25 @@ impl DatasetSanitizer {
     pub fn is_malicious(text: &str) -> bool {
         let lower = text.to_lowercase();
         let malicious_patterns = [
-            "<script", "</script>", "javascript:", "eval(", "exec(",
-            "select * from", "drop table", "insert into", "union select",
-            "/bin/sh", "/bin/bash", "cmd.exe", "powershell", "rm -rf",
-            "curl -", "wget -", "http://", "https://", "www.",
+            "<script",
+            "</script>",
+            "javascript:",
+            "eval(",
+            "exec(",
+            "select * from",
+            "drop table",
+            "insert into",
+            "union select",
+            "/bin/sh",
+            "/bin/bash",
+            "cmd.exe",
+            "powershell",
+            "rm -rf",
+            "curl -",
+            "wget -",
+            "http://",
+            "https://",
+            "www.",
         ];
         for pattern in &malicious_patterns {
             if lower.contains(pattern) {
@@ -211,7 +232,9 @@ impl DatasetSanitizer {
 
         // 2. Also strip trailing digits or dots that might remain
         let mut trimmed = text.trim();
-        while trimmed.ends_with(|c: char| c.is_ascii_digit() || c == '.' || c == ' ' || ('\u{0966}'..='\u{096F}').contains(&c)) {
+        while trimmed.ends_with(|c: char| {
+            c.is_ascii_digit() || c == '.' || c == ' ' || ('\u{0966}'..='\u{096F}').contains(&c)
+        }) {
             trimmed = trimmed[..trimmed.len() - trimmed.chars().last().unwrap().len_utf8()].trim();
         }
 
@@ -223,7 +246,12 @@ impl DatasetSanitizer {
         }
 
         // 4. Normalize multiple spaces / linebreaks cleanly
-        cleaned = cleaned.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n");
+        cleaned = cleaned
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
         cleaned
     }
 
@@ -299,7 +327,10 @@ fn filter_text_corpus(
     let mut count = 0usize;
 
     if !is_permissive_commercial_license(config.license) {
-        println!(">>> EXCLUDED text corpus due to non-permissive license: {}", config.license);
+        println!(
+            ">>> EXCLUDED text corpus due to non-permissive license: {}",
+            config.license
+        );
         return Ok(FilterStats::default());
     }
 
@@ -329,7 +360,12 @@ fn filter_text_corpus(
     }
 
     writer.flush()?;
-    println!("Completed {:?}: Passed {} / Total {}", input_path, sanitizer.stats().passed_records, sanitizer.stats().total_input_lines);
+    println!(
+        "Completed {:?}: Passed {} / Total {}",
+        input_path,
+        sanitizer.stats().passed_records,
+        sanitizer.stats().total_input_lines
+    );
     Ok(sanitizer.stats)
 }
 
@@ -361,10 +397,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for item in arr {
                 if let Some(txt) = item.get("text").and_then(|t| t.as_str()) {
                     let cleaned = DatasetSanitizer::strip_verse_numbers_and_normalize(txt);
-                    if !DatasetSanitizer::is_malicious(&cleaned) && !DatasetSanitizer::is_corrupted_or_gibberish(&cleaned) {
+                    if !DatasetSanitizer::is_malicious(&cleaned)
+                        && !DatasetSanitizer::is_corrupted_or_gibberish(&cleaned)
+                    {
                         count += 1;
-                        let ch = item.get("chapter_number").and_then(|v| v.as_u64()).map(|v| v as u32);
-                        let vs = item.get("verse_number").and_then(|v| v.as_u64()).map(|v| v as u32);
+                        let ch = item
+                            .get("chapter_number")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as u32);
+                        let vs = item
+                            .get("verse_number")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as u32);
 
                         let rec = RecommendedVerseRecord {
                             id: format!("gita_{:04}", count),
@@ -519,7 +563,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     let rec = CleanTranslationRecord {
                                         id: format!("trans_en_kn_{:06}", trans_count),
                                         language_pair: "en-kn".to_string(),
-                                        source: "ramachandrajoshi/english-kannada-cleaned".to_string(),
+                                        source: "ramachandrajoshi/english-kannada-cleaned"
+                                            .to_string(),
                                         license: "Apache-2.0".to_string(),
                                         english: en.to_string(),
                                         kannada: kn,
@@ -583,7 +628,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 7. STREAM CONVERT REMAINING DATASETS DIRECTLY TO SHARDS (tara_shard_049+)
     // =========================================================================
     let shards_dir = workspace_root.join("storage/datasets/shards");
-    println!("\n>>> Initializing ShardWriter to output at: {:?}", shards_dir);
+    println!(
+        "\n>>> Initializing ShardWriter to output at: {:?}",
+        shards_dir
+    );
     let mut sharder = ShardWriter::with_start_index(shards_dir, 53)?;
 
     // 7a. Sanskrit Itihasa (.sn files)
@@ -597,7 +645,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (filename, split) in &itihasa_files {
         let file_path = base_in.join(filename);
         if file_path.exists() {
-            println!(">>> Converting Sanskrit Itihasa ({}) from {:?}...", split, file_path);
+            println!(
+                ">>> Converting Sanskrit Itihasa ({}) from {:?}...",
+                split, file_path
+            );
             let file = File::open(&file_path)?;
             let reader = BufReader::new(file);
             let mut file_records = 0usize;
@@ -627,7 +678,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            println!(">>> Finished Itihasa {}: {} valid records. Processing raw file...", split, file_records);
+            println!(
+                ">>> Finished Itihasa {}: {} valid records. Processing raw file...",
+                split, file_records
+            );
             maybe_remove_raw_file(&file_path)?;
         }
     }
@@ -636,7 +690,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 7b. Alar Kannada-English Dictionary (.yml)
     let alar_path = base_in.join("alar_kannada_english_dictionary.yml");
     if alar_path.exists() {
-        println!(">>> Converting Alar Kannada-English Dictionary from {:?}...", alar_path);
+        println!(
+            ">>> Converting Alar Kannada-English Dictionary from {:?}...",
+            alar_path
+        );
         let file = File::open(&alar_path)?;
         let reader = BufReader::new(file);
         let mut cur_head = String::new();
@@ -645,7 +702,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut alar_records = 0usize;
         let mut alar_sanitizer = DatasetSanitizer::new();
 
-        let flush_entry = |head: &str, entry: &str, defs: &[String], sharder: &mut ShardWriter, sanitizer: &mut DatasetSanitizer, count: &mut usize| -> std::io::Result<()> {
+        let flush_entry = |head: &str,
+                           entry: &str,
+                           defs: &[String],
+                           sharder: &mut ShardWriter,
+                           sanitizer: &mut DatasetSanitizer,
+                           count: &mut usize|
+         -> std::io::Result<()> {
             if !entry.is_empty() && !defs.is_empty() {
                 let word = if !head.is_empty() { head } else { entry };
                 let combined_def = defs.join(" | ");
@@ -674,23 +737,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let line = line_res?;
             let trimmed = line.trim();
             if trimmed.starts_with("- id:") {
-                flush_entry(&cur_head, &cur_entry, &cur_defs, &mut sharder, &mut alar_sanitizer, &mut alar_records)?;
+                flush_entry(
+                    &cur_head,
+                    &cur_entry,
+                    &cur_defs,
+                    &mut sharder,
+                    &mut alar_sanitizer,
+                    &mut alar_records,
+                )?;
                 cur_head.clear();
                 cur_entry.clear();
                 cur_defs.clear();
             } else if trimmed.starts_with("head:") {
-                cur_head = trimmed.trim_start_matches("head:").trim().trim_matches('"').to_string();
+                cur_head = trimmed
+                    .trim_start_matches("head:")
+                    .trim()
+                    .trim_matches('"')
+                    .to_string();
             } else if trimmed.starts_with("entry:") && cur_entry.is_empty() {
-                cur_entry = trimmed.trim_start_matches("entry:").trim().trim_matches('"').to_string();
+                cur_entry = trimmed
+                    .trim_start_matches("entry:")
+                    .trim()
+                    .trim_matches('"')
+                    .to_string();
             } else if trimmed.starts_with("entry:") && !cur_entry.is_empty() {
-                let def = trimmed.trim_start_matches("entry:").trim().trim_matches('"');
+                let def = trimmed
+                    .trim_start_matches("entry:")
+                    .trim()
+                    .trim_matches('"');
                 if !def.is_empty() {
                     cur_defs.push(def.to_string());
                 }
             }
         }
-        flush_entry(&cur_head, &cur_entry, &cur_defs, &mut sharder, &mut alar_sanitizer, &mut alar_records)?;
-        println!(">>> Finished Alar Dictionary: {} valid entries. Processing raw file...", alar_records);
+        flush_entry(
+            &cur_head,
+            &cur_entry,
+            &cur_defs,
+            &mut sharder,
+            &mut alar_sanitizer,
+            &mut alar_records,
+        )?;
+        println!(
+            ">>> Finished Alar Dictionary: {} valid entries. Processing raw file...",
+            alar_records
+        );
         maybe_remove_raw_file(&alar_path)?;
     }
 
@@ -724,14 +815,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        println!(">>> Finished OPUS-100: {} valid records. Processing raw file...", count);
+        println!(
+            ">>> Finished OPUS-100: {} valid records. Processing raw file...",
+            count
+        );
         maybe_remove_raw_file(&opus_path)?;
     }
 
     // 2) translation_en_kn_hemanth.parquet
     let hemanth_path = base_in.join("translation_en_kn_hemanth.parquet");
     if hemanth_path.exists() {
-        println!(">>> Converting Hemanth MT Parquet from {:?}...", hemanth_path);
+        println!(
+            ">>> Converting Hemanth MT Parquet from {:?}...",
+            hemanth_path
+        );
         let file = File::open(&hemanth_path)?;
         let reader = SerializedFileReader::new(file)?;
         let mut count = 0usize;
@@ -757,7 +854,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        println!(">>> Finished Hemanth MT: {} valid records. Processing raw file...", count);
+        println!(
+            ">>> Finished Hemanth MT: {} valid records. Processing raw file...",
+            count
+        );
         maybe_remove_raw_file(&hemanth_path)?;
     }
 
@@ -772,16 +872,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 4) sanskrit_gretil_verses_train.parquet
     let gretil_path = base_in.join("sanskrit_gretil_verses_train.parquet");
     if gretil_path.exists() {
-        println!(">>> Converting GRETIL Sanskrit Verses from {:?}...", gretil_path);
+        println!(
+            ">>> Converting GRETIL Sanskrit Verses from {:?}...",
+            gretil_path
+        );
         let file = File::open(&gretil_path)?;
         let reader = SerializedFileReader::new(file)?;
         let mut count = 0usize;
         let mut sanitizer = DatasetSanitizer::new();
         for row_result in reader.into_iter() {
             let row = row_result?;
-            let author = row.get_string(5).map_or("Ancient Sanskrit Authors", |v| v.as_str());
+            let author = row
+                .get_string(5)
+                .map_or("Ancient Sanskrit Authors", |v| v.as_str());
             let quote_dev = row.get_string(3).map_or("", |v| v.as_str());
-            let text = if !quote_dev.is_empty() { quote_dev } else { row.get_string(6).map_or("", |v| v.as_str()) };
+            let text = if !quote_dev.is_empty() {
+                quote_dev
+            } else {
+                row.get_string(6).map_or("", |v| v.as_str())
+            };
             let normalized = DatasetSanitizer::strip_verse_numbers_and_normalize(text);
             if let Some(clean_text) = sanitizer.process_line(&normalized) {
                 count += 1;
@@ -805,7 +914,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        println!(">>> Finished GRETIL: {} valid records. Processing raw file...", count);
+        println!(
+            ">>> Finished GRETIL: {} valid records. Processing raw file...",
+            count
+        );
         maybe_remove_raw_file(&gretil_path)?;
     }
 
@@ -817,7 +929,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (filename, sh_id) in &sangraha_kn_shards {
         let p = base_in.join(filename);
         if p.exists() {
-            println!(">>> Converting Sangraha Kannada Shard {} from {:?}...", sh_id, p);
+            println!(
+                ">>> Converting Sangraha Kannada Shard {} from {:?}...",
+                sh_id, p
+            );
             let file = File::open(&p)?;
             let reader = SerializedFileReader::new(file)?;
             let mut count = 0usize;
@@ -843,7 +958,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            println!(">>> Finished Sangraha Kannada Shard {}: {} valid records. Processing raw file...", sh_id, count);
+            println!(
+                ">>> Finished Sangraha Kannada Shard {}: {} valid records. Processing raw file...",
+                sh_id, count
+            );
             maybe_remove_raw_file(&p)?;
         }
     }
@@ -851,7 +969,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 6) ai4bharat_sangraha_sanskrit_shard_0.parquet
     let sangraha_sa_path = base_in.join("ai4bharat_sangraha_sanskrit_shard_0.parquet");
     if sangraha_sa_path.exists() {
-        println!(">>> Converting Sangraha Sanskrit Shard 0 from {:?}...", sangraha_sa_path);
+        println!(
+            ">>> Converting Sangraha Sanskrit Shard 0 from {:?}...",
+            sangraha_sa_path
+        );
         let file = File::open(&sangraha_sa_path)?;
         let reader = SerializedFileReader::new(file)?;
         let mut count = 0usize;
@@ -877,7 +998,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        println!(">>> Finished Sangraha Sanskrit: {} valid records. Processing raw file...", count);
+        println!(
+            ">>> Finished Sangraha Sanskrit: {} valid records. Processing raw file...",
+            count
+        );
         maybe_remove_raw_file(&sangraha_sa_path)?;
     }
 

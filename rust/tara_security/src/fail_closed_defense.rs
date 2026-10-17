@@ -73,8 +73,13 @@ impl TripwireDefenseEngine {
         let p = path.as_ref().to_path_buf();
         if let Some(parent) = p.parent() {
             if !parent.exists() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create tripwire directory {}: {}", parent.display(), e))?;
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    format!(
+                        "Failed to create tripwire directory {}: {}",
+                        parent.display(),
+                        e
+                    )
+                })?;
             }
         }
 
@@ -112,9 +117,23 @@ impl TripwireDefenseEngine {
             None => return Ok(()),
         };
 
-        let sentinels = self.sentinels.lock().map_err(|_| "Sentinels lock poisoned")?.clone();
-        let tokens: Vec<String> = self.honeypot_tokens.lock().map_err(|_| "Tokens lock poisoned")?.iter().cloned().collect();
-        let containment = self.active_containment.lock().map_err(|_| "Containment lock poisoned")?.clone();
+        let sentinels = self
+            .sentinels
+            .lock()
+            .map_err(|_| "Sentinels lock poisoned")?
+            .clone();
+        let tokens: Vec<String> = self
+            .honeypot_tokens
+            .lock()
+            .map_err(|_| "Tokens lock poisoned")?
+            .iter()
+            .cloned()
+            .collect();
+        let containment = self
+            .active_containment
+            .lock()
+            .map_err(|_| "Containment lock poisoned")?
+            .clone();
 
         let state = TripwireStateFile {
             sentinels,
@@ -125,7 +144,11 @@ impl TripwireDefenseEngine {
         let serialized = serde_json::to_vec_pretty(&state)
             .map_err(|e| format!("Serialization error for tripwire state: {e}"))?;
 
-        let temp_path = p.with_extension(format!("tmp.{}.{}", std::process::id(), rand::random::<u64>()));
+        let temp_path = p.with_extension(format!(
+            "tmp.{}.{}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
 
         {
             use std::io::Write;
@@ -156,10 +179,14 @@ impl TripwireDefenseEngine {
     /// Arm a canary file tripwire. The canary file must remain unmodified.
     pub fn arm_file_canary(&self, tripwire_id: &str, file_path: &Path) -> Result<(), String> {
         if !file_path.exists() {
-            return Err(format!("Canary file '{}' does not exist to arm", file_path.display()));
+            return Err(format!(
+                "Canary file '{}' does not exist to arm",
+                file_path.display()
+            ));
         }
 
-        let content = std::fs::read(file_path).map_err(|e| format!("Failed to read canary file: {e}"))?;
+        let content =
+            std::fs::read(file_path).map_err(|e| format!("Failed to read canary file: {e}"))?;
         let hash = CryptoUtils::sha256_hex(&content);
 
         let sentinel = CanarySentinel {
@@ -169,7 +196,10 @@ impl TripwireDefenseEngine {
             expected_canary_hash: Some(hash),
         };
 
-        let mut list = self.sentinels.lock().map_err(|_| "Tripwire lock poisoned")?;
+        let mut list = self
+            .sentinels
+            .lock()
+            .map_err(|_| "Tripwire lock poisoned")?;
         list.push(sentinel);
         drop(list);
         self.flush_persistent_state()?;
@@ -179,7 +209,10 @@ impl TripwireDefenseEngine {
     /// Plant a honeypot decoy token.
     pub fn plant_honeypot_token(&self, decoy_token: &str) -> Result<(), String> {
         let hash = CryptoUtils::sha256_hex(decoy_token.as_bytes());
-        let mut tokens = self.honeypot_tokens.lock().map_err(|_| "Honeypot lock poisoned")?;
+        let mut tokens = self
+            .honeypot_tokens
+            .lock()
+            .map_err(|_| "Honeypot lock poisoned")?;
         tokens.insert(hash);
         drop(tokens);
         self.flush_persistent_state()?;
@@ -190,15 +223,22 @@ impl TripwireDefenseEngine {
     pub fn check_token_trap(&self, candidate_token: &str, epoch_secs: u64) -> bool {
         let hash = CryptoUtils::sha256_hex(candidate_token.as_bytes());
         let is_trap = {
-            let tokens = self.honeypot_tokens.lock().unwrap_or_else(|p| p.into_inner());
+            let tokens = self
+                .honeypot_tokens
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             tokens.contains(&hash)
         };
 
         if is_trap {
-            let mut containment = self.active_containment.lock().unwrap_or_else(|p| p.into_inner());
+            let mut containment = self
+                .active_containment
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             *containment = Some(TripwireStatus::Contained {
                 tripwire_id: "HONEYPOT_TOKEN_BREACH".into(),
-                details: "Planted decoy honeypot credential was submitted in authorization header".into(),
+                details: "Planted decoy honeypot credential was submitted in authorization header"
+                    .into(),
                 contained_epoch_secs: epoch_secs,
                 forensic_hash: hash,
             });
@@ -212,7 +252,10 @@ impl TripwireDefenseEngine {
 
     /// Scan all armed canaries for tampering.
     pub fn scan_integrity(&self, epoch_secs: u64) -> TripwireStatus {
-        let containment = self.active_containment.lock().unwrap_or_else(|p| p.into_inner());
+        let containment = self
+            .active_containment
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         if let Some(ref st) = *containment {
             return st.clone();
         }
@@ -224,7 +267,9 @@ impl TripwireDefenseEngine {
         };
 
         for s in sentinels_snapshot.iter() {
-            if let (Some(ref path), Some(ref expected_hash)) = (&s.canary_path, &s.expected_canary_hash) {
+            if let (Some(ref path), Some(ref expected_hash)) =
+                (&s.canary_path, &s.expected_canary_hash)
+            {
                 if !path.exists() {
                     let st = TripwireStatus::Contained {
                         tripwire_id: s.tripwire_id.clone(),
@@ -232,7 +277,10 @@ impl TripwireDefenseEngine {
                         contained_epoch_secs: epoch_secs,
                         forensic_hash: "FILE_DELETED".into(),
                     };
-                    let mut containment = self.active_containment.lock().unwrap_or_else(|p| p.into_inner());
+                    let mut containment = self
+                        .active_containment
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner());
                     *containment = Some(st.clone());
                     drop(containment);
                     let _ = self.flush_persistent_state();
@@ -242,14 +290,20 @@ impl TripwireDefenseEngine {
                 match std::fs::read(path) {
                     Ok(bytes) => {
                         let current_hash = CryptoUtils::sha256_hex(&bytes);
-                        if !CryptoUtils::constant_time_eq(current_hash.as_bytes(), expected_hash.as_bytes()) {
+                        if !CryptoUtils::constant_time_eq(
+                            current_hash.as_bytes(),
+                            expected_hash.as_bytes(),
+                        ) {
                             let st = TripwireStatus::Contained {
                                 tripwire_id: s.tripwire_id.clone(),
                                 details: format!("Canary file tampered with: {}", path.display()),
                                 contained_epoch_secs: epoch_secs,
                                 forensic_hash: current_hash,
                             };
-                            let mut containment = self.active_containment.lock().unwrap_or_else(|p| p.into_inner());
+                            let mut containment = self
+                                .active_containment
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner());
                             *containment = Some(st.clone());
                             drop(containment);
                             let _ = self.flush_persistent_state();
@@ -263,7 +317,10 @@ impl TripwireDefenseEngine {
                             contained_epoch_secs: epoch_secs,
                             forensic_hash: "IO_ERROR".into(),
                         };
-                        let mut containment = self.active_containment.lock().unwrap_or_else(|p| p.into_inner());
+                        let mut containment = self
+                            .active_containment
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner());
                         *containment = Some(st.clone());
                         drop(containment);
                         let _ = self.flush_persistent_state();
@@ -278,7 +335,10 @@ impl TripwireDefenseEngine {
 
     /// Returns whether the system is currently under tripwire containment.
     pub fn is_contained(&self) -> bool {
-        let containment = self.active_containment.lock().unwrap_or_else(|p| p.into_inner());
+        let containment = self
+            .active_containment
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         containment.is_some()
     }
 
@@ -291,14 +351,20 @@ impl TripwireDefenseEngine {
         forensic_acknowledgment: &str,
     ) -> Result<PrincipalId, String> {
         if !principal.is_creator_root() {
-            return Err("RecoveryDenied: Lifting tripwire containment requires Creator Root authority".into());
+            return Err(
+                "RecoveryDenied: Lifting tripwire containment requires Creator Root authority"
+                    .into(),
+            );
         }
 
         if forensic_acknowledgment.trim().len() < 16 {
             return Err("RecoveryDenied: Forensic incident review acknowledgment must be at least 16 characters".into());
         }
 
-        let mut containment = self.active_containment.lock().map_err(|_| "Containment lock poisoned")?;
+        let mut containment = self
+            .active_containment
+            .lock()
+            .map_err(|_| "Containment lock poisoned")?;
         *containment = None;
         drop(containment);
         self.flush_persistent_state()?;

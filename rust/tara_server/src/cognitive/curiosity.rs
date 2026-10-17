@@ -9,7 +9,6 @@
 //! prompts. They CANNOT trigger autonomous privileged system modifications,
 //! bypass execution guards, or override safety constraints.
 
-use tara_security::primitives::AuthenticatedPrincipal;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -19,6 +18,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tara_security::primitives::AuthenticatedPrincipal;
 
 const MAX_DOMAIN_LEN: usize = 64;
 const MAX_CONCEPT_LEN: usize = 128;

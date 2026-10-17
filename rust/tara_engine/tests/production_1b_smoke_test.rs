@@ -6,9 +6,7 @@ use tara_engine::internal_diagnostics::{
     unique_test_dir, write_safetensors_with_shapes, AdamWHyperparams, DynamicAdamW,
 };
 use tara_engine::train_candidate::verify_continuation_checkpoint_dir;
-use tara_engine::{
-    load_model_weights_with_shapes, TaraConfig, TaraForCausalLM, TaraTokenizer,
-};
+use tara_engine::{load_model_weights_with_shapes, TaraConfig, TaraForCausalLM, TaraTokenizer};
 
 fn resolve_production_model_dir() -> PathBuf {
     let rel_crate = Path::new("../../storage/models/tara_candidate_v1");
@@ -58,9 +56,15 @@ fn test_production_1b_single_step_smoke() {
     println!("      - Model: Tara Causal LM (GQA + SwiGLU + RoPE + RMSNorm)");
     println!("      - Vocabulary Size: {}", prod_config.vocab_size);
     println!("      - Hidden Dimension: {}", prod_config.hidden_size);
-    println!("      - Intermediate Size: {}", prod_config.intermediate_size);
+    println!(
+        "      - Intermediate Size: {}",
+        prod_config.intermediate_size
+    );
     println!("      - Decoder Layers: {}", prod_config.num_hidden_layers);
-    println!("      - Attention Heads: {} (KV Heads: {})", prod_config.num_attention_heads, prod_config.num_key_value_heads);
+    println!(
+        "      - Attention Heads: {} (KV Heads: {})",
+        prod_config.num_attention_heads, prod_config.num_key_value_heads
+    );
 
     // 2. Load authentic production model weights from Safetensors shards
     println!("[2/6] Loading 995.8M Production Model Shards into Memory...");
@@ -73,7 +77,10 @@ fn test_production_1b_single_step_smoke() {
     println!("      - Total Tensors Loaded: {}", weights.len());
     println!("      - Exact Total Parameters: {}", total_params);
     println!("      - Time to Load Shards: {:.2}s", load_dur);
-    assert_eq!(total_params, 995_809_280, "Must match exactly 995.8M production parameters");
+    assert_eq!(
+        total_params, 995_809_280,
+        "Must match exactly 995.8M production parameters"
+    );
 
     let temp_root = unique_test_dir("prod_1b_smoke");
     let _guard = TestDirGuard(temp_root.clone());
@@ -107,7 +114,10 @@ fn test_production_1b_single_step_smoke() {
 
     assert_eq!(layer_inputs.len(), prod_config.num_hidden_layers + 1);
     assert_eq!(logits.len(), seq_len * prod_config.vocab_size);
-    assert!(logits.iter().all(|x| x.is_finite()), "Logits must be finite");
+    assert!(
+        logits.iter().all(|x| x.is_finite()),
+        "Logits must be finite"
+    );
 
     // Compute cross-entropy loss on target tokens
     let mut d_logits = vec![0.0f32; seq_len * prod_config.vocab_size];
@@ -126,7 +136,10 @@ fn test_production_1b_single_step_smoke() {
         let logits_slice = &logits[logit_start..logit_start + prod_config.vocab_size];
         let grad_slice = &mut d_logits[logit_start..logit_start + prod_config.vocab_size];
 
-        let max_logit = logits_slice.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let max_logit = logits_slice
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
         let mut sum_exp = 0.0f32;
         for (v, &l) in logits_slice.iter().enumerate() {
             let exp_val = (l - max_logit).exp();
@@ -148,8 +161,15 @@ fn test_production_1b_single_step_smoke() {
     assert!(valid_targets > 0);
     sample_loss /= valid_targets as f32;
     println!("      - Forward Duration: {:.3}s", fwd_dur);
-    println!("      - Cross-Entropy Loss: {:.4} (Finite: {})", sample_loss, sample_loss.is_finite());
-    assert!(sample_loss.is_finite() && sample_loss > 0.0, "Loss must be finite and positive");
+    println!(
+        "      - Cross-Entropy Loss: {:.4} (Finite: {})",
+        sample_loss,
+        sample_loss.is_finite()
+    );
+    assert!(
+        sample_loss.is_finite() && sample_loss > 0.0,
+        "Loss must be finite and positive"
+    );
 
     let norm_factor = 1.0 / valid_targets as f32;
     for g in d_logits.iter_mut() {
@@ -171,15 +191,24 @@ fn test_production_1b_single_step_smoke() {
     for (k, g) in &grad_map {
         let mut t_sq = 0.0f64;
         for &val in g {
-            assert!(val.is_finite(), "Gradient for {k} contains non-finite element");
+            assert!(
+                val.is_finite(),
+                "Gradient for {k} contains non-finite element"
+            );
             t_sq += (val as f64) * (val as f64);
         }
         total_grad_norm_sq += t_sq;
     }
     let global_grad_norm = total_grad_norm_sq.sqrt() as f32;
     println!("      - Backward Duration: {:.3}s", bwd_dur);
-    println!("      - Global Gradient Norm: {:.6} (Finite & Non-Zero)", global_grad_norm);
-    assert!(global_grad_norm.is_finite() && global_grad_norm > 0.0, "Grad norm must be finite and > 0");
+    println!(
+        "      - Global Gradient Norm: {:.6} (Finite & Non-Zero)",
+        global_grad_norm
+    );
+    assert!(
+        global_grad_norm.is_finite() && global_grad_norm > 0.0,
+        "Grad norm must be finite and > 0"
+    );
 
     // 5. Execute 1 Real AdamW Optimizer Step
     println!("[5/6] Executing Real AdamW Optimizer Step...");
@@ -211,8 +240,14 @@ fn test_production_1b_single_step_smoke() {
     drop(initial_weights_snapshot);
     let param_delta = total_param_delta_sq.sqrt();
     println!("      - Optimizer Step Duration: {:.3}s", opt_dur);
-    println!("      - Parameter Update Delta (L2 Norm): {:.6} (Parameters genuinely changed!)", param_delta);
-    assert!(param_delta > 0.0, "Parameters must genuinely change after optimizer step");
+    println!(
+        "      - Parameter Update Delta (L2 Norm): {:.6} (Parameters genuinely changed!)",
+        param_delta
+    );
+    assert!(
+        param_delta > 0.0,
+        "Parameters must genuinely change after optimizer step"
+    );
 
     // 6. Save and Reload Checkpoint Verification
     println!("[6/6] Verifying Checkpoint Persistence & Reloading Parity...");
@@ -268,11 +303,12 @@ fn test_production_1b_single_step_smoke() {
         .expect("Checkpoint continuation verification must succeed");
     assert_eq!(verified_step, 1);
 
-    let (reloaded_weights, _) =
-        load_model_weights_with_shapes(&cp_dir.to_string_lossy()).unwrap();
+    let (reloaded_weights, _) = load_model_weights_with_shapes(&cp_dir.to_string_lossy()).unwrap();
     assert_eq!(reloaded_weights.len(), weights.len());
     for (name, orig_t) in &weights {
-        let reloaded_t = reloaded_weights.get(name).expect("Tensor must exist in reloaded checkpoint");
+        let reloaded_t = reloaded_weights
+            .get(name)
+            .expect("Tensor must exist in reloaded checkpoint");
         assert_eq!(orig_t.len(), reloaded_t.len());
         for (i, (&a, &b)) in orig_t.iter().zip(reloaded_t.iter()).enumerate() {
             assert!(

@@ -18,7 +18,9 @@ use rsa::signature::Verifier;
 use rsa::{pkcs1v15::VerifyingKey, BigUint, RsaPublicKey};
 use sha2::Sha256;
 
-use crate::cryptography::{AlgorithmId, CryptoUtils, Ed25519Verifier, Rs256Verifier, SignatureVerifier};
+use crate::cryptography::{
+    AlgorithmId, CryptoUtils, Ed25519Verifier, Rs256Verifier, SignatureVerifier,
+};
 use crate::primitives::{
     AssuranceLevel, AuthorityGeneration, DeviceId, PrincipalId, PrincipalRole, VerifiedPrincipal,
 };
@@ -55,8 +57,12 @@ impl DeviceEnrollmentRegistry {
     pub fn from_identity_manager(id_mgr: &crate::devices::IdentityManager) -> Result<Self, String> {
         let registry = Self::new();
         for dev in id_mgr.list_devices() {
-            if let (Ok(device_id), Ok(pub_bytes)) = (DeviceId::new(&dev.device_id), hex::decode(&dev.device_public_key)) {
-                let bound_principal = PrincipalId::new(&dev.creator_id).unwrap_or_else(|_| PrincipalId::new("creator_root").unwrap());
+            if let (Ok(device_id), Ok(pub_bytes)) = (
+                DeviceId::new(&dev.device_id),
+                hex::decode(&dev.device_public_key),
+            ) {
+                let bound_principal = PrincipalId::new(&dev.creator_id)
+                    .unwrap_or_else(|_| PrincipalId::new("creator_root").unwrap());
                 let is_revoked = dev.status.to_uppercase() == "REVOKED";
                 let record = DeviceEnrollmentRecord {
                     device_id,
@@ -71,21 +77,33 @@ impl DeviceEnrollmentRegistry {
     }
 
     pub fn enroll_device(&self, record: DeviceEnrollmentRecord) -> Result<(), String> {
-        let mut map = self.enrolled_devices.write().map_err(|_| "Device registry lock poisoned (FailClosed)")?;
+        let mut map = self
+            .enrolled_devices
+            .write()
+            .map_err(|_| "Device registry lock poisoned (FailClosed)")?;
         map.insert(record.device_id.as_str().to_string(), record);
         Ok(())
     }
 
     pub fn revoke_device(&self, device_id: &DeviceId) -> Result<(), String> {
-        let mut map = self.enrolled_devices.write().map_err(|_| "Device registry lock poisoned (FailClosed)")?;
+        let mut map = self
+            .enrolled_devices
+            .write()
+            .map_err(|_| "Device registry lock poisoned (FailClosed)")?;
         if let Some(record) = map.get_mut(device_id.as_str()) {
             record.is_revoked = true;
         }
         Ok(())
     }
 
-    pub fn get_device(&self, device_id: &DeviceId) -> Result<Option<DeviceEnrollmentRecord>, String> {
-        let map = self.enrolled_devices.read().map_err(|_| "Device registry lock poisoned (FailClosed)")?;
+    pub fn get_device(
+        &self,
+        device_id: &DeviceId,
+    ) -> Result<Option<DeviceEnrollmentRecord>, String> {
+        let map = self
+            .enrolled_devices
+            .read()
+            .map_err(|_| "Device registry lock poisoned (FailClosed)")?;
         Ok(map.get(device_id.as_str()).cloned())
     }
 }
@@ -118,13 +136,19 @@ impl TrustedIssuerRegistry {
     }
 
     pub fn register_issuer(&self, policy: TrustedIssuerPolicy) -> Result<(), String> {
-        let mut map = self.issuers.write().map_err(|_| "Issuer registry lock poisoned (FailClosed)")?;
+        let mut map = self
+            .issuers
+            .write()
+            .map_err(|_| "Issuer registry lock poisoned (FailClosed)")?;
         map.insert(policy.issuer_url.clone(), policy);
         Ok(())
     }
 
     pub fn get_issuer(&self, issuer_url: &str) -> Result<Option<TrustedIssuerPolicy>, String> {
-        let map = self.issuers.read().map_err(|_| "Issuer registry lock poisoned (FailClosed)")?;
+        let map = self
+            .issuers
+            .read()
+            .map_err(|_| "Issuer registry lock poisoned (FailClosed)")?;
         Ok(map.get(issuer_url).cloned())
     }
 }
@@ -156,10 +180,7 @@ pub enum IdentityProof {
         signature: Vec<u8>,
     },
     /// Custom extensible proof payload.
-    Custom {
-        proof_type: String,
-        payload: Value,
-    },
+    Custom { proof_type: String, payload: Value },
 }
 
 /// Trait for pluggable identity verifiers.
@@ -195,22 +216,34 @@ impl IdentityVerifierRegistry {
             verifiers: Arc::new(RwLock::new(HashMap::new())),
         };
         // Register authentic CentralizedPasskeyVerifier by default
-        let _ = registry.register_verifier(Box::new(crate::hardware_root::CentralizedPasskeyVerifier::new()));
+        let _ = registry.register_verifier(Box::new(
+            crate::hardware_root::CentralizedPasskeyVerifier::new(),
+        ));
         registry
     }
 
     pub fn register_verifier(&self, verifier: Box<dyn IdentityVerifier>) -> Result<(), String> {
-        let mut map = self.verifiers.write().map_err(|_| "Verifier registry lock poisoned (FailClosed)")?;
+        let mut map = self
+            .verifiers
+            .write()
+            .map_err(|_| "Verifier registry lock poisoned (FailClosed)")?;
         map.insert(verifier.proof_type().to_string(), verifier);
         Ok(())
     }
 
     /// Issue a single-use challenge nonce for the specified verifier proof type.
-    pub fn create_challenge_nonce(&self, proof_type: &str, ttl_secs: u64) -> Result<String, String> {
-        let map = self.verifiers.read().map_err(|_| "Verifier registry lock poisoned (FailClosed)")?;
-        let verifier = map.get(proof_type).ok_or_else(|| {
-            format!("No verifier registered for proof type: '{}'", proof_type)
-        })?;
+    pub fn create_challenge_nonce(
+        &self,
+        proof_type: &str,
+        ttl_secs: u64,
+    ) -> Result<String, String> {
+        let map = self
+            .verifiers
+            .read()
+            .map_err(|_| "Verifier registry lock poisoned (FailClosed)")?;
+        let verifier = map
+            .get(proof_type)
+            .ok_or_else(|| format!("No verifier registered for proof type: '{}'", proof_type))?;
         verifier.create_challenge_nonce(ttl_secs)
     }
 
@@ -229,9 +262,15 @@ impl IdentityVerifierRegistry {
             IdentityProof::Custom { proof_type, .. } => proof_type.as_str(),
         };
 
-        let map = self.verifiers.read().map_err(|_| "Verifier registry lock poisoned (FailClosed)")?;
+        let map = self
+            .verifiers
+            .read()
+            .map_err(|_| "Verifier registry lock poisoned (FailClosed)")?;
         let verifier = map.get(proof_type_key).ok_or_else(|| {
-            format!("No verifier registered for proof type: '{}'", proof_type_key)
+            format!(
+                "No verifier registered for proof type: '{}'",
+                proof_type_key
+            )
         })?;
 
         verifier.verify_proof(proof, current_generation, current_epoch_secs)
@@ -261,13 +300,23 @@ impl DeviceSignatureVerifier {
         let mut nonce_bytes = [0u8; 32];
         rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut nonce_bytes);
         let nonce = hex::encode(nonce_bytes);
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         let exp = now + ttl_secs.clamp(60, 600);
-        let mut map = self.challenge_nonces.write().map_err(|_| "Nonce cache lock poisoned")?;
+        let mut map = self
+            .challenge_nonces
+            .write()
+            .map_err(|_| "Nonce cache lock poisoned")?;
         map.retain(|_, expiry| *expiry > now);
         if map.len() >= 5000 {
             // Anti-saturation: evict only the earliest-expiring entry (never clear entire cache)
-            if let Some(oldest_key) = map.iter().min_by_key(|(_, expiry)| *expiry).map(|(k, _)| k.clone()) {
+            if let Some(oldest_key) = map
+                .iter()
+                .min_by_key(|(_, expiry)| *expiry)
+                .map(|(k, _)| k.clone())
+            {
                 map.remove(&oldest_key);
             }
         }
@@ -276,8 +325,15 @@ impl DeviceSignatureVerifier {
     }
 
     /// Check and consume a challenge nonce (single-use anti-replay defense).
-    pub fn consume_challenge_nonce(&self, nonce: &str, current_epoch_secs: u64) -> Result<(), String> {
-        let mut map = self.challenge_nonces.write().map_err(|_| "Nonce cache lock poisoned")?;
+    pub fn consume_challenge_nonce(
+        &self,
+        nonce: &str,
+        current_epoch_secs: u64,
+    ) -> Result<(), String> {
+        let mut map = self
+            .challenge_nonces
+            .write()
+            .map_err(|_| "Nonce cache lock poisoned")?;
         map.retain(|_, exp| *exp > current_epoch_secs);
         match map.remove(nonce) {
             Some(exp) if exp >= current_epoch_secs => Ok(()),
@@ -318,16 +374,26 @@ impl IdentityVerifier for DeviceSignatureVerifier {
         let record = self
             .enrollment_registry
             .get_device(device_id)?
-            .ok_or_else(|| format!("Device '{}' is not registered in enrollment registry", device_id.as_str()))?;
+            .ok_or_else(|| {
+                format!(
+                    "Device '{}' is not registered in enrollment registry",
+                    device_id.as_str()
+                )
+            })?;
 
         // 2. Reject revoked devices
         if record.is_revoked {
-            return Err(format!("DeviceRevoked: Device '{}' has been revoked", device_id.as_str()));
+            return Err(format!(
+                "DeviceRevoked: Device '{}' has been revoked",
+                device_id.as_str()
+            ));
         }
 
         // 3. Verify signature using the registered, enrolled public key
         if record.enrolled_public_key.len() != 32 {
-            return Err("Invalid enrolled public key length for Ed25519 device verification".into());
+            return Err(
+                "Invalid enrolled public key length for Ed25519 device verification".into(),
+            );
         }
 
         let verifier = Ed25519Verifier;
@@ -338,8 +404,14 @@ impl IdentityVerifier for DeviceSignatureVerifier {
         let assurance = AssuranceLevel::HARDWARE_ATTESTED;
 
         let mut claims = HashMap::new();
-        claims.insert("device_id".into(), Value::String(device_id.as_str().to_string()));
-        claims.insert("verified_via".into(), Value::String("Enrolled_Ed25519_Device_Challenge".into()));
+        claims.insert(
+            "device_id".into(),
+            Value::String(device_id.as_str().to_string()),
+        );
+        claims.insert(
+            "verified_via".into(),
+            Value::String("Enrolled_Ed25519_Device_Challenge".into()),
+        );
 
         VerifiedPrincipal::construct_verified(
             principal_id,
@@ -393,17 +465,15 @@ impl IdentityVerifier for TokenIdentityVerifier {
         }
 
         // 1. Decode Header
-        let header_bytes = base64::Engine::decode(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            parts[0],
-        )
-        .or_else(|_| {
-            base64::Engine::decode(
-                &base64::engine::general_purpose::STANDARD_NO_PAD,
-                parts[0],
-            )
-        })
-        .map_err(|e| format!("Failed to base64 decode JWT header: {e}"))?;
+        let header_bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, parts[0])
+                .or_else(|_| {
+                    base64::Engine::decode(
+                        &base64::engine::general_purpose::STANDARD_NO_PAD,
+                        parts[0],
+                    )
+                })
+                .map_err(|e| format!("Failed to base64 decode JWT header: {e}"))?;
 
         let header_value: Value = serde_json::from_slice(&header_bytes)
             .map_err(|e| format!("Failed to parse JWT header JSON: {e}"))?;
@@ -419,33 +489,29 @@ impl IdentityVerifier for TokenIdentityVerifier {
             .unwrap_or("default");
 
         // 2. Decode Payload
-        let payload_bytes = base64::Engine::decode(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            parts[1],
-        )
-        .or_else(|_| {
-            base64::Engine::decode(
-                &base64::engine::general_purpose::STANDARD_NO_PAD,
-                parts[1],
-            )
-        })
-        .map_err(|e| format!("Failed to base64 decode JWT payload: {e}"))?;
+        let payload_bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, parts[1])
+                .or_else(|_| {
+                    base64::Engine::decode(
+                        &base64::engine::general_purpose::STANDARD_NO_PAD,
+                        parts[1],
+                    )
+                })
+                .map_err(|e| format!("Failed to base64 decode JWT payload: {e}"))?;
 
         let claims_value: Value = serde_json::from_slice(&payload_bytes)
             .map_err(|e| format!("Failed to parse JWT claims JSON: {e}"))?;
 
         // 3. Decode Signature
-        let signature_bytes = base64::Engine::decode(
-            &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-            parts[2],
-        )
-        .or_else(|_| {
-            base64::Engine::decode(
-                &base64::engine::general_purpose::STANDARD_NO_PAD,
-                parts[2],
-            )
-        })
-        .map_err(|e| format!("Failed to base64 decode JWT signature: {e}"))?;
+        let signature_bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, parts[2])
+                .or_else(|_| {
+                    base64::Engine::decode(
+                        &base64::engine::general_purpose::STANDARD_NO_PAD,
+                        parts[2],
+                    )
+                })
+                .map_err(|e| format!("Failed to base64 decode JWT signature: {e}"))?;
 
         // 4. Validate Issuer against configured TrustedIssuerRegistry (ID-01, ID-19)
         let iss = claims_value
@@ -453,30 +519,44 @@ impl IdentityVerifier for TokenIdentityVerifier {
             .and_then(|v| v.as_str())
             .ok_or("JWT token missing 'iss' claim")?;
 
-        let issuer_policy = self
-            .issuer_registry
-            .get_issuer(iss)?
-            .ok_or_else(|| format!("UntrustedIssuer: Token issuer '{}' is not registered as trusted", iss))?;
+        let issuer_policy = self.issuer_registry.get_issuer(iss)?.ok_or_else(|| {
+            format!(
+                "UntrustedIssuer: Token issuer '{}' is not registered as trusted",
+                iss
+            )
+        })?;
 
         // 5. Verify algorithm is allowlisted by issuer policy
         let token_alg = match alg_str {
             "EdDSA" => AlgorithmId::Ed25519,
             "RS256" => AlgorithmId::Rs256,
-            other => return Err(format!("Unsupported or unallowlisted JWT algorithm: {}", other)),
+            other => {
+                return Err(format!(
+                    "Unsupported or unallowlisted JWT algorithm: {}",
+                    other
+                ))
+            }
         };
 
         if !issuer_policy.allowed_algorithms.contains(&token_alg) {
-            return Err(format!("AlgorithmDisallowed: Algorithm '{}' not permitted for issuer '{}'", alg_str, iss));
+            return Err(format!(
+                "AlgorithmDisallowed: Algorithm '{}' not permitted for issuer '{}'",
+                alg_str, iss
+            ));
         }
 
         // 6. Look up trusted public key for (issuer, kid)
-        let (key_alg, public_key_bytes) = issuer_policy
-            .public_keys
-            .get(kid)
-            .ok_or_else(|| format!("UnknownKeyId: Key ID '{}' not found for issuer '{}'", kid, iss))?;
+        let (key_alg, public_key_bytes) = issuer_policy.public_keys.get(kid).ok_or_else(|| {
+            format!(
+                "UnknownKeyId: Key ID '{}' not found for issuer '{}'",
+                kid, iss
+            )
+        })?;
 
         if *key_alg != token_alg {
-            return Err("AlgorithmMismatch: Key algorithm does not match token header algorithm".into());
+            return Err(
+                "AlgorithmMismatch: Key algorithm does not match token header algorithm".into(),
+            );
         }
 
         // 7. Cryptographically verify signature over `${parts[0]}.${parts[1]}` (ID-01)
@@ -484,12 +564,22 @@ impl IdentityVerifier for TokenIdentityVerifier {
         match token_alg {
             AlgorithmId::Ed25519 => {
                 let verifier = Ed25519Verifier;
-                verifier.verify(public_key_bytes, signed_message.as_bytes(), &signature_bytes)
+                verifier
+                    .verify(
+                        public_key_bytes,
+                        signed_message.as_bytes(),
+                        &signature_bytes,
+                    )
                     .map_err(|e| format!("JwtSignatureVerificationFailed: {e}"))?;
             }
             AlgorithmId::Rs256 => {
                 let verifier = Rs256Verifier;
-                verifier.verify(public_key_bytes, signed_message.as_bytes(), &signature_bytes)
+                verifier
+                    .verify(
+                        public_key_bytes,
+                        signed_message.as_bytes(),
+                        &signature_bytes,
+                    )
                     .map_err(|e| format!("JwtSignatureVerificationFailed: {e}"))?;
             }
             _ => return Err("Unsupported signature verification algorithm".into()),
@@ -502,13 +592,19 @@ impl IdentityVerifier for TokenIdentityVerifier {
             .ok_or("JWT token missing 'exp' claim")?;
 
         if exp <= current_epoch_secs {
-            return Err(format!("JwtTokenExpired: Token expired at {} (current: {})", exp, current_epoch_secs));
+            return Err(format!(
+                "JwtTokenExpired: Token expired at {} (current: {})",
+                exp, current_epoch_secs
+            ));
         }
 
         // 9. Validate Not-Before (nbf) if present
         if let Some(nbf) = claims_value.get("nbf").and_then(|v| v.as_u64()) {
             if current_epoch_secs < nbf {
-                return Err(format!("JwtTokenNotYetValid: Token not valid before {} (current: {})", nbf, current_epoch_secs));
+                return Err(format!(
+                    "JwtTokenNotYetValid: Token not valid before {} (current: {})",
+                    nbf, current_epoch_secs
+                ));
             }
         }
 
@@ -517,7 +613,9 @@ impl IdentityVerifier for TokenIdentityVerifier {
             CryptoUtils::constant_time_eq(aud_str.as_bytes(), expected_audience.as_bytes())
         } else if let Some(aud_array) = claims_value.get("aud").and_then(|v| v.as_array()) {
             aud_array.iter().any(|item| {
-                item.as_str().is_some_and(|s| CryptoUtils::constant_time_eq(s.as_bytes(), expected_audience.as_bytes()))
+                item.as_str().is_some_and(|s| {
+                    CryptoUtils::constant_time_eq(s.as_bytes(), expected_audience.as_bytes())
+                })
             })
         } else {
             return Err("JWT token missing or invalid 'aud' claim".into());
@@ -538,7 +636,12 @@ impl IdentityVerifier for TokenIdentityVerifier {
         let role = PrincipalRole::user();
         let assurance = AssuranceLevel::STANDARD_TOKEN;
         // ID-19: Stable principal identity anchored to (iss, sub) with bounded namespace encoding
-        let safe_namespace = if iss.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') && !iss.is_empty() && iss.len() <= 64 {
+        let safe_namespace = if iss
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            && !iss.is_empty()
+            && iss.len() <= 64
+        {
             iss.to_string()
         } else {
             let digest = hex::encode(&CryptoUtils::sha256(iss.as_bytes())[..8]);
@@ -640,7 +743,10 @@ impl GoogleAuthService {
         };
 
         let now = Self::now_seconds();
-        let mut nonces = self.pending_nonces.lock().unwrap_or_else(|p| p.into_inner());
+        let mut nonces = self
+            .pending_nonces
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         // Purge expired nonces only
         nonces.retain(|_, (exp, _)| now <= *exp);
 
@@ -659,8 +765,15 @@ impl GoogleAuthService {
     pub fn fetch_google_jwks(&self) -> bool {
         let now = Self::now_seconds();
         {
-            let last = *self.last_key_fetch.lock().unwrap_or_else(|p| p.into_inner());
-            let cache_empty = self.key_cache.lock().unwrap_or_else(|p| p.into_inner()).is_empty();
+            let last = *self
+                .last_key_fetch
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            let cache_empty = self
+                .key_cache
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .is_empty();
             if !cache_empty && (now - last) < 60.0 {
                 return false;
             }
@@ -706,7 +819,10 @@ impl GoogleAuthService {
                         }
                     }
                 }
-                *self.last_key_fetch.lock().unwrap_or_else(|p| p.into_inner()) = now;
+                *self
+                    .last_key_fetch
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner()) = now;
                 return true;
             }
         }
@@ -856,7 +972,10 @@ impl GoogleAuthService {
                 ));
             }
 
-            let mut nonces = self.pending_nonces.lock().unwrap_or_else(|p| p.into_inner());
+            let mut nonces = self
+                .pending_nonces
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             let entry = nonces
                 .get_mut(exp_n)
                 .ok_or_else(|| "Nonce is not registered in server nonce store".to_string())?;
@@ -914,16 +1033,24 @@ impl IdentityVerifier for GoogleOAuthVerifier {
         current_epoch_secs: u64,
     ) -> Result<VerifiedPrincipal, String> {
         let (token, expected_nonce) = match proof {
-            IdentityProof::GoogleIdToken { token, expected_nonce } => (token, expected_nonce),
+            IdentityProof::GoogleIdToken {
+                token,
+                expected_nonce,
+            } => (token, expected_nonce),
             _ => return Err("Invalid proof variant for GoogleOAuthVerifier".into()),
         };
 
         let nonce_str = expected_nonce
             .as_deref()
             .ok_or("Replay protection violation: expected_nonce is mandatory for Google ID token verification")?;
-        let claims = self.auth_service.verify_id_token(token, Some(nonce_str), true)?;
+        let claims = self
+            .auth_service
+            .verify_id_token(token, Some(nonce_str), true)?;
 
-        let sub = claims.get("sub").and_then(|v| v.as_str()).ok_or("Missing 'sub' in Google ID token")?;
+        let sub = claims
+            .get("sub")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing 'sub' in Google ID token")?;
         let email = claims.get("email").and_then(|v| v.as_str()).unwrap_or(sub);
 
         let role = PrincipalRole::user();

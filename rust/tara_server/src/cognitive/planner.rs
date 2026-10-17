@@ -286,7 +286,10 @@ impl GoalTracker {
             content.push('\n');
         }
         drop(goals);
-        tara_security::persistence::atomic_write_file_hardened(&self.storage_path, content.as_bytes())
+        tara_security::persistence::atomic_write_file_hardened(
+            &self.storage_path,
+            content.as_bytes(),
+        )
     }
 }
 

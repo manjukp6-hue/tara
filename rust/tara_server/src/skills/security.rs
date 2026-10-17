@@ -64,7 +64,10 @@ pub fn tag_sensitive_path(path: &str) -> Vec<String> {
 }
 
 pub fn scan_repo_security_ownership(repo_root: &Path) -> SecurityOwnershipSummary {
-    if repo_root.components().any(|c| c == std::path::Component::ParentDir) {
+    if repo_root
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
         return SecurityOwnershipSummary {
             total_files_analyzed: 0,
             hotspots_count: 0,

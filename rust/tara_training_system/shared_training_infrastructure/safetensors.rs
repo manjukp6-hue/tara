@@ -75,10 +75,9 @@ pub fn load_safetensors_with_shapes(path: &str) -> Result<WeightsWithShapes, Saf
     let mut len_buf = [0u8; 8];
     file.read_exact(&mut len_buf)?;
     // 8-byte little-endian header length
-    let header_len =
-        usize::try_from(u64::from_le_bytes(len_buf)).map_err(|_| {
-            SafeTensorsError::InvalidHeader("header length overflows address space".into())
-        })?;
+    let header_len = usize::try_from(u64::from_le_bytes(len_buf)).map_err(|_| {
+        SafeTensorsError::InvalidHeader("header length overflows address space".into())
+    })?;
     let header_end = 8usize
         .checked_add(header_len)
         .ok_or_else(|| SafeTensorsError::InvalidHeader("header length overflow".into()))?;
@@ -301,19 +300,27 @@ pub fn load_model_weights_with_purpose(
     model_dir: &str,
     purpose: &str,
 ) -> Result<WeightsWithShapes, SafeTensorsError> {
-    println!("[SafeTensors Loader] Path: '{}' | Purpose: {}", model_dir, purpose);
+    println!(
+        "[SafeTensors Loader] Path: '{}' | Purpose: {}",
+        model_dir, purpose
+    );
     let index_path = format!("{}/model.safetensors.index.json", model_dir);
     if std::path::Path::new(&index_path).exists() {
         load_sharded_weights_with_purpose(model_dir, &index_path, purpose)
     } else {
         let single_path = format!("{}/model.safetensors", model_dir);
-        println!("[SafeTensors Shard Loader] Shard: '{}' | Purpose: {}", single_path, purpose);
+        println!(
+            "[SafeTensors Shard Loader] Shard: '{}' | Purpose: {}",
+            single_path, purpose
+        );
         load_safetensors_with_shapes(&single_path)
     }
 }
 
 /// Read tensor shapes and dtypes from a SafeTensors file without loading tensor payload data.
-pub fn read_safetensors_shapes(path: &str) -> Result<HashMap<String, Vec<usize>>, SafeTensorsError> {
+pub fn read_safetensors_shapes(
+    path: &str,
+) -> Result<HashMap<String, Vec<usize>>, SafeTensorsError> {
     use std::io::Read;
     let mut file = fs::File::open(path)?;
     let file_len = file.metadata()?.len() as usize;
@@ -435,9 +442,7 @@ fn load_sharded_weights_with_purpose(
         .get("weight_map")
         .and_then(|v| v.as_object())
         .ok_or_else(|| {
-            SafeTensorsError::InvalidHeader(
-                "sharded index is missing 'weight_map' object".into(),
-            )
+            SafeTensorsError::InvalidHeader("sharded index is missing 'weight_map' object".into())
         })?;
 
     let root = std::path::Path::new(model_dir).canonicalize()?;
@@ -467,7 +472,11 @@ fn load_sharded_weights_with_purpose(
                     "shard path escapes model directory: '{shard}'"
                 )));
             }
-            println!("[SafeTensors Shard Loader] Shard: '{}' | Purpose: {}", full.display(), purpose);
+            println!(
+                "[SafeTensors Shard Loader] Shard: '{}' | Purpose: {}",
+                full.display(),
+                purpose
+            );
             let loaded = load_safetensors_with_shapes(&full.to_string_lossy())?;
             shard_cache.insert(shard.to_string(), loaded);
         }
@@ -795,7 +804,9 @@ where
             let byte_len = (data.len() as u64)
                 .checked_mul(bytes_per_elem as u64)
                 .ok_or_else(|| {
-                    SafeTensorsError::InvalidHeader(format!("byte length overflow for tensor '{name}'"))
+                    SafeTensorsError::InvalidHeader(format!(
+                        "byte length overflow for tensor '{name}'"
+                    ))
                 })?;
 
             let dtype_str = if is_bf16 { "BF16" } else { "F32" };

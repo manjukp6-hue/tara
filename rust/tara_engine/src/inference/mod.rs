@@ -51,9 +51,9 @@ pub use tiered_store::{
 
 #[cfg(test)]
 mod tests {
+    use super::shard_manager::ShardedSafeTensorsManager;
     use super::*;
     use crate::safetensors::write_safetensors_sharded;
-    use super::shard_manager::ShardedSafeTensorsManager;
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
 

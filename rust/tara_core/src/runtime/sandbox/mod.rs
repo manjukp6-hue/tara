@@ -518,9 +518,23 @@ impl IsolatedSandbox {
             // Comprehensive guard: block any variable whose name contains a secret-associated keyword
             let k_upper = k.to_uppercase();
             let is_secret_variable = [
-                "KEY", "SECRET", "TOKEN", "AUTH", "PASSWORD", "CREDENTIAL",
-                "PASSPHRASE", "PRIVATE", "CERT", "SIGNING", "HMAC", "BEARER",
-                "JWT", "ENCRYPTION", "MASTER", "API_KEY", "APIKEY",
+                "KEY",
+                "SECRET",
+                "TOKEN",
+                "AUTH",
+                "PASSWORD",
+                "CREDENTIAL",
+                "PASSPHRASE",
+                "PRIVATE",
+                "CERT",
+                "SIGNING",
+                "HMAC",
+                "BEARER",
+                "JWT",
+                "ENCRYPTION",
+                "MASTER",
+                "API_KEY",
+                "APIKEY",
             ]
             .iter()
             .any(|pattern| k_upper.contains(pattern));
@@ -609,7 +623,11 @@ impl IsolatedSandbox {
                             return Err(error);
                         }
                     };
-                    let peak_memory = self.job_guard.as_ref().map(|g| g.query_peak_memory()).unwrap_or(0);
+                    let peak_memory = self
+                        .job_guard
+                        .as_ref()
+                        .map(|g| g.query_peak_memory())
+                        .unwrap_or(0);
                     if disk_usage > self.config.max_disk_bytes {
                         let _ = self.state.transition_to(
                             EntityState::Quarantined,
@@ -683,7 +701,11 @@ impl IsolatedSandbox {
             "MANAGER",
         );
 
-        let peak_memory = self.job_guard.as_ref().map(|g| g.query_peak_memory()).unwrap_or(0);
+        let peak_memory = self
+            .job_guard
+            .as_ref()
+            .map(|g| g.query_peak_memory())
+            .unwrap_or(0);
         Ok(SandboxExecutionResult {
             exit_code: -1,
             stdout,
@@ -733,8 +755,11 @@ impl IsolatedSandbox {
             let _ = Self::force_remove_dir(&self.config.root_dir);
         }
         if self.state.current_state() != EntityState::Retired {
-            self.state
-                .transition_to(EntityState::Retired, "Sandbox wiped and retired", "MANAGER")?;
+            self.state.transition_to(
+                EntityState::Retired,
+                "Sandbox wiped and retired",
+                "MANAGER",
+            )?;
         }
         Ok(())
     }

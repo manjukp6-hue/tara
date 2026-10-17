@@ -34,9 +34,7 @@ use thiserror::Error;
 
 use crate::config::TaraConfig;
 use crate::model::causal_lm::TaraForCausalLM;
-use crate::safetensors::{
-    load_model_weights_with_purpose, load_safetensors_with_shapes,
-};
+use crate::safetensors::{load_model_weights_with_purpose, load_safetensors_with_shapes};
 use crate::tokenizer::TaraTokenizer;
 use crate::trainer::{
     promote_directory_atomically, recover_interrupted_promotion, NativeSelfTrainer, TrainerError,
@@ -126,7 +124,9 @@ pub struct TrainingOptions {
 }
 
 pub fn has_parent_dir_traversal<P: AsRef<Path>>(path: P) -> bool {
-    path.as_ref().components().any(|c| matches!(c, Component::ParentDir))
+    path.as_ref()
+        .components()
+        .any(|c| matches!(c, Component::ParentDir))
 }
 
 pub fn normalize_path_for_comparison(path: &Path) -> PathBuf {
@@ -697,16 +697,28 @@ fn evaluate_checkpoint_loss_score(dir: &Path) -> Option<(f64, u64)> {
         return None;
     }
     let tok_path = dir.join("tokenizer.json");
-    let probe_tokens: Vec<u32> = if let Ok(tok) = TaraTokenizer::from_file(&tok_path.to_string_lossy()) {
-        let encoded = tok.encode("The fundamental principles of computation and mathematical reasoning.");
-        if encoded.len() >= 2 {
-            encoded
+    let probe_tokens: Vec<u32> =
+        if let Ok(tok) = TaraTokenizer::from_file(&tok_path.to_string_lossy()) {
+            let encoded =
+                tok.encode("The fundamental principles of computation and mathematical reasoning.");
+            if encoded.len() >= 2 {
+                encoded
+            } else {
+                vec![
+                    0,
+                    (1 % vocab_size) as u32,
+                    (2 % vocab_size) as u32,
+                    (3 % vocab_size) as u32,
+                ]
+            }
         } else {
-            vec![0, (1 % vocab_size) as u32, (2 % vocab_size) as u32, (3 % vocab_size) as u32]
-        }
-    } else {
-        vec![0, (1 % vocab_size) as u32, (2 % vocab_size) as u32, (3 % vocab_size) as u32]
-    };
+            vec![
+                0,
+                (1 % vocab_size) as u32,
+                (2 % vocab_size) as u32,
+                (3 % vocab_size) as u32,
+            ]
+        };
 
     let (_, _, logits) = model.forward_with_cache(&probe_tokens);
     if logits.len() != probe_tokens.len() * vocab_size {
@@ -777,7 +789,9 @@ fn select_best_checkpoint_into_staging(
             }
 
             for cand in candidates_to_check {
-                if normalize_path_for_comparison(&cand) == normalize_path_for_comparison(staging_dir) {
+                if normalize_path_for_comparison(&cand)
+                    == normalize_path_for_comparison(staging_dir)
+                {
                     continue;
                 }
                 if let Some((cand_loss, cand_step)) = evaluate_checkpoint_loss_score(&cand) {

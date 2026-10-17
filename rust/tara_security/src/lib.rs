@@ -84,38 +84,17 @@ pub use broker::{
     EnforcementGateway, EnforcementRequest, ModelAction, OperationBroker, OperationRequest,
     ProtectedCategory,
 };
-pub use path_security::{
-    canonical_containment, check_lexical_traversal, is_symlink_escaping, normalize_path,
-    validate_sandbox_path, validate_tool_command_path, PathSecurityError,
-};
-pub use cryptography::{
-    AeadProvider, Aes256GcmProvider, AlgorithmId, CryptoUtils, Ed25519Verifier, Es256Verifier,
-    HmacSha256Signer, Rs256Verifier, SignatureVerifier,
-};
-pub use fail_closed_defense::{CanarySentinel, TripwireDefenseEngine, TripwireStatus};
-pub use hardware_root::{
-    pcr_quote::{PcrQuoteVerificationResult, TpmPcrQuoteStatement, TpmPcrQuoteVerifier},
-    AttestationFormatVerifier, AttestationRegistry, AttestationStatement, AttestationTrustStore,
-    AttestationVerificationResult, AuthorityManager, AuthorityRecord, BiometricCapability,
-    BiometricChallenge, BiometricChallengeService, BiometricFactorProvider, CoseAlgorithm,
-    PlatformAuthenticatorType, PlatformBiometricAssertion, PlatformBiometricReport, RecoveryProof,
-    RotationToken,
-    UvmEntry, KEY_PROTECTION_HARDWARE, KEY_PROTECTION_SECURE_ELEMENT, KEY_PROTECTION_SOFTWARE,
-    KEY_PROTECTION_TEE, MATCHER_PROTECTION_ON_CHIP, MATCHER_PROTECTION_SOFTWARE,
-    MATCHER_PROTECTION_TEE, USER_VERIFY_ALL, USER_VERIFY_EYEPRINT, USER_VERIFY_FACEPRINT,
-    USER_VERIFY_FINGERPRINT, USER_VERIFY_HANDPRINT, USER_VERIFY_LOCATION, USER_VERIFY_NONE,
-    USER_VERIFY_PASSCODE, USER_VERIFY_PATTERN, USER_VERIFY_PRESENCE, USER_VERIFY_VOICEPRINT,
-    extract_signed_uvm_entries_from_authenticator_data, CentralizedPasskeyVerifier,
-    EnrolledBiometricCredential, ParsedAttestationObject, RelyingPartyConfig, TpmsAttest,
-};
-pub use qr::QrCodeMatrix;
 pub use cbor::{CborDecoder, CborEncoder, CborValue};
 pub use creator::{
     canonical_json_bytes, canonicalize_value, compute_canonical_hash,
     compute_recovery_verifier_hash, AuthorityLifecycleManager, AuthorityState, BootstrapWizard,
     CreatorAuthService, CreatorIdentity, CreatorIdentityRecord, CreatorSessionRecord,
-    CreatorSetupEngine, CreatorSetupRequest, CreatorSetupResult, QrPrompt, RateLimiter,
-    RevokedKey, CANONICAL_CREATOR_ID, DEFAULT_DISPLAY_NAME,
+    CreatorSetupEngine, CreatorSetupRequest, CreatorSetupResult, QrPrompt, RateLimiter, RevokedKey,
+    CANONICAL_CREATOR_ID, DEFAULT_DISPLAY_NAME,
+};
+pub use cryptography::{
+    AeadProvider, Aes256GcmProvider, AlgorithmId, CryptoUtils, Ed25519Verifier, Es256Verifier,
+    HmacSha256Signer, Rs256Verifier, SignatureVerifier,
 };
 pub use devices::{
     DeviceCrypto, DeviceKeyPair, DeviceRecord, DeviceRegistryData, EnrollmentService,
@@ -124,13 +103,31 @@ pub use devices::{
 pub use dpapi::{
     cleanup_test_watermark_artifacts, delete_os_monotonic_watermark, derive_authority_hmac_key,
     get_os_isolated_watermark_path, get_system_witness_path, is_test_watermark_domain,
-    load_monotonic_watermark, load_os_monotonic_watermark, native_dpapi,
-    store_monotonic_watermark, store_os_monotonic_watermark, store_system_witness_watermark,
-    SecureKeyStorage,
+    load_monotonic_watermark, load_os_monotonic_watermark, native_dpapi, store_monotonic_watermark,
+    store_os_monotonic_watermark, store_system_witness_watermark, SecureKeyStorage,
 };
-pub use lockdown::{LockdownCoordinator, LockdownRecord, LockdownState, ProgressiveLockdownCoordinator};
-pub use recovery::{
-    pbkdf2_hmac_sha256, RecoveryAuthorizationProof, RecoveryLockoutState, RecoveryManager,
+pub use fail_closed_defense::{CanarySentinel, TripwireDefenseEngine, TripwireStatus};
+pub use hardware_root::{
+    extract_signed_uvm_entries_from_authenticator_data,
+    pcr_quote::{PcrQuoteVerificationResult, TpmPcrQuoteStatement, TpmPcrQuoteVerifier},
+    AttestationFormatVerifier, AttestationRegistry, AttestationStatement, AttestationTrustStore,
+    AttestationVerificationResult, AuthorityManager, AuthorityRecord, BiometricCapability,
+    BiometricChallenge, BiometricChallengeService, BiometricFactorProvider,
+    CentralizedPasskeyVerifier, CoseAlgorithm, EnrolledBiometricCredential,
+    ParsedAttestationObject, PlatformAuthenticatorType, PlatformBiometricAssertion,
+    PlatformBiometricReport, RecoveryProof, RelyingPartyConfig, RotationToken, TpmsAttest,
+    UvmEntry, KEY_PROTECTION_HARDWARE, KEY_PROTECTION_SECURE_ELEMENT, KEY_PROTECTION_SOFTWARE,
+    KEY_PROTECTION_TEE, MATCHER_PROTECTION_ON_CHIP, MATCHER_PROTECTION_SOFTWARE,
+    MATCHER_PROTECTION_TEE, USER_VERIFY_ALL, USER_VERIFY_EYEPRINT, USER_VERIFY_FACEPRINT,
+    USER_VERIFY_FINGERPRINT, USER_VERIFY_HANDPRINT, USER_VERIFY_LOCATION, USER_VERIFY_NONE,
+    USER_VERIFY_PASSCODE, USER_VERIFY_PATTERN, USER_VERIFY_PRESENCE, USER_VERIFY_VOICEPRINT,
+};
+pub use lockdown::{
+    LockdownCoordinator, LockdownRecord, LockdownState, ProgressiveLockdownCoordinator,
+};
+pub use path_security::{
+    canonical_containment, check_lexical_traversal, is_symlink_escaping, normalize_path,
+    validate_sandbox_path, validate_tool_command_path, PathSecurityError,
 };
 pub use persistence::{atomic_write_file_hardened, HardenedFileSystemStorage, SecureStorage};
 pub use primitives::{
@@ -142,6 +139,22 @@ pub use primitives::{
 pub use process_isolation::{
     AntiReplayCache, IpcEndpoint, IpcSecurityEnvelope, ProcessRole, SecureIpcBus,
 };
+pub use qr::QrCodeMatrix;
+pub use recovery::{
+    pbkdf2_hmac_sha256, RecoveryAuthorizationProof, RecoveryLockoutState, RecoveryManager,
+};
+pub use tara_control::{
+    canonical_manifest_payload, compute_file_sha256, AgentExecutionOutcome, AgentExecutionSandbox,
+    AgentSandboxPolicy, AttackVector, AutonomousGoalGating, ContainmentManager,
+    CopyleftConflictReport, DependencyVerificationReport, DependencyVerifier, GatedGoal, GoalState,
+    HomoglyphNormalizer, IntegrityError, JailbreakDefenseEngine, JailbreakDetector,
+    JailbreakVerdict, LicenseFamily, LicenseProvenanceEngine, ModelIntegrityEngine,
+    ModelIntegrityGuard, ModelManifestSeal, ProvenanceLedgerGuard, ProvenanceRecord,
+    QuarantineEngine, QuarantineRecord, QuarantineStage, QuarantineVerdict, ReleaseManifest,
+    ReleaseManifestManager, RuntimeTamperSentinel, SealResult, SecretFinding, SecretLeakScanner,
+    SourceProtector, SourceTamperDetector, SpdxLicenseInfo, TARAControlledSecurity, TokenScanner,
+    VerifiedPackage, VerifyResult,
+};
 pub use telemetry_boundary::{AuthenticatedAuthority, HeuristicTelemetry, SecurityDecision};
 pub use threshold_quorum::{
     QuorumAuthorizationToken, QuorumPolicy, QuorumProposal, QuorumSignature, ThresholdQuorumEngine,
@@ -151,23 +164,9 @@ pub use transparency_log::{
     AuditRecord, AuditSink, AuthenticatedAuditLogger, FileAuditSink, MemoryAuditSink,
     MerkleConsistencyProof, MerkleInclusionProof, MerkleLeaf, MerkleTree, SignedTreeHead,
 };
-pub use tara_control::{
-    canonical_manifest_payload, compute_file_sha256, AgentExecutionOutcome,
-    AgentExecutionSandbox, AgentSandboxPolicy, AttackVector, AutonomousGoalGating,
-    ContainmentManager, CopyleftConflictReport, DependencyVerificationReport,
-    DependencyVerifier, GatedGoal, GoalState, HomoglyphNormalizer, JailbreakDefenseEngine,
-    JailbreakDetector, JailbreakVerdict, LicenseFamily, LicenseProvenanceEngine,
-    IntegrityError, ModelIntegrityEngine, ModelIntegrityGuard, ModelManifestSeal,
-    ProvenanceLedgerGuard, ProvenanceRecord, QuarantineEngine, QuarantineRecord,
-    QuarantineStage, QuarantineVerdict, ReleaseManifest, ReleaseManifestManager,
-    RuntimeTamperSentinel, SealResult, SecretFinding, SecretLeakScanner, SourceProtector,
-    SourceTamperDetector, SpdxLicenseInfo, TARAControlledSecurity, TokenScanner,
-    VerifiedPackage, VerifyResult,
-};
 pub use zero_trust::{
     CapabilityCaveat, CapabilityToken, ChallengeRecord, ContinuousRiskEngine, GoogleAuthService,
     GoogleOAuthVerifier, IdentityProof, IdentityVerifier, IdentityVerifierRegistry, PolicyEngine,
     PolicyRule, RiskVerdict, SecurityDenial, SessionManager, SessionRecord, GOOGLE_ISSUERS,
     GOOGLE_JWKS_URL,
 };
-

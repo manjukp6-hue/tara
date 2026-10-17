@@ -183,15 +183,18 @@ impl OnlineSearchEngine {
                         || v6.is_unspecified()
                         || v6.is_multicast()
                         || (v6.segments()[0] & 0xffc0) == 0xfe80
-                        || v6.to_ipv4_mapped().map(|v4| {
-                            v4.is_loopback()
-                                || v4.is_private()
-                                || v4.is_link_local()
-                                || v4.is_unspecified()
-                                || v4.is_broadcast()
-                                || v4.is_multicast()
-                                || (v4.octets()[0] == 169 && v4.octets()[1] == 254)
-                        }).unwrap_or(false)
+                        || v6
+                            .to_ipv4_mapped()
+                            .map(|v4| {
+                                v4.is_loopback()
+                                    || v4.is_private()
+                                    || v4.is_link_local()
+                                    || v4.is_unspecified()
+                                    || v4.is_broadcast()
+                                    || v4.is_multicast()
+                                    || (v4.octets()[0] == 169 && v4.octets()[1] == 254)
+                            })
+                            .unwrap_or(false)
                 }
             };
 

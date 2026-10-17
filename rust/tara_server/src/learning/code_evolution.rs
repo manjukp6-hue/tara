@@ -612,13 +612,27 @@ mod tests {
 
     #[test]
     fn test_is_protected_file_expanded_zone() {
-        assert!(CodeEvolutionEngine::is_protected_file("rust/tara_security/src/lib.rs"));
-        assert!(CodeEvolutionEngine::is_protected_file("tara_security/src/main.rs"));
-        assert!(CodeEvolutionEngine::is_protected_file("storage/vault/keys.bin"));
-        assert!(CodeEvolutionEngine::is_protected_file("storage/security/tokens.json"));
-        assert!(CodeEvolutionEngine::is_protected_file("rust/tara_server/src/brain.rs"));
-        assert!(CodeEvolutionEngine::is_protected_file("rust/tara_server/src/server.rs"));
-        assert!(!CodeEvolutionEngine::is_protected_file("rust/tara_server/src/skills/custom.rs"));
+        assert!(CodeEvolutionEngine::is_protected_file(
+            "rust/tara_security/src/lib.rs"
+        ));
+        assert!(CodeEvolutionEngine::is_protected_file(
+            "tara_security/src/main.rs"
+        ));
+        assert!(CodeEvolutionEngine::is_protected_file(
+            "storage/vault/keys.bin"
+        ));
+        assert!(CodeEvolutionEngine::is_protected_file(
+            "storage/security/tokens.json"
+        ));
+        assert!(CodeEvolutionEngine::is_protected_file(
+            "rust/tara_server/src/brain.rs"
+        ));
+        assert!(CodeEvolutionEngine::is_protected_file(
+            "rust/tara_server/src/server.rs"
+        ));
+        assert!(!CodeEvolutionEngine::is_protected_file(
+            "rust/tara_server/src/skills/custom.rs"
+        ));
     }
 
     #[test]

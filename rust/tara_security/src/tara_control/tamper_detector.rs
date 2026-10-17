@@ -37,16 +37,21 @@ impl RuntimeTamperSentinel {
 
     /// Registers baseline hashes for a set of critical files dynamically at runtime.
     pub fn register_baseline(&self, relative_paths: &[String]) -> Result<usize, String> {
-        let mut map = self.baseline_hashes.lock().map_err(|_| "Baseline lock poisoned")?;
+        let mut map = self
+            .baseline_hashes
+            .lock()
+            .map_err(|_| "Baseline lock poisoned")?;
         let mut registered = 0;
 
         for rel in relative_paths {
-            check_lexical_traversal(Path::new(rel))
-                .map_err(|e| format!("InvalidPath: {e}"))?;
+            check_lexical_traversal(Path::new(rel)).map_err(|e| format!("InvalidPath: {e}"))?;
 
             let full = self.repo_root.join(rel);
             if full.is_symlink() {
-                return Err(format!("Symlinks are forbidden in baseline registration: {}", rel));
+                return Err(format!(
+                    "Symlinks are forbidden in baseline registration: {}",
+                    rel
+                ));
             }
             if full.exists() && full.is_file() {
                 let hash = CryptoUtils::compute_file_sha256(&full)?;
@@ -85,7 +90,10 @@ impl RuntimeTamperSentinel {
 
             match CryptoUtils::compute_file_sha256(&full) {
                 Ok(current_hash) => {
-                    if !CryptoUtils::constant_time_eq(current_hash.as_bytes(), expected_hash.as_bytes()) {
+                    if !CryptoUtils::constant_time_eq(
+                        current_hash.as_bytes(),
+                        expected_hash.as_bytes(),
+                    ) {
                         tampered.push(format!("ALTERED:{}", rel));
                     }
                 }
@@ -110,7 +118,10 @@ impl RuntimeTamperSentinel {
 
     /// Persists dynamically computed baseline registry to a JSON file.
     pub fn save_baseline_registry(&self, registry_file: &Path) -> Result<(), String> {
-        let map = self.baseline_hashes.lock().map_err(|_| "Baseline lock poisoned")?;
+        let map = self
+            .baseline_hashes
+            .lock()
+            .map_err(|_| "Baseline lock poisoned")?;
         let serialized = serde_json::to_vec_pretty(&*map)
             .map_err(|e| format!("Failed to serialize baseline registry: {e}"))?;
 
@@ -128,7 +139,10 @@ impl RuntimeTamperSentinel {
             .map_err(|e| format!("Corrupted baseline registry JSON: {e}"))?;
 
         let count = loaded.len();
-        let mut map = self.baseline_hashes.lock().map_err(|_| "Baseline lock poisoned")?;
+        let mut map = self
+            .baseline_hashes
+            .lock()
+            .map_err(|_| "Baseline lock poisoned")?;
         *map = loaded;
         Ok(count)
     }

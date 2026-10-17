@@ -238,7 +238,9 @@ mod tests {
         let shares = distribute_load(&nodes);
 
         // Verify unhealthy and dead nodes are excluded
-        assert!(shares.iter().all(|(id, _)| id != "node-unhealthy" && id != "node-dead"));
+        assert!(shares
+            .iter()
+            .all(|(id, _)| id != "node-unhealthy" && id != "node-dead"));
         assert_eq!(shares.len(), 3);
 
         // Check shares sum to 1.0

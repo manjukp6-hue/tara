@@ -67,14 +67,29 @@ impl MonotonicDiskRecord {
 
     fn verify_integrity(&self, expected_name: &str) -> Result<(), String> {
         if self.magic != Self::MAGIC {
-            return Err(format!("CorruptedAnchorMagic: Expected {}, got {}", Self::MAGIC, self.magic));
+            return Err(format!(
+                "CorruptedAnchorMagic: Expected {}, got {}",
+                Self::MAGIC,
+                self.magic
+            ));
         }
         if self.anchor_name != expected_name {
-            return Err(format!("AnchorNameMismatch: Expected {}, got {}", expected_name, self.anchor_name));
+            return Err(format!(
+                "AnchorNameMismatch: Expected {}, got {}",
+                expected_name, self.anchor_name
+            ));
         }
-        let expected_digest = Self::compute_digest(&self.magic, &self.anchor_name, self.watermark, self.updated_epoch_secs);
-        if !CryptoUtils::constant_time_eq(self.record_sha256.as_bytes(), expected_digest.as_bytes()) {
-            return Err("AnchorRecordTampered: SHA-256 integrity checksum does not match payload".into());
+        let expected_digest = Self::compute_digest(
+            &self.magic,
+            &self.anchor_name,
+            self.watermark,
+            self.updated_epoch_secs,
+        );
+        if !CryptoUtils::constant_time_eq(self.record_sha256.as_bytes(), expected_digest.as_bytes())
+        {
+            return Err(
+                "AnchorRecordTampered: SHA-256 integrity checksum does not match payload".into(),
+            );
         }
         Ok(())
     }
@@ -100,16 +115,22 @@ impl DurableMonotonicAnchor {
 
         if let Some(parent) = p.parent() {
             if !parent.exists() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Failed to create anchor directory {}: {}", parent.display(), e))?;
+                fs::create_dir_all(parent).map_err(|e| {
+                    format!(
+                        "Failed to create anchor directory {}: {}",
+                        parent.display(),
+                        e
+                    )
+                })?;
             }
         }
 
         let loaded_watermark = if p.exists() {
             let data = fs::read(&p)
                 .map_err(|e| format!("Failed to read anchor file {}: {}", p.display(), e))?;
-            let record: MonotonicDiskRecord = serde_json::from_slice(&data)
-                .map_err(|e| format!("Corrupted monotonic anchor JSON at {}: {}", p.display(), e))?;
+            let record: MonotonicDiskRecord = serde_json::from_slice(&data).map_err(|e| {
+                format!("Corrupted monotonic anchor JSON at {}: {}", p.display(), e)
+            })?;
             record.verify_integrity(&name)?;
             record.watermark
         } else {
@@ -147,7 +168,13 @@ impl DurableMonotonicAnchor {
                 .create(true)
                 .truncate(true)
                 .open(&temp_path)
-                .map_err(|e| format!("Failed to open temp anchor file {}: {}", temp_path.display(), e))?;
+                .map_err(|e| {
+                    format!(
+                        "Failed to open temp anchor file {}: {}",
+                        temp_path.display(),
+                        e
+                    )
+                })?;
 
             file.write_all(&serialized)
                 .map_err(|e| format!("Failed to write anchor record: {e}"))?;
@@ -182,12 +209,18 @@ impl MonotonicAnchor for DurableMonotonicAnchor {
     }
 
     fn read_watermark(&self) -> Result<u64, String> {
-        let val = self.current_watermark.lock().map_err(|_| "Watermark lock poisoned")?;
+        let val = self
+            .current_watermark
+            .lock()
+            .map_err(|_| "Watermark lock poisoned")?;
         Ok(*val)
     }
 
     fn advance_watermark(&self, candidate: u64) -> Result<(), String> {
-        let mut val = self.current_watermark.lock().map_err(|_| "Watermark lock poisoned")?;
+        let mut val = self
+            .current_watermark
+            .lock()
+            .map_err(|_| "Watermark lock poisoned")?;
         if candidate <= *val {
             return Err(format!(
                 "RollbackDetected[{}]: Candidate watermark {} is not strictly greater than committed watermark {}",

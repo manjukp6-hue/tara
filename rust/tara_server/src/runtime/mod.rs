@@ -24,10 +24,7 @@ mod tests {
         assert!(registry.get_runtime("RUST").is_some());
         assert!(registry.get_runtime("rust").is_some());
         assert!(registry.get_runtime("  Rust  ").is_some());
-        assert_eq!(
-            registry.get_runtime("RUST").unwrap().runtime_id,
-            "rust"
-        );
+        assert_eq!(registry.get_runtime("RUST").unwrap().runtime_id, "rust");
     }
 
     #[test]
@@ -62,7 +59,8 @@ mod tests {
         let creator = AuthenticatedPrincipal::mint_creator_for_test("session_test").unwrap();
 
         // "rust" is the sole required runtime
-        let res_single = registry.retire_runtime("rust", &creator, "attempting to retire sole runtime");
+        let res_single =
+            registry.retire_runtime("rust", &creator, "attempting to retire sole runtime");
         assert!(res_single.is_err());
         assert!(res_single
             .unwrap_err()
@@ -77,8 +75,11 @@ mod tests {
         assert!(res_ok.is_ok());
 
         // Now "runtime_secondary" is the sole remaining required runtime, so retiring it is rejected
-        let res_second_fail =
-            registry.retire_runtime("runtime_secondary", &creator, "retiring last remaining runtime");
+        let res_second_fail = registry.retire_runtime(
+            "runtime_secondary",
+            &creator,
+            "retiring last remaining runtime",
+        );
         assert!(res_second_fail.is_err());
         assert!(res_second_fail
             .unwrap_err()
@@ -110,9 +111,13 @@ mod tests {
 
         // Missing evaluation -> RejectedPartialSupport
         let empty_evals = HashMap::new();
-        let resp_missing = gate.evaluate_evolution_candidate("model", "target_1", "2.0.0", &empty_evals);
+        let resp_missing =
+            gate.evaluate_evolution_candidate("model", "target_1", "2.0.0", &empty_evals);
         assert!(!resp_missing.eligible_for_promotion);
-        assert_eq!(resp_missing.gate_verdict, GateVerdict::RejectedPartialSupport);
+        assert_eq!(
+            resp_missing.gate_verdict,
+            GateVerdict::RejectedPartialSupport
+        );
         assert!(resp_missing.quarantined);
 
         // Case-insensitive evaluation passed ("RUST") -> Approved
@@ -126,7 +131,8 @@ mod tests {
                 error_message: None,
             },
         );
-        let resp_ok = gate.evaluate_evolution_candidate("model", "target_1", "2.0.0", &passing_evals);
+        let resp_ok =
+            gate.evaluate_evolution_candidate("model", "target_1", "2.0.0", &passing_evals);
         assert!(resp_ok.eligible_for_promotion);
         assert_eq!(resp_ok.gate_verdict, GateVerdict::Approved);
         assert!(!resp_ok.quarantined);
@@ -142,7 +148,8 @@ mod tests {
                 error_message: Some("Execution failure".to_string()),
             },
         );
-        let resp_fail = gate.evaluate_evolution_candidate("model", "target_1", "2.0.0", &failing_evals);
+        let resp_fail =
+            gate.evaluate_evolution_candidate("model", "target_1", "2.0.0", &failing_evals);
         assert!(!resp_fail.eligible_for_promotion);
         assert_eq!(resp_fail.gate_verdict, GateVerdict::RejectedRuntimeFailure);
         assert!(resp_fail.quarantined);
@@ -154,7 +161,10 @@ mod tests {
         let resp_unverified =
             gate.evaluate_evolution_candidate("model", "target_1", "2.0.0", &passing_evals);
         assert!(!resp_unverified.eligible_for_promotion);
-        assert_eq!(resp_unverified.gate_verdict, GateVerdict::RejectedRuntimeFailure);
+        assert_eq!(
+            resp_unverified.gate_verdict,
+            GateVerdict::RejectedRuntimeFailure
+        );
         assert!(resp_unverified.quarantined);
     }
 }

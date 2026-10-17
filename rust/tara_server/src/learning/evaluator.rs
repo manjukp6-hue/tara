@@ -332,7 +332,10 @@ mod tests {
         let (recovered1, healed1, _) =
             engine.attempt_recovery("file_inspector", &params1, "missing path");
         assert!(recovered1);
-        assert_eq!(healed1.get("path").and_then(Value::as_str), Some("Cargo.toml"));
+        assert_eq!(
+            healed1.get("path").and_then(Value::as_str),
+            Some("Cargo.toml")
+        );
         assert!(healed1.get("file").is_none());
 
         // 2. "filepath" alias
@@ -340,7 +343,10 @@ mod tests {
         let (recovered2, healed2, _) =
             engine.attempt_recovery("hash_verifier", &params2, "missing path");
         assert!(recovered2);
-        assert_eq!(healed2.get("path").and_then(Value::as_str), Some("Cargo.toml"));
+        assert_eq!(
+            healed2.get("path").and_then(Value::as_str),
+            Some("Cargo.toml")
+        );
         assert!(healed2.get("filepath").is_none());
 
         // 3. "file_path" alias
@@ -348,7 +354,10 @@ mod tests {
         let (recovered3, healed3, _) =
             engine.attempt_recovery("file_inspector", &params3, "missing path");
         assert!(recovered3);
-        assert_eq!(healed3.get("path").and_then(Value::as_str), Some("Cargo.toml"));
+        assert_eq!(
+            healed3.get("path").and_then(Value::as_str),
+            Some("Cargo.toml")
+        );
         assert!(healed3.get("file_path").is_none());
     }
 }

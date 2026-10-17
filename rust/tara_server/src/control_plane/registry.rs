@@ -207,7 +207,8 @@ impl CapabilityRegistry {
                         .and_then(|v| v.as_str())
                         .unwrap_or("capability_registry")
                         .to_string();
-                    let root = tara_engine::find_workspace_root().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                    let root = tara_engine::find_workspace_root()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("."));
                     let root_str = root.to_str().unwrap_or(".");
                     let reg = crate::skills::tools_registry::ToolRegistry::get_default(root_str);
                     reg.execute_tool("file_inspector", params, &actor, root_str)
@@ -223,7 +224,8 @@ impl CapabilityRegistry {
                         .and_then(|v| v.as_str())
                         .unwrap_or("capability_registry")
                         .to_string();
-                    let root = tara_engine::find_workspace_root().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                    let root = tara_engine::find_workspace_root()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("."));
                     let root_str = root.to_str().unwrap_or(".");
                     let reg = crate::skills::tools_registry::ToolRegistry::get_default(root_str);
                     reg.execute_tool("hash_verifier", params, &actor, root_str)
@@ -243,11 +245,12 @@ impl CapabilityRegistry {
                     if skill_name.is_empty() {
                         serde_json::json!({ "status": "ERROR", "error": "skill name is required" })
                     } else {
-                        let root = tara_engine::find_workspace_root().unwrap_or_else(|_| std::path::PathBuf::from("."));
-                        let storage_skills = root.join("storage/skills").to_string_lossy().to_string();
+                        let root = tara_engine::find_workspace_root()
+                            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                        let storage_skills =
+                            root.join("storage/skills").to_string_lossy().to_string();
                         let tara_skills = root.join("TARA/SKILLS").to_string_lossy().to_string();
-                        let engine =
-                            crate::skills::SkillEngine::new(&storage_skills, &tara_skills);
+                        let engine = crate::skills::SkillEngine::new(&storage_skills, &tara_skills);
                         engine.execute_skill(&skill_name, params)
                     }
                 },

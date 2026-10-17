@@ -253,8 +253,7 @@ mod tests {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw_cfg) {
                     if let Some(expected_vocab) = val.get("vocab_size").and_then(|v| v.as_u64()) {
                         assert_eq!(
-                            tokenizer.vocab_size,
-                            expected_vocab as usize,
+                            tokenizer.vocab_size, expected_vocab as usize,
                             "Tokenizer vocab size must match model config"
                         );
                     }

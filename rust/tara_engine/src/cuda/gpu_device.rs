@@ -2,11 +2,11 @@
 //!
 //! Exposes genuine GPU hardware execution through the unified TARA-HD interface.
 
+use crate::cuda::gpu_trainer::CudaTrainer;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tara_hd::{ComputeDevice, DeviceCapability};
-use crate::cuda::gpu_trainer::CudaTrainer;
 
 /// CUDA GPU Compute Device bridging CudaTrainer with the TARA-HD ComputeDevice trait.
 #[derive(Clone)]
@@ -93,7 +93,11 @@ impl ComputeDevice for CudaComputeDevice {
         out_dim: usize,
     ) -> Result<Vec<f32>, String> {
         let ptr = weight.as_ptr() as usize;
-        let name_opt = self.slice_to_name.lock().ok().and_then(|m| m.get(&ptr).cloned());
+        let name_opt = self
+            .slice_to_name
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&ptr).cloned());
         if let Some(name) = name_opt {
             let t = self.trainer.lock().map_err(|e| e.to_string())?;
             if let Ok(res) = t.forward_linear(&name, x, seq_len, in_dim, out_dim) {
@@ -150,7 +154,11 @@ impl ComputeDevice for CudaComputeDevice {
         eps: f32,
     ) -> Result<Vec<f32>, String> {
         let ptr = weight.as_ptr() as usize;
-        let name_opt = self.slice_to_name.lock().ok().and_then(|m| m.get(&ptr).cloned());
+        let name_opt = self
+            .slice_to_name
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&ptr).cloned());
         if let Some(name) = name_opt {
             let t = self.trainer.lock().map_err(|e| e.to_string())?;
             if let Ok(res) = t.forward_rmsnorm(&name, x, seq_len, hidden_dim, eps) {
@@ -161,14 +169,19 @@ impl ComputeDevice for CudaComputeDevice {
         if seq_len == 0 || hidden_dim == 0 {
             return Ok(Vec::new());
         }
-        let safe_eps = if eps.is_finite() && eps > 0.0 { eps } else { 1e-5 };
+        let safe_eps = if eps.is_finite() && eps > 0.0 {
+            eps
+        } else {
+            1e-5
+        };
         let mut out = vec![0.0f32; seq_len * hidden_dim];
         use rayon::prelude::*;
         out.par_chunks_exact_mut(hidden_dim)
             .enumerate()
             .for_each(|(i, out_row)| {
                 let x_row = &x[i * hidden_dim..(i + 1) * hidden_dim];
-                let mean_sq: f32 = x_row.iter().map(|&v| v * v).sum::<f32>() / (hidden_dim as f32).max(1.0);
+                let mean_sq: f32 =
+                    x_row.iter().map(|&v| v * v).sum::<f32>() / (hidden_dim as f32).max(1.0);
                 let inv_rms = 1.0 / (mean_sq + safe_eps).sqrt();
                 for (j, (&xv, &wv)) in x_row.iter().zip(weight.iter()).enumerate() {
                     out_row[j] = xv * inv_rms * wv;
@@ -243,7 +256,11 @@ impl ComputeDevice for CudaComputeDevice {
         out_dim: usize,
     ) -> Result<(Vec<f32>, Vec<f32>), String> {
         let ptr = weight.as_ptr() as usize;
-        let name_opt = self.slice_to_name.lock().ok().and_then(|m| m.get(&ptr).cloned());
+        let name_opt = self
+            .slice_to_name
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&ptr).cloned());
         if let Some(name) = name_opt {
             let t = self.trainer.lock().map_err(|e| e.to_string())?;
             if let Ok(res) = t.backward_linear(&name, d_out, x, seq_len, in_dim, out_dim) {
@@ -253,25 +270,30 @@ impl ComputeDevice for CudaComputeDevice {
 
         use rayon::prelude::*;
         let mut d_weight = vec![0.0f32; out_dim * in_dim];
-        d_weight.par_chunks_exact_mut(in_dim).enumerate().for_each(|(o, w_row)| {
-            for s in 0..seq_len {
-                let d_val = d_out[s * out_dim + o];
-                let x_row = &x[s * in_dim..(s + 1) * in_dim];
-                for (i, &xv) in x_row.iter().enumerate() {
-                    w_row[i] += d_val * xv;
+        d_weight
+            .par_chunks_exact_mut(in_dim)
+            .enumerate()
+            .for_each(|(o, w_row)| {
+                for s in 0..seq_len {
+                    let d_val = d_out[s * out_dim + o];
+                    let x_row = &x[s * in_dim..(s + 1) * in_dim];
+                    for (i, &xv) in x_row.iter().enumerate() {
+                        w_row[i] += d_val * xv;
+                    }
                 }
-            }
-        });
+            });
         let mut d_in = vec![0.0f32; seq_len * in_dim];
-        d_in.par_chunks_exact_mut(in_dim).enumerate().for_each(|(s, in_row)| {
-            let d_row = &d_out[s * out_dim..(s + 1) * out_dim];
-            for (o, &dv) in d_row.iter().enumerate() {
-                let w_row = &weight[o * in_dim..(o + 1) * in_dim];
-                for (i, &wv) in w_row.iter().enumerate() {
-                    in_row[i] += dv * wv;
+        d_in.par_chunks_exact_mut(in_dim)
+            .enumerate()
+            .for_each(|(s, in_row)| {
+                let d_row = &d_out[s * out_dim..(s + 1) * out_dim];
+                for (o, &dv) in d_row.iter().enumerate() {
+                    let w_row = &weight[o * in_dim..(o + 1) * in_dim];
+                    for (i, &wv) in w_row.iter().enumerate() {
+                        in_row[i] += dv * wv;
+                    }
                 }
-            }
-        });
+            });
         Ok((d_weight, d_in))
     }
 
@@ -321,6 +343,7 @@ impl ComputeDevice for CudaComputeDevice {
 
     fn accumulate_gradient(&self, param_name: &str, gradient: &[f32]) -> Result<(), String> {
         let t = self.trainer.lock().map_err(|e| e.to_string())?;
-        t.accumulate_gradient(param_name, gradient).map_err(|e| e.to_string())
+        t.accumulate_gradient(param_name, gradient)
+            .map_err(|e| e.to_string())
     }
 }

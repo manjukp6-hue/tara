@@ -7,10 +7,10 @@
 //! - Rejects path traversal and out-of-workspace mutations.
 //! - Fails closed immediately if global lockdown is active.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use serde::{Deserialize, Serialize};
 
 use crate::broker::{EnforcementGateway, EnforcementRequest, ProtectedCategory};
 use crate::path_security::{canonical_containment, check_lexical_traversal};
@@ -99,7 +99,9 @@ impl AgentExecutionSandbox {
 
         // 2. Write policy gate
         if is_write && !self.policy.allow_filesystem_write {
-            return Err("AgentWriteBlocked: Agent sandbox policy prohibits filesystem writes".into());
+            return Err(
+                "AgentWriteBlocked: Agent sandbox policy prohibits filesystem writes".into(),
+            );
         }
 
         // 3. Strict containment verification
@@ -131,8 +133,7 @@ impl AgentExecutionSandbox {
         }
 
         // 2. Validate tool path against lexical traversal and workspace containment
-        check_lexical_traversal(tool_executable)
-            .map_err(|e| format!("InvalidToolPath: {e}"))?;
+        check_lexical_traversal(tool_executable).map_err(|e| format!("InvalidToolPath: {e}"))?;
 
         let contained_tool = canonical_containment(&self.workspace_root, tool_executable)
             .map_err(|e| format!("ToolWorkspaceBoundaryEscape: {e}"))?;
@@ -210,7 +211,9 @@ mod tests {
         };
 
         let gateway = Arc::new(EnforcementGateway::new_standalone());
-        let sandbox = AgentExecutionSandbox::new("test_agent", temp_dir.clone(), policy, gateway.clone()).unwrap();
+        let sandbox =
+            AgentExecutionSandbox::new("test_agent", temp_dir.clone(), policy, gateway.clone())
+                .unwrap();
 
         let user_pid = PrincipalId::new("test_user").unwrap();
         let principal = VerifiedPrincipal::construct_verified(
@@ -221,7 +224,8 @@ mod tests {
             AuthorityGeneration::new(1).unwrap(),
             1000,
             std::collections::HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
         let context = SecurityContext::new("127.0.0.1", 1000);
 
         // Disallowed tool rejected
@@ -254,7 +258,13 @@ mod tests {
             allowed_tools: wildcard_allowed,
             ..Default::default()
         };
-        let wildcard_sandbox = AgentExecutionSandbox::new("test_agent_2", temp_dir.clone(), wildcard_policy, gateway.clone()).unwrap();
+        let wildcard_sandbox = AgentExecutionSandbox::new(
+            "test_agent_2",
+            temp_dir.clone(),
+            wildcard_policy,
+            gateway.clone(),
+        )
+        .unwrap();
 
         let res_wildcard_escaped = wildcard_sandbox.dispatch_tool(
             "any_tool",
@@ -267,7 +277,13 @@ mod tests {
         assert!(res_wildcard_escaped.is_err());
 
         // Default empty allowed_tools policy fails closed
-        let default_sandbox = AgentExecutionSandbox::new("test_agent_default", temp_dir.clone(), AgentSandboxPolicy::default(), gateway).unwrap();
+        let default_sandbox = AgentExecutionSandbox::new(
+            "test_agent_default",
+            temp_dir.clone(),
+            AgentSandboxPolicy::default(),
+            gateway,
+        )
+        .unwrap();
         let res_default_empty = default_sandbox.dispatch_tool(
             "any_tool",
             &temp_dir.join("any_tool.exe"),
@@ -282,4 +298,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
-

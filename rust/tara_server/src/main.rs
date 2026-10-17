@@ -53,7 +53,6 @@ fn main() {
     let api_keys = Arc::new(tara_server::server::load_api_keys());
     let web_sessions = brain.web_sessions.clone();
 
-
     println!(
         "[TARA Server] Routes registered. Starting HTTP server on {}:{}",
         host, port
@@ -82,7 +81,10 @@ fn load_dotenv() {
             }
             // Reject excessively long lines (defense-in-depth)
             if line.len() > 4096 {
-                eprintln!("[TARA Security] Skipping oversized .env line (>{} bytes)", 4096);
+                eprintln!(
+                    "[TARA Security] Skipping oversized .env line (>{} bytes)",
+                    4096
+                );
                 continue;
             }
             if let Some(eq_pos) = line.find('=') {
@@ -92,11 +94,7 @@ fn load_dotenv() {
                     .trim_matches('"')
                     .trim_matches('\'');
                 // Validate key: only ASCII alphanumeric and underscores, non-empty
-                if key.is_empty()
-                    || !key
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-                {
+                if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
                     eprintln!(
                         "[TARA Security] Skipping .env variable with invalid key syntax: '{}'",
                         &key[..key.len().min(32)]

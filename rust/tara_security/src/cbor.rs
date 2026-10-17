@@ -383,6 +383,10 @@ mod tests {
         let bytes = CborEncoder::encode(&val);
         let mut decoder = CborDecoder::new(&bytes);
         let decoded = decoder.decode();
-        assert!(decoded.is_ok(), "Text('u:1') and Unsigned(1) must not collide: {:?}", decoded.err());
+        assert!(
+            decoded.is_ok(),
+            "Text('u:1') and Unsigned(1) must not collide: {:?}",
+            decoded.err()
+        );
     }
 }

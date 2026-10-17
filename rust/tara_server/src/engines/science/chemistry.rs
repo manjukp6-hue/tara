@@ -328,12 +328,16 @@ impl Chemistry {
             let count = if count_str.is_empty() {
                 1u32
             } else {
-                let parsed = count_str.parse::<u32>().map_err(|_| {
-                    ChemistryError::FormulaParseError {
-                        formula: formula.to_string(),
-                        details: format!("stoichiometric subscript '{}' overflows u32", count_str),
-                    }
-                })?;
+                let parsed =
+                    count_str
+                        .parse::<u32>()
+                        .map_err(|_| ChemistryError::FormulaParseError {
+                            formula: formula.to_string(),
+                            details: format!(
+                                "stoichiometric subscript '{}' overflows u32",
+                                count_str
+                            ),
+                        })?;
                 if parsed == 0 {
                     return Err(ChemistryError::FormulaParseError {
                         formula: formula.to_string(),
@@ -344,12 +348,12 @@ impl Chemistry {
             };
 
             let entry = counts.entry(symbol).or_insert(0u32);
-            *entry = entry.checked_add(count).ok_or_else(|| {
-                ChemistryError::FormulaParseError {
+            *entry = entry
+                .checked_add(count)
+                .ok_or_else(|| ChemistryError::FormulaParseError {
                     formula: formula.to_string(),
                     details: "total atom count overflowed u32".into(),
-                }
-            })?;
+                })?;
         }
 
         Ok(counts)
@@ -404,7 +408,9 @@ impl Chemistry {
         volume_m3: f64,
     ) -> Result<f64, ChemistryError> {
         if !volume_m3.is_finite() || volume_m3 <= 0.0 {
-            return Err(ChemistryError::DivisionByZero("volume must be > 0 and finite".into()));
+            return Err(ChemistryError::DivisionByZero(
+                "volume must be > 0 and finite".into(),
+            ));
         }
         if !n_moles.is_finite() || !temp_kelvin.is_finite() || n_moles < 0.0 || temp_kelvin < 0.0 {
             return Err(ChemistryError::NegativeQuantity {
@@ -418,7 +424,9 @@ impl Chemistry {
     /// Solution molarity: M = moles / volume_liters.
     pub fn molarity(moles: f64, volume_liters: f64) -> Result<f64, ChemistryError> {
         if !volume_liters.is_finite() || volume_liters <= 0.0 {
-            return Err(ChemistryError::DivisionByZero("volume must be > 0 and finite".into()));
+            return Err(ChemistryError::DivisionByZero(
+                "volume must be > 0 and finite".into(),
+            ));
         }
         if !moles.is_finite() || moles < 0.0 {
             return Err(ChemistryError::NegativeQuantity {

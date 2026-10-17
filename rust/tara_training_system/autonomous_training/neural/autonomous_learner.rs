@@ -164,7 +164,10 @@ impl AutonomousOnlineLearner {
                 .get("error")
                 .and_then(Value::as_str)
                 .unwrap_or("Knowledge base rejected candidate entry");
-            return Err(format!("Autonomous learning step failed validation: {}", err_msg));
+            return Err(format!(
+                "Autonomous learning step failed validation: {}",
+                err_msg
+            ));
         }
         self.items_learned = self.items_learned.saturating_add(1);
 

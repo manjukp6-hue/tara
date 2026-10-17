@@ -62,7 +62,9 @@ fn test_priority_hierarchy_resolution() {
         cpu: mock_cpu.clone(),
         custom: Vec::new(),
     };
-    let resolved_gpu = inv_all.resolve_device(&SelectionPolicy::Auto).expect("resolve gpu");
+    let resolved_gpu = inv_all
+        .resolve_device(&SelectionPolicy::Auto)
+        .expect("resolve gpu");
     assert_eq!(resolved_gpu.kind, DeviceKind::Gpu);
 
     // When GPU is absent but TPU and CPU are present: TPU must win
@@ -72,7 +74,9 @@ fn test_priority_hierarchy_resolution() {
         cpu: mock_cpu.clone(),
         custom: Vec::new(),
     };
-    let resolved_tpu = inv_no_gpu.resolve_device(&SelectionPolicy::Auto).expect("resolve tpu");
+    let resolved_tpu = inv_no_gpu
+        .resolve_device(&SelectionPolicy::Auto)
+        .expect("resolve tpu");
     assert_eq!(resolved_tpu.kind, DeviceKind::Tpu);
 
     // When GPU and TPU are absent: CPU is the final fallback
@@ -82,7 +86,9 @@ fn test_priority_hierarchy_resolution() {
         cpu: mock_cpu.clone(),
         custom: Vec::new(),
     };
-    let resolved_cpu = inv_cpu_only.resolve_device(&SelectionPolicy::Auto).expect("resolve cpu");
+    let resolved_cpu = inv_cpu_only
+        .resolve_device(&SelectionPolicy::Auto)
+        .expect("resolve cpu");
     assert_eq!(resolved_cpu.kind, DeviceKind::Cpu);
 }
 
@@ -113,7 +119,10 @@ fn test_explicit_selection_with_and_without_fallback() {
     assert!(explicit_err.is_err());
 
     // Explicit GPU with fallback on missing hardware must safely fall back to CPU
-    let fallback_ok = empty_inv.resolve_device(&SelectionPolicy::ExplicitWithFallback(DeviceKind::Gpu, None));
+    let fallback_ok = empty_inv.resolve_device(&SelectionPolicy::ExplicitWithFallback(
+        DeviceKind::Gpu,
+        None,
+    ));
     assert!(fallback_ok.is_ok());
     assert_eq!(fallback_ok.unwrap().kind, DeviceKind::Cpu);
 }
@@ -127,7 +136,9 @@ fn test_on_demand_chunked_streaming() {
     });
 
     let full_sequence: Vec<u32> = (0..200).collect();
-    let chunks: Vec<_> = stream_helper.stream_sequence_chunks(&full_sequence).collect();
+    let chunks: Vec<_> = stream_helper
+        .stream_sequence_chunks(&full_sequence)
+        .collect();
 
     // 200 tokens with chunk size 64 should yield 4 chunks: 64, 64, 64, 8
     assert_eq!(chunks.len(), 4);
@@ -170,7 +181,10 @@ fn test_extensible_custom_device() {
         supports_in_place_optimizer: true,
     };
 
-    let custom_dev = CustomDevice::new(custom_cap, vec!["matmul".to_string(), "attention".to_string()]);
+    let custom_dev = CustomDevice::new(
+        custom_cap,
+        vec!["matmul".to_string(), "attention".to_string()],
+    );
     assert_eq!(custom_dev.name(), "Apple M3 Max GPU");
     assert!(custom_dev.supports_operation("matmul"));
     assert!(custom_dev.supports_operation("attention"));
@@ -199,7 +213,9 @@ fn test_compute_dispatch_primitives() {
         0.0, 0.0, 1.0, // out 2
         1.0, 1.0, 1.0, // out 3
     ];
-    let y = channel.forward_linear(&w, &x, 2, 3, 4).expect("forward_linear");
+    let y = channel
+        .forward_linear(&w, &x, 2, 3, 4)
+        .expect("forward_linear");
     assert_eq!(y.len(), 8);
     assert_eq!(y[0], 1.0);
     assert_eq!(y[1], 2.0);
@@ -208,7 +224,9 @@ fn test_compute_dispatch_primitives() {
 
     // 2. RMSNorm forward
     let norm_w = vec![1.0, 1.0, 1.0];
-    let normed = channel.forward_rmsnorm(&norm_w, &x, 2, 3, 1e-5).expect("forward_rmsnorm");
+    let normed = channel
+        .forward_rmsnorm(&norm_w, &x, 2, 3, 1e-5)
+        .expect("forward_rmsnorm");
     assert_eq!(normed.len(), 6);
 
     // 3. SwiGLU forward
@@ -225,8 +243,9 @@ fn test_compute_dispatch_primitives() {
 
     // 5. Linear backward
     let d_out = vec![1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]; // [2, 4]
-    let (dw, dx) = channel.backward_linear(&w, &d_out, &x, 2, 3, 4).expect("backward_linear");
+    let (dw, dx) = channel
+        .backward_linear(&w, &d_out, &x, 2, 3, 4)
+        .expect("backward_linear");
     assert_eq!(dw.len(), 12); // [4, 3]
-    assert_eq!(dx.len(), 6);  // [2, 3]
+    assert_eq!(dx.len(), 6); // [2, 3]
 }
-

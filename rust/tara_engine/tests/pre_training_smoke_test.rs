@@ -57,10 +57,22 @@ fn test_pre_training_smoke_pipeline() {
     println!("[1/7] Initial Architecture & State Verification:");
     println!("      - Model Architecture: Tara Causal LM (GQA + SwiGLU + RoPE + RMSNorm)");
     println!("      - Production Vocab Size: {}", vocab_size);
-    println!("      - Production Hidden Size: {}", prod_config.hidden_size);
-    println!("      - Production Layers: {}", prod_config.num_hidden_layers);
-    println!("      - Attention Heads: {} (KV: {})", prod_config.num_attention_heads, prod_config.num_key_value_heads);
-    println!("      - Expected Uniform Random Cross-Entropy: ln({}) = {:.4}", vocab_size, expected_uniform_loss);
+    println!(
+        "      - Production Hidden Size: {}",
+        prod_config.hidden_size
+    );
+    println!(
+        "      - Production Layers: {}",
+        prod_config.num_hidden_layers
+    );
+    println!(
+        "      - Attention Heads: {} (KV: {})",
+        prod_config.num_attention_heads, prod_config.num_key_value_heads
+    );
+    println!(
+        "      - Expected Uniform Random Cross-Entropy: ln({}) = {:.4}",
+        vocab_size, expected_uniform_loss
+    );
     println!("      - Note: Initial probe loss (~11.71) reflects newly initialized random weights, not model degradation.\n");
 
     // -------------------------------------------------------------------------
@@ -68,10 +80,7 @@ fn test_pre_training_smoke_pipeline() {
     // -------------------------------------------------------------------------
     let dataset_samples = vec![
         // Kannada prompt-response pairs
-        (
-            "ಕನ್ನಡದ ರಾಜಧಾನಿ ಯಾವುದು?",
-            "ಕರ್ನಾಟಕದ ರಾಜಧಾನಿ ಬೆಂಗಳೂರು.",
-        ),
+        ("ಕನ್ನಡದ ರಾಜಧಾನಿ ಯಾವುದು?", "ಕರ್ನಾಟಕದ ರಾಜಧಾನಿ ಬೆಂಗಳೂರು."),
         (
             "ಕನ್ನಡ ವರ್ಣಮಾಲೆಯಲ್ಲಿ ಎಷ್ಟು ಅಕ್ಷರಗಳಿವೆ?",
             "ಕನ್ನಡ ವರ್ಣಮಾಲೆಯಲ್ಲಿ ಒಟ್ಟು ೪೯ ಅಕ್ಷರಗಳಿವೆ.",
@@ -105,7 +114,12 @@ fn test_pre_training_smoke_pipeline() {
         assert!(!output_ids.is_empty(), "Target encoding must be non-empty");
 
         for &id in input_ids.iter().chain(output_ids.iter()) {
-            assert!((id as usize) < vocab_size, "Token ID {} must be within vocabulary bounds {}", id, vocab_size);
+            assert!(
+                (id as usize) < vocab_size,
+                "Token ID {} must be within vocabulary bounds {}",
+                id,
+                vocab_size
+            );
         }
 
         let mut full_seq = input_ids.clone();
@@ -155,36 +169,94 @@ fn test_pre_training_smoke_pipeline() {
     // Standard Gaussian initialization with deterministic pseudo-random seed
     let mut seed = 123456789u64;
     let mut rng_next = || {
-        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let u1 = ((seed >> 32) as f32 + 1.0) / 4294967296.0;
-        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let u2 = ((seed >> 32) as f32 + 1.0) / 4294967296.0;
         let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
         z * 0.02
     };
 
-    let mut insert_tensor = |name: &str, shape: Vec<usize>, weights_map: &mut HashMap<String, Vec<f32>>, shapes_map: &mut HashMap<String, Vec<usize>>| {
-        let count = shape.iter().product::<usize>();
-        let data: Vec<f32> = (0..count).map(|_| rng_next()).collect();
-        weights_map.insert(name.to_string(), data);
-        shapes_map.insert(name.to_string(), shape);
-    };
+    let mut insert_tensor =
+        |name: &str,
+         shape: Vec<usize>,
+         weights_map: &mut HashMap<String, Vec<f32>>,
+         shapes_map: &mut HashMap<String, Vec<usize>>| {
+            let count = shape.iter().product::<usize>();
+            let data: Vec<f32> = (0..count).map(|_| rng_next()).collect();
+            weights_map.insert(name.to_string(), data);
+            shapes_map.insert(name.to_string(), shape);
+        };
 
-    insert_tensor("model.embed_tokens.weight", vec![vs, hs], &mut weights, &mut shapes);
+    insert_tensor(
+        "model.embed_tokens.weight",
+        vec![vs, hs],
+        &mut weights,
+        &mut shapes,
+    );
     insert_tensor("model.norm.weight", vec![hs], &mut weights, &mut shapes);
     insert_tensor("lm_head.weight", vec![vs, hs], &mut weights, &mut shapes);
 
     for l in 0..smoke_config.num_hidden_layers {
         let p = format!("model.layers.{l}");
-        insert_tensor(&format!("{p}.input_layernorm.weight"), vec![hs], &mut weights, &mut shapes);
-        insert_tensor(&format!("{p}.self_attn.q_proj.weight"), vec![nh * hd, hs], &mut weights, &mut shapes);
-        insert_tensor(&format!("{p}.self_attn.k_proj.weight"), vec![nkv * hd, hs], &mut weights, &mut shapes);
-        insert_tensor(&format!("{p}.self_attn.v_proj.weight"), vec![nkv * hd, hs], &mut weights, &mut shapes);
-        insert_tensor(&format!("{p}.self_attn.o_proj.weight"), vec![hs, nh * hd], &mut weights, &mut shapes);
-        insert_tensor(&format!("{p}.post_attention_layernorm.weight"), vec![hs], &mut weights, &mut shapes);
-        insert_tensor(&format!("{p}.mlp.gate_proj.weight"), vec![inter, hs], &mut weights, &mut shapes);
-        insert_tensor(&format!("{p}.mlp.up_proj.weight"), vec![inter, hs], &mut weights, &mut shapes);
-        insert_tensor(&format!("{p}.mlp.down_proj.weight"), vec![hs, inter], &mut weights, &mut shapes);
+        insert_tensor(
+            &format!("{p}.input_layernorm.weight"),
+            vec![hs],
+            &mut weights,
+            &mut shapes,
+        );
+        insert_tensor(
+            &format!("{p}.self_attn.q_proj.weight"),
+            vec![nh * hd, hs],
+            &mut weights,
+            &mut shapes,
+        );
+        insert_tensor(
+            &format!("{p}.self_attn.k_proj.weight"),
+            vec![nkv * hd, hs],
+            &mut weights,
+            &mut shapes,
+        );
+        insert_tensor(
+            &format!("{p}.self_attn.v_proj.weight"),
+            vec![nkv * hd, hs],
+            &mut weights,
+            &mut shapes,
+        );
+        insert_tensor(
+            &format!("{p}.self_attn.o_proj.weight"),
+            vec![hs, nh * hd],
+            &mut weights,
+            &mut shapes,
+        );
+        insert_tensor(
+            &format!("{p}.post_attention_layernorm.weight"),
+            vec![hs],
+            &mut weights,
+            &mut shapes,
+        );
+        insert_tensor(
+            &format!("{p}.mlp.gate_proj.weight"),
+            vec![inter, hs],
+            &mut weights,
+            &mut shapes,
+        );
+        insert_tensor(
+            &format!("{p}.mlp.up_proj.weight"),
+            vec![inter, hs],
+            &mut weights,
+            &mut shapes,
+        );
+        insert_tensor(
+            &format!("{p}.mlp.down_proj.weight"),
+            vec![hs, inter],
+            &mut weights,
+            &mut shapes,
+        );
     }
 
     let initial_weights_snapshot = weights.clone();
@@ -251,7 +323,10 @@ fn test_pre_training_smoke_pipeline() {
             let logits_slice = &logits[logit_start..logit_start + vs];
             let grad_slice = &mut d_logits[logit_start..logit_start + vs];
 
-            let max_logit = logits_slice.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            let max_logit = logits_slice
+                .iter()
+                .copied()
+                .fold(f32::NEG_INFINITY, f32::max);
             let mut sum_exp = 0.0f32;
             for (v, &l) in logits_slice.iter().enumerate() {
                 let exp_val = (l - max_logit).exp();
@@ -360,12 +435,8 @@ fn test_pre_training_smoke_pipeline() {
 
     // Save model.safetensors
     let model_safetensors_path = checkpoint_dir.join("model.safetensors");
-    write_safetensors_with_shapes(
-        &weights,
-        &shapes,
-        &model_safetensors_path.to_string_lossy(),
-    )
-    .expect("Save checkpoint weights");
+    write_safetensors_with_shapes(&weights, &shapes, &model_safetensors_path.to_string_lossy())
+        .expect("Save checkpoint weights");
 
     // Save config.json & tokenizer.json
     fs::write(
@@ -388,7 +459,9 @@ fn test_pre_training_smoke_pipeline() {
     write_safetensors_with_shapes(
         &opt_tensors,
         &opt_shapes,
-        &checkpoint_dir.join("optimizer.safetensors").to_string_lossy(),
+        &checkpoint_dir
+            .join("optimizer.safetensors")
+            .to_string_lossy(),
     )
     .expect("Save optimizer tensors");
 
@@ -412,9 +485,12 @@ fn test_pre_training_smoke_pipeline() {
     // Load reloaded weights and optimizer state
     let (reloaded_weights, _) =
         load_model_weights_with_shapes(&checkpoint_dir.to_string_lossy()).unwrap();
-    let (reloaded_opt_tensors, _) =
-        load_safetensors_with_shapes(&checkpoint_dir.join("optimizer.safetensors").to_string_lossy())
-            .unwrap();
+    let (reloaded_opt_tensors, _) = load_safetensors_with_shapes(
+        &checkpoint_dir
+            .join("optimizer.safetensors")
+            .to_string_lossy(),
+    )
+    .unwrap();
 
     // Verify weight parity
     for (name, orig_tensor) in &weights {
@@ -450,7 +526,10 @@ fn test_pre_training_smoke_pipeline() {
     assert_eq!(reloaded_optimizer.get_step(), optimizer.get_step());
     println!("      - Verified Continuation Checkpoint: PASSED");
     println!("      - Reloaded Weights Parity: 100% Bit-Accurate");
-    println!("      - Restored Optimizer Step & Moments: Exact match (Step {})\n", verified_step);
+    println!(
+        "      - Restored Optimizer Step & Moments: Exact match (Step {})\n",
+        verified_step
+    );
 
     // -------------------------------------------------------------------------
     // 7. Full 1B Parameter Model Memory & Compute Requirements Estimation
@@ -465,13 +544,27 @@ fn test_pre_training_smoke_pipeline() {
     let total_vram_mixed_gb = bf16_weight_gb + grads_gb + adamw_states_gb + est_activations_gb;
 
     println!("      - Total Parameters: 995,809,280 (~1B)");
-    println!("      - Model Weights: {:.2} GB (FP32) / {:.2} GB (BF16)", fp32_weight_gb, bf16_weight_gb);
-    println!("      - AdamW Optimizer Moments (m, v): {:.2} GB", adamw_states_gb);
+    println!(
+        "      - Model Weights: {:.2} GB (FP32) / {:.2} GB (BF16)",
+        fp32_weight_gb, bf16_weight_gb
+    );
+    println!(
+        "      - AdamW Optimizer Moments (m, v): {:.2} GB",
+        adamw_states_gb
+    );
     println!("      - Gradient Buffers: {:.2} GB", grads_gb);
-    println!("      - Estimated Activations (seq_len=2048, batch=2): ~{:.1} GB", est_activations_gb);
+    println!(
+        "      - Estimated Activations (seq_len=2048, batch=2): ~{:.1} GB",
+        est_activations_gb
+    );
     println!("      - Minimum Recommended GPU VRAM: ~{:.1} GB (fits in single A100 40GB/80GB or A10G 24GB)", total_vram_mixed_gb);
-    println!("      - Estimated Flops / Token: 6 * P = {:.2e} FLOPs", 6.0 * param_count_1b as f64);
-    println!("      - Local CPU Feasibility: ~12-15s / step -> 100k samples = ~350-400 hours on CPU.");
+    println!(
+        "      - Estimated Flops / Token: 6 * P = {:.2e} FLOPs",
+        6.0 * param_count_1b as f64
+    );
+    println!(
+        "      - Local CPU Feasibility: ~12-15s / step -> 100k samples = ~350-400 hours on CPU."
+    );
     println!("      - Deployment Recommendation: Execute on Google Colab Pro / Cloud GPU (NVIDIA A100/T4/L4).\n");
 
     println!("=======================================================");

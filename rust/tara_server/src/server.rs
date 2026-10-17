@@ -141,16 +141,19 @@ impl ApiRouter {
     ) {
         let norm = Self::normalize_path(path);
         let key = format!("{}:{}", method.to_uppercase(), norm);
-        self.routes.write().unwrap_or_else(|e| e.into_inner()).insert(
-            key,
-            Route {
-                method: method.to_uppercase(),
-                path: norm,
-                handler: Arc::new(handler),
-                required_auth,
-                required_role: required_role.map(|s| s.to_string()),
-            },
-        );
+        self.routes
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                key,
+                Route {
+                    method: method.to_uppercase(),
+                    path: norm,
+                    handler: Arc::new(handler),
+                    required_auth,
+                    required_role: required_role.map(|s| s.to_string()),
+                },
+            );
     }
 
     pub fn match_route(
@@ -301,8 +304,9 @@ pub fn unauthenticated_client_principal(client_ip: &str) -> tara_security::primi
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect::<String>();
     let name = format!("ip_{}", sanitized_ip);
-    tara_security::primitives::PrincipalId::new(&name)
-        .unwrap_or_else(|_| tara_security::primitives::PrincipalId::new("ip_unauthenticated").unwrap())
+    tara_security::primitives::PrincipalId::new(&name).unwrap_or_else(|_| {
+        tara_security::primitives::PrincipalId::new("ip_unauthenticated").unwrap()
+    })
 }
 
 /// Authenticate an incoming request. Returns `Ok(actor_id)` or `Err(error_message)`.
@@ -347,7 +351,10 @@ pub fn authenticate_request(
     // Active Fail-Closed Honeypot Tripwire Inspection (Pillar 6)
     let now = crate::now_secs();
     if brain.tripwire_defense.check_token_trap(token, now) {
-        return Err("Unauthorized: Honeypot decoy credential submitted. Security containment activated.".into());
+        return Err(
+            "Unauthorized: Honeypot decoy credential submitted. Security containment activated."
+                .into(),
+        );
     }
 
     // Fail-closed revocation check against ContainmentManager
@@ -370,21 +377,38 @@ pub fn authenticate_request(
             token.to_string()
         };
 
-        if let Ok(cap_token) = serde_json::from_str::<tara_security::zero_trust::CapabilityToken>(&json_str) {
-            let current_gen = brain.authority_manager.current_generation().unwrap_or(tara_security::primitives::AuthorityGeneration::INITIAL);
-            if let Ok(root_key) = tara_security::dpapi::derive_authority_hmac_key(&format!("capability_root:gen_{}", current_gen.get())) {
+        if let Ok(cap_token) =
+            serde_json::from_str::<tara_security::zero_trust::CapabilityToken>(&json_str)
+        {
+            let current_gen = brain
+                .authority_manager
+                .current_generation()
+                .unwrap_or(tara_security::primitives::AuthorityGeneration::INITIAL);
+            if let Ok(root_key) = tara_security::dpapi::derive_authority_hmac_key(&format!(
+                "capability_root:gen_{}",
+                current_gen.get()
+            )) {
                 let action = match method.to_uppercase().as_str() {
                     "GET" => tara_security::primitives::SecurityAction::read_protected_resource(),
                     "POST" => tara_security::primitives::SecurityAction::execute_task(),
-                    "PUT" | "PATCH" => tara_security::primitives::SecurityAction::write_protected_resource(),
+                    "PUT" | "PATCH" => {
+                        tara_security::primitives::SecurityAction::write_protected_resource()
+                    }
                     "DELETE" => tara_security::primitives::SecurityAction::revoke_device(),
                     _ => tara_security::primitives::SecurityAction::execute_task(),
                 };
                 let resource_path = path.trim_start_matches('/');
-                let resource = tara_security::primitives::SecurityResource::custom("route", resource_path)
-                    .unwrap_or_else(|_| tara_security::primitives::SecurityResource::custom("server", "api").unwrap());
+                let resource =
+                    tara_security::primitives::SecurityResource::custom("route", resource_path)
+                        .unwrap_or_else(|_| {
+                            tara_security::primitives::SecurityResource::custom("server", "api")
+                                .unwrap()
+                        });
                 let context = tara_security::primitives::SecurityContext::new(client_ip, now);
-                if cap_token.verify(&root_key, &action, &resource, &context, None).is_ok() {
+                if cap_token
+                    .verify(&root_key, &action, &resource, &context, None)
+                    .is_ok()
+                {
                     return Ok(format!("capability:{}", cap_token.token_id));
                 }
             }
@@ -392,8 +416,15 @@ pub fn authenticate_request(
     }
 
     // Check centralized SessionManager validation (Pillar 2: Zero-Trust Sessions)
-    let current_gen = brain.authority_manager.current_generation().unwrap_or(tara_security::primitives::AuthorityGeneration::INITIAL);
-    if let Ok(sess_rec) = brain.centralized_session_manager.validate_session(token, current_gen, now) {
+    let current_gen = brain
+        .authority_manager
+        .current_generation()
+        .unwrap_or(tara_security::primitives::AuthorityGeneration::INITIAL);
+    if let Ok(sess_rec) =
+        brain
+            .centralized_session_manager
+            .validate_session(token, current_gen, now)
+    {
         return Ok(sess_rec.principal.id().name().to_string());
     }
 
@@ -407,7 +438,9 @@ pub fn authenticate_request(
             .validate_worker_token(token)
         {
             if brain.containment_manager.is_worker_isolated(&worker_id) {
-                return Err("Unauthorized: Worker has been isolated by security containment.".into());
+                return Err(
+                    "Unauthorized: Worker has been isolated by security containment.".into(),
+                );
             }
             return Ok(format!("worker:{}", worker_id));
         }
@@ -417,12 +450,27 @@ pub fn authenticate_request(
     if let Some(actor) = web_sessions.verify(token) {
         let safe_actor_id = actor
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect::<String>();
-        let actor_pid = tara_security::primitives::PrincipalId::new(format!("actor_{}", safe_actor_id)).ok();
+        let actor_pid =
+            tara_security::primitives::PrincipalId::new(format!("actor_{}", safe_actor_id)).ok();
         let direct_pid = if let Some((ns, nm)) = actor.split_once(':') {
-            let safe_ns = ns.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect::<String>();
-            let safe_nm = nm.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-' || *c == '@' || *c == '.').collect::<String>();
+            let safe_ns = ns
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+                .collect::<String>();
+            let safe_nm = nm
+                .chars()
+                .filter(|c| {
+                    c.is_ascii_alphanumeric() || *c == '_' || *c == '-' || *c == '@' || *c == '.'
+                })
+                .collect::<String>();
             tara_security::primitives::PrincipalId::with_namespace(&safe_ns, &safe_nm).ok()
         } else {
             tara_security::primitives::PrincipalId::new(&actor).ok()
@@ -447,8 +495,13 @@ pub fn authenticate_request(
             .get("creator_id")
             .cloned()
             .unwrap_or_else(|| "ROOT_OPERATOR".to_string());
-        if let Ok(creator_pid) = tara_security::primitives::PrincipalId::with_namespace("creator", &cid) {
-            if brain.centralized_session_manager.is_principal_revoked(&creator_pid) {
+        if let Ok(creator_pid) =
+            tara_security::primitives::PrincipalId::with_namespace("creator", &cid)
+        {
+            if brain
+                .centralized_session_manager
+                .is_principal_revoked(&creator_pid)
+            {
                 return Err("CreatorSessionRevoked: Creator principal has been revoked in centralized zero-trust session store".into());
             }
         }
@@ -459,8 +512,20 @@ pub fn authenticate_request(
     for (key, actor) in api_keys {
         if constant_time_eq(token.as_bytes(), key.as_bytes()) {
             let pid = if let Some((ns, nm)) = actor.split_once(':') {
-                let safe_ns = ns.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect::<String>();
-                let safe_nm = nm.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-' || *c == '@' || *c == '.').collect::<String>();
+                let safe_ns = ns
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+                    .collect::<String>();
+                let safe_nm = nm
+                    .chars()
+                    .filter(|c| {
+                        c.is_ascii_alphanumeric()
+                            || *c == '_'
+                            || *c == '-'
+                            || *c == '@'
+                            || *c == '.'
+                    })
+                    .collect::<String>();
                 tara_security::primitives::PrincipalId::with_namespace(&safe_ns, &safe_nm).ok()
             } else {
                 tara_security::primitives::PrincipalId::new(actor).ok()
@@ -482,15 +547,15 @@ pub fn authenticate_request(
     let sec_ctx = tara_security::primitives::SecurityContext::new(client_ip, epoch_secs);
     let sec_action = tara_security::primitives::SecurityAction::new("auth", "authenticate")
         .unwrap_or_else(|_| tara_security::primitives::SecurityAction::execute_task());
-    if let Ok(tara_security::zero_trust::RiskVerdict::TriggerLockdown { reason, .. }) =
-        brain.centralized_risk_engine.evaluate_risk(
-            &unauth_id,
-            &sec_action,
-            &sec_ctx,
-        )
+    if let Ok(tara_security::zero_trust::RiskVerdict::TriggerLockdown { reason, .. }) = brain
+        .centralized_risk_engine
+        .evaluate_risk(&unauth_id, &sec_action, &sec_ctx)
     {
         eprintln!("[SECURITY] Unauthenticated client IP {} exceeded failure threshold ({}): blocking client request", client_ip, reason);
-        return Err(format!("Unauthorized: Client IP blocked due to excessive authentication failures: {}", reason));
+        return Err(format!(
+            "Unauthorized: Client IP blocked due to excessive authentication failures: {}",
+            reason
+        ));
     }
 
     Err("Unauthorized: Invalid API key or token.".into())
@@ -531,14 +596,13 @@ fn cors_headers(origin: &str) -> Vec<Header> {
     let mut headers = Vec::new();
 
     // Sanitize origin: must be ASCII, non-empty, and free of control characters (CR/LF)
-    let safe_origin = if !origin.is_empty()
-        && origin.is_ascii()
-        && !origin.chars().any(|c| c.is_ascii_control())
-    {
-        origin
-    } else {
-        "*"
-    };
+    let safe_origin =
+        if !origin.is_empty() && origin.is_ascii() && !origin.chars().any(|c| c.is_ascii_control())
+        {
+            origin
+        } else {
+            "*"
+        };
 
     if let Ok(h) = Header::from_bytes("Access-Control-Allow-Origin", safe_origin) {
         headers.push(h);
@@ -557,7 +621,6 @@ fn cors_headers(origin: &str) -> Vec<Header> {
     }
     headers
 }
-
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Request parsing
@@ -838,7 +901,15 @@ pub fn run_server(
 
         // Preserve endpoint-list resource with mandatory authentication.
         if method == "GET" && path == "/endpoints.txt" {
-            if let Err(e) = authenticate_request(&headers, &api_keys_ref, &brain_ref, &ws_ref, &method, path, &client_ip) {
+            if let Err(e) = authenticate_request(
+                &headers,
+                &api_keys_ref,
+                &brain_ref,
+                &ws_ref,
+                &method,
+                path,
+                &client_ip,
+            ) {
                 let resp = json_response(401, &json!({"status":"ERROR","error":e}));
                 let _ = request.respond(resp);
                 continue;
@@ -881,7 +952,15 @@ pub fn run_server(
             }
             Some((handler, required_auth, required_role)) => {
                 let actor = if required_auth {
-                    match authenticate_request(&headers, &api_keys_ref, &brain_ref, &ws_ref, &method, path, &client_ip) {
+                    match authenticate_request(
+                        &headers,
+                        &api_keys_ref,
+                        &brain_ref,
+                        &ws_ref,
+                        &method,
+                        path,
+                        &client_ip,
+                    ) {
                         Ok(a) => a,
                         Err(e) => {
                             let resp = json_response(401, &json!({"status":"ERROR","error":e}));
@@ -962,28 +1041,57 @@ pub fn run_server(
 
                 let safe_actor_id = actor
                     .chars()
-                    .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+                    .map(|c| {
+                        if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                            c
+                        } else {
+                            '_'
+                        }
+                    })
                     .collect::<String>();
                 let pid = if let Some((ns, nm)) = actor.split_once(':') {
-                    let safe_ns = ns.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect::<String>();
-                    let safe_nm = nm.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-' || *c == '@' || *c == '.').collect::<String>();
+                    let safe_ns = ns
+                        .chars()
+                        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+                        .collect::<String>();
+                    let safe_nm = nm
+                        .chars()
+                        .filter(|c| {
+                            c.is_ascii_alphanumeric()
+                                || *c == '_'
+                                || *c == '-'
+                                || *c == '@'
+                                || *c == '.'
+                        })
+                        .collect::<String>();
                     tara_security::primitives::PrincipalId::with_namespace(&safe_ns, &safe_nm)
-                        .unwrap_or_else(|_| tara_security::primitives::PrincipalId::new(format!("actor_{}", safe_actor_id)).unwrap_or_else(|_| tara_security::primitives::PrincipalId::new("actor_fallback").unwrap()))
+                        .unwrap_or_else(|_| {
+                            tara_security::primitives::PrincipalId::new(format!(
+                                "actor_{}",
+                                safe_actor_id
+                            ))
+                            .unwrap_or_else(|_| {
+                                tara_security::primitives::PrincipalId::new("actor_fallback")
+                                    .unwrap()
+                            })
+                        })
                 } else {
                     tara_security::primitives::PrincipalId::new(format!("actor_{}", safe_actor_id))
-                        .unwrap_or_else(|_| tara_security::primitives::PrincipalId::new("actor_fallback").unwrap())
+                        .unwrap_or_else(|_| {
+                            tara_security::primitives::PrincipalId::new("actor_fallback").unwrap()
+                        })
                 };
 
                 let principal = if is_creator_actor {
                     let tok = session_token.as_deref().unwrap_or("");
-                    match brain_ref.creator_auth_service.mint_verified_creator_principal(tok, current_gen) {
+                    match brain_ref
+                        .creator_auth_service
+                        .mint_verified_creator_principal(tok, current_gen)
+                    {
                         Ok(p) => {
-                            let _ = brain_ref.centralized_session_manager.ensure_session_registered(
-                                tok,
-                                &p,
-                                current_gen,
-                                now_epoch,
-                            );
+                            let _ = brain_ref
+                                .centralized_session_manager
+                                .ensure_session_registered(tok, &p, current_gen, now_epoch);
                             p
                         }
                         Err(e) => {
@@ -1001,7 +1109,10 @@ pub fn run_server(
                 } else {
                     let mut principal_claims = HashMap::new();
                     if let Some(ref s_id) = session_token {
-                        principal_claims.insert("session_id".to_string(), serde_json::Value::String(s_id.clone()));
+                        principal_claims.insert(
+                            "session_id".to_string(),
+                            serde_json::Value::String(s_id.clone()),
+                        );
                     }
                     match tara_security::primitives::VerifiedPrincipal::construct_verified(
                         pid,
@@ -1014,12 +1125,9 @@ pub fn run_server(
                     ) {
                         Ok(p) => {
                             if let Some(ref s_id) = session_token {
-                                let _ = brain_ref.centralized_session_manager.ensure_session_registered(
-                                    s_id,
-                                    &p,
-                                    current_gen,
-                                    now_epoch,
-                                );
+                                let _ = brain_ref
+                                    .centralized_session_manager
+                                    .ensure_session_registered(s_id, &p, current_gen, now_epoch);
                             }
                             p
                         }
@@ -1051,9 +1159,7 @@ pub fn run_server(
                                 || actor.starts_with("api_key:ROOT_OPERATOR")
                                 || actor.starts_with("api_key:operator")
                         }
-                        "creator" => {
-                            actor.starts_with("creator:") || actor == "ROOT_OPERATOR"
-                        }
+                        "creator" => actor.starts_with("creator:") || actor == "ROOT_OPERATOR",
                         "worker" => {
                             actor.starts_with("worker:")
                                 || actor == "system"
@@ -1131,9 +1237,11 @@ pub fn run_server(
 
                 let sec_action = tara_security::primitives::SecurityAction::new("http", &method)
                     .unwrap_or_else(|_| tara_security::primitives::SecurityAction::execute_task());
-                let sec_resource = tara_security::primitives::SecurityResource::custom("route", path)
-                    .unwrap_or(tara_security::primitives::SecurityResource::SystemVault);
-                let sec_context = tara_security::primitives::SecurityContext::new(&client_ip, now_epoch);
+                let sec_resource =
+                    tara_security::primitives::SecurityResource::custom("route", path)
+                        .unwrap_or(tara_security::primitives::SecurityResource::SystemVault);
+                let sec_context =
+                    tara_security::primitives::SecurityContext::new(&client_ip, now_epoch);
 
                 // Synchronize unified subsystem lockdown state
                 let _ = brain_ref.is_system_locked_down();
@@ -1148,9 +1256,11 @@ pub fn run_server(
 
                 // Centralized Enforcement Gateway: Operation executes strictly inside authorized callback
                 let brain_clone = brain_ref.clone();
-                let exec_result = brain_ref.enforcement_gateway.evaluate_and_enforce(op_req, |_p, _r| {
-                    Ok(handler.handle(&route_req, &brain_clone))
-                });
+                let exec_result = brain_ref
+                    .enforcement_gateway
+                    .evaluate_and_enforce(op_req, |_p, _r| {
+                        Ok(handler.handle(&route_req, &brain_clone))
+                    });
 
                 let result = match exec_result {
                     Ok(res) => res,
@@ -1198,8 +1308,8 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tara_security::primitives::{
-        AssuranceLevel, PrincipalId, PrincipalRole, SecurityAction,
-        SecurityContext, SecurityResource, SecurityState, VerifiedPrincipal,
+        AssuranceLevel, PrincipalId, PrincipalRole, SecurityAction, SecurityContext,
+        SecurityResource, SecurityState, VerifiedPrincipal,
     };
 
     #[test]
@@ -1208,10 +1318,7 @@ mod tests {
         let web_sessions = WebSessionStore::new();
         let api_keys = HashMap::new();
 
-        let current_gen = brain
-            .authority_manager
-            .current_generation()
-            .unwrap();
+        let current_gen = brain.authority_manager.current_generation().unwrap();
         let now_epoch = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -1231,14 +1338,34 @@ mod tests {
 
         let session = brain
             .centralized_session_manager
-            .create_session(principal, "tara_server_test", "tara_api", current_gen, now_epoch)
+            .create_session(
+                principal,
+                "tara_server_test",
+                "tara_api",
+                current_gen,
+                now_epoch,
+            )
             .unwrap();
 
         let mut headers = HashMap::new();
-        headers.insert("authorization".into(), format!("Bearer {}", session.session_id));
+        headers.insert(
+            "authorization".into(),
+            format!("Bearer {}", session.session_id),
+        );
 
-        let res = authenticate_request(&headers, &api_keys, &brain, &web_sessions, "POST", "/api/v1/test", "127.0.0.1");
-        assert!(res.is_ok(), "Centralized session token must authenticate successfully");
+        let res = authenticate_request(
+            &headers,
+            &api_keys,
+            &brain,
+            &web_sessions,
+            "POST",
+            "/api/v1/test",
+            "127.0.0.1",
+        );
+        assert!(
+            res.is_ok(),
+            "Centralized session token must authenticate successfully"
+        );
         assert_eq!(res.unwrap(), "operator_alice");
     }
 
@@ -1249,9 +1376,20 @@ mod tests {
         let api_keys = HashMap::new();
 
         let mut headers = HashMap::new();
-        headers.insert("authorization".into(), "Bearer invalid_bad_token_12345".into());
+        headers.insert(
+            "authorization".into(),
+            "Bearer invalid_bad_token_12345".into(),
+        );
 
-        let res = authenticate_request(&headers, &api_keys, &brain, &web_sessions, "POST", "/api/v1/test", "127.0.0.1");
+        let res = authenticate_request(
+            &headers,
+            &api_keys,
+            &brain,
+            &web_sessions,
+            "POST",
+            "/api/v1/test",
+            "127.0.0.1",
+        );
         assert!(res.is_err(), "Invalid token must be rejected");
 
         // Verify that failure was automatically recorded in ContinuousRiskEngine against client IP
@@ -1265,9 +1403,15 @@ mod tests {
 
         match verdict {
             tara_security::zero_trust::RiskVerdict::Accept { risk_score } => {
-                assert!(risk_score >= 200, "Failure penalty must elevate risk score (got {})", risk_score);
+                assert!(
+                    risk_score >= 200,
+                    "Failure penalty must elevate risk score (got {})",
+                    risk_score
+                );
             }
-            tara_security::zero_trust::RiskVerdict::RequireHardwareStepUp { risk_score, .. }
+            tara_security::zero_trust::RiskVerdict::RequireHardwareStepUp {
+                risk_score, ..
+            }
             | tara_security::zero_trust::RiskVerdict::RequireCreatorStepUp { risk_score, .. }
             | tara_security::zero_trust::RiskVerdict::TriggerLockdown { risk_score, .. } => {
                 assert!(risk_score >= 200);
@@ -1277,9 +1421,11 @@ mod tests {
 
     #[test]
     fn test_server_honeypot_trap_locks_down_system() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_honeypot_test_{}", rand::random::<u64>()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_honeypot_test_{}", rand::random::<u64>()));
         let _ = std::fs::create_dir_all(&temp_dir);
-        let brain = Arc::new(crate::brain::TaraBrain::new_with_root(temp_dir.to_str().unwrap()).unwrap());
+        let brain =
+            Arc::new(crate::brain::TaraBrain::new_with_root(temp_dir.to_str().unwrap()).unwrap());
         let web_sessions = WebSessionStore::new();
         let api_keys = HashMap::new();
 
@@ -1292,12 +1438,25 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert("authorization".into(), "Bearer decoy_token_trap_xyz".into());
 
-        let res = authenticate_request(&headers, &api_keys, &brain, &web_sessions, "POST", "/api/v1/test", "127.0.0.1");
+        let res = authenticate_request(
+            &headers,
+            &api_keys,
+            &brain,
+            &web_sessions,
+            "POST",
+            "/api/v1/test",
+            "127.0.0.1",
+        );
         assert!(res.is_err(), "Honeypot token must be rejected");
-        assert!(res.unwrap_err().contains("Honeypot decoy credential submitted"));
+        assert!(res
+            .unwrap_err()
+            .contains("Honeypot decoy credential submitted"));
 
         // Verify system lockdown fail-closed engaged
-        assert!(brain.is_system_locked_down(), "Containment must lock down the system");
+        assert!(
+            brain.is_system_locked_down(),
+            "Containment must lock down the system"
+        );
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
@@ -1340,7 +1499,9 @@ mod tests {
         )
         .unwrap();
 
-        let sec_state = SecurityState::Operational { generation: current_gen };
+        let sec_state = SecurityState::Operational {
+            generation: current_gen,
+        };
         let sec_action = SecurityAction::new("http", "GET").unwrap();
         let sec_resource = SecurityResource::custom("route", path).unwrap();
         let sec_context = SecurityContext::new("127.0.0.1", now_epoch);
@@ -1355,7 +1516,10 @@ mod tests {
         );
 
         // MUST be denied by Centralized Policy Engine (Explicit Deny for Anonymous on Admin)
-        assert!(authz_res.is_err(), "Anonymous must be denied access to admin endpoint by Centralized Policy");
+        assert!(
+            authz_res.is_err(),
+            "Anonymous must be denied access to admin endpoint by Centralized Policy"
+        );
 
         // Simulate the dispatch loop: if policy authorization fails, handler MUST NOT be called!
         if authz_res.is_ok() {
@@ -1372,7 +1536,11 @@ mod tests {
         }
 
         // Verify that handler was NOT invoked
-        assert_eq!(call_count.load(Ordering::SeqCst), 0, "Handler must NEVER be executed when policy denies");
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            0,
+            "Handler must NEVER be executed when policy denies"
+        );
     }
 
     #[test]
@@ -1411,8 +1579,14 @@ mod tests {
             session_id: None,
         };
 
-        let result = brain.enforcement_gateway.evaluate_and_enforce(op_req, |_p, _r| Ok("HANDLER_EXECUTED"));
-        assert_eq!(result.unwrap(), "HANDLER_EXECUTED", "EnforcementGateway must approve authorized operator");
+        let result = brain
+            .enforcement_gateway
+            .evaluate_and_enforce(op_req, |_p, _r| Ok("HANDLER_EXECUTED"));
+        assert_eq!(
+            result.unwrap(),
+            "HANDLER_EXECUTED",
+            "EnforcementGateway must approve authorized operator"
+        );
         assert_eq!(
             brain.transparency_tree.leaf_count(),
             initial_merkle_leaf_count + 1,
@@ -1441,8 +1615,13 @@ mod tests {
             session_id: None,
         };
 
-        let denied_result = brain.enforcement_gateway.evaluate_and_enforce(denied_req, |_p, _r| Ok("SHOULD_NOT_EXECUTE"));
-        assert!(denied_result.is_err(), "EnforcementGateway must fail closed on anonymous access to admin route");
+        let denied_result = brain
+            .enforcement_gateway
+            .evaluate_and_enforce(denied_req, |_p, _r| Ok("SHOULD_NOT_EXECUTE"));
+        assert!(
+            denied_result.is_err(),
+            "EnforcementGateway must fail closed on anonymous access to admin route"
+        );
     }
 
     #[test]
@@ -1456,27 +1635,32 @@ mod tests {
 
         use ed25519_dalek::Signer;
 
-        let (signing_key, verifying_key) = tara_security::cryptography::CryptoUtils::generate_ed25519_keypair();
+        let (signing_key, verifying_key) =
+            tara_security::cryptography::CryptoUtils::generate_ed25519_keypair();
         let cred_id = vec![0x11, 0x22, 0x33, 0x44];
 
         // Authoritatively register credential in passkey_verifier with cryptographic verification
         let cred_hex = hex::encode(&cred_id);
-        brain.passkey_verifier.register_credential(tara_security::hardware_root::EnrolledBiometricCredential {
-            credential_id: cred_hex,
-            creator_id: "creator_root".to_string(),
-            public_key_bytes: verifying_key.to_bytes().to_vec(),
-            enrolled_at: now_epoch,
-            authenticator_type: tara_security::hardware_root::PlatformAuthenticatorType::default(),
-            attestation_statement_hash: String::new(),
-            require_hardware_authenticator: false,
-            require_biometric_modality: false,
-            attestation_format: "none".to_string(),
-            aaguid: "00000000-0000-0000-0000-000000000000".to_string(),
-            raw_attestation_object: Vec::new(),
-            attestation_certificate_der: Vec::new(),
-            client_data_hash: [0u8; 32],
-            raw_client_data_json: Vec::new(),
-        }).unwrap();
+        brain
+            .passkey_verifier
+            .register_credential(tara_security::hardware_root::EnrolledBiometricCredential {
+                credential_id: cred_hex,
+                creator_id: "creator_root".to_string(),
+                public_key_bytes: verifying_key.to_bytes().to_vec(),
+                enrolled_at: now_epoch,
+                authenticator_type:
+                    tara_security::hardware_root::PlatformAuthenticatorType::default(),
+                attestation_statement_hash: String::new(),
+                require_hardware_authenticator: false,
+                require_biometric_modality: false,
+                attestation_format: "none".to_string(),
+                aaguid: "00000000-0000-0000-0000-000000000000".to_string(),
+                raw_attestation_object: Vec::new(),
+                attestation_certificate_der: Vec::new(),
+                client_data_hash: [0u8; 32],
+                raw_client_data_json: Vec::new(),
+            })
+            .unwrap();
 
         // Build authentic WebAuthn authenticator_data with UP (0x01), UV (0x04), and AT (0x40) set
         let mut auth_data = vec![0u8; 37];
@@ -1509,15 +1693,27 @@ mod tests {
             signature: signature.clone(),
         };
 
-        let principal_res = brain.centralized_identity_registry.verify(&valid_proof, current_gen, now_epoch);
-        assert!(principal_res.is_ok(), "Centralized identity registry must verify valid PasskeyAssertion: {:?}", principal_res.err());
+        let principal_res =
+            brain
+                .centralized_identity_registry
+                .verify(&valid_proof, current_gen, now_epoch);
+        assert!(
+            principal_res.is_ok(),
+            "Centralized identity registry must verify valid PasskeyAssertion: {:?}",
+            principal_res.err()
+        );
         let principal = principal_res.unwrap();
-        assert_eq!(principal.assurance_level(), AssuranceLevel::CREATOR_ROOT, "User-verified passkey must yield CREATOR_ROOT");
+        assert_eq!(
+            principal.assurance_level(),
+            AssuranceLevel::CREATOR_ROOT,
+            "User-verified passkey must yield CREATOR_ROOT"
+        );
         assert_eq!(principal.role(), &PrincipalRole::creator());
 
         // Test fail-closed rejection: Authenticator data lacking UV flag (biometrics not verified)
         let non_uv_client_data_json = br#"{"type":"webauthn.get","challenge":"test_challenge_nonce_2","origin":"https://localhost:7070"}"#;
-        let non_uv_client_data_hash = tara_security::cryptography::CryptoUtils::sha256(non_uv_client_data_json);
+        let non_uv_client_data_hash =
+            tara_security::cryptography::CryptoUtils::sha256(non_uv_client_data_json);
 
         let mut non_uv_auth_data = auth_data;
         non_uv_auth_data[32] = 0x41; // UP (0x01) | AT (0x40), UV missing
@@ -1532,11 +1728,17 @@ mod tests {
             client_data_json: non_uv_client_data_json.to_vec(),
             signature: non_uv_signature,
         };
-        let non_uv_res = brain.centralized_identity_registry.verify(&non_uv_proof, current_gen, now_epoch);
+        let non_uv_res =
+            brain
+                .centralized_identity_registry
+                .verify(&non_uv_proof, current_gen, now_epoch);
         assert!(non_uv_res.is_ok());
         let non_uv_principal = non_uv_res.unwrap();
         // Without UV, assurance is reduced to HARDWARE_ATTESTED, NOT CREATOR_ROOT, and role is operator
-        assert_eq!(non_uv_principal.assurance_level(), AssuranceLevel::HARDWARE_ATTESTED);
+        assert_eq!(
+            non_uv_principal.assurance_level(),
+            AssuranceLevel::HARDWARE_ATTESTED
+        );
         assert_eq!(non_uv_principal.role(), &PrincipalRole::operator());
 
         // Test fail-closed rejection: Truncated authenticator data (<37 bytes)
@@ -1546,8 +1748,14 @@ mod tests {
             client_data_json: client_data_json.to_vec(),
             signature: vec![1, 2, 3],
         };
-        let rej = brain.centralized_identity_registry.verify(&truncated_proof, current_gen, now_epoch);
-        assert!(rej.is_err(), "Truncated authenticator data must fail closed");
+        let rej =
+            brain
+                .centralized_identity_registry
+                .verify(&truncated_proof, current_gen, now_epoch);
+        assert!(
+            rej.is_err(),
+            "Truncated authenticator data must fail closed"
+        );
     }
 
     #[test]
@@ -1561,7 +1769,9 @@ mod tests {
 
         // Generate an authentic Ed25519 device keypair
         let keypair = tara_security::devices::DeviceCrypto::generate_device_keypair();
-        let dev_id_str = tara_security::devices::DeviceCrypto::derive_device_id(&keypair.public_key_hex).unwrap();
+        let dev_id_str =
+            tara_security::devices::DeviceCrypto::derive_device_id(&keypair.public_key_hex)
+                .unwrap();
         let dev_id = tara_security::primitives::DeviceId::new(&dev_id_str).unwrap();
 
         // Enroll device into centralized_device_registry
@@ -1572,11 +1782,21 @@ mod tests {
             bound_principal_id: PrincipalId::new("creator_root_operator").unwrap(),
             is_revoked: false,
         };
-        brain.centralized_device_registry.enroll_device(enroll_rec).unwrap();
+        brain
+            .centralized_device_registry
+            .enroll_device(enroll_rec)
+            .unwrap();
 
         // Issue and sign challenge nonce
-        let nonce = brain.centralized_identity_registry.create_challenge_nonce("device_signature", 300).unwrap();
-        let sig_hex = tara_security::devices::DeviceCrypto::sign_message(keypair.private_key_hex(), nonce.as_bytes()).unwrap();
+        let nonce = brain
+            .centralized_identity_registry
+            .create_challenge_nonce("device_signature", 300)
+            .unwrap();
+        let sig_hex = tara_security::devices::DeviceCrypto::sign_message(
+            keypair.private_key_hex(),
+            nonce.as_bytes(),
+        )
+        .unwrap();
         let sig_bytes = hex::decode(sig_hex).unwrap();
 
         let device_proof = tara_security::zero_trust::IdentityProof::DeviceSignature {
@@ -1585,29 +1805,54 @@ mod tests {
             signature: sig_bytes,
         };
 
-        let verified_principal = brain.centralized_identity_registry.verify(&device_proof, current_gen, now_epoch).unwrap();
-        assert_eq!(verified_principal.assurance_level(), AssuranceLevel::HARDWARE_ATTESTED);
+        let verified_principal = brain
+            .centralized_identity_registry
+            .verify(&device_proof, current_gen, now_epoch)
+            .unwrap();
+        assert_eq!(
+            verified_principal.assurance_level(),
+            AssuranceLevel::HARDWARE_ATTESTED
+        );
         assert_eq!(verified_principal.bound_device(), Some(&dev_id));
 
         // Revoke device and verify fail-closed with a fresh challenge
-        brain.centralized_device_registry.revoke_device(&dev_id).unwrap();
-        let fresh_nonce = brain.centralized_identity_registry.create_challenge_nonce("device_signature", 300).unwrap();
-        let fresh_sig_hex = tara_security::devices::DeviceCrypto::sign_message(keypair.private_key_hex(), fresh_nonce.as_bytes()).unwrap();
+        brain
+            .centralized_device_registry
+            .revoke_device(&dev_id)
+            .unwrap();
+        let fresh_nonce = brain
+            .centralized_identity_registry
+            .create_challenge_nonce("device_signature", 300)
+            .unwrap();
+        let fresh_sig_hex = tara_security::devices::DeviceCrypto::sign_message(
+            keypair.private_key_hex(),
+            fresh_nonce.as_bytes(),
+        )
+        .unwrap();
         let fresh_sig_bytes = hex::decode(fresh_sig_hex).unwrap();
         let revoked_device_proof = tara_security::zero_trust::IdentityProof::DeviceSignature {
             device_id: dev_id.clone(),
             challenge_nonce: fresh_nonce,
             signature: fresh_sig_bytes,
         };
-        let revoked_res = brain.centralized_identity_registry.verify(&revoked_device_proof, current_gen, now_epoch);
-        assert!(revoked_res.is_err(), "Revoked device signature must be rejected");
+        let revoked_res = brain.centralized_identity_registry.verify(
+            &revoked_device_proof,
+            current_gen,
+            now_epoch,
+        );
+        assert!(
+            revoked_res.is_err(),
+            "Revoked device signature must be rejected"
+        );
     }
 
     #[test]
     fn test_server_web_session_revocation_enforced() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_web_rev_test_{}", rand::random::<u64>()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_web_rev_test_{}", rand::random::<u64>()));
         let _ = std::fs::create_dir_all(&temp_dir);
-        let brain = Arc::new(crate::brain::TaraBrain::new_with_root(temp_dir.to_str().unwrap()).unwrap());
+        let brain =
+            Arc::new(crate::brain::TaraBrain::new_with_root(temp_dir.to_str().unwrap()).unwrap());
         let web_sessions = WebSessionStore::new();
         let api_keys = HashMap::new();
 
@@ -1617,18 +1862,46 @@ mod tests {
         // 1. Before revocation, session authenticates successfully
         let mut headers = HashMap::new();
         headers.insert("cookie".into(), format!("tara_web_session={}", token));
-        let res = authenticate_request(&headers, &api_keys, &brain, &web_sessions, "POST", "/api/v1/test", "127.0.0.1");
-        assert!(res.is_ok(), "Web session must authenticate successfully before revocation");
+        let res = authenticate_request(
+            &headers,
+            &api_keys,
+            &brain,
+            &web_sessions,
+            "POST",
+            "/api/v1/test",
+            "127.0.0.1",
+        );
+        assert!(
+            res.is_ok(),
+            "Web session must authenticate successfully before revocation"
+        );
         assert_eq!(res.unwrap(), "creator:test_creator_actor");
 
         // 2. Revoke the creator principal in CentralizedSessionManager
         let pid = PrincipalId::with_namespace("creator", "test_creator_actor").unwrap();
-        assert!(brain.centralized_session_manager.revoke_principal(&pid).is_ok());
+        assert!(brain
+            .centralized_session_manager
+            .revoke_principal(&pid)
+            .is_ok());
 
         // 3. After revocation, session must immediately fail closed with WebSessionRevoked
-        let res_revoked = authenticate_request(&headers, &api_keys, &brain, &web_sessions, "POST", "/api/v1/test", "127.0.0.1");
-        assert!(res_revoked.is_err(), "Revoked principal web session must fail closed");
-        assert!(res_revoked.unwrap_err().contains("WebSessionRevoked"), "Error must indicate principal revocation");
+        let res_revoked = authenticate_request(
+            &headers,
+            &api_keys,
+            &brain,
+            &web_sessions,
+            "POST",
+            "/api/v1/test",
+            "127.0.0.1",
+        );
+        assert!(
+            res_revoked.is_err(),
+            "Revoked principal web session must fail closed"
+        );
+        assert!(
+            res_revoked.unwrap_err().contains("WebSessionRevoked"),
+            "Error must indicate principal revocation"
+        );
 
         // Cleanup test directory post-test
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -1636,9 +1909,11 @@ mod tests {
 
     #[test]
     fn test_server_authenticate_client_ip_risk_isolation() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_ip_risk_test_{}", rand::random::<u64>()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_ip_risk_test_{}", rand::random::<u64>()));
         let _ = std::fs::create_dir_all(&temp_dir);
-        let brain = Arc::new(crate::brain::TaraBrain::new_with_root(temp_dir.to_str().unwrap()).unwrap());
+        let brain =
+            Arc::new(crate::brain::TaraBrain::new_with_root(temp_dir.to_str().unwrap()).unwrap());
         let web_sessions = WebSessionStore::new();
         let api_keys = HashMap::new();
 
@@ -1648,7 +1923,15 @@ mod tests {
         headers.insert("x-forwarded-for".into(), "203.0.113.199".into());
 
         let actual_ip = "198.51.100.5";
-        let res = authenticate_request(&headers, &api_keys, &brain, &web_sessions, "POST", "/api/v1/test", actual_ip);
+        let res = authenticate_request(
+            &headers,
+            &api_keys,
+            &brain,
+            &web_sessions,
+            "POST",
+            "/api/v1/test",
+            actual_ip,
+        );
         assert!(res.is_err());
 
         // Verify failure was attributed strictly to actual_ip, NOT spoofed x-forwarded-for header
@@ -1657,15 +1940,24 @@ mod tests {
         let action = SecurityAction::execute_task();
         let context = SecurityContext::new(actual_ip, 1700000000);
 
-        let actual_verdict = brain.centralized_risk_engine.evaluate_risk(&actual_pid, &action, &context).unwrap();
-        let spoofed_verdict = brain.centralized_risk_engine.evaluate_risk(&spoofed_pid, &action, &context).unwrap();
+        let actual_verdict = brain
+            .centralized_risk_engine
+            .evaluate_risk(&actual_pid, &action, &context)
+            .unwrap();
+        let spoofed_verdict = brain
+            .centralized_risk_engine
+            .evaluate_risk(&spoofed_pid, &action, &context)
+            .unwrap();
 
         if let tara_security::zero_trust::RiskVerdict::Accept { risk_score } = actual_verdict {
             assert!(risk_score >= 200, "Actual IP must receive risk penalty");
         }
         match spoofed_verdict {
             tara_security::zero_trust::RiskVerdict::Accept { risk_score } => {
-                assert_eq!(risk_score, 0, "Spoofed victim IP must NOT receive risk penalty");
+                assert_eq!(
+                    risk_score, 0,
+                    "Spoofed victim IP must NOT receive risk penalty"
+                );
             }
             _ => panic!("Spoofed IP should not have any risk score"),
         }
@@ -1676,9 +1968,11 @@ mod tests {
 
     #[test]
     fn test_unauthenticated_ip_dos_does_not_trigger_global_lockdown() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_dos_isolation_test_{}", rand::random::<u64>()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_dos_isolation_test_{}", rand::random::<u64>()));
         let _ = std::fs::create_dir_all(&temp_dir);
-        let brain = Arc::new(crate::brain::TaraBrain::new_with_root(temp_dir.to_str().unwrap()).unwrap());
+        let brain =
+            Arc::new(crate::brain::TaraBrain::new_with_root(temp_dir.to_str().unwrap()).unwrap());
 
         // Initialize authority manager root ceremony so authority is in Operational state
         let creator_id = tara_security::primitives::PrincipalId::new("creator_test_root").unwrap();
@@ -1699,20 +1993,48 @@ mod tests {
 
         // Repeatedly send invalid credentials from attacker IP to trigger high risk
         for _ in 0..15 {
-            let res = authenticate_request(&bad_headers, &api_keys, &brain, &web_sessions, "POST", "/api/v1/test", attacker_ip);
+            let res = authenticate_request(
+                &bad_headers,
+                &api_keys,
+                &brain,
+                &web_sessions,
+                "POST",
+                "/api/v1/test",
+                attacker_ip,
+            );
             assert!(res.is_err(), "Invalid token requests must fail");
         }
 
         // Verify attacker IP fails, but authority manager and lockdown coordinator are NOT locked down
-        assert!(!brain.lockdown_coordinator.is_locked_down(), "Lockdown coordinator must remain active and not triggered by remote attacker IP");
-        assert!(!brain.authority_manager.is_locked_down(), "Authority manager must remain active and not triggered by remote attacker IP");
-        assert!(!brain.tripwire_defense.is_contained(), "Tripwire defense must not be contained");
+        assert!(
+            !brain.lockdown_coordinator.is_locked_down(),
+            "Lockdown coordinator must remain active and not triggered by remote attacker IP"
+        );
+        assert!(
+            !brain.authority_manager.is_locked_down(),
+            "Authority manager must remain active and not triggered by remote attacker IP"
+        );
+        assert!(
+            !brain.tripwire_defense.is_contained(),
+            "Tripwire defense must not be contained"
+        );
 
         // Verify valid authenticated user can still authenticate successfully
         let mut good_headers = HashMap::new();
         good_headers.insert("authorization".into(), "Bearer valid_creator_key".into());
-        let good_res = authenticate_request(&good_headers, &api_keys, &brain, &web_sessions, "POST", "/api/v1/test", "127.0.0.1");
-        assert!(good_res.is_ok(), "Legitimate authenticated requests must still succeed");
+        let good_res = authenticate_request(
+            &good_headers,
+            &api_keys,
+            &brain,
+            &web_sessions,
+            "POST",
+            "/api/v1/test",
+            "127.0.0.1",
+        );
+        assert!(
+            good_res.is_ok(),
+            "Legitimate authenticated requests must still succeed"
+        );
     }
 
     #[test]
@@ -1725,8 +2047,20 @@ mod tests {
         // Parse query with Kannada key and value
         let url = "/api/v1/chat?query=%E0%B2%A8%E0%B2%AE%E0%B2%B8%E0%B3%8D%E0%B2%95%E0%B2%BE%E0%B2%B0&lang=%E0%B2%95%E0%B2%A8%E0%B3%8D%E0%B2%A8%E0%B2%A1";
         let params = parse_query(url);
-        assert_eq!(params.get("query").and_then(|v| v.first()).map(|s| s.as_str()), Some("ನಮಸ್ಕಾರ"));
-        assert_eq!(params.get("lang").and_then(|v| v.first()).map(|s| s.as_str()), Some("ಕನ್ನಡ"));
+        assert_eq!(
+            params
+                .get("query")
+                .and_then(|v| v.first())
+                .map(|s| s.as_str()),
+            Some("ನಮಸ್ಕಾರ")
+        );
+        assert_eq!(
+            params
+                .get("lang")
+                .and_then(|v| v.first())
+                .map(|s| s.as_str()),
+            Some("ಕನ್ನಡ")
+        );
     }
 
     #[test]
@@ -1739,15 +2073,29 @@ mod tests {
         // Test with uppercase 'Bearer '
         let mut headers_upper = HashMap::new();
         headers_upper.insert("authorization".into(), "Bearer test_key".into());
-        let res_upper = authenticate_request(&headers_upper, &api_keys, &brain, &web_sessions, "POST", "/api/v1/test", "127.0.0.1");
+        let res_upper = authenticate_request(
+            &headers_upper,
+            &api_keys,
+            &brain,
+            &web_sessions,
+            "POST",
+            "/api/v1/test",
+            "127.0.0.1",
+        );
         assert_eq!(res_upper.unwrap(), "api_key:operator:bob");
 
         // Test with lowercase 'bearer '
         let mut headers_lower = HashMap::new();
         headers_lower.insert("authorization".into(), "bearer test_key".into());
-        let res_lower = authenticate_request(&headers_lower, &api_keys, &brain, &web_sessions, "POST", "/api/v1/test", "127.0.0.1");
+        let res_lower = authenticate_request(
+            &headers_lower,
+            &api_keys,
+            &brain,
+            &web_sessions,
+            "POST",
+            "/api/v1/test",
+            "127.0.0.1",
+        );
         assert_eq!(res_lower.unwrap(), "api_key:operator:bob");
     }
 }
-
-

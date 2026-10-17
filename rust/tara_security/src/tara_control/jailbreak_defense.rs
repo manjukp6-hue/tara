@@ -186,7 +186,11 @@ impl JailbreakDefenseEngine {
         // 5. Homoglyph Obfuscation
         if normalized != input {
             let non_ascii_count = input.chars().filter(|c| !c.is_ascii()).count();
-            if non_ascii_count > 3 && (lower.contains("ignore") || lower.contains("prompt") || lower.contains("bypass")) {
+            if non_ascii_count > 3
+                && (lower.contains("ignore")
+                    || lower.contains("prompt")
+                    || lower.contains("bypass"))
+            {
                 detected.push(AttackVector::HomoglyphObfuscation);
                 total_score += 0.70;
             }
@@ -275,7 +279,11 @@ impl JailbreakDefenseEngine {
             "Input verified clean of recognized adversarial attack vectors".to_string()
         } else {
             let names: Vec<&str> = detected.iter().map(|v| v.name()).collect();
-            format!("Adversarial threat detected: [{}] (score: {:.2})", names.join(", "), final_score)
+            format!(
+                "Adversarial threat detected: [{}] (score: {:.2})",
+                names.join(", "),
+                final_score
+            )
         };
 
         JailbreakVerdict {

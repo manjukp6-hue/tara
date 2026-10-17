@@ -18,11 +18,11 @@ pub mod vocab_builder;
 
 pub use classifier::*;
 pub use compiler::{compile_unified_dataset, DynamicDatasetCompiler};
-pub use sharder::{get_target_shard_bytes, ShardWriter};
 pub use reader::{
     DatasetStreamLifecycle, ExpandableDatasetReader, MalformedRecordPolicy, ReaderError,
     ReaderTelemetry, ShardAvailability, ShardStreamingMode, TrainingSample,
 };
+pub use sharder::{get_target_shard_bytes, ShardWriter};
 pub use splitter::{
     compute_file_sha256, DatasetSplitter, LeakageChecker, SplitRatio, SplitReport, SplitterError,
 };

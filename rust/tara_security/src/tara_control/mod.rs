@@ -91,7 +91,8 @@ impl TARAControlledSecurity {
         let jailbreak_defense = Arc::new(JailbreakDefenseEngine::new());
         let secret_scanner = Arc::new(SecretLeakScanner::new());
         let model_integrity = Arc::new(ModelIntegrityGuard::new());
-        let tamper_sentinel = Arc::new(RuntimeTamperSentinel::new(repo_root).with_authority(authority.clone()));
+        let tamper_sentinel =
+            Arc::new(RuntimeTamperSentinel::new(repo_root).with_authority(authority.clone()));
         let provenance_guard = Arc::new(ProvenanceLedgerGuard::new());
         let goal_gating = Arc::new(AutonomousGoalGating::new(authority, gateway.clone()));
 
@@ -181,7 +182,8 @@ impl TARAControlledSecurity {
         content: &[u8],
         epoch_secs: u64,
     ) -> Result<QuarantineRecord, String> {
-        self.quarantine.evaluate_artifact(artifact_name, artifact_type, content, epoch_secs)
+        self.quarantine
+            .evaluate_artifact(artifact_name, artifact_type, content, epoch_secs)
     }
 
     /// Scans a prompt or tool parameter against 14 adversarial prompt injection vectors.
@@ -196,6 +198,7 @@ impl TARAControlledSecurity {
 
     /// Asserts that a license is fully compliant with commercial and permissive criteria (commercial use, adaptation, redistribution rights).
     pub fn assert_license_compliant(&self, license_text: &str) -> Result<SpdxLicenseInfo, String> {
-        self.provenance_guard.assert_ingestion_compliant(license_text)
+        self.provenance_guard
+            .assert_ingestion_compliant(license_text)
     }
 }

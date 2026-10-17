@@ -171,7 +171,10 @@ pub fn save_screenshot_file(
     out_path: &Path,
     region: Option<(i32, i32, u32, u32)>,
 ) -> Result<PathBuf, String> {
-    if out_path.components().any(|c| c == std::path::Component::ParentDir) {
+    if out_path
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
         return Err("Parent directory traversal (..) is not allowed in out_path".to_string());
     }
 
@@ -292,7 +295,10 @@ pub fn synthesize_speech(
         }
     }
 
-    if !voice.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ' ')) {
+    if !voice
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ' '))
+    {
         return Err("Voice identifier contains invalid characters".to_string());
     }
 

@@ -40,8 +40,8 @@ impl RecoveryAuthorizationProof {
         expires_at: u64,
         nonce: &str,
     ) -> String {
-        let mut signer = crate::cryptography::HmacSha256Signer::new(secret_key)
-            .expect("HMAC accepts key");
+        let mut signer =
+            crate::cryptography::HmacSha256Signer::new(secret_key).expect("HMAC accepts key");
         signer.update(proof_id.as_bytes());
         signer.update(b":");
         signer.update(creator_id.as_bytes());
@@ -129,7 +129,9 @@ impl RecoveryManager {
         let now = Self::now_secs();
         if path.exists() {
             if let Ok(data) = fs::read(path) {
-                if let Ok(mut proofs) = serde_json::from_slice::<HashMap<String, RecoveryAuthorizationProof>>(&data) {
+                if let Ok(mut proofs) =
+                    serde_json::from_slice::<HashMap<String, RecoveryAuthorizationProof>>(&data)
+                {
                     proofs.retain(|_, p| p.expires_at > now);
                     return proofs;
                 }
@@ -163,12 +165,14 @@ impl RecoveryManager {
 
         // Deletion attack defense: if established vault security exists but lockout state was deleted, fail closed
         if let Some(parent) = path.parent() {
-            let watermark_path = crate::dpapi::get_os_isolated_watermark_path("creator_authority_initialized");
-            let was_previously_initialized = crate::dpapi::load_monotonic_watermark(&watermark_path)
-                .ok()
-                .flatten()
-                .map(|val| val > 0)
-                .unwrap_or(false);
+            let watermark_path =
+                crate::dpapi::get_os_isolated_watermark_path("creator_authority_initialized");
+            let was_previously_initialized =
+                crate::dpapi::load_monotonic_watermark(&watermark_path)
+                    .ok()
+                    .flatten()
+                    .map(|val| val > 0)
+                    .unwrap_or(false);
 
             let has_established = was_previously_initialized
                 || parent.join("recovery_master_key.bin").exists()
@@ -210,7 +214,11 @@ impl RecoveryManager {
 
     pub fn from_base_dir<P: AsRef<Path>>(base_dir: P) -> Self {
         let dir = base_dir.as_ref().to_path_buf();
-        let key_file = dir.join("storage").join("vault").join("access").join("recovery_master_key.bin");
+        let key_file = dir
+            .join("storage")
+            .join("vault")
+            .join("access")
+            .join("recovery_master_key.bin");
         let protect_master_key = |k: &[u8; 32]| -> Vec<u8> {
             #[cfg(windows)]
             {
@@ -263,7 +271,11 @@ impl RecoveryManager {
             rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut k);
             let to_write = protect_master_key(&k);
             let _ = crate::persistence::atomic_write_file_hardened(&key_file, &to_write);
-            let lockout_file = dir.join("storage").join("vault").join("access").join("recovery_lockout.json");
+            let lockout_file = dir
+                .join("storage")
+                .join("vault")
+                .join("access")
+                .join("recovery_lockout.json");
             let mut initial_lockout = RecoveryLockoutState {
                 failure_count: 0,
                 lockout_until: None,
@@ -304,7 +316,10 @@ impl RecoveryManager {
     }
 
     pub fn record_failure(&self) -> Result<(), String> {
-        let mut guard = self.lockout_state.lock().map_err(|_| "Lockout state poisoned")?;
+        let mut guard = self
+            .lockout_state
+            .lock()
+            .map_err(|_| "Lockout state poisoned")?;
         guard.failure_count = guard.failure_count.saturating_add(1);
 
         let now = Self::now_secs();
@@ -319,7 +334,10 @@ impl RecoveryManager {
     }
 
     pub fn record_success(&self) -> Result<(), String> {
-        let mut guard = self.lockout_state.lock().map_err(|_| "Lockout state poisoned")?;
+        let mut guard = self
+            .lockout_state
+            .lock()
+            .map_err(|_| "Lockout state poisoned")?;
         guard.failure_count = 0;
         guard.lockout_until = None;
         self.persist_lockout(&guard);
@@ -351,7 +369,9 @@ impl RecoveryManager {
 
         if !constant_time_eq(&candidate_hash, expected_hash) {
             let _ = self.record_failure();
-            return Err("RecoveryProofRejected: Invalid recovery secret authentication material".into());
+            return Err(
+                "RecoveryProofRejected: Invalid recovery secret authentication material".into(),
+            );
         }
 
         let now = Self::now_secs();
@@ -378,7 +398,10 @@ impl RecoveryManager {
             proof_sig,
         };
 
-        let mut proofs = self.active_proofs.lock().map_err(|_| "Proofs mutex poisoned")?;
+        let mut proofs = self
+            .active_proofs
+            .lock()
+            .map_err(|_| "Proofs mutex poisoned")?;
         proofs.retain(|_, p| p.expires_at > now);
         proofs.insert(proof_id, proof.clone());
         self.persist_active_proofs(&proofs);
@@ -388,7 +411,10 @@ impl RecoveryManager {
     }
 
     pub fn consume_proof(&self, proof_id: &str) -> Result<RecoveryAuthorizationProof, String> {
-        let mut proofs = self.active_proofs.lock().map_err(|_| "Proofs mutex poisoned")?;
+        let mut proofs = self
+            .active_proofs
+            .lock()
+            .map_err(|_| "Proofs mutex poisoned")?;
         let proof = match proofs.remove(proof_id) {
             Some(p) => {
                 self.persist_active_proofs(&proofs);
@@ -396,7 +422,10 @@ impl RecoveryManager {
             }
             None => {
                 let _ = self.record_failure();
-                return Err("RecoveryProofRejected: Proof ID not found or already consumed (anti-replay)".to_string());
+                return Err(
+                    "RecoveryProofRejected: Proof ID not found or already consumed (anti-replay)"
+                        .to_string(),
+                );
             }
         };
 
@@ -408,7 +437,9 @@ impl RecoveryManager {
 
         if !proof.verify_signature(&self.secret_key) {
             let _ = self.record_failure();
-            return Err("RecoveryProofRejected: Proof cryptographic signature verification failed".into());
+            return Err(
+                "RecoveryProofRejected: Proof cryptographic signature verification failed".into(),
+            );
         }
 
         Ok(proof)
@@ -416,13 +447,9 @@ impl RecoveryManager {
 }
 
 /// Derives a PBKDF2-HMAC-SHA256 hash using the specified salt and iteration count.
-pub fn pbkdf2_hmac_sha256(
-    password: &[u8],
-    salt: &[u8],
-    iterations: u32,
-    output: &mut [u8; 32],
-) {
-    let mut signer = crate::cryptography::HmacSha256Signer::new(password).expect("HMAC accepts key");
+pub fn pbkdf2_hmac_sha256(password: &[u8], salt: &[u8], iterations: u32, output: &mut [u8; 32]) {
+    let mut signer =
+        crate::cryptography::HmacSha256Signer::new(password).expect("HMAC accepts key");
     signer.update(salt);
     signer.update(&1u32.to_be_bytes());
     let mut u = signer.finalize();
@@ -443,17 +470,25 @@ mod tests {
 
     #[test]
     fn test_recovery_proof_consumption_failure_increments_lockout() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_rec_test_{}", rand::random::<u64>()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_rec_test_{}", rand::random::<u64>()));
         let _ = std::fs::create_dir_all(&temp_dir);
 
         let manager = RecoveryManager::from_base_dir(&temp_dir);
-        assert!(!manager.is_locked_out(), "New manager must not be locked out");
+        assert!(
+            !manager.is_locked_out(),
+            "New manager must not be locked out"
+        );
         assert_eq!(manager.failure_count(), 0);
 
         // 1. Non-existent proof ID consumption fails and increments failure counter
         let res = manager.consume_proof("non_existent_proof_id");
         assert!(res.is_err());
-        assert_eq!(manager.failure_count(), 1, "Failure counter must increment on missing proof");
+        assert_eq!(
+            manager.failure_count(),
+            1,
+            "Failure counter must increment on missing proof"
+        );
 
         // 2. Consume with another bad proof increments to 2
         let res2 = manager.consume_proof("another_bad_proof");
@@ -464,12 +499,22 @@ mod tests {
         let res3 = manager.consume_proof("third_bad_proof");
         assert!(res3.is_err());
         assert_eq!(manager.failure_count(), 3);
-        assert!(manager.is_locked_out(), "Manager must be locked out after reaching max attempts");
+        assert!(
+            manager.is_locked_out(),
+            "Manager must be locked out after reaching max attempts"
+        );
 
         // 4. Persistence across restart: create a new RecoveryManager instance pointing to same storage
         let manager2 = RecoveryManager::from_base_dir(&temp_dir);
-        assert!(manager2.is_locked_out(), "Lockout state must persist across manager restart");
-        assert_eq!(manager2.failure_count(), 3, "Failure count must survive restart");
+        assert!(
+            manager2.is_locked_out(),
+            "Lockout state must persist across manager restart"
+        );
+        assert_eq!(
+            manager2.failure_count(),
+            3,
+            "Failure count must survive restart"
+        );
 
         // Cleanup test directory post-test
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -477,7 +522,8 @@ mod tests {
 
     #[test]
     fn test_issue_verified_proof_and_active_proof_persistence() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_rec_proof_test_{}", rand::random::<u64>()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_rec_proof_test_{}", rand::random::<u64>()));
         let _ = std::fs::create_dir_all(&temp_dir);
 
         let manager = RecoveryManager::from_base_dir(&temp_dir);
@@ -499,19 +545,23 @@ mod tests {
         assert_eq!(manager.failure_count(), 1);
 
         // 2. Valid secret issues verified proof
-        let proof = manager.issue_verified_proof(
-            CANONICAL_CREATOR_ID,
-            "scrypt_code",
-            secret,
-            salt,
-            &expected_hash,
-            300,
-        ).expect("Valid secret must issue recovery proof");
+        let proof = manager
+            .issue_verified_proof(
+                CANONICAL_CREATOR_ID,
+                "scrypt_code",
+                secret,
+                salt,
+                &expected_hash,
+                300,
+            )
+            .expect("Valid secret must issue recovery proof");
         assert_eq!(manager.failure_count(), 0);
 
         // 3. Persistence across restart: new manager instance loads active proof
         let manager2 = RecoveryManager::from_base_dir(&temp_dir);
-        let consumed = manager2.consume_proof(&proof.proof_id).expect("Active proof must persist across restart");
+        let consumed = manager2
+            .consume_proof(&proof.proof_id)
+            .expect("Active proof must persist across restart");
         assert_eq!(consumed.proof_id, proof.proof_id);
 
         // 4. Replay attack: consuming again must fail
@@ -524,7 +574,8 @@ mod tests {
 
     #[test]
     fn test_issue_verified_proof_prunes_expired() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_rec_prune_test_{}", rand::random::<u64>()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_rec_prune_test_{}", rand::random::<u64>()));
         let _ = std::fs::create_dir_all(&temp_dir);
 
         let manager = RecoveryManager::from_base_dir(&temp_dir);
@@ -549,20 +600,25 @@ mod tests {
         }
 
         // Issue a new proof with large TTL to test saturating_add and pruning
-        let proof = manager.issue_verified_proof(
-            CANONICAL_CREATOR_ID,
-            "scrypt_code",
-            secret,
-            salt,
-            &expected_hash,
-            u64::MAX, // Saturating add test
-        ).expect("Must issue proof with saturating TTL");
+        let proof = manager
+            .issue_verified_proof(
+                CANONICAL_CREATOR_ID,
+                "scrypt_code",
+                secret,
+                salt,
+                &expected_hash,
+                u64::MAX, // Saturating add test
+            )
+            .expect("Must issue proof with saturating TTL");
 
         assert_eq!(proof.expires_at, u64::MAX);
 
         // Verify expired proof was pruned from active_proofs
         let proofs = manager.active_proofs.lock().unwrap();
-        assert!(!proofs.contains_key("expired_proof_123"), "Expired proof must be pruned");
+        assert!(
+            !proofs.contains_key("expired_proof_123"),
+            "Expired proof must be pruned"
+        );
         assert!(proofs.contains_key(&proof.proof_id));
 
         drop(proofs);

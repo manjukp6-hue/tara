@@ -7,12 +7,14 @@
 //! - Strictly requires verified Creator-Root authorization through the Central Enforcement Gateway.
 //! - Strictly rejects path traversal attempts.
 
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 use crate::broker::{EnforcementGateway, EnforcementRequest, ProtectedCategory};
 use crate::path_security::check_lexical_traversal;
-use crate::primitives::{AssuranceLevel, SecurityAction, SecurityContext, SecurityResource, VerifiedPrincipal};
+use crate::primitives::{
+    AssuranceLevel, SecurityAction, SecurityContext, SecurityResource, VerifiedPrincipal,
+};
 
 /// Core Source Protector guarding critical project assets.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,7 +46,9 @@ impl SourceProtector {
     }
 
     pub fn with_protected_roots(roots: Vec<String>) -> Self {
-        Self { protected_roots: roots }
+        Self {
+            protected_roots: roots,
+        }
     }
 
     pub fn protected_roots(&self) -> &[String] {
@@ -97,8 +101,12 @@ impl SourceProtector {
         gateway: &EnforcementGateway,
     ) -> Result<PathBuf, String> {
         let path = Path::new(rel_path);
-        check_lexical_traversal(path)
-            .map_err(|e| format!("AccessDenied: Path traversal in '{}' is prohibited: {}", rel_path, e))?;
+        check_lexical_traversal(path).map_err(|e| {
+            format!(
+                "AccessDenied: Path traversal in '{}' is prohibited: {}",
+                rel_path, e
+            )
+        })?;
 
         let is_protected = self.is_path_protected(rel_path);
 

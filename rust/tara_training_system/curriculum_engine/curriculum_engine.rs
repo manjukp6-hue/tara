@@ -147,7 +147,10 @@ impl CurriculumEngine {
         // 1. Auto-Order and Partition Neural Curriculum
         let (ordered_neural, neural_stages, avg_diff) = self.build_neural_curriculum(raw_neural);
         let (neural_count, neural_stages_len, neural_active) = {
-            let mut curr = self.neural_curriculum.write().unwrap_or_else(|p| p.into_inner());
+            let mut curr = self
+                .neural_curriculum
+                .write()
+                .unwrap_or_else(|p| p.into_inner());
             let prev_stage = curr.active_stage_index;
             curr.ordered_records = ordered_neural;
             curr.stages = neural_stages;
@@ -165,7 +168,10 @@ impl CurriculumEngine {
         // 2. Auto-Order and Partition World Model Curriculum
         let (ordered_world, world_stages, avg_conf) = self.build_world_curriculum(raw_world);
         let (world_count, world_stages_len, world_active) = {
-            let mut curr = self.world_curriculum.write().unwrap_or_else(|p| p.into_inner());
+            let mut curr = self
+                .world_curriculum
+                .write()
+                .unwrap_or_else(|p| p.into_inner());
             let prev_stage = curr.active_stage_index;
             curr.ordered_records = ordered_world;
             curr.stages = world_stages;
@@ -311,7 +317,10 @@ impl CurriculumEngine {
 
         match model_type {
             TargetModel::NeuralModel => {
-                let curr = self.neural_curriculum.read().unwrap_or_else(|p| p.into_inner());
+                let curr = self
+                    .neural_curriculum
+                    .read()
+                    .unwrap_or_else(|p| p.into_inner());
                 let (stage_idx, stage_name, samples) = self.sample_neural_batch(&curr, bsz);
                 CurriculumBatch {
                     stage_index: stage_idx,
@@ -322,7 +331,10 @@ impl CurriculumEngine {
                 }
             }
             TargetModel::WorldModel => {
-                let curr = self.world_curriculum.read().unwrap_or_else(|p| p.into_inner());
+                let curr = self
+                    .world_curriculum
+                    .read()
+                    .unwrap_or_else(|p| p.into_inner());
                 let (stage_idx, stage_name, samples) = self.sample_world_batch(&curr, bsz);
                 CurriculumBatch {
                     stage_index: stage_idx,
@@ -333,8 +345,14 @@ impl CurriculumEngine {
                 }
             }
             TargetModel::Both => {
-                let n_curr = self.neural_curriculum.read().unwrap_or_else(|p| p.into_inner());
-                let w_curr = self.world_curriculum.read().unwrap_or_else(|p| p.into_inner());
+                let n_curr = self
+                    .neural_curriculum
+                    .read()
+                    .unwrap_or_else(|p| p.into_inner());
+                let w_curr = self
+                    .world_curriculum
+                    .read()
+                    .unwrap_or_else(|p| p.into_inner());
                 let half_bsz = (bsz / 2).max(1);
                 let (n_stage, n_name, n_samples) = self.sample_neural_batch(&n_curr, half_bsz);
                 let (_, _, w_samples) = self.sample_world_batch(&w_curr, half_bsz);
@@ -455,7 +473,10 @@ impl CurriculumEngine {
     pub fn advance_stage(&self, model_type: TargetModel) -> bool {
         match model_type {
             TargetModel::NeuralModel => {
-                let mut curr = self.neural_curriculum.write().unwrap_or_else(|p| p.into_inner());
+                let mut curr = self
+                    .neural_curriculum
+                    .write()
+                    .unwrap_or_else(|p| p.into_inner());
                 if curr.active_stage_index + 1 < curr.stages.len() {
                     curr.active_stage_index += 1;
                     curr.stage_completion_progress = 0.0;
@@ -465,7 +486,10 @@ impl CurriculumEngine {
                 }
             }
             TargetModel::WorldModel => {
-                let mut curr = self.world_curriculum.write().unwrap_or_else(|p| p.into_inner());
+                let mut curr = self
+                    .world_curriculum
+                    .write()
+                    .unwrap_or_else(|p| p.into_inner());
                 if curr.active_stage_index + 1 < curr.stages.len() {
                     curr.active_stage_index += 1;
                     curr.stage_completion_progress = 0.0;
@@ -485,8 +509,14 @@ impl CurriculumEngine {
     /// Snapshot of current curriculum state.
     pub fn get_curriculum_snapshots(&self) -> (NeuralCurriculum, WorldModelCurriculum) {
         (
-            self.neural_curriculum.read().unwrap_or_else(|p| p.into_inner()).clone(),
-            self.world_curriculum.read().unwrap_or_else(|p| p.into_inner()).clone(),
+            self.neural_curriculum
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone(),
+            self.world_curriculum
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone(),
         )
     }
 }
@@ -499,7 +529,10 @@ mod tests {
     fn test_advance_stage_both_advances_both() {
         let engine = CurriculumEngine::new(CurriculumConfig::default());
         {
-            let mut nc = engine.neural_curriculum.write().unwrap_or_else(|p| p.into_inner());
+            let mut nc = engine
+                .neural_curriculum
+                .write()
+                .unwrap_or_else(|p| p.into_inner());
             nc.stages = vec![
                 CurriculumStage {
                     stage_index: 0,
@@ -521,7 +554,10 @@ mod tests {
             nc.active_stage_index = 0;
         }
         {
-            let mut wc = engine.world_curriculum.write().unwrap_or_else(|p| p.into_inner());
+            let mut wc = engine
+                .world_curriculum
+                .write()
+                .unwrap_or_else(|p| p.into_inner());
             wc.stages = vec![
                 CurriculumStage {
                     stage_index: 0,

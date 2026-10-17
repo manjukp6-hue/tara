@@ -57,7 +57,10 @@ pub fn validate_protected_route(
         }
     }
 
-    Err("Protected route authorization rejected: Valid creator session or admin API key required".into())
+    Err(
+        "Protected route authorization rejected: Valid creator session or admin API key required"
+            .into(),
+    )
 }
 
 #[cfg(test)]
@@ -68,13 +71,25 @@ mod tests {
 
     #[test]
     fn test_verify_worker_token_and_api_key() {
-        assert!(verify_worker_token("test_worker_cmp_aaa", "test_worker_cmp_aaa"));
-        assert!(!verify_worker_token("test_worker_cmp_aaa", "test_worker_cmp_bbb"));
+        assert!(verify_worker_token(
+            "test_worker_cmp_aaa",
+            "test_worker_cmp_aaa"
+        ));
+        assert!(!verify_worker_token(
+            "test_worker_cmp_aaa",
+            "test_worker_cmp_bbb"
+        ));
         assert!(!verify_worker_token("", ""));
         assert!(!verify_worker_token("   ", "   "));
 
-        assert!(verify_api_key("test_api_cmp_valid_01", "test_api_cmp_valid_01"));
-        assert!(!verify_api_key("test_api_cmp_valid_01", "test_api_cmp_wrong_01"));
+        assert!(verify_api_key(
+            "test_api_cmp_valid_01",
+            "test_api_cmp_valid_01"
+        ));
+        assert!(!verify_api_key(
+            "test_api_cmp_valid_01",
+            "test_api_cmp_wrong_01"
+        ));
         assert!(!verify_api_key("", "key"));
     }
 
@@ -102,9 +117,13 @@ mod tests {
             AuthorityGeneration::INITIAL,
             1000,
             HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
         let anon_res = validate_protected_route(Some(&anon_principal), None, None);
-        assert!(anon_res.is_err(), "Anonymous principal must be rejected on protected route");
+        assert!(
+            anon_res.is_err(),
+            "Anonymous principal must be rejected on protected route"
+        );
 
         // 5. Valid session principal (STANDARD_TOKEN) succeeds
         let user_pid = PrincipalId::new("user_bob").unwrap();
@@ -116,7 +135,8 @@ mod tests {
             AuthorityGeneration::INITIAL,
             1000,
             HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
         let user_res = validate_protected_route(Some(&user_principal), None, None);
         assert_eq!(user_res.unwrap(), PrincipalRole::user());
     }

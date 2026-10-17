@@ -64,7 +64,10 @@ impl ContinuousRiskEngine {
         action: &SecurityAction,
         context: &SecurityContext,
     ) -> Result<RiskVerdict, String> {
-        let mut map = self.telemetry.lock().map_err(|_| "Risk telemetry lock poisoned")?;
+        let mut map = self
+            .telemetry
+            .lock()
+            .map_err(|_| "Risk telemetry lock poisoned")?;
         let now = Instant::now();
         let key = principal_id.as_str();
 
@@ -78,18 +81,24 @@ impl ContinuousRiskEngine {
             }
         }
 
-        let entry = map.entry(key.clone()).or_insert_with(|| PrincipalTelemetry {
-            recent_requests: Vec::new(),
-            recent_failures: Vec::new(),
-            last_known_ip: context.client_ip.clone(),
-        });
+        let entry = map
+            .entry(key.clone())
+            .or_insert_with(|| PrincipalTelemetry {
+                recent_requests: Vec::new(),
+                recent_failures: Vec::new(),
+                last_known_ip: context.client_ip.clone(),
+            });
 
         // 1. Prune requests older than 60 seconds
-        entry.recent_requests.retain(|ts| now.duration_since(*ts).as_secs() < 60);
+        entry
+            .recent_requests
+            .retain(|ts| now.duration_since(*ts).as_secs() < 60);
         entry.recent_requests.push(now);
 
         // 2. Prune failures older than 15-minute sliding window (ID-18)
-        entry.recent_failures.retain(|ts| now.duration_since(*ts).as_secs() < FAILURE_WINDOW_SECS);
+        entry
+            .recent_failures
+            .retain(|ts| now.duration_since(*ts).as_secs() < FAILURE_WINDOW_SECS);
 
         let mut risk_score: u32 = 0;
         let mut reasons = Vec::new();
@@ -99,13 +108,19 @@ impl ContinuousRiskEngine {
         if count_last_minute > self.max_requests_per_minute {
             let overflow = count_last_minute - self.max_requests_per_minute;
             risk_score += (overflow * 15).min(400) as u32;
-            reasons.push(format!("High velocity: {} requests in past 60s", count_last_minute));
+            reasons.push(format!(
+                "High velocity: {} requests in past 60s",
+                count_last_minute
+            ));
         }
 
         // 4. Network Anomaly evaluation (IP Drift)
         if !entry.last_known_ip.is_empty() && entry.last_known_ip != context.client_ip {
             risk_score += 250;
-            reasons.push(format!("IP address drift: {} -> {}", entry.last_known_ip, context.client_ip));
+            reasons.push(format!(
+                "IP address drift: {} -> {}",
+                entry.last_known_ip, context.client_ip
+            ));
             entry.last_known_ip = context.client_ip.clone();
         }
 
@@ -120,7 +135,10 @@ impl ContinuousRiskEngine {
         if failure_count > 0 {
             let failure_penalty = (failure_count * 200).min(500);
             risk_score += failure_penalty;
-            reasons.push(format!("Active failed verification attempts in window: {}", failure_count));
+            reasons.push(format!(
+                "Active failed verification attempts in window: {}",
+                failure_count
+            ));
         }
 
         // 7. Compute Verdict based on Dynamic Risk Thresholds
@@ -134,12 +152,18 @@ impl ContinuousRiskEngine {
         } else if risk_score >= 600 {
             Ok(RiskVerdict::RequireCreatorStepUp {
                 risk_score,
-                reason: format!("High risk detected (score {}): {}", risk_score, reason_summary),
+                reason: format!(
+                    "High risk detected (score {}): {}",
+                    risk_score, reason_summary
+                ),
             })
         } else if risk_score >= 200 {
             Ok(RiskVerdict::RequireHardwareStepUp {
                 risk_score,
-                reason: format!("Medium risk detected (score {}): {}", risk_score, reason_summary),
+                reason: format!(
+                    "Medium risk detected (score {}): {}",
+                    risk_score, reason_summary
+                ),
             })
         } else {
             Ok(RiskVerdict::Accept { risk_score })
@@ -149,13 +173,17 @@ impl ContinuousRiskEngine {
     /// Record failed verification to penalize suspicious clients within the sliding window (ID-18).
     pub fn record_failure(&self, principal_id: &PrincipalId) {
         if let Ok(mut map) = self.telemetry.lock() {
-            let entry = map.entry(principal_id.as_str()).or_insert_with(|| PrincipalTelemetry {
-                recent_requests: Vec::new(),
-                recent_failures: Vec::new(),
-                last_known_ip: String::new(),
-            });
+            let entry = map
+                .entry(principal_id.as_str())
+                .or_insert_with(|| PrincipalTelemetry {
+                    recent_requests: Vec::new(),
+                    recent_failures: Vec::new(),
+                    last_known_ip: String::new(),
+                });
             let now = Instant::now();
-            entry.recent_failures.retain(|ts| now.duration_since(*ts).as_secs() < FAILURE_WINDOW_SECS);
+            entry
+                .recent_failures
+                .retain(|ts| now.duration_since(*ts).as_secs() < FAILURE_WINDOW_SECS);
             entry.recent_failures.push(now);
         }
     }
@@ -208,4 +236,3 @@ mod tests {
         assert!(map.contains_key(&new_pid.as_str()));
     }
 }
-

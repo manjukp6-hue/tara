@@ -353,10 +353,7 @@ impl ModelExpansionEngine {
             "model.embed_tokens.weight".to_string(),
             random_noise(target_config.vocab_size * hs, std),
         );
-        weights.insert(
-            "model.norm.weight".to_string(),
-            vec![1.0; hs],
-        );
+        weights.insert("model.norm.weight".to_string(), vec![1.0; hs]);
         weights.insert(
             "lm_head.weight".to_string(),
             random_noise(target_config.vocab_size * hs, std),

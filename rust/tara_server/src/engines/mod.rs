@@ -181,13 +181,33 @@ mod tests {
 
         // DoS bounds verification
         assert!(math.evaluate("factorial", &json!({ "n": 10_001 })).is_err());
-        assert!(math.evaluate("matrix_det", &json!({ "n": 65, "data": [] })).is_err());
-        assert!(math.evaluate("matrix_det", &json!({ "n": 0, "data": [] })).is_err());
-        assert!(math.evaluate("numerical_integral", &json!({ "a": 0.0, "b": 1.0, "panels": 0 })).is_err());
-        assert!(math.evaluate("numerical_integral", &json!({ "a": 0.0, "b": 1.0, "panels": 100_001 })).is_err());
-        assert!(math.evaluate("stochastic_process", &json!({ "s0": f64::NAN })).is_err());
-        assert!(math.evaluate("stochastic_process", &json!({ "s0": -10.0 })).is_err());
-        assert!(math.evaluate("stochastic_process", &json!({ "mu": f64::INFINITY })).is_err());
+        assert!(math
+            .evaluate("matrix_det", &json!({ "n": 65, "data": [] }))
+            .is_err());
+        assert!(math
+            .evaluate("matrix_det", &json!({ "n": 0, "data": [] }))
+            .is_err());
+        assert!(math
+            .evaluate(
+                "numerical_integral",
+                &json!({ "a": 0.0, "b": 1.0, "panels": 0 })
+            )
+            .is_err());
+        assert!(math
+            .evaluate(
+                "numerical_integral",
+                &json!({ "a": 0.0, "b": 1.0, "panels": 100_001 })
+            )
+            .is_err());
+        assert!(math
+            .evaluate("stochastic_process", &json!({ "s0": f64::NAN }))
+            .is_err());
+        assert!(math
+            .evaluate("stochastic_process", &json!({ "s0": -10.0 }))
+            .is_err());
+        assert!(math
+            .evaluate("stochastic_process", &json!({ "mu": f64::INFINITY }))
+            .is_err());
 
         // Safe UTF-8 query slicing
         let utf8_res = math.solve_query("solve 12 + 34");
@@ -195,14 +215,29 @@ mod tests {
         assert_eq!(utf8_res.unwrap().exact_result["result"], "46");
 
         // Geometry NaN rejection
-        use math::{Geometry, GeometryError, Trigonometry, TrigError, Expr};
-        assert!(matches!(Geometry::circle_area(f64::NAN), Err(GeometryError::NegativeDimension { .. })));
-        assert!(matches!(Geometry::rectangle_perimeter(10.0, f64::INFINITY), Err(GeometryError::NegativeDimension { .. })));
-        assert!(matches!(Geometry::slope_2d(0.0, 0.0, f64::NAN, 1.0), Err(GeometryError::UndefinedSlope)));
+        use math::{Expr, Geometry, GeometryError, TrigError, Trigonometry};
+        assert!(matches!(
+            Geometry::circle_area(f64::NAN),
+            Err(GeometryError::NegativeDimension { .. })
+        ));
+        assert!(matches!(
+            Geometry::rectangle_perimeter(10.0, f64::INFINITY),
+            Err(GeometryError::NegativeDimension { .. })
+        ));
+        assert!(matches!(
+            Geometry::slope_2d(0.0, 0.0, f64::NAN, 1.0),
+            Err(GeometryError::UndefinedSlope)
+        ));
 
         // Trigonometry NaN rejection
-        assert!(matches!(Trigonometry::tan(f64::NAN), Err(TrigError::DomainError { func: "tan", .. })));
-        assert!(matches!(Trigonometry::asin(f64::NAN), Err(TrigError::DomainError { func: "asin", .. })));
+        assert!(matches!(
+            Trigonometry::tan(f64::NAN),
+            Err(TrigError::DomainError { func: "tan", .. })
+        ));
+        assert!(matches!(
+            Trigonometry::asin(f64::NAN),
+            Err(TrigError::DomainError { func: "asin", .. })
+        ));
 
         // Symbolic Expr::Ln differentiation and 0/0 simplification
         let exp_expr = Expr::pow(Expr::var("x"), Expr::var("x"));
@@ -287,18 +322,11 @@ mod tests {
         assert!((nacl_mass - 58.44).abs() < 1e-1);
 
         // Simulation DoS guard: dt <= 0.0 fails immediately, negative v0 fails
-        let proj_err = sci.evaluate(
-            "physics",
-            "projectile",
-            &json!({ "v0": 50.0, "dt": 0.0 }),
-        );
+        let proj_err = sci.evaluate("physics", "projectile", &json!({ "v0": 50.0, "dt": 0.0 }));
         assert!(proj_err.is_err());
 
-        let proj_neg_v0 = sci.evaluate(
-            "physics",
-            "projectile",
-            &json!({ "v0": -10.0, "dt": 0.01 }),
-        );
+        let proj_neg_v0 =
+            sci.evaluate("physics", "projectile", &json!({ "v0": -10.0, "dt": 0.01 }));
         assert!(proj_neg_v0.is_err());
 
         // Damped oscillator DoS step cap guard: (t_max / dt) > 100,000 fails
@@ -420,10 +448,14 @@ mod tests {
 
     #[test]
     fn test_tara_brain_specialist_engine_routing() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_test_specialist_engines_{}", uuid::Uuid::new_v4()));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tara_test_specialist_engines_{}",
+            uuid::Uuid::new_v4()
+        ));
         let access_dir = temp_dir.join("storage").join("vault").join("access");
         let _ = std::fs::create_dir_all(&access_dir);
-        let workspace_root = tara_engine::find_workspace_root().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let workspace_root =
+            tara_engine::find_workspace_root().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let src_vault = workspace_root.join("storage").join("vault").join("access");
         if src_vault.exists() {
             if let Ok(entries) = std::fs::read_dir(src_vault) {
@@ -578,6 +610,9 @@ mod tests {
             .unwrap();
         assert!(!blocked_res["success"].as_bool().unwrap());
         assert!(blocked_res["external_ai_rejected"].as_bool().unwrap());
-        assert_eq!(blocked_res["triangulation_consensus"], "BLOCKED_EXTERNAL_AI");
+        assert_eq!(
+            blocked_res["triangulation_consensus"],
+            "BLOCKED_EXTERNAL_AI"
+        );
     }
 }

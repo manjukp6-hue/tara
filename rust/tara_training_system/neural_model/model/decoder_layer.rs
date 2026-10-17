@@ -120,15 +120,39 @@ impl TaraDecoderLayer {
     /// Deconstruct this layer and return its weight tensors into `out` without cloning.
     pub fn into_weights(self, layer_idx: usize, out: &mut HashMap<String, Vec<f32>>) {
         let prefix = format!("model.layers.{}", layer_idx);
-        out.insert(format!("{}.input_layernorm.weight", prefix), self.input_layernorm.weight);
-        out.insert(format!("{}.post_attention_layernorm.weight", prefix), self.post_attention_layernorm.weight);
-        out.insert(format!("{}.self_attn.q_proj.weight", prefix), self.self_attn.q_proj);
-        out.insert(format!("{}.self_attn.k_proj.weight", prefix), self.self_attn.k_proj);
-        out.insert(format!("{}.self_attn.v_proj.weight", prefix), self.self_attn.v_proj);
-        out.insert(format!("{}.self_attn.o_proj.weight", prefix), self.self_attn.o_proj);
-        out.insert(format!("{}.mlp.gate_proj.weight", prefix), self.mlp.gate_proj);
+        out.insert(
+            format!("{}.input_layernorm.weight", prefix),
+            self.input_layernorm.weight,
+        );
+        out.insert(
+            format!("{}.post_attention_layernorm.weight", prefix),
+            self.post_attention_layernorm.weight,
+        );
+        out.insert(
+            format!("{}.self_attn.q_proj.weight", prefix),
+            self.self_attn.q_proj,
+        );
+        out.insert(
+            format!("{}.self_attn.k_proj.weight", prefix),
+            self.self_attn.k_proj,
+        );
+        out.insert(
+            format!("{}.self_attn.v_proj.weight", prefix),
+            self.self_attn.v_proj,
+        );
+        out.insert(
+            format!("{}.self_attn.o_proj.weight", prefix),
+            self.self_attn.o_proj,
+        );
+        out.insert(
+            format!("{}.mlp.gate_proj.weight", prefix),
+            self.mlp.gate_proj,
+        );
         out.insert(format!("{}.mlp.up_proj.weight", prefix), self.mlp.up_proj);
-        out.insert(format!("{}.mlp.down_proj.weight", prefix), self.mlp.down_proj);
+        out.insert(
+            format!("{}.mlp.down_proj.weight", prefix),
+            self.mlp.down_proj,
+        );
     }
 
     /// Run the decoder layer forward pass.
@@ -163,20 +187,27 @@ impl TaraDecoderLayer {
     ) -> Vec<f32> {
         let hs = self.hidden_size;
 
-        let normed_x = self.input_layernorm.forward_channel(x, seq_len, hs, channel);
+        let normed_x = self
+            .input_layernorm
+            .forward_channel(x, seq_len, hs, channel);
         let attn_out = self.self_attn.forward_channel(&normed_x, seq_len, channel);
         let h = channel.add_residual(x, &attn_out).unwrap_or_else(|_| {
-            x.iter().zip(attn_out.iter()).map(|(&a, &b)| a + b).collect()
+            x.iter()
+                .zip(attn_out.iter())
+                .map(|(&a, &b)| a + b)
+                .collect()
         });
 
-        let normed_h = self.post_attention_layernorm.forward_channel(&h, seq_len, hs, channel);
-        let mlp_out = self
-            .mlp
-            .forward_channel(&normed_h, seq_len, hs, self.intermediate_size, channel);
+        let normed_h = self
+            .post_attention_layernorm
+            .forward_channel(&h, seq_len, hs, channel);
+        let mlp_out =
+            self.mlp
+                .forward_channel(&normed_h, seq_len, hs, self.intermediate_size, channel);
 
-        channel.add_residual(&h, &mlp_out).unwrap_or_else(|_| {
-            h.iter().zip(mlp_out.iter()).map(|(&a, &b)| a + b).collect()
-        })
+        channel
+            .add_residual(&h, &mlp_out)
+            .unwrap_or_else(|_| h.iter().zip(mlp_out.iter()).map(|(&a, &b)| a + b).collect())
     }
 
     /// Single-token forward pass through the decoder layer using KV caching.

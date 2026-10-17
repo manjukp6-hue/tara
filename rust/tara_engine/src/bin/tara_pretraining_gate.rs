@@ -208,15 +208,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!("Missing mandatory special token: {sp}").into());
         }
     }
-    println!("  Special Tokens    : {}/{} verified with zero collision", verified_specials, SPECIAL_TOKENS.len());
+    println!(
+        "  Special Tokens    : {}/{} verified with zero collision",
+        verified_specials,
+        SPECIAL_TOKENS.len()
+    );
 
     // Verify Indic script coverage per language priority
     let kannada_nums = ['೦', '೧', '೨', '೩', '೪', '೫', '೬', '೭', '೮', '೯'];
     let devanagari_nums = ['०', '१', '२', '३', '४', '५', '६', '७', '८', '९'];
-    let has_kn = kannada_nums.iter().all(|&c| tokenizer.token_to_id.contains_key(&c.to_string()));
-    let has_dv = devanagari_nums.iter().all(|&c| tokenizer.token_to_id.contains_key(&c.to_string()));
-    println!("  Kannada Numerals  : {}", if has_kn { "PASSED (all ೦..೯ present)" } else { "MISSING" });
-    println!("  Devanagari Num.   : {}", if has_dv { "PASSED (all ०..९ present)" } else { "MISSING" });
+    let has_kn = kannada_nums
+        .iter()
+        .all(|&c| tokenizer.token_to_id.contains_key(&c.to_string()));
+    let has_dv = devanagari_nums
+        .iter()
+        .all(|&c| tokenizer.token_to_id.contains_key(&c.to_string()));
+    println!(
+        "  Kannada Numerals  : {}",
+        if has_kn {
+            "PASSED (all ೦..೯ present)"
+        } else {
+            "MISSING"
+        }
+    );
+    println!(
+        "  Devanagari Num.   : {}",
+        if has_dv {
+            "PASSED (all ०..९ present)"
+        } else {
+            "MISSING"
+        }
+    );
 
     if !has_kn {
         return Err("Kannada numerals ೦..೯ are mandatory in canonical vocabulary".into());
@@ -230,15 +252,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = TaraConfig::from_json_file(&cfg_path.to_string_lossy())
         .map_err(|e| format!("Model config validation error: {e}"))?;
     let config_vocab_match = config.vocab_size == tokenizer.vocab_size;
-    println!("  Config Vocab Match: {} (model: {}, tokenizer: {})",
-        if config_vocab_match { "PASSED" } else { "MISMATCH" },
-        config.vocab_size, tokenizer.vocab_size
+    println!(
+        "  Config Vocab Match: {} (model: {}, tokenizer: {})",
+        if config_vocab_match {
+            "PASSED"
+        } else {
+            "MISMATCH"
+        },
+        config.vocab_size,
+        tokenizer.vocab_size
     );
     if !config_vocab_match {
         return Err(format!(
             "Model config vocab_size ({}) does not match tokenizer ({})",
             config.vocab_size, tokenizer.vocab_size
-        ).into());
+        )
+        .into());
     }
 
     let tok_audit = TokenizerAuditResult {
@@ -289,7 +318,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut dataset_hasher = Sha256::new();
 
     for file_path in &dataset_files {
-        let name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("shard").to_string();
+        let name = file_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("shard")
+            .to_string();
         audited_names.push(name.clone());
 
         let file = File::open(file_path)?;
@@ -308,7 +341,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let sample = extract_canonical_sample(trimmed);
 
             let is_duplicate = seen_line_hashes.contains(&sample.line_hash)
-                || (sample.combined_hash != 0 && seen_payload_hashes.contains(&sample.combined_hash));
+                || (sample.combined_hash != 0
+                    && seen_payload_hashes.contains(&sample.combined_hash));
 
             if is_duplicate {
                 duplicate_records += 1;
@@ -389,17 +423,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .and_then(|s| s.as_u64())
             .unwrap_or(0);
 
-        println!("  Sharded Model Index   : PASSED ({} tensors mapped across shards)", total_tensors);
-        println!("  Total Weight Bytes    : {} bytes ({:.2} GB)", total_bytes, total_bytes as f64 / (1024.0 * 1024.0 * 1024.0));
+        println!(
+            "  Sharded Model Index   : PASSED ({} tensors mapped across shards)",
+            total_tensors
+        );
+        println!(
+            "  Total Weight Bytes    : {} bytes ({:.2} GB)",
+            total_bytes,
+            total_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+        );
 
         // Verify layer completeness: 22 layers * 9 layer tensors = 198 layer tensors
         let expected_layer_tensors = config.num_hidden_layers * 9;
-        let actual_layer_tensors = weight_map.keys().filter(|k| k.starts_with("model.layers.")).count();
+        let actual_layer_tensors = weight_map
+            .keys()
+            .filter(|k| k.starts_with("model.layers."))
+            .count();
         if actual_layer_tensors != expected_layer_tensors {
             return Err(format!(
                 "Layer count mismatch: expected {} layer tensors for {} layers, found {}",
                 expected_layer_tensors, config.num_hidden_layers, actual_layer_tensors
-            ).into());
+            )
+            .into());
         }
 
         // Verify embedding and lm_head presence
@@ -414,23 +459,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     } else {
         total_bytes = fs::metadata(&single_path)?.len();
-        let (weights, _) = tara_engine::load_model_weights_with_shapes(&model_dir.to_string_lossy())
-            .map_err(|e| format!("Single SafeTensors load error: {e}"))?;
+        let (weights, _) =
+            tara_engine::load_model_weights_with_shapes(&model_dir.to_string_lossy())
+                .map_err(|e| format!("Single SafeTensors load error: {e}"))?;
         total_tensors = weights.len();
         let expected_layer_tensors = config.num_hidden_layers * 9;
-        let actual_layer_tensors = weights.keys().filter(|k| k.starts_with("model.layers.")).count();
+        let actual_layer_tensors = weights
+            .keys()
+            .filter(|k| k.starts_with("model.layers."))
+            .count();
         if actual_layer_tensors != expected_layer_tensors {
             return Err(format!(
                 "Layer count mismatch in model.safetensors: expected {} layer tensors for {} layers, found {}",
                 expected_layer_tensors, config.num_hidden_layers, actual_layer_tensors
             ).into());
         }
-        for req in ["model.embed_tokens.weight", "lm_head.weight", "model.norm.weight"] {
+        for req in [
+            "model.embed_tokens.weight",
+            "lm_head.weight",
+            "model.norm.weight",
+        ] {
             if !weights.contains_key(req) {
                 return Err(format!("Missing {req} in model.safetensors").into());
             }
         }
-        println!("  Single SafeTensors    : PASSED ({} tensors, {} bytes)", total_tensors, total_bytes);
+        println!(
+            "  Single SafeTensors    : PASSED ({} tensors, {} bytes)",
+            total_tensors, total_bytes
+        );
     }
 
     let weights_audit = ModelWeightsAuditResult {
@@ -488,7 +544,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => {
                 let prov_manifest = dataset_path.join("provenance_manifest.json");
                 if prov_manifest.exists() {
-                    println!("  HF Network check notice: {e}; local provenance manifest verified at {}", prov_manifest.display());
+                    println!(
+                        "  HF Network check notice: {e}; local provenance manifest verified at {}",
+                        prov_manifest.display()
+                    );
                     HuggingFaceDatasetVerificationResult {
                         repo_id: hf_repo_id,
                         remote_verified: true,
@@ -547,7 +606,10 @@ fn chrono_like_timestamp() -> String {
 }
 
 /// Verifies whether the specified dataset repository exists and is accessible on Hugging Face.
-fn verify_hf_dataset_uploaded(repo_id: &str, token: Option<&str>) -> Result<bool, Box<dyn std::error::Error>> {
+fn verify_hf_dataset_uploaded(
+    repo_id: &str,
+    token: Option<&str>,
+) -> Result<bool, Box<dyn std::error::Error>> {
     let url = format!("https://huggingface.co/api/datasets/{}", repo_id);
     let (curl_bin, null_sink) = if cfg!(windows) {
         ("curl.exe", "NUL")
@@ -555,7 +617,15 @@ fn verify_hf_dataset_uploaded(repo_id: &str, token: Option<&str>) -> Result<bool
         ("curl", "/dev/null")
     };
     let mut cmd = std::process::Command::new(curl_bin);
-    cmd.args(["-s", "-o", null_sink, "-w", "%{http_code}", "--max-time", "5"]);
+    cmd.args([
+        "-s",
+        "-o",
+        null_sink,
+        "-w",
+        "%{http_code}",
+        "--max-time",
+        "5",
+    ]);
     if let Some(t) = token {
         cmd.args(["-H", &format!("Authorization: Bearer {}", t)]);
     }

@@ -102,13 +102,19 @@ impl MemoryAuditSink {
     }
 
     pub fn records(&self) -> Vec<AuditRecord> {
-        self.records.lock().unwrap_or_else(|p| p.into_inner()).clone()
+        self.records
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
     }
 }
 
 impl AuditSink for MemoryAuditSink {
     fn append_record(&self, record: &AuditRecord) -> Result<(), String> {
-        let mut list = self.records.lock().map_err(|_| "Audit sink lock poisoned (FailClosed)")?;
+        let mut list = self
+            .records
+            .lock()
+            .map_err(|_| "Audit sink lock poisoned (FailClosed)")?;
         list.push(record.clone());
         Ok(())
     }
@@ -128,7 +134,8 @@ impl FileAuditSink {
     pub fn new<P: AsRef<std::path::Path>>(path: P) -> Result<Self, String> {
         let p = path.as_ref().to_path_buf();
         if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create audit dir: {e}"))?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create audit dir: {e}"))?;
         }
         Ok(Self {
             path: p,
@@ -149,7 +156,8 @@ impl AuditSink for FileAuditSink {
             .open(&self.path)
             .map_err(|e| format!("Failed to open audit log for append: {e}"))?;
         writeln!(file, "{}", line).map_err(|e| format!("Failed to write audit record: {e}"))?;
-        file.sync_data().map_err(|e| format!("Failed to fsync audit record: {e}"))?;
+        file.sync_data()
+            .map_err(|e| format!("Failed to fsync audit record: {e}"))?;
         Ok(())
     }
 
@@ -199,14 +207,23 @@ impl AuthenticatedAuditLogger {
     pub fn recover_from_sink(&self) -> Result<(), String> {
         let records = self.sink.read_all_records()?;
         if !records.is_empty() {
-            Self::verify_chain(&records, &self.audit_hmac_key[..])
-                .map_err(|e| format!("Audit log recovery failed: hash chain verification failed (FailClosed): {e}"))?;
+            Self::verify_chain(&records, &self.audit_hmac_key[..]).map_err(|e| {
+                format!(
+                    "Audit log recovery failed: hash chain verification failed (FailClosed): {e}"
+                )
+            })?;
             let last_rec = records.last().unwrap();
             let next_seq = last_rec.sequence.next()?;
             let current_hash = CryptoUtils::sha256_hex(last_rec.record_hmac_signature.as_bytes());
 
-            let mut seq_guard = self.current_sequence.lock().map_err(|_| "Sequence lock poisoned")?;
-            let mut hash_guard = self.last_record_hash.lock().map_err(|_| "Hash lock poisoned")?;
+            let mut seq_guard = self
+                .current_sequence
+                .lock()
+                .map_err(|_| "Sequence lock poisoned")?;
+            let mut hash_guard = self
+                .last_record_hash
+                .lock()
+                .map_err(|_| "Hash lock poisoned")?;
 
             *seq_guard = next_seq;
             *hash_guard = current_hash;
@@ -225,8 +242,14 @@ impl AuthenticatedAuditLogger {
         generation: AuthorityGeneration,
         epoch_secs: u64,
     ) -> Result<AuditRecord, String> {
-        let mut seq_guard = self.current_sequence.lock().map_err(|_| "Sequence lock poisoned (FailClosed)")?;
-        let mut prev_hash_guard = self.last_record_hash.lock().map_err(|_| "Hash lock poisoned (FailClosed)")?;
+        let mut seq_guard = self
+            .current_sequence
+            .lock()
+            .map_err(|_| "Sequence lock poisoned (FailClosed)")?;
+        let mut prev_hash_guard = self
+            .last_record_hash
+            .lock()
+            .map_err(|_| "Hash lock poisoned (FailClosed)")?;
 
         let seq = *seq_guard;
         let prev_hash = prev_hash_guard.clone();
@@ -288,12 +311,17 @@ impl AuthenticatedAuditLogger {
             if record.sequence.get() != expected_seq {
                 return Err(format!(
                     "AuditChainIntegrityFailure: Sequence gap at record {}: expected {}, found {}",
-                    idx, expected_seq, record.sequence.get()
+                    idx,
+                    expected_seq,
+                    record.sequence.get()
                 ));
             }
 
             // 2. Verify previous hash chaining
-            if !CryptoUtils::constant_time_eq(record.previous_record_hash.as_bytes(), expected_prev_hash.as_bytes()) {
+            if !CryptoUtils::constant_time_eq(
+                record.previous_record_hash.as_bytes(),
+                expected_prev_hash.as_bytes(),
+            ) {
                 return Err(format!(
                     "AuditChainIntegrityFailure: Hash chain broken at record {}: expected prev {}, found {}",
                     idx, expected_prev_hash, record.previous_record_hash

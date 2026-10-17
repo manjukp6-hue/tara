@@ -199,7 +199,11 @@ impl TaraForCausalLM {
 
         let mut layers = Vec::with_capacity(config.num_hidden_layers);
         for i in 0..config.num_hidden_layers {
-            layers.push(super::decoder_layer::TaraDecoderLayer::from_weights_move(&mut weights, i, config)?);
+            layers.push(super::decoder_layer::TaraDecoderLayer::from_weights_move(
+                &mut weights,
+                i,
+                config,
+            )?);
         }
 
         let norm_w = weights
@@ -242,7 +246,6 @@ impl TaraForCausalLM {
         Self::from_weights_move(weights, &config, model_dir)
     }
 
-
     /// Validate all required model tensor shapes against the config without loading float weights into memory.
     pub fn validate_architecture_shapes(
         shapes: &HashMap<String, Vec<usize>>,
@@ -271,10 +274,7 @@ impl TaraForCausalLM {
         )?;
         check_shape("model.norm.weight", config.hidden_size)?;
         if shapes.contains_key("lm_head.weight") {
-            check_shape(
-                "lm_head.weight",
-                config.vocab_size * config.hidden_size,
-            )?;
+            check_shape("lm_head.weight", config.vocab_size * config.hidden_size)?;
         }
         let hs = config.hidden_size;
         let hd = config.effective_head_dim();
@@ -310,7 +310,10 @@ impl TaraForCausalLM {
     }
 
     /// Update model weights in-place from a weights map without allocating new layers or cloning.
-    pub fn update_weights(&mut self, weights: &HashMap<String, Vec<f32>>) -> Result<(), ModelError> {
+    pub fn update_weights(
+        &mut self,
+        weights: &HashMap<String, Vec<f32>>,
+    ) -> Result<(), ModelError> {
         if let Some(w) = weights.get("model.embed_tokens.weight") {
             if w.len() != self.embed_tokens.len() {
                 return Err(ModelError::InvalidWeightShape {
@@ -382,22 +385,49 @@ impl TaraForCausalLM {
         map.insert("lm_head.weight".to_string(), &self.lm_head);
         for (i, layer) in self.layers.iter().enumerate() {
             let prefix = format!("model.layers.{i}");
-            map.insert(format!("{prefix}.input_layernorm.weight"), &layer.input_layernorm.weight);
-            map.insert(format!("{prefix}.post_attention_layernorm.weight"), &layer.post_attention_layernorm.weight);
-            map.insert(format!("{prefix}.self_attn.q_proj.weight"), &layer.self_attn.q_proj);
-            map.insert(format!("{prefix}.self_attn.k_proj.weight"), &layer.self_attn.k_proj);
-            map.insert(format!("{prefix}.self_attn.v_proj.weight"), &layer.self_attn.v_proj);
-            map.insert(format!("{prefix}.self_attn.o_proj.weight"), &layer.self_attn.o_proj);
-            map.insert(format!("{prefix}.mlp.gate_proj.weight"), &layer.mlp.gate_proj);
+            map.insert(
+                format!("{prefix}.input_layernorm.weight"),
+                &layer.input_layernorm.weight,
+            );
+            map.insert(
+                format!("{prefix}.post_attention_layernorm.weight"),
+                &layer.post_attention_layernorm.weight,
+            );
+            map.insert(
+                format!("{prefix}.self_attn.q_proj.weight"),
+                &layer.self_attn.q_proj,
+            );
+            map.insert(
+                format!("{prefix}.self_attn.k_proj.weight"),
+                &layer.self_attn.k_proj,
+            );
+            map.insert(
+                format!("{prefix}.self_attn.v_proj.weight"),
+                &layer.self_attn.v_proj,
+            );
+            map.insert(
+                format!("{prefix}.self_attn.o_proj.weight"),
+                &layer.self_attn.o_proj,
+            );
+            map.insert(
+                format!("{prefix}.mlp.gate_proj.weight"),
+                &layer.mlp.gate_proj,
+            );
             map.insert(format!("{prefix}.mlp.up_proj.weight"), &layer.mlp.up_proj);
-            map.insert(format!("{prefix}.mlp.down_proj.weight"), &layer.mlp.down_proj);
+            map.insert(
+                format!("{prefix}.mlp.down_proj.weight"),
+                &layer.mlp.down_proj,
+            );
         }
         map
     }
 
     /// Export a full owned clone of weights map only when required (e.g. for checkpoint persistence).
     pub fn to_weights_map(&self) -> HashMap<String, Vec<f32>> {
-        self.weights_ref_map().into_iter().map(|(k, v)| (k, v.clone())).collect()
+        self.weights_ref_map()
+            .into_iter()
+            .map(|(k, v)| (k, v.clone()))
+            .collect()
     }
 
     /// Run the forward pass over a sequence of token IDs.
@@ -572,7 +602,9 @@ impl TaraForCausalLM {
             layer_inputs.push(next_x);
         }
 
-        let final_normed = self.norm.forward_channel(layer_inputs.last().unwrap(), seq_len, hs, channel);
+        let final_normed =
+            self.norm
+                .forward_channel(layer_inputs.last().unwrap(), seq_len, hs, channel);
         (layer_inputs, final_normed)
     }
 
@@ -581,20 +613,53 @@ impl TaraForCausalLM {
     /// to pre-allocated device hardware buffers.
     pub fn parameter_slice_map(&self) -> HashMap<usize, String> {
         let mut map = HashMap::new();
-        map.insert(self.embed_tokens.as_ptr() as usize, "model.embed_tokens.weight".to_string());
-        map.insert(self.norm.weight.as_ptr() as usize, "model.norm.weight".to_string());
+        map.insert(
+            self.embed_tokens.as_ptr() as usize,
+            "model.embed_tokens.weight".to_string(),
+        );
+        map.insert(
+            self.norm.weight.as_ptr() as usize,
+            "model.norm.weight".to_string(),
+        );
         map.insert(self.lm_head.as_ptr() as usize, "lm_head.weight".to_string());
         for (i, layer) in self.layers.iter().enumerate() {
             let pfx = format!("model.layers.{i}");
-            map.insert(layer.input_layernorm.weight.as_ptr() as usize, format!("{pfx}.input_layernorm.weight"));
-            map.insert(layer.post_attention_layernorm.weight.as_ptr() as usize, format!("{pfx}.post_attention_layernorm.weight"));
-            map.insert(layer.self_attn.q_proj.as_ptr() as usize, format!("{pfx}.self_attn.q_proj.weight"));
-            map.insert(layer.self_attn.k_proj.as_ptr() as usize, format!("{pfx}.self_attn.k_proj.weight"));
-            map.insert(layer.self_attn.v_proj.as_ptr() as usize, format!("{pfx}.self_attn.v_proj.weight"));
-            map.insert(layer.self_attn.o_proj.as_ptr() as usize, format!("{pfx}.self_attn.o_proj.weight"));
-            map.insert(layer.mlp.gate_proj.as_ptr() as usize, format!("{pfx}.mlp.gate_proj.weight"));
-            map.insert(layer.mlp.up_proj.as_ptr() as usize, format!("{pfx}.mlp.up_proj.weight"));
-            map.insert(layer.mlp.down_proj.as_ptr() as usize, format!("{pfx}.mlp.down_proj.weight"));
+            map.insert(
+                layer.input_layernorm.weight.as_ptr() as usize,
+                format!("{pfx}.input_layernorm.weight"),
+            );
+            map.insert(
+                layer.post_attention_layernorm.weight.as_ptr() as usize,
+                format!("{pfx}.post_attention_layernorm.weight"),
+            );
+            map.insert(
+                layer.self_attn.q_proj.as_ptr() as usize,
+                format!("{pfx}.self_attn.q_proj.weight"),
+            );
+            map.insert(
+                layer.self_attn.k_proj.as_ptr() as usize,
+                format!("{pfx}.self_attn.k_proj.weight"),
+            );
+            map.insert(
+                layer.self_attn.v_proj.as_ptr() as usize,
+                format!("{pfx}.self_attn.v_proj.weight"),
+            );
+            map.insert(
+                layer.self_attn.o_proj.as_ptr() as usize,
+                format!("{pfx}.self_attn.o_proj.weight"),
+            );
+            map.insert(
+                layer.mlp.gate_proj.as_ptr() as usize,
+                format!("{pfx}.mlp.gate_proj.weight"),
+            );
+            map.insert(
+                layer.mlp.up_proj.as_ptr() as usize,
+                format!("{pfx}.mlp.up_proj.weight"),
+            );
+            map.insert(
+                layer.mlp.down_proj.as_ptr() as usize,
+                format!("{pfx}.mlp.down_proj.weight"),
+            );
         }
         map
     }
@@ -844,10 +909,7 @@ impl ModelGradients {
     /// Flatten all gradients into an owned map of canonical tensor_name -> Vec<f32> without cloning.
     pub fn into_map(self) -> HashMap<String, Vec<f32>> {
         let mut map = HashMap::new();
-        map.insert(
-            "model.embed_tokens.weight".to_string(),
-            self.embed_tokens,
-        );
+        map.insert("model.embed_tokens.weight".to_string(), self.embed_tokens);
         map.insert("model.norm.weight".to_string(), self.norm);
         map.insert("lm_head.weight".to_string(), self.lm_head);
 
@@ -881,10 +943,7 @@ impl ModelGradients {
                 format!("{}.mlp.gate_proj.weight", prefix),
                 layer.d_gate_proj,
             );
-            map.insert(
-                format!("{}.mlp.up_proj.weight", prefix),
-                layer.d_up_proj,
-            );
+            map.insert(format!("{}.mlp.up_proj.weight", prefix), layer.d_up_proj);
             map.insert(
                 format!("{}.mlp.down_proj.weight", prefix),
                 layer.d_down_proj,
@@ -1111,27 +1170,52 @@ mod tests {
         };
 
         let mut weights = HashMap::<String, Vec<f32>>::new();
-        weights.insert("model.embed_tokens.weight".into(), vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6]);
+        weights.insert(
+            "model.embed_tokens.weight".into(),
+            vec![
+                0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6,
+            ],
+        );
         weights.insert("model.norm.weight".into(), vec![1.0, 1.0, 1.0, 1.0]);
         weights.insert("lm_head.weight".into(), vec![0.5; 16]);
         weights.insert("model.layers.0.input_layernorm.weight".into(), vec![1.0; 4]);
-        weights.insert("model.layers.0.post_attention_layernorm.weight".into(), vec![1.0; 4]);
-        weights.insert("model.layers.0.self_attn.q_proj.weight".into(), vec![0.2; 16]);
-        weights.insert("model.layers.0.self_attn.k_proj.weight".into(), vec![0.3; 16]);
-        weights.insert("model.layers.0.self_attn.v_proj.weight".into(), vec![0.4; 16]);
-        weights.insert("model.layers.0.self_attn.o_proj.weight".into(), vec![0.1; 16]);
+        weights.insert(
+            "model.layers.0.post_attention_layernorm.weight".into(),
+            vec![1.0; 4],
+        );
+        weights.insert(
+            "model.layers.0.self_attn.q_proj.weight".into(),
+            vec![0.2; 16],
+        );
+        weights.insert(
+            "model.layers.0.self_attn.k_proj.weight".into(),
+            vec![0.3; 16],
+        );
+        weights.insert(
+            "model.layers.0.self_attn.v_proj.weight".into(),
+            vec![0.4; 16],
+        );
+        weights.insert(
+            "model.layers.0.self_attn.o_proj.weight".into(),
+            vec![0.1; 16],
+        );
         weights.insert("model.layers.0.mlp.gate_proj.weight".into(), vec![0.6; 16]);
         weights.insert("model.layers.0.mlp.up_proj.weight".into(), vec![0.7; 16]);
         weights.insert("model.layers.0.mlp.down_proj.weight".into(), vec![0.8; 16]);
 
         let orig_weights = weights.clone();
-        let model = TaraForCausalLM::from_weights_move(weights, &config, "test_dir").expect("from_weights_move");
+        let model = TaraForCausalLM::from_weights_move(weights, &config, "test_dir")
+            .expect("from_weights_move");
         assert_eq!(model.layers.len(), 1);
 
         let reconstructed = model.into_weights_map();
         assert_eq!(reconstructed.len(), orig_weights.len());
         for (k, v) in &orig_weights {
-            assert_eq!(reconstructed.get(k), Some(v), "Tensor '{k}' mismatch after into_weights_map");
+            assert_eq!(
+                reconstructed.get(k),
+                Some(v),
+                "Tensor '{k}' mismatch after into_weights_map"
+            );
         }
     }
 }

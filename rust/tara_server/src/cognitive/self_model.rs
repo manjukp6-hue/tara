@@ -15,13 +15,13 @@
 //! Unknown or unverified capabilities are REJECTED by default (`(false, "CAPABILITY_UNVERIFIED")`).
 //! Registration of new capabilities strictly requires a verified Creator principal.
 
-use tara_security::primitives::AuthenticatedPrincipal;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
+use tara_security::primitives::AuthenticatedPrincipal;
 
 static SELF_MODEL_HMAC_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
     tara_security::dpapi::derive_authority_hmac_key("self_model_state")
@@ -127,8 +127,8 @@ pub struct CognitiveSelfState {
 
 impl CognitiveSelfState {
     pub fn compute_hmac(&self) -> String {
-        let mut signer =
-            tara_security::cryptography::HmacSha256Signer::new(&*SELF_MODEL_HMAC_KEY).expect("32-byte key");
+        let mut signer = tara_security::cryptography::HmacSha256Signer::new(&*SELF_MODEL_HMAC_KEY)
+            .expect("32-byte key");
         signer.update(self.system_identity.as_bytes());
         signer.update(b"|");
         signer.update(self.engine_version.as_bytes());

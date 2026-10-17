@@ -42,11 +42,13 @@ pub fn shift_period(fiscal_period_id: &str, delta_quarters: i32) -> Result<Strin
     let new_y = idx.div_euclid(4);
     let new_q = idx.rem_euclid(4) + 1;
     if !(0..=9999).contains(&new_y) {
-        return Err(format!("Shifted fiscal year {} out of 4-digit range", new_y));
+        return Err(format!(
+            "Shifted fiscal year {} out of 4-digit range",
+            new_y
+        ));
     }
     Ok(format!("FY{:04}Q{}", new_y, new_q))
 }
-
 
 pub fn is_rate_metric(metric_id: &str, unit: &str) -> bool {
     let u = unit.to_lowercase();
@@ -276,4 +278,3 @@ mod tests {
         assert!(err.unwrap_err().contains("out of 4-digit range"));
     }
 }
-

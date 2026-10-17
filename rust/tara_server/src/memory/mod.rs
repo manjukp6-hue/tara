@@ -693,7 +693,8 @@ mod tests {
 
     #[test]
     fn test_record_episode_cross_platform_colon_actor() {
-        let tmp = std::env::temp_dir().join(format!("tara_mem_colon_test_{}", uuid::Uuid::new_v4()));
+        let tmp =
+            std::env::temp_dir().join(format!("tara_mem_colon_test_{}", uuid::Uuid::new_v4()));
         let engine = MemoryEngine::new(tmp.to_str().unwrap());
 
         let ep_id = engine
@@ -725,13 +726,8 @@ mod tests {
 
         // Verify index rebuild from disk also preserves authentic actor_id
         let rebuilt_engine = MemoryEngine::new(tmp.to_str().unwrap());
-        let rebuilt_results = rebuilt_engine.query_episodes(
-            None,
-            Some("creator:ROOT_OPERATOR"),
-            None,
-            5,
-            "all",
-        );
+        let rebuilt_results =
+            rebuilt_engine.query_episodes(None, Some("creator:ROOT_OPERATOR"), None, 5, "all");
         assert_eq!(rebuilt_results.len(), 1);
         assert_eq!(rebuilt_results[0]["actor_id"], "creator:ROOT_OPERATOR");
 
@@ -776,8 +772,14 @@ mod tests {
     fn test_sanitize_actor_dir_cross_platform_and_empty() {
         assert_eq!(sanitize_actor_dir(""), "anonymous");
         assert_eq!(sanitize_actor_dir("   "), "anonymous");
-        assert_eq!(sanitize_actor_dir("creator:ROOT_OPERATOR"), "creator_ROOT_OPERATOR");
-        assert_eq!(sanitize_actor_dir("../../../etc/passwd"), "_________etc_passwd");
+        assert_eq!(
+            sanitize_actor_dir("creator:ROOT_OPERATOR"),
+            "creator_ROOT_OPERATOR"
+        );
+        assert_eq!(
+            sanitize_actor_dir("../../../etc/passwd"),
+            "_________etc_passwd"
+        );
         assert_eq!(sanitize_actor_dir("user\\admin:1"), "user_admin_1");
         assert_eq!(sanitize_actor_dir("valid-actor_01"), "valid-actor_01");
         let long_actor = "a".repeat(100);

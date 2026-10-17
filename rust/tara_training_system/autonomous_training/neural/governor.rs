@@ -152,7 +152,11 @@ impl ContinualLearningGovernor {
         {
             return DegradationEvaluation {
                 task_id: task_id.to_string(),
-                current_loss: if current_loss.is_finite() { current_loss } else { f64::MAX },
+                current_loss: if current_loss.is_finite() {
+                    current_loss
+                } else {
+                    f64::MAX
+                },
                 baseline_loss: 0.0,
                 loss_degradation_ratio: f64::MAX,
                 accuracy_delta: -1.0,
@@ -256,7 +260,10 @@ impl CurriculumPriorityEngine {
 
     /// Sets mastery level for a concept.
     pub fn record_mastery(&self, concept_id: &str, level: f64) {
-        let mut mastered = self.mastered_concepts.lock().unwrap_or_else(|p| p.into_inner());
+        let mut mastered = self
+            .mastered_concepts
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         mastered.insert(concept_id.to_string(), level.clamp(0.0, 1.0));
     }
 
@@ -266,7 +273,10 @@ impl CurriculumPriorityEngine {
             return 1.0;
         }
 
-        let mastered = self.mastered_concepts.lock().unwrap_or_else(|p| p.into_inner());
+        let mastered = self
+            .mastered_concepts
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let ready_count = prerequisites
             .iter()
             .filter(|&req| mastered.get(req).copied().unwrap_or(0.0) >= self.mastery_threshold)

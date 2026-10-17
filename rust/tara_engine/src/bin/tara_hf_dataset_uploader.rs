@@ -28,7 +28,10 @@ fn run_upload_pipeline(repo_id: &str, token: &str) -> Result<bool, Box<dyn std::
     let root = tara_engine::find_workspace_root()
         .unwrap_or_else(|_| env::current_dir().unwrap_or_default());
 
-    let dataset_dir = root.join("storage").join("datasets").join("main_dataset_v2");
+    let dataset_dir = root
+        .join("storage")
+        .join("datasets")
+        .join("main_dataset_v2");
     println!("Target Local Directory : {:?}", dataset_dir);
 
     if !dataset_dir.exists() {
@@ -85,11 +88,18 @@ fn run_upload_pipeline(repo_id: &str, token: &str) -> Result<bool, Box<dyn std::
     }
 
     println!("--------------------------------------------------------------------------------");
-    println!("Shards Pending Upload  : {} of {}", pending_shards.len(), shard_paths.len());
+    println!(
+        "Shards Pending Upload  : {} of {}",
+        pending_shards.len(),
+        shard_paths.len()
+    );
     println!("--------------------------------------------------------------------------------");
 
     if pending_shards.is_empty() {
-        println!("All {} shards are already uploaded and committed on Hugging Face!", shard_paths.len());
+        println!(
+            "All {} shards are already uploaded and committed on Hugging Face!",
+            shard_paths.len()
+        );
         return Ok(true);
     }
 
@@ -100,9 +110,18 @@ fn run_upload_pipeline(repo_id: &str, token: &str) -> Result<bool, Box<dyn std::
         let batch_num = batch_idx + 1;
         let total_batches = total_pending.div_ceil(batch_size);
         println!();
-        println!("================================================================================");
-        println!("Processing Batch {}/{} ({} shards)", batch_num, total_batches, chunk.len());
-        println!("================================================================================");
+        println!(
+            "================================================================================"
+        );
+        println!(
+            "Processing Batch {}/{} ({} shards)",
+            batch_num,
+            total_batches,
+            chunk.len()
+        );
+        println!(
+            "================================================================================"
+        );
 
         let mut hash_records: Vec<(String, PathBuf, String, u64)> = Vec::new();
         for (name, path) in chunk {
@@ -131,13 +150,19 @@ fn run_upload_pipeline(repo_id: &str, token: &str) -> Result<bool, Box<dyn std::
                     if let Some(ref actions) = obj.actions {
                         if let Some(ref upload_link) = actions.upload {
                             println!("Streaming {} to AWS S3 Acceleration endpoint ({} MB, attempt {}/{})...", name, size / (1024 * 1024), attempts, max_attempts);
-                            match upload_lfs_to_s3(path, &upload_link.href, upload_link.header.as_ref()) {
+                            match upload_lfs_to_s3(
+                                path,
+                                &upload_link.href,
+                                upload_link.header.as_ref(),
+                            ) {
                                 Ok(()) => {
                                     println!("  Successfully uploaded {} to S3.", name);
                                     if let Some(ref verify_link) = actions.verify {
                                         println!("Verifying LFS object on Hugging Face...");
                                         verify_lfs_upload(&verify_link.href, token, oid, *size)
-                                            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+                                            .map_err(|e| -> Box<dyn std::error::Error> {
+                                                e.into()
+                                            })?;
                                         println!("  LFS object verification confirmed.");
                                     }
                                     break;
@@ -145,21 +170,33 @@ fn run_upload_pipeline(repo_id: &str, token: &str) -> Result<bool, Box<dyn std::
                                 Err(e) => {
                                     eprintln!("  Attempt {}/{} failed: {}. Retrying with fresh ticket in 5s...", attempts, max_attempts, e);
                                     if attempts >= max_attempts {
-                                        return Err(format!("Max upload attempts exceeded for {}", name).into());
+                                        return Err(format!(
+                                            "Max upload attempts exceeded for {}",
+                                            name
+                                        )
+                                        .into());
                                     }
                                     sleep(Duration::from_secs(5));
                                 }
                             }
                         } else {
-                            println!("  Shard {} already exists in LFS store. No upload needed.", name);
+                            println!(
+                                "  Shard {} already exists in LFS store. No upload needed.",
+                                name
+                            );
                             break;
                         }
                     } else {
-                        println!("  Shard {} already exists in LFS store. No upload needed.", name);
+                        println!(
+                            "  Shard {} already exists in LFS store. No upload needed.",
+                            name
+                        );
                         break;
                     }
                 } else {
-                    return Err(format!("Empty response from LFS batch endpoint for {}", name).into());
+                    return Err(
+                        format!("Empty response from LFS batch endpoint for {}", name).into(),
+                    );
                 }
             }
         }
@@ -175,9 +212,15 @@ fn run_upload_pipeline(repo_id: &str, token: &str) -> Result<bool, Box<dyn std::
 
         let first_shard = &hash_records.first().unwrap().0;
         let last_shard = &hash_records.last().unwrap().0;
-        let summary = format!("Upload v2 shards: {} to {} (Batch {}/{})", first_shard, last_shard, batch_num, total_batches);
+        let summary = format!(
+            "Upload v2 shards: {} to {} (Batch {}/{})",
+            first_shard, last_shard, batch_num, total_batches
+        );
 
-        println!("Committing batch {} to Hugging Face repository...", batch_num);
+        println!(
+            "Committing batch {} to Hugging Face repository...",
+            batch_num
+        );
         commit_lfs_files(
             HfRepoType::Dataset,
             repo_id,
@@ -185,7 +228,8 @@ fn run_upload_pipeline(repo_id: &str, token: &str) -> Result<bool, Box<dyn std::
             &summary,
             "TARA Canonical Indic Dataset v2 Shards",
             &commit_refs,
-        ).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        )
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
         println!("Commit successful: {}", summary);
     }
 
@@ -204,13 +248,19 @@ fn run_upload_pipeline(repo_id: &str, token: &str) -> Result<bool, Box<dyn std::
     }
 
     if missing.is_empty() {
-        println!("VERIFICATION SUCCESS: All {} canonical shards verified live on Hugging Face!", shard_paths.len());
+        println!(
+            "VERIFICATION SUCCESS: All {} canonical shards verified live on Hugging Face!",
+            shard_paths.len()
+        );
         println!("Repository: https://huggingface.co/datasets/{}", repo_id);
         println!("Directory : v2/");
         println!("100% COMPLETE: Full dataset v2 successfully uploaded to Hugging Face.");
         Ok(true)
     } else {
-        println!("Partial batch complete; {} shards remaining.", missing.len());
+        println!(
+            "Partial batch complete; {} shards remaining.",
+            missing.len()
+        );
         Ok(false)
     }
 }
@@ -232,9 +282,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let root = tara_engine::find_workspace_root()
         .unwrap_or_else(|_| env::current_dir().unwrap_or_default());
-    let dataset_dir = root.join("storage").join("datasets").join("main_dataset_v2");
+    let dataset_dir = root
+        .join("storage")
+        .join("datasets")
+        .join("main_dataset_v2");
     if !dataset_dir.exists() {
-        eprintln!("FATAL ERROR: Local dataset directory does not exist: {:?}", dataset_dir);
+        eprintln!(
+            "FATAL ERROR: Local dataset directory does not exist: {:?}",
+            dataset_dir
+        );
         std::process::exit(1);
     }
     let has_files = fs::read_dir(&dataset_dir)
@@ -248,7 +304,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .unwrap_or(false);
     if !has_files {
-        eprintln!("FATAL ERROR: Local dataset directory contains 0 files to upload: {:?}", dataset_dir);
+        eprintln!(
+            "FATAL ERROR: Local dataset directory contains 0 files to upload: {:?}",
+            dataset_dir
+        );
         std::process::exit(1);
     }
 
@@ -260,7 +319,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!("Exceeded maximum recovery cycles ({MAX_RECOVERY_CYCLES})").into());
         }
         if cycle > 1 {
-            println!("\n[CYCLE {}/{}] Resuming autonomous upload pipeline...\n", cycle, MAX_RECOVERY_CYCLES);
+            println!(
+                "\n[CYCLE {}/{}] Resuming autonomous upload pipeline...\n",
+                cycle, MAX_RECOVERY_CYCLES
+            );
         }
 
         match run_upload_pipeline(&repo_id, &token) {
@@ -273,7 +335,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 sleep(Duration::from_secs(5));
             }
             Err(e) => {
-                eprintln!("\n[RESILIENCE] Temporary error encountered: {}. Auto-recovering in 10s...\n", e);
+                eprintln!(
+                    "\n[RESILIENCE] Temporary error encountered: {}. Auto-recovering in 10s...\n",
+                    e
+                );
                 sleep(Duration::from_secs(10));
             }
         }

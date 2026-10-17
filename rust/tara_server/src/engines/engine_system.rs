@@ -73,26 +73,29 @@ impl DynamicEngineSystem {
             })
             .unwrap_or_default();
 
-        self.engines.lock().unwrap_or_else(|p| p.into_inner()).insert(
-            engine_id.clone(),
-            EngineManifest {
-                engine_id: engine_id.clone(),
-                name: payload
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(&engine_id)
-                    .to_string(),
-                version: payload
-                    .get("version")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("1.0.0")
-                    .to_string(),
-                capabilities: caps,
-                // A manifest is metadata; it is not an executable backend.
-                status: EngineStatus::Offline,
-                quarantine_reason: None,
-            },
-        );
+        self.engines
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(
+                engine_id.clone(),
+                EngineManifest {
+                    engine_id: engine_id.clone(),
+                    name: payload
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&engine_id)
+                        .to_string(),
+                    version: payload
+                        .get("version")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("1.0.0")
+                        .to_string(),
+                    capabilities: caps,
+                    // A manifest is metadata; it is not an executable backend.
+                    status: EngineStatus::Offline,
+                    quarantine_reason: None,
+                },
+            );
         (true, None)
     }
 
@@ -120,7 +123,12 @@ impl DynamicEngineSystem {
         let Some(selected) = selected else {
             return json!({"status":"ERROR","error":format!("No active executable engine for task '{}'", task_type)});
         };
-        let executor = self.executors.lock().unwrap_or_else(|p| p.into_inner()).get(&selected).cloned();
+        let executor = self
+            .executors
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&selected)
+            .cloned();
         let Some(executor) = executor else {
             return json!({"status":"ERROR","error":format!("Engine '{}' has no executable backend", selected)});
         };
@@ -156,7 +164,12 @@ impl DynamicEngineSystem {
     }
 
     pub fn quarantine_engine(&self, engine_id: &str, reason: &str) -> bool {
-        if let Some(e) = self.engines.lock().unwrap_or_else(|p| p.into_inner()).get_mut(engine_id) {
+        if let Some(e) = self
+            .engines
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get_mut(engine_id)
+        {
             e.status = EngineStatus::Quarantined;
             e.quarantine_reason = Some(reason.to_string());
             true

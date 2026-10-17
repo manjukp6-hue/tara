@@ -9,12 +9,12 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tara_security::cryptography::CryptoUtils;
 use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use tara_security::cryptography::CryptoUtils;
 
 /// Decision emitted by the Autonomy Governor.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -341,7 +341,10 @@ impl AutonomousCreativityEngine {
                 .map_err(|e| e.to_string())?;
             writeln!(f, "{}", line).map_err(|e| e.to_string())?;
 
-            let mut l = self.reinforced_ledger.lock().unwrap_or_else(|p| p.into_inner());
+            let mut l = self
+                .reinforced_ledger
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             l.push(line);
 
             Ok(format!(
@@ -369,7 +372,10 @@ impl AutonomousCreativityEngine {
                     .map_err(|e| e.to_string())?;
                 writeln!(f, "{}", line).map_err(|e| e.to_string())?;
 
-                let mut ap = self.anti_patterns_ledger.lock().unwrap_or_else(|p| p.into_inner());
+                let mut ap = self
+                    .anti_patterns_ledger
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
                 ap.insert(hypothesis.id.clone());
             }
 

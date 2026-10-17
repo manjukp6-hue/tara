@@ -42,7 +42,8 @@ mod tests {
 
     #[test]
     fn test_format_request_id_format() {
-        let req = CoreProtocolHandler::format_request("test_intent", "actor_1", serde_json::json!({}));
+        let req =
+            CoreProtocolHandler::format_request("test_intent", "actor_1", serde_json::json!({}));
         assert!(req.request_id.starts_with("req_"));
         // "req_" is 4 chars + 32 hex chars = 36 chars
         assert_eq!(req.request_id.len(), 36);

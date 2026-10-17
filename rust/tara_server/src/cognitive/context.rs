@@ -267,19 +267,21 @@ impl SessionContextManager {
 // CoreferenceResolver
 // ---------------------------------------------------------------------------
 
-pub static ANAPHORIC_FILE_PATTERNS: std::sync::LazyLock<Vec<Regex>> = std::sync::LazyLock::new(|| {
-    vec![
-        Regex::new(r"(?i)\b(it|that file|this file|the file|the same file|its hash|the log file)\b")
-            .expect("valid regex pattern for file anaphora"),
-    ]
-});
+pub static ANAPHORIC_FILE_PATTERNS: std::sync::LazyLock<Vec<Regex>> =
+    std::sync::LazyLock::new(|| {
+        vec![Regex::new(
+            r"(?i)\b(it|that file|this file|the file|the same file|its hash|the log file)\b",
+        )
+        .expect("valid regex pattern for file anaphora")]
+    });
 
-pub static ANAPHORIC_RESULT_PATTERNS: std::sync::LazyLock<Vec<Regex>> = std::sync::LazyLock::new(|| {
-    vec![
-        Regex::new(r"(?i)\b(previous result|last result|the result|prior output)\b")
-            .expect("valid regex pattern for result anaphora"),
-    ]
-});
+pub static ANAPHORIC_RESULT_PATTERNS: std::sync::LazyLock<Vec<Regex>> =
+    std::sync::LazyLock::new(|| {
+        vec![
+            Regex::new(r"(?i)\b(previous result|last result|the result|prior output)\b")
+                .expect("valid regex pattern for result anaphora"),
+        ]
+    });
 
 /// Resolves anaphoric expressions ("it", "that file", "previous result") from session history.
 pub struct CoreferenceResolver;
@@ -297,9 +299,7 @@ impl CoreferenceResolver {
         };
 
         // File anaphora
-        let has_file_ref = ANAPHORIC_FILE_PATTERNS
-            .iter()
-            .any(|re| re.is_match(text));
+        let has_file_ref = ANAPHORIC_FILE_PATTERNS.iter().any(|re| re.is_match(text));
         if has_file_ref {
             if let Some(fp) = sess.last_slots.get("file_path") {
                 resolved_slots.insert("file_path".to_owned(), fp.clone());
@@ -307,9 +307,7 @@ impl CoreferenceResolver {
         }
 
         // Previous result anaphora
-        let has_res_ref = ANAPHORIC_RESULT_PATTERNS
-            .iter()
-            .any(|re| re.is_match(text));
+        let has_res_ref = ANAPHORIC_RESULT_PATTERNS.iter().any(|re| re.is_match(text));
         if has_res_ref {
             if let Some(tr) = &sess.last_tool_result {
                 // Store serialised result as JSON string in slots

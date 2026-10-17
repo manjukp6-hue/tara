@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
 use crate::primitives::{
-    AssuranceLevel, PrincipalRole, SecurityAction, SecurityContext, SecurityResource, SecurityState,
-    VerifiedPrincipal,
+    AssuranceLevel, PrincipalRole, SecurityAction, SecurityContext, SecurityResource,
+    SecurityState, VerifiedPrincipal,
 };
 
 /// Denial reason explaining why an operation was rejected.
@@ -29,16 +29,27 @@ impl std::fmt::Display for SecurityDenial {
         match self {
             Self::SystemLockedDown { reason } => write!(f, "SystemLockedDown: {reason}"),
             Self::AuthorityGenerationMismatch { expected, actual } => {
-                write!(f, "AuthorityGenerationMismatch: expected gen {expected}, got {actual}")
+                write!(
+                    f,
+                    "AuthorityGenerationMismatch: expected gen {expected}, got {actual}"
+                )
             }
             Self::InsufficientAssurance { required, actual } => {
-                write!(f, "InsufficientAssurance: required {required}, actual {actual}")
+                write!(
+                    f,
+                    "InsufficientAssurance: required {required}, actual {actual}"
+                )
             }
             Self::RoleUnauthorized { required, actual } => {
                 write!(f, "RoleUnauthorized: required {required}, actual {actual}")
             }
-            Self::ExplicitDeny { rule_id, reason } => write!(f, "ExplicitDeny[{rule_id}]: {reason}"),
-            Self::NoMatchingAllowRule => write!(f, "DefaultDeny: No matching policy rule granted authorization"),
+            Self::ExplicitDeny { rule_id, reason } => {
+                write!(f, "ExplicitDeny[{rule_id}]: {reason}")
+            }
+            Self::NoMatchingAllowRule => write!(
+                f,
+                "DefaultDeny: No matching policy rule granted authorization"
+            ),
         }
     }
 }
@@ -104,17 +115,16 @@ impl PolicyEngine {
         if rule.action_pattern.trim().is_empty() || rule.resource_pattern.trim().is_empty() {
             return Err("InvalidPolicyRule: Action and resource patterns cannot be empty".into());
         }
-        let mut rules = self.rules.write().map_err(|_| "Policy lock poisoned (FailClosed)")?;
+        let mut rules = self
+            .rules
+            .write()
+            .map_err(|_| "Policy lock poisoned (FailClosed)")?;
         rules.push(rule);
         Ok(())
     }
 
     /// Add a dynamic policy rule at runtime, protected by governance authorization (ID-20).
-    pub fn add_rule(
-        &self,
-        authorizer: &VerifiedPrincipal,
-        rule: PolicyRule,
-    ) -> Result<(), String> {
+    pub fn add_rule(&self, authorizer: &VerifiedPrincipal, rule: PolicyRule) -> Result<(), String> {
         // Privileged governance gate (ID-20): Only Creator or Hardware-Attested Operator can add rules
         if authorizer.role() != &PrincipalRole::creator()
             && authorizer.assurance_level().score() < AssuranceLevel::HARDWARE_ATTESTED.score()
@@ -129,7 +139,10 @@ impl PolicyEngine {
             return Err("InvalidPolicyRule: Action and resource patterns cannot be empty".into());
         }
 
-        let mut rules = self.rules.write().map_err(|_| "Policy lock poisoned (FailClosed)")?;
+        let mut rules = self
+            .rules
+            .write()
+            .map_err(|_| "Policy lock poisoned (FailClosed)")?;
         rules.push(rule);
         Ok(())
     }
@@ -292,21 +305,21 @@ mod tests {
             &resource,
             &context,
         );
-        assert!(matches!(uninit_res, Err(SecurityDenial::SystemLockedDown { .. })));
+        assert!(matches!(
+            uninit_res,
+            Err(SecurityDenial::SystemLockedDown { .. })
+        ));
 
         // 2. Recovering security state MUST fail closed
         let recovering_state = SecurityState::Recovering {
             target_generation: gen,
             nonce: "recovery_nonce_123".into(),
         };
-        let rec_res = engine.authorize(
-            &recovering_state,
-            &principal,
-            &action,
-            &resource,
-            &context,
-        );
-        assert!(matches!(rec_res, Err(SecurityDenial::SystemLockedDown { .. })));
+        let rec_res = engine.authorize(&recovering_state, &principal, &action, &resource, &context);
+        assert!(matches!(
+            rec_res,
+            Err(SecurityDenial::SystemLockedDown { .. })
+        ));
 
         // 3. LockedDown security state MUST fail closed
         let locked_state = SecurityState::LockedDown {
@@ -314,25 +327,19 @@ mod tests {
             reason: "Emergency tripwire triggered".into(),
             since_epoch_secs: 1_700_000_000,
         };
-        let lock_res = engine.authorize(
-            &locked_state,
-            &principal,
-            &action,
-            &resource,
-            &context,
-        );
-        assert!(matches!(lock_res, Err(SecurityDenial::SystemLockedDown { .. })));
+        let lock_res = engine.authorize(&locked_state, &principal, &action, &resource, &context);
+        assert!(matches!(
+            lock_res,
+            Err(SecurityDenial::SystemLockedDown { .. })
+        ));
 
         // 4. Operational state with authority generation mismatch MUST fail closed
         let next_gen = gen.next().unwrap();
-        let stale_state = SecurityState::Operational { generation: next_gen };
-        let gen_mismatch_res = engine.authorize(
-            &stale_state,
-            &principal,
-            &action,
-            &resource,
-            &context,
-        );
+        let stale_state = SecurityState::Operational {
+            generation: next_gen,
+        };
+        let gen_mismatch_res =
+            engine.authorize(&stale_state, &principal, &action, &resource, &context);
         assert!(matches!(
             gen_mismatch_res,
             Err(SecurityDenial::AuthorityGenerationMismatch { .. })
@@ -340,14 +347,7 @@ mod tests {
 
         // 5. Operational state with matching generation MUST succeed on allowed rule
         let valid_state = SecurityState::Operational { generation: gen };
-        let ok_res = engine.authorize(
-            &valid_state,
-            &principal,
-            &action,
-            &resource,
-            &context,
-        );
+        let ok_res = engine.authorize(&valid_state, &principal, &action, &resource, &context);
         assert!(ok_res.is_ok());
     }
 }
-

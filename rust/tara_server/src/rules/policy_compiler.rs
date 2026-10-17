@@ -1,10 +1,10 @@
 //! Main Policy Compiler.
 //! Compiles RULEBOOK.txt + DEFAULT_SAFE_RULES.txt into a verified StructuredCompiledPolicy object.
 
-use crate::language::LanguageDetector;
 use super::policy_schema::{PolicyPriority, RuleItem, StructuredCompiledPolicy};
 use super::rule_parser::RuleParser;
 use super::validator::PolicyValidator;
+use crate::language::LanguageDetector;
 use std::collections::HashMap;
 
 pub const CANONICAL_CREATOR_ID: &str = "ROOT_OPERATOR";

@@ -3,8 +3,8 @@
 //! Implements the gated feed-forward network used in each TaraDecoderLayer.
 //! Formula: `down_proj( silu(gate_proj(x)) * up_proj(x) )`.
 
-use std::collections::HashMap;
 use rayon::prelude::*;
+use std::collections::HashMap;
 use thiserror::Error;
 
 /// Errors building the MLP layer.
@@ -62,21 +62,31 @@ pub fn mat_mul(a: &[f32], b: &[f32], m: usize, k: usize, n: usize) -> Vec<f32> {
     let mut c = vec![0.0f32; m * n];
     if m >= 4 {
         use rayon::prelude::*;
-        c.par_chunks_exact_mut(n).enumerate().for_each(|(i, c_row)| {
-            let a_row = &a[i * k..(i + 1) * k];
-            for j in 0..n {
-                let b_row = &b[j * k..(j + 1) * k];
-                let sum: f32 = a_row.iter().zip(b_row.iter()).map(|(&av, &bv)| av * bv).sum();
-                c_row[j] = sum;
-            }
-        });
+        c.par_chunks_exact_mut(n)
+            .enumerate()
+            .for_each(|(i, c_row)| {
+                let a_row = &a[i * k..(i + 1) * k];
+                for j in 0..n {
+                    let b_row = &b[j * k..(j + 1) * k];
+                    let sum: f32 = a_row
+                        .iter()
+                        .zip(b_row.iter())
+                        .map(|(&av, &bv)| av * bv)
+                        .sum();
+                    c_row[j] = sum;
+                }
+            });
     } else {
         for i in 0..m {
             let a_row = &a[i * k..(i + 1) * k];
             let c_row = &mut c[i * n..(i + 1) * n];
             for j in 0..n {
                 let b_row = &b[j * k..(j + 1) * k];
-                let sum: f32 = a_row.iter().zip(b_row.iter()).map(|(&av, &bv)| av * bv).sum();
+                let sum: f32 = a_row
+                    .iter()
+                    .zip(b_row.iter())
+                    .map(|(&av, &bv)| av * bv)
+                    .sum();
                 c_row[j] = sum;
             }
         }
@@ -183,14 +193,22 @@ impl TaraMlp {
         intermediate_size: usize,
         channel: &tara_hd::ComputeChannel,
     ) -> Vec<f32> {
-        let gate_raw = match channel.forward_linear(&self.gate_proj, x, seq_len, hidden_size, intermediate_size) {
+        let gate_raw = match channel.forward_linear(
+            &self.gate_proj,
+            x,
+            seq_len,
+            hidden_size,
+            intermediate_size,
+        ) {
             Ok(g) => g,
             Err(_) => return self.forward(x, seq_len, hidden_size, intermediate_size),
         };
-        let up = match channel.forward_linear(&self.up_proj, x, seq_len, hidden_size, intermediate_size) {
-            Ok(u) => u,
-            Err(_) => return self.forward(x, seq_len, hidden_size, intermediate_size),
-        };
+        let up =
+            match channel.forward_linear(&self.up_proj, x, seq_len, hidden_size, intermediate_size)
+            {
+                Ok(u) => u,
+                Err(_) => return self.forward(x, seq_len, hidden_size, intermediate_size),
+            };
         let hidden = match channel.forward_swiglu(&gate_raw, &up) {
             Ok(h) => h,
             Err(_) => {
@@ -199,8 +217,22 @@ impl TaraMlp {
             }
         };
         channel
-            .forward_linear(&self.down_proj, &hidden, seq_len, intermediate_size, hidden_size)
-            .unwrap_or_else(|_| mat_mul(&hidden, &self.down_proj, seq_len, intermediate_size, hidden_size))
+            .forward_linear(
+                &self.down_proj,
+                &hidden,
+                seq_len,
+                intermediate_size,
+                hidden_size,
+            )
+            .unwrap_or_else(|_| {
+                mat_mul(
+                    &hidden,
+                    &self.down_proj,
+                    seq_len,
+                    intermediate_size,
+                    hidden_size,
+                )
+            })
     }
 
     /// Compute gradients for inputs `x` and weights (`gate_proj`, `up_proj`, `down_proj`)

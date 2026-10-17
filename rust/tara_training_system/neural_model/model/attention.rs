@@ -6,10 +6,10 @@
 use std::collections::HashMap;
 use thiserror::Error;
 
-use rayon::prelude::*;
 use super::mlp::mat_mul;
 use super::rope::{RotaryDimensions, RotaryEmbedding};
 use crate::config::TaraConfig;
+use rayon::prelude::*;
 
 /// Errors that can occur while constructing an attention layer.
 #[derive(Debug, Error)]
@@ -568,8 +568,10 @@ impl TaraAttention {
             .enumerate()
             .for_each(|(h, h_d_scores)| {
                 for i in 0..seq_len {
-                    let w_row = &attn_weights[h * seq_len * seq_len + i * seq_len..(h * seq_len * seq_len + (i + 1) * seq_len)];
-                    let dw_row = &d_attn_weights[h * seq_len * seq_len + i * seq_len..(h * seq_len * seq_len + (i + 1) * seq_len)];
+                    let w_row = &attn_weights[h * seq_len * seq_len + i * seq_len
+                        ..(h * seq_len * seq_len + (i + 1) * seq_len)];
+                    let dw_row = &d_attn_weights[h * seq_len * seq_len + i * seq_len
+                        ..(h * seq_len * seq_len + (i + 1) * seq_len)];
 
                     let sum_w_dw: f32 = w_row[..=i]
                         .iter()

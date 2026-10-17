@@ -1,9 +1,9 @@
-use tara_security::lockdown::LockdownCoordinator;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
+use tara_security::lockdown::LockdownCoordinator;
 
 /// Guard decision.
 #[derive(Debug, Clone)]
@@ -54,23 +54,24 @@ impl CompiledPolicy {
                         }
                     })
                     .unwrap_or_else(|| "ALLOW".to_string());
-                let conditions = if let Some(arr) = rule.get("conditions").and_then(|v| v.as_array()) {
-                    arr.iter()
-                        .filter_map(|c| c.as_str().map(String::from))
-                        .collect()
-                } else if let Some(obj) = rule.get("conditions").and_then(|v| v.as_object()) {
-                    obj.iter()
-                        .map(|(k, v)| {
-                            if let Some(s) = v.as_str() {
-                                format!("{k}:{s}")
-                            } else {
-                                format!("{k}:{v}")
-                            }
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+                let conditions =
+                    if let Some(arr) = rule.get("conditions").and_then(|v| v.as_array()) {
+                        arr.iter()
+                            .filter_map(|c| c.as_str().map(String::from))
+                            .collect()
+                    } else if let Some(obj) = rule.get("conditions").and_then(|v| v.as_object()) {
+                        obj.iter()
+                            .map(|(k, v)| {
+                                if let Some(s) = v.as_str() {
+                                    format!("{k}:{s}")
+                                } else {
+                                    format!("{k}:{v}")
+                                }
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
                 let reason = rule
                     .get("reason")
                     .or_else(|| rule.get("original_text"))
@@ -220,9 +221,9 @@ impl ExecutionGuard {
             policy,
             identity_manager: None,
             lockdown: None,
-            consumed_action_nonces: Arc::new(std::sync::Mutex::new(
-                BoundedNonceCache::new(Self::DEFAULT_NONCE_CAPACITY),
-            )),
+            consumed_action_nonces: Arc::new(std::sync::Mutex::new(BoundedNonceCache::new(
+                Self::DEFAULT_NONCE_CAPACITY,
+            ))),
         }
     }
 
@@ -234,9 +235,9 @@ impl ExecutionGuard {
             policy,
             identity_manager: None,
             lockdown: Some(lockdown),
-            consumed_action_nonces: Arc::new(std::sync::Mutex::new(
-                BoundedNonceCache::new(Self::DEFAULT_NONCE_CAPACITY),
-            )),
+            consumed_action_nonces: Arc::new(std::sync::Mutex::new(BoundedNonceCache::new(
+                Self::DEFAULT_NONCE_CAPACITY,
+            ))),
         }
     }
 
@@ -686,16 +687,37 @@ mod tests {
         assert!(cache.check_and_insert("nonce_3"));
 
         // 2. Immediate replay of any seen nonce must be rejected
-        assert!(!cache.check_and_insert("nonce_1"), "Replay of nonce_1 must be blocked");
-        assert!(!cache.check_and_insert("nonce_2"), "Replay of nonce_2 must be blocked");
-        assert!(!cache.check_and_insert("nonce_3"), "Replay of nonce_3 must be blocked");
+        assert!(
+            !cache.check_and_insert("nonce_1"),
+            "Replay of nonce_1 must be blocked"
+        );
+        assert!(
+            !cache.check_and_insert("nonce_2"),
+            "Replay of nonce_2 must be blocked"
+        );
+        assert!(
+            !cache.check_and_insert("nonce_3"),
+            "Replay of nonce_3 must be blocked"
+        );
 
         // 3. Unexpired retention: inserting 4th nonce when all 3 are unexpired must be rejected
         // Never evict unexpired entries merely to make room (fixes finding #2)
-        assert!(!cache.check_and_insert("nonce_4"), "Capacity exhaustion of unexpired entries must reject new nonce");
-        assert!(!cache.check_and_insert("nonce_1"), "nonce_1 must still be retained and protected against replay");
-        assert!(!cache.check_and_insert("nonce_2"), "nonce_2 must still be retained");
-        assert!(!cache.check_and_insert("nonce_3"), "nonce_3 must still be retained");
+        assert!(
+            !cache.check_and_insert("nonce_4"),
+            "Capacity exhaustion of unexpired entries must reject new nonce"
+        );
+        assert!(
+            !cache.check_and_insert("nonce_1"),
+            "nonce_1 must still be retained and protected against replay"
+        );
+        assert!(
+            !cache.check_and_insert("nonce_2"),
+            "nonce_2 must still be retained"
+        );
+        assert!(
+            !cache.check_and_insert("nonce_3"),
+            "nonce_3 must still be retained"
+        );
 
         // 4. Cache length equals capacity
         assert_eq!(cache.len(), 3);
@@ -746,13 +768,17 @@ mod tests {
 
         let mgr = RulebookManager::new(Some(temp_dir.to_str().unwrap()));
 
-        let default_rules = "Users must not modify system files\nRegular users cannot delete database\n";
+        let default_rules =
+            "Users must not modify system files\nRegular users cannot delete database\n";
         fs::write(&mgr.default_safe_path, default_rules).unwrap();
 
         let compiled = mgr
             .compile_and_save(1)
             .expect("compile_and_save must succeed");
-        assert!(!compiled.rules.is_empty(), "Compiled rules must not be empty");
+        assert!(
+            !compiled.rules.is_empty(),
+            "Compiled rules must not be empty"
+        );
 
         let loaded = CompiledPolicy::from_json_file(mgr.compiled_policy_path.to_str().unwrap())
             .expect("CompiledPolicy::from_json_file must parse StructuredCompiledPolicy format");
@@ -762,7 +788,11 @@ mod tests {
             compiled.rules.len(),
             "Rule count must match between saved structured policy and loaded CompiledPolicy"
         );
-        let block_count = loaded.rules.iter().filter(|r| r.decision == "BLOCK").count();
+        let block_count = loaded
+            .rules
+            .iter()
+            .filter(|r| r.decision == "BLOCK")
+            .count();
         assert!(
             block_count > 0,
             "BLOCK rules must be preserved in CompiledPolicy"
@@ -924,7 +954,9 @@ mod tests {
         let _ = fs::create_dir_all(&temp_dir);
 
         let coordinator = Arc::new(LockdownCoordinator::new_with_root(&temp_dir));
-        coordinator.trigger_lockdown("Emergency security trigger").unwrap();
+        coordinator
+            .trigger_lockdown("Emergency security trigger")
+            .unwrap();
 
         let mut locked_guard = ExecutionGuard::new(None);
         locked_guard.set_lockdown(coordinator);
@@ -936,4 +968,3 @@ mod tests {
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }
-

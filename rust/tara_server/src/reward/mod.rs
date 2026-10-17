@@ -17,6 +17,7 @@ use aes_gcm::{Aes256Gcm, Nonce};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -25,7 +26,6 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 use zeroize::Zeroize;
-use sha2::{Digest, Sha256};
 
 pub const GENESIS_REWARD_HASH: &str = "GENESIS_REWARD_ROOT_HASH";
 
@@ -164,7 +164,9 @@ impl RewardSystem {
     pub fn watermark_domain(&self) -> String {
         format!(
             "reward_ledger_{}",
-            &hex::encode(Sha256::digest(self.storage_path.to_string_lossy().as_bytes()))[..16]
+            &hex::encode(Sha256::digest(
+                self.storage_path.to_string_lossy().as_bytes()
+            ))[..16]
         )
     }
 
@@ -438,9 +440,18 @@ impl RewardSystem {
         #[cfg(test)]
         {
             if is_creator {
-                let principal = tara_security::primitives::AuthenticatedPrincipal::mint_creator_for_test("reward_test_session")
+                let principal =
+                    tara_security::primitives::AuthenticatedPrincipal::mint_creator_for_test(
+                        "reward_test_session",
+                    )
                     .map_err(|e| format!("Failed to mint test creator: {}", e))?;
-                return self.manual_adjustment_with_principal(&principal, actor_id, category, delta, justification);
+                return self.manual_adjustment_with_principal(
+                    &principal,
+                    actor_id,
+                    category,
+                    delta,
+                    justification,
+                );
             }
         }
         let _ = is_creator;
@@ -701,8 +712,8 @@ impl RewardSystem {
 pub mod gated;
 pub use gated::{
     ActiveTaskView, FailureRule, GatedGoalSystem, GatedTask, GoalHierarchySpec,
-    GoalRewardDisburser, MilestoneSpec, RetryRule, ServerRewardDisburser, StageSpec,
-    TaskSpec, TaskStatus, VerificationResult,
+    GoalRewardDisburser, MilestoneSpec, RetryRule, ServerRewardDisburser, StageSpec, TaskSpec,
+    TaskStatus, VerificationResult,
 };
 
 #[cfg(test)]
@@ -798,10 +809,20 @@ mod tests {
         let reward_sys = RewardSystem::new(&tmp);
 
         reward_sys
-            .record_reward("agent_primary", RewardCategory::TaskCompletion, 5.0, "step 1")
+            .record_reward(
+                "agent_primary",
+                RewardCategory::TaskCompletion,
+                5.0,
+                "step 1",
+            )
             .unwrap();
         reward_sys
-            .record_reward("agent_primary", RewardCategory::TaskCompletion, 5.0, "step 2")
+            .record_reward(
+                "agent_primary",
+                RewardCategory::TaskCompletion,
+                5.0,
+                "step 2",
+            )
             .unwrap();
 
         // Intentionally tamper with event 0
@@ -835,10 +856,20 @@ mod tests {
         let _guard = TestDirGuard(tmp.clone(), domain.clone());
 
         reward_sys
-            .record_reward("agent_1", RewardCategory::TaskCompletion, 10.0, "initial task")
+            .record_reward(
+                "agent_1",
+                RewardCategory::TaskCompletion,
+                10.0,
+                "initial task",
+            )
             .unwrap();
         reward_sys
-            .record_reward("agent_1", RewardCategory::LearningProgress, 5.0, "second task")
+            .record_reward(
+                "agent_1",
+                RewardCategory::LearningProgress,
+                5.0,
+                "second task",
+            )
             .unwrap();
 
         let enc_path = tmp
@@ -849,7 +880,12 @@ mod tests {
         let enc_backup_2_events = fs::read(&enc_path).unwrap();
 
         reward_sys
-            .record_reward("agent_1", RewardCategory::ContinuousImprovement, 2.5, "third task")
+            .record_reward(
+                "agent_1",
+                RewardCategory::ContinuousImprovement,
+                2.5,
+                "third task",
+            )
             .unwrap();
 
         drop(reward_sys);

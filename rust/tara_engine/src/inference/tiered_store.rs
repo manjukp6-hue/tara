@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use super::shard_manager::ShardedSafeTensorsManager;
 use crate::inference::backend::{
     BackendError, BackendPolicy, BackendRegistry, DeviceBackend, DeviceKind, DeviceTensor,
 };
@@ -29,7 +30,6 @@ use crate::inference::cache_policy::{
 };
 use crate::inference::telemetry::{EvictionRoute, LookupOutcome, TelemetryMonitor, TransferRoute};
 use crate::safetensors::SafeTensorsError;
-use super::shard_manager::ShardedSafeTensorsManager;
 
 /// Default safety headroom percentage reserved when computing a VRAM cache budget from raw device free memory.
 /// Prevents filling 100% of `cuMemGetInfo` free memory so CUDA context, workspace, and allocator overhead remain safe.
@@ -1211,7 +1211,10 @@ impl ConcurrentTieredTensorStore {
 
     /// Returns the number of currently active in-flight key lock entries.
     pub fn active_key_lock_count(&self) -> usize {
-        self.key_locks.lock().unwrap_or_else(|e| e.into_inner()).len()
+        self.key_locks
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .len()
     }
 
     /// Concurrent single-flight lookup across `VRAM -> RAM -> Disk`.
@@ -1875,8 +1878,9 @@ mod tests {
         let mut shapes = HashMap::new();
         tensors.insert("shard_weight".to_string(), vec![10.0, 20.0, 30.0, 40.0]);
         shapes.insert("shard_weight".to_string(), vec![2, 2]);
-        let shard_files = write_safetensors_sharded(&tensors, &shapes, &shard_dir.to_string_lossy(), 1024 * 1024)
-            .unwrap();
+        let shard_files =
+            write_safetensors_sharded(&tensors, &shapes, &shard_dir.to_string_lossy(), 1024 * 1024)
+                .unwrap();
 
         let mut shard_mgr = ShardedSafeTensorsManager::new(&shard_dir, 2).unwrap();
         let mut store = TieredTensorStore::new(0, 16, HashSet::new())

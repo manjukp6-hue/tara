@@ -316,7 +316,11 @@ impl EventBus {
     }
 
     pub fn persist_journal(&self, path: &Path) -> Result<(), String> {
-        let events = self.event_log.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let events = self
+            .event_log
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
         let count = events.len();
         let journal_record = json!({
             "status": "JOURNAL_COMMITTED",
@@ -1020,8 +1024,9 @@ impl AuditExplainabilityEngine {
                     "prev_signature": prev_sig
                 });
                 let serialized_content = serde_json::to_vec(&content).unwrap_or_default();
-                let mut signer = tara_security::cryptography::HmacSha256Signer::new(&*AUDIT_HMAC_KEY)
-                    .expect("HMAC accepts 32-byte key");
+                let mut signer =
+                    tara_security::cryptography::HmacSha256Signer::new(&*AUDIT_HMAC_KEY)
+                        .expect("HMAC accepts 32-byte key");
                 signer.update(prev_sig.as_bytes());
                 signer.update(b":");
                 signer.update(&serialized_content);
@@ -1029,7 +1034,10 @@ impl AuditExplainabilityEngine {
             }
 
             if computed_hmac.is_empty()
-                || !tara_security::cryptography::CryptoUtils::constant_time_eq(file_hmac.as_bytes(), computed_hmac.as_bytes())
+                || !tara_security::cryptography::CryptoUtils::constant_time_eq(
+                    file_hmac.as_bytes(),
+                    computed_hmac.as_bytes(),
+                )
             {
                 // Fallback to legacy schema verification
                 let content_legacy = json!({
@@ -1044,14 +1052,18 @@ impl AuditExplainabilityEngine {
                     "prev_signature": prev_sig
                 });
                 let serialized_content = serde_json::to_vec(&content_legacy).unwrap_or_default();
-                let mut signer = tara_security::cryptography::HmacSha256Signer::new(&*AUDIT_HMAC_KEY)
-                    .expect("HMAC accepts 32-byte key");
+                let mut signer =
+                    tara_security::cryptography::HmacSha256Signer::new(&*AUDIT_HMAC_KEY)
+                        .expect("HMAC accepts 32-byte key");
                 signer.update(prev_sig.as_bytes());
                 signer.update(b":");
                 signer.update(&serialized_content);
                 let computed_legacy = signer.finalize_hex();
 
-                if !tara_security::cryptography::CryptoUtils::constant_time_eq(file_hmac.as_bytes(), computed_legacy.as_bytes()) {
+                if !tara_security::cryptography::CryptoUtils::constant_time_eq(
+                    file_hmac.as_bytes(),
+                    computed_legacy.as_bytes(),
+                ) {
                     return Err(format!(
                         "AuditSignatureTampered: record in {:?} signature mismatch",
                         path

@@ -1633,7 +1633,10 @@ mod tests {
     fn test_all_ptx_kernels_register_bounds_and_syntax() {
         let count = validate_ptx_registers(PTX_TARA_KERNELS)
             .expect("All PTX_TARA_KERNELS must have valid, in-bounds register declarations");
-        assert!(count >= 20, "All CUDA PTX kernels must be validated (found {count})");
+        assert!(
+            count >= 20,
+            "All CUDA PTX kernels must be validated (found {count})"
+        );
         assert!(!PTX_TARA_KERNELS.contains("%rd8_w"));
         assert!(!PTX_TARA_KERNELS.contains("%rd9_w"));
     }
@@ -1678,7 +1681,8 @@ mod tests {
         let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target");
         fs::create_dir_all(&out_dir).expect("Failed to create target directory");
         let ptx_path = out_dir.join("tara_kernels.ptx");
-        fs::write(&ptx_path, PTX_TARA_KERNELS).expect("Failed to write PTX to target/tara_kernels.ptx");
+        fs::write(&ptx_path, PTX_TARA_KERNELS)
+            .expect("Failed to write PTX to target/tara_kernels.ptx");
 
         println!("Saved PTX file to: {}", ptx_path.display());
         assert!(ptx_path.exists(), "PTX artifact must exist on disk");
@@ -1714,6 +1718,9 @@ mod tests {
         );
 
         // 4. Validate complete ASCII property
-        assert!(PTX_TARA_KERNELS.is_ascii(), "PTX_TARA_KERNELS must be 100% 7-bit ASCII");
+        assert!(
+            PTX_TARA_KERNELS.is_ascii(),
+            "PTX_TARA_KERNELS must be 100% 7-bit ASCII"
+        );
     }
 }

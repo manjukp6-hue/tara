@@ -25,7 +25,10 @@ fn redact_value(val: &Value) -> Value {
             let mut out = serde_json::Map::new();
             for (k, v) in map {
                 let k_lower = k.to_lowercase();
-                if FORBIDDEN_AUDIT_KEYS.iter().any(|&bad| k_lower.contains(bad)) {
+                if FORBIDDEN_AUDIT_KEYS
+                    .iter()
+                    .any(|&bad| k_lower.contains(bad))
+                {
                     out.insert(k.clone(), Value::String("[REDACTED]".to_string()));
                 } else {
                     out.insert(k.clone(), redact_value(v));
@@ -132,7 +135,10 @@ impl RulebookManager {
         }
 
         let serialized = serde_json::to_string_pretty(&policy).map_err(|e| e.to_string())?;
-        tara_security::persistence::atomic_write_file_hardened(&self.compiled_policy_path, serialized.as_bytes())?;
+        tara_security::persistence::atomic_write_file_hardened(
+            &self.compiled_policy_path,
+            serialized.as_bytes(),
+        )?;
 
         self.log_event(
             "POLICY_COMPILED_AND_SAVED",

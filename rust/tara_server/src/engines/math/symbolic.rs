@@ -140,7 +140,10 @@ impl Expr {
                     Expr::make_mul(
                         self.clone(),
                         Expr::make_add(
-                            Expr::make_mul(exp.diff(var_name), Expr::Ln(Box::new((**base).clone()))),
+                            Expr::make_mul(
+                                exp.diff(var_name),
+                                Expr::Ln(Box::new((**base).clone())),
+                            ),
                             Expr::make_div(
                                 Expr::make_mul((**exp).clone(), base.diff(var_name)),
                                 (**base).clone(),

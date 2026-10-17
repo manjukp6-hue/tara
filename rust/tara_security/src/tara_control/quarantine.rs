@@ -89,7 +89,10 @@ impl QuarantineEngine {
 
     /// Creates a standalone QuarantineEngine with a default EnforcementGateway.
     pub fn new_standalone(quarantine_root: PathBuf) -> Self {
-        Self::new(quarantine_root, Arc::new(EnforcementGateway::new_standalone()))
+        Self::new(
+            quarantine_root,
+            Arc::new(EnforcementGateway::new_standalone()),
+        )
     }
 
     pub fn quarantine_root(&self) -> &Path {
@@ -98,7 +101,10 @@ impl QuarantineEngine {
 
     /// Blocklists a specific SHA-256 digest dynamically at runtime.
     pub fn blocklist_hash(&self, hash: &str) -> Result<(), String> {
-        let mut list = self.blocklisted_hashes.lock().map_err(|_| "Blocklist lock poisoned")?;
+        let mut list = self
+            .blocklisted_hashes
+            .lock()
+            .map_err(|_| "Blocklist lock poisoned")?;
         let cleaned = hash.trim().to_lowercase();
         list.insert(cleaned);
         Ok(())
@@ -122,7 +128,11 @@ impl QuarantineEngine {
         epoch_secs: u64,
     ) -> Result<QuarantineRecord, String> {
         // Stage 1: Ingestion
-        let q_id = format!("quarantine_{}_{}", epoch_secs, hex::encode(&CryptoUtils::sha256(content)[..8]));
+        let q_id = format!(
+            "quarantine_{}_{}",
+            epoch_secs,
+            hex::encode(&CryptoUtils::sha256(content)[..8])
+        );
         let sha256_hash = CryptoUtils::sha256_hex(content);
 
         let mut record = QuarantineRecord {
@@ -140,7 +150,9 @@ impl QuarantineEngine {
         // Stage 2: Hash Verification & Blocklist check
         if self.is_hash_blocklisted(&sha256_hash) {
             record.verdict = QuarantineVerdict::Contained;
-            record.failure_reason = Some("BlocklistedHash: Artifact hash exists in dynamic containment blocklist".into());
+            record.failure_reason = Some(
+                "BlocklistedHash: Artifact hash exists in dynamic containment blocklist".into(),
+            );
             self.persist_record(&record, Some(content))?;
             return Ok(record);
         }
@@ -149,13 +161,18 @@ impl QuarantineEngine {
 
         // Stage 3: Syntactic Analysis
         let text_result = std::str::from_utf8(content);
-        if text_result.is_err() && (artifact_type == "code" || artifact_type == "skill" || artifact_type == "config") {
+        if text_result.is_err()
+            && (artifact_type == "code" || artifact_type == "skill" || artifact_type == "config")
+        {
             record.verdict = QuarantineVerdict::Rejected;
-            record.failure_reason = Some("InvalidTextEncoding: UTF-8 decoding failed for text artifact".into());
+            record.failure_reason =
+                Some("InvalidTextEncoding: UTF-8 decoding failed for text artifact".into());
             self.persist_record(&record, Some(content))?;
             return Ok(record);
         }
-        record.stages_passed.push(QuarantineStage::SyntacticAnalysis);
+        record
+            .stages_passed
+            .push(QuarantineStage::SyntacticAnalysis);
         record.current_stage = QuarantineStage::HeuristicScanning;
 
         // Stage 4: Heuristic Scanning for dangerous payloads
@@ -167,28 +184,37 @@ impl QuarantineEngine {
             || content_lc.contains("/bin/sh")
         {
             record.verdict = QuarantineVerdict::Contained;
-            record.failure_reason = Some("HeuristicViolation: Malicious or destructive command sequences detected".into());
+            record.failure_reason = Some(
+                "HeuristicViolation: Malicious or destructive command sequences detected".into(),
+            );
             self.blocklist_hash(&sha256_hash)?;
             self.persist_record(&record, Some(content))?;
             return Ok(record);
         }
-        record.stages_passed.push(QuarantineStage::HeuristicScanning);
+        record
+            .stages_passed
+            .push(QuarantineStage::HeuristicScanning);
         record.current_stage = QuarantineStage::ExecutionPrimitiveAnalysis;
 
         // Stage 5: Execution Primitive Analysis (detect unescaped null bytes, shell injections)
         if content.contains(&0) && artifact_type != "model_weights" {
             record.verdict = QuarantineVerdict::Rejected;
-            record.failure_reason = Some("ExecutionPrimitiveAnomaly: Unexpected null bytes in non-binary artifact".into());
+            record.failure_reason = Some(
+                "ExecutionPrimitiveAnomaly: Unexpected null bytes in non-binary artifact".into(),
+            );
             self.persist_record(&record, Some(content))?;
             return Ok(record);
         }
-        record.stages_passed.push(QuarantineStage::ExecutionPrimitiveAnalysis);
+        record
+            .stages_passed
+            .push(QuarantineStage::ExecutionPrimitiveAnalysis);
         record.current_stage = QuarantineStage::ProvenanceCheck;
 
         // Stage 6: Provenance Check
         if artifact_name.trim().is_empty() {
             record.verdict = QuarantineVerdict::Rejected;
-            record.failure_reason = Some("MissingProvenance: Artifact name identifier is missing".into());
+            record.failure_reason =
+                Some("MissingProvenance: Artifact name identifier is missing".into());
             self.persist_record(&record, Some(content))?;
             return Ok(record);
         }
@@ -217,7 +243,11 @@ impl QuarantineEngine {
         Ok(record)
     }
 
-    fn persist_record(&self, record: &QuarantineRecord, payload: Option<&[u8]>) -> Result<(), String> {
+    fn persist_record(
+        &self,
+        record: &QuarantineRecord,
+        payload: Option<&[u8]>,
+    ) -> Result<(), String> {
         // Ensure quarantine root directory exists
         if !self.quarantine_root.exists() {
             std::fs::create_dir_all(&self.quarantine_root)
@@ -225,16 +255,22 @@ impl QuarantineEngine {
         }
 
         // If contained or rejected, isolate raw payload into quarantine root vault
-        if (record.verdict == QuarantineVerdict::Contained || record.verdict == QuarantineVerdict::Rejected)
+        if (record.verdict == QuarantineVerdict::Contained
+            || record.verdict == QuarantineVerdict::Rejected)
             && payload.is_some()
         {
             if let Some(bytes) = payload {
-                let isolated_file = self.quarantine_root.join(format!("{}.isolated", record.quarantine_id));
+                let isolated_file = self
+                    .quarantine_root
+                    .join(format!("{}.isolated", record.quarantine_id));
                 crate::persistence::atomic_write_file_hardened(&isolated_file, bytes)?;
             }
         }
 
-        let mut map = self.active_records.lock().map_err(|_| "Active records lock poisoned")?;
+        let mut map = self
+            .active_records
+            .lock()
+            .map_err(|_| "Active records lock poisoned")?;
         map.insert(record.quarantine_id.clone(), record.clone());
 
         // Persist ledger to disk if quarantine_root is writable
@@ -304,31 +340,51 @@ impl ContainmentManager {
     }
 
     pub fn revoke_session(&self, session_id: &str) {
-        let mut sessions = self.revoked_sessions.lock().unwrap_or_else(|p| p.into_inner());
+        let mut sessions = self
+            .revoked_sessions
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         sessions.insert(session_id.to_string());
         self.persist();
     }
 
     pub fn is_session_revoked(&self, session_id: &str) -> bool {
-        let sessions = self.revoked_sessions.lock().unwrap_or_else(|p| p.into_inner());
+        let sessions = self
+            .revoked_sessions
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         sessions.contains(session_id)
     }
 
     pub fn isolate_worker(&self, worker_id: &str) {
-        let mut workers = self.isolated_workers.lock().unwrap_or_else(|p| p.into_inner());
+        let mut workers = self
+            .isolated_workers
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         workers.insert(worker_id.to_string());
         self.persist();
     }
 
     pub fn is_worker_isolated(&self, worker_id: &str) -> bool {
-        let workers = self.isolated_workers.lock().unwrap_or_else(|p| p.into_inner());
+        let workers = self
+            .isolated_workers
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         workers.contains(worker_id)
     }
 
     fn persist(&self) {
         if let Some(ref path) = self.persistence_path {
-            let sessions = self.revoked_sessions.lock().unwrap_or_else(|p| p.into_inner()).clone();
-            let workers = self.isolated_workers.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            let sessions = self
+                .revoked_sessions
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
+            let workers = self
+                .isolated_workers
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
             let state = ContainmentState {
                 revoked_sessions: sessions,
                 isolated_workers: workers,

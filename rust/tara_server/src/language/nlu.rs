@@ -325,10 +325,8 @@ impl SemanticIntentParser {
                 "file_path".to_owned(),
                 serde_json::Value::String(file_target.clone()),
             );
-            res.params.insert(
-                "path".to_owned(),
-                serde_json::Value::String(file_target),
-            );
+            res.params
+                .insert("path".to_owned(), serde_json::Value::String(file_target));
             res.params
                 .insert("is_important".to_owned(), serde_json::Value::Bool(true));
             return res;
@@ -521,7 +519,10 @@ impl SemanticIntentParser {
         // ------------------------------------------------------------------
 
         // -- file_inspector --
-        if FILE_INSPECTOR_RES.iter().any(|re| re.is_match(text_lower.as_str())) {
+        if FILE_INSPECTOR_RES
+            .iter()
+            .any(|re| re.is_match(text_lower.as_str()))
+        {
             let target_path = slots
                 .get("file_path")
                 .cloned()
@@ -546,7 +547,10 @@ impl SemanticIntentParser {
         }
 
         // -- hash_verifier --
-        if HASH_VERIFIER_RES.iter().any(|re| re.is_match(text_lower.as_str())) {
+        if HASH_VERIFIER_RES
+            .iter()
+            .any(|re| re.is_match(text_lower.as_str()))
+        {
             let target_path = slots.get("file_path").cloned().or_else(|| {
                 ctx.get("file_path")
                     .or_else(|| ctx.get("path"))
@@ -580,8 +584,14 @@ impl SemanticIntentParser {
         }
 
         // -- knowledge_retriever --
-        if KNOWLEDGE_RETRIEVER_RES.iter().any(|re| re.is_match(text_lower.as_str())) {
-            let q_text = KNOWLEDGE_STRIP_RE.replace_all(text_clean, "").trim().to_owned();
+        if KNOWLEDGE_RETRIEVER_RES
+            .iter()
+            .any(|re| re.is_match(text_lower.as_str()))
+        {
+            let q_text = KNOWLEDGE_STRIP_RE
+                .replace_all(text_clean, "")
+                .trim()
+                .to_owned();
             let q_text = if q_text.is_empty() {
                 text_clean.to_owned()
             } else {

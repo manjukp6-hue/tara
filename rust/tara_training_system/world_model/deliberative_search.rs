@@ -72,9 +72,8 @@ impl SearchNode {
             // Unvisited nodes get priority bonus
             safe_q + safe_c * safe_prior * ((parent_visits as f64).max(1.0).sqrt())
         } else {
-            let u = safe_c
-                * safe_prior
-                * ((parent_visits as f64).sqrt() / (1.0 + self.visits as f64));
+            let u =
+                safe_c * safe_prior * ((parent_visits as f64).sqrt() / (1.0 + self.visits as f64));
             safe_q + u
         }
     }

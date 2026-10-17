@@ -499,8 +499,8 @@ impl ScienceEngine {
             let lower_words: Vec<String> = orig_words.iter().map(|w| w.to_lowercase()).collect();
             if let Some(pos) = lower_words.iter().position(|w| w == "of") {
                 if pos + 1 < orig_words.len() {
-                    let raw_token = orig_words[pos + 1]
-                        .trim_matches(|c: char| !c.is_ascii_alphanumeric());
+                    let raw_token =
+                        orig_words[pos + 1].trim_matches(|c: char| !c.is_ascii_alphanumeric());
                     // If user typed all-lowercase like "h2o" or "co2", capitalize single-letter elements;
                     // if user typed mixed case like "NaCl" or "H2O", preserve it!
                     let formula = if raw_token.chars().any(|c| c.is_ascii_uppercase()) {

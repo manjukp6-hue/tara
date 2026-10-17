@@ -306,10 +306,9 @@ impl ModelRegistry {
                         shard_full.display()
                     ));
                 }
-                let shard_hash = tara_engine::compute256(&shard_full)
-                    .map_err(|e| {
-                        format!("Shard hash failed for '{}': {e}", shard_full.display())
-                    })?;
+                let shard_hash = tara_engine::compute256(&shard_full).map_err(|e| {
+                    format!("Shard hash failed for '{}': {e}", shard_full.display())
+                })?;
                 aggregate_hasher.update(shard_hash.as_bytes());
             }
             (
@@ -317,8 +316,7 @@ impl ModelRegistry {
                 sorted_shards.len(),
             )
         } else if single_path.exists() {
-            let sha = tara_engine::compute256(&single_path)
-                .map_err(|error| error.to_string())?;
+            let sha = tara_engine::compute256(&single_path).map_err(|error| error.to_string())?;
             (sha, 1)
         } else {
             return Err("neither model.safetensors nor model.safetensors.index.json found in candidate model dir".into());
@@ -342,10 +340,7 @@ impl ModelRegistry {
         }
 
         // Acquire lock across the entire manifest update & disk write to serialize registrations
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
 
         let mut manifest: Value = match fs::read(&self.manifest_path) {
             Ok(raw) => serde_json::from_slice(&raw).map_err(|error| error.to_string())?,
@@ -505,10 +500,7 @@ impl ModelRegistry {
                 "MissingSignature: Model promotion requires verified creator signature".into(),
             );
         }
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         if !state.versions.iter().any(|v| v.version_id == version_id) {
             return Err(format!(
                 "Model version '{}' not found in registry",
@@ -674,12 +666,15 @@ mod tests {
         .unwrap();
 
         let registry = ModelRegistry::new(root.to_str().unwrap());
-        let principal =
-            tara_security::primitives::AuthenticatedPrincipal::mint_creator_for_test("test_session")
-                .unwrap();
+        let principal = tara_security::primitives::AuthenticatedPrincipal::mint_creator_for_test(
+            "test_session",
+        )
+        .unwrap();
 
         // 1. Promote v2
-        assert!(registry.promote(&principal, "v2", Some("valid_sig")).is_ok());
+        assert!(registry
+            .promote(&principal, "v2", Some("valid_sig"))
+            .is_ok());
         assert_eq!(registry.get_active_version().as_deref(), Some("v2"));
 
         // Verify disk persistence
@@ -707,4 +702,3 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 }
-

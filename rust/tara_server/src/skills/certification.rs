@@ -164,8 +164,7 @@ impl SkillCertificationAuthority {
         record.inferred_schema = inferred_schema;
         record.last_updated_ms = now;
 
-        let cumulative_rate =
-            (record.pass_count as f64) / (record.test_runs_count.max(1) as f64);
+        let cumulative_rate = (record.pass_count as f64) / (record.test_runs_count.max(1) as f64);
         let effective_rate = success_rate.min(cumulative_rate);
 
         // State transition rules:

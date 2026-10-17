@@ -1163,9 +1163,12 @@ pub fn select_and_report_best_checkpoint(
         let cfg = TaraConfig::from_json_file(&dir.join("config.json").to_string_lossy()).ok()?;
         let tok = TaraTokenizer::from_file(&dir.join("tokenizer.json").to_string_lossy()).ok()?;
         let (weights, _) = load_model_weights_with_shapes(&dir.to_string_lossy()).ok()?;
-        let model = TaraForCausalLM::from_weights_and_config(weights, cfg.clone(), &dir.to_string_lossy()).ok()?;
+        let model =
+            TaraForCausalLM::from_weights_and_config(weights, cfg.clone(), &dir.to_string_lossy())
+                .ok()?;
         let tids = tok.encode(probe_text);
-        let (total_loss, targets) = compute_causal_sequence_loss(&model, &tids, cfg.vocab_size).ok()?;
+        let (total_loss, targets) =
+            compute_causal_sequence_loss(&model, &tids, cfg.vocab_size).ok()?;
         if targets == 0 {
             return None;
         }
@@ -1178,8 +1181,12 @@ pub fn select_and_report_best_checkpoint(
         }
     };
 
-    let (mut best_loss, mut best_ppl) = eval_dir_loss(staging_out_dir)
-        .ok_or_else(|| format!("Failed to evaluate final staged model in '{}'", staging_out_dir.display()))?;
+    let (mut best_loss, mut best_ppl) = eval_dir_loss(staging_out_dir).ok_or_else(|| {
+        format!(
+            "Failed to evaluate final staged model in '{}'",
+            staging_out_dir.display()
+        )
+    })?;
     let mut best_source = "final_step".to_string();
     let mut best_path: Option<PathBuf> = None;
     let bpb = best_loss / std::f64::consts::LN_2;
@@ -1195,7 +1202,11 @@ pub fn select_and_report_best_checkpoint(
             subdirs.sort();
 
             for cp_sub in subdirs {
-                let cp_name = cp_sub.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let cp_name = cp_sub
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
                 if let Some((loss, ppl)) = eval_dir_loss(&cp_sub) {
                     let cp_bpb = loss / std::f64::consts::LN_2;
                     println!("  [LIVE EVAL] Intermediate '{}' -> Loss: {:.4} | Perplexity: {:.4} | Bits-Per-Byte: {:.4}", cp_name, loss, ppl, cp_bpb);
@@ -1421,7 +1432,9 @@ pub fn evaluate_checkpoint_model(
 }
 
 /// Verifies that the Pre-Training Authorization Gate has passed and generated an authorized record.
-fn verify_pretraining_authorization(checkpoints_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn verify_pretraining_authorization(
+    checkpoints_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let candidate_paths = [
         checkpoints_dir.join("pretraining_authorization.json"),
         PathBuf::from("storage/models/checkpoints/pretraining_authorization.json"),
@@ -1485,8 +1498,12 @@ fn verify_pretraining_authorization(checkpoints_dir: &Path) -> Result<(), Box<dy
 /// Enforces cloud / Google Colab training environment to protect local developer PC hardware.
 fn verify_cloud_training_environment() -> Result<(), Box<dyn std::error::Error>> {
     let is_colab = std::env::var("COLAB_GPU").is_ok() || std::env::var("COLAB_RELEASE_TAG").is_ok();
-    let is_cloud = std::env::var("TARA_CLOUD_TRAINING").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false);
-    let allow_local = std::env::var("TARA_ALLOW_LOCAL_TRAINING").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false);
+    let is_cloud = std::env::var("TARA_CLOUD_TRAINING")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let allow_local = std::env::var("TARA_ALLOW_LOCAL_TRAINING")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
 
     if !is_colab && !is_cloud && !allow_local {
         return Err(
@@ -1648,7 +1665,6 @@ pub fn build_default_stages(
         },
     ]
 }
-
 
 fn print_usage() {
     println!("Usage: tara_training_stages [OPTIONS]");
@@ -1979,8 +1995,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !model_dir.exists() {
         return Err(format!("Base model directory missing: {}", model_dir.display()).into());
     }
-    let (is_base_model, missing_base, base_param_count) =
-        verify_working_model_with_context("main_pipeline_startup", "base_model", &model_dir, "INPUT");
+    let (is_base_model, missing_base, base_param_count) = verify_working_model_with_context(
+        "main_pipeline_startup",
+        "base_model",
+        &model_dir,
+        "INPUT",
+    );
     if !is_base_model {
         return Err(format!(
             "Base model directory '{}' is invalid: {:?}",
@@ -2096,8 +2116,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .into());
         }
-        let (is_cont, missing_cont, _) =
-            verify_continuation_ready_with_context("cli_resume_override", "entry", r_path, "RESUME");
+        let (is_cont, missing_cont, _) = verify_continuation_ready_with_context(
+            "cli_resume_override",
+            "entry",
+            r_path,
+            "RESUME",
+        );
         if !is_cont {
             return Err(format!(
                 "Specified --resume-from path '{}' is not continuation-ready (requires valid checkpoint_state.json and optimizer.safetensors): {:?}",
@@ -2165,9 +2189,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !is_base {
                 return Err(format!(
                     "Entry stage '{}' input checkpoint '{}' is not a valid working model: {:?}",
-                    s.stage_id,
-                    s.input_checkpoint,
-                    missing
+                    s.stage_id, s.input_checkpoint, missing
                 )
                 .into());
             }
@@ -2433,7 +2455,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if stage.stage_index == 0 && input_cp.contains("tara_candidate_v1") {
             println!("  [INITIAL PRODUCTION MODEL VALIDATION]");
             println!("    Input Checkpoint Shards   : VALIDATED (120 tensors)");
-            println!("    Exact Parameter Count     : {} parameters", loaded_param_count);
+            println!(
+                "    Exact Parameter Count     : {} parameters",
+                loaded_param_count
+            );
         }
 
         // Strict auto-resume verification: if input_path has continuation files and we aren't in --init-from mode, verify them!
@@ -2483,7 +2508,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Fingerprint-gated idempotence check (skip unless --force or explicit entry override was requested)
         let has_entry_override =
             is_first_stage && (resume_from_override.is_some() || init_from_override.is_some());
-        if !force_rerun && !has_entry_override && should_skip_completed_stage(&out_dir, &expected_fingerprint) {
+        if !force_rerun
+            && !has_entry_override
+            && should_skip_completed_stage(&out_dir, &expected_fingerprint)
+        {
             println!();
             println!(
                 "[STAGE {:02} ({}) ALREADY COMPLETED & FINGERPRINT VERIFIED: SKIPPING (use --force to re-run)]",
@@ -2588,7 +2616,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             checkpoint_interval: Some(stage.checkpoint_interval),
             resume: should_resume,
             resume_from: resume_source,
-            stage_name: Some(format!("Stage {:02} ({})", stage.stage_index, stage.stage_id)),
+            stage_name: Some(format!(
+                "Stage {:02} ({})",
+                stage.stage_index, stage.stage_id
+            )),
             max_memory_mb: Some(max_mem_mb),
             ..Default::default()
         };
@@ -2682,7 +2713,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  Baseline Loss (Before)          : {:.6}", lb);
         }
         if let Some(la) = result.get("loss_after").and_then(|v| v.as_f64()) {
-            println!("  Final Step Loss (After)         : {:.6} (PPL: {:.4})", la, la.exp());
+            println!(
+                "  Final Step Loss (After)         : {:.6} (PPL: {:.4})",
+                la,
+                la.exp()
+            );
         }
         if let Some(bl) = result.get("best_loss").and_then(|v| v.as_f64()) {
             if let Some(bs) = result.get("best_step").and_then(|v| v.as_u64()) {
@@ -2690,13 +2725,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "  Best Checkpoint Loss            : {:.6} (Step {}, Source: {})",
                     bl,
                     bs,
-                    result.get("best_checkpoint_source").and_then(|v| v.as_str()).unwrap_or("unknown")
+                    result
+                        .get("best_checkpoint_source")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
                 );
             } else {
                 println!("  Best Checkpoint Loss            : {:.6}", bl);
             }
         }
-        if let Some(st) = result.get("steps").or_else(|| result.get("optimizer_steps")).and_then(|v| v.as_u64()) {
+        if let Some(st) = result
+            .get("steps")
+            .or_else(|| result.get("optimizer_steps"))
+            .and_then(|v| v.as_u64())
+        {
             println!("  Total Optimizer Steps           : {}", st);
         }
         println!("  Model Weights Digest (SHA-256)  : {}", weights_sha);
@@ -2778,7 +2820,12 @@ fn trigger_hf_model_promotion(model_dir: &Path) -> Result<(), Box<dyn std::error
     if let Some(bin_path) = candidates.iter().find(|p| p.exists()) {
         let mut cmd = std::process::Command::new(bin_path);
         cmd.env("HF_MODEL_REPO", &hf_repo);
-        cmd.args(["--model", &model_dir.to_string_lossy(), "--repo-id", &hf_repo]);
+        cmd.args([
+            "--model",
+            &model_dir.to_string_lossy(),
+            "--repo-id",
+            &hf_repo,
+        ]);
         if let Ok(mut child) = cmd.spawn() {
             let status = child.wait()?;
             if status.success() {
@@ -3222,7 +3269,10 @@ mod tests {
         let (is_model, missing, param_count) =
             verify_working_model_with_purpose(&input_dir, "INPUT");
         assert!(is_model, "Input model should be valid: {:?}", missing);
-        assert!(param_count.unwrap_or(0) > 0, "Parameter count must be non-zero");
+        assert!(
+            param_count.unwrap_or(0) > 0,
+            "Parameter count must be non-zero"
+        );
 
         // Verify that empty output directory is recognized as a new training destination,
         // and does NOT trigger "contains no SafeTensors weight shards" during DAG planning.
@@ -3314,8 +3364,9 @@ mod tests {
 
         let (is_inc_model, inc_missing, _) = verify_working_model(&incomplete_dir);
         assert!(!is_inc_model);
-        assert!(inc_missing.iter().any(|m| m.contains("Failed to load model SafeTensors weights")
-            || m.contains("missing")));
+        assert!(inc_missing.iter().any(
+            |m| m.contains("Failed to load model SafeTensors weights") || m.contains("missing")
+        ));
     }
 
     #[test]
@@ -3394,7 +3445,10 @@ mod tests {
 
             if !scheduled_outputs.contains(&norm_in) {
                 // Only root stage (idx == 0) must exist on disk prior to execution
-                assert_eq!(idx, 0, "Only the entry stage may have an un-scheduled input checkpoint");
+                assert_eq!(
+                    idx, 0,
+                    "Only the entry stage may have an un-scheduled input checkpoint"
+                );
                 let (is_model, missing, _) = verify_working_model(&effective_in);
                 assert!(is_model, "Base model input must be valid: {:?}", missing);
             }
@@ -3404,10 +3458,11 @@ mod tests {
             let is_empty_or_missing = !out_p.exists() || is_empty_dir(&out_p);
             assert!(is_empty_or_missing);
 
-            scheduled_outputs.insert(normalize_for_comparison(Path::new(&stage.output_checkpoint)));
+            scheduled_outputs.insert(normalize_for_comparison(Path::new(
+                &stage.output_checkpoint,
+            )));
         }
 
         assert_eq!(scheduled_outputs.len(), 3);
     }
 }
-

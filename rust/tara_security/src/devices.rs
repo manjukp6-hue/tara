@@ -81,18 +81,24 @@ impl DeviceCrypto {
         message: &[u8],
         signature_hex: &str,
     ) -> Result<(), String> {
-        let pub_bytes = hex::decode(public_key_hex)
-            .map_err(|e| format!("Malformed public key hex: {}", e))?;
+        let pub_bytes =
+            hex::decode(public_key_hex).map_err(|e| format!("Malformed public key hex: {}", e))?;
         if pub_bytes.len() != 32 {
-            return Err(format!("Public key must be 32 bytes, got {}", pub_bytes.len()));
+            return Err(format!(
+                "Public key must be 32 bytes, got {}",
+                pub_bytes.len()
+            ));
         }
         let mut pk_arr = [0u8; 32];
         pk_arr.copy_from_slice(&pub_bytes);
 
-        let sig_bytes = hex::decode(signature_hex)
-            .map_err(|e| format!("Malformed signature hex: {}", e))?;
+        let sig_bytes =
+            hex::decode(signature_hex).map_err(|e| format!("Malformed signature hex: {}", e))?;
         if sig_bytes.len() != 64 {
-            return Err(format!("Signature must be 64 bytes, got {}", sig_bytes.len()));
+            return Err(format!(
+                "Signature must be 64 bytes, got {}",
+                sig_bytes.len()
+            ));
         }
         let mut sig_arr = [0u8; 64];
         sig_arr.copy_from_slice(&sig_bytes);
@@ -267,12 +273,7 @@ impl IdentityManager {
     }
 
     pub fn get_device(&self, device_id: &str) -> Option<DeviceRecord> {
-        self.devices
-            .lock()
-            .ok()?
-            .devices
-            .get(device_id)
-            .cloned()
+        self.devices.lock().ok()?.devices.get(device_id).cloned()
     }
 
     pub fn authorize_device(&self, device_id: &str) -> bool {
@@ -333,11 +334,18 @@ impl EnrollmentService {
         rand::RngCore::fill_bytes(&mut OsRng, &mut rand_bytes);
         let token = hex::encode(rand_bytes);
 
-        let mut ch = self.active_challenges.lock().unwrap_or_else(|p| p.into_inner());
+        let mut ch = self
+            .active_challenges
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         // Evict expired challenges
         ch.retain(|_, (_, ts)| ts.elapsed() < Duration::from_secs(300));
         if ch.len() >= Self::MAX_CHALLENGES {
-            if let Some(oldest_token) = ch.iter().min_by_key(|(_, (_, ts))| *ts).map(|(k, _)| k.clone()) {
+            if let Some(oldest_token) = ch
+                .iter()
+                .min_by_key(|(_, (_, ts))| *ts)
+                .map(|(k, _)| k.clone())
+            {
                 ch.remove(&oldest_token);
             }
         }
@@ -357,7 +365,10 @@ impl EnrollmentService {
         device_pubkey_hex: &str,
         proof_signature_hex: &str,
     ) -> Result<String, String> {
-        let mut ch = self.active_challenges.lock().map_err(|_| "Challenges lock poisoned")?;
+        let mut ch = self
+            .active_challenges
+            .lock()
+            .map_err(|_| "Challenges lock poisoned")?;
         let (device_name, created_at) = ch
             .remove(enrollment_token)
             .ok_or_else(|| "Enrollment token expired or not found".to_string())?;
@@ -386,11 +397,14 @@ mod tests {
 
     #[test]
     fn test_register_device_derives_canonical_device_id() {
-        let (_signing_key, verifying_key) = crate::cryptography::CryptoUtils::generate_ed25519_keypair();
+        let (_signing_key, verifying_key) =
+            crate::cryptography::CryptoUtils::generate_ed25519_keypair();
         let pub_hex = hex::encode(verifying_key.as_bytes());
 
         let mut reg = DeviceRegistryData::new();
-        let rec = reg.register_device(&pub_hex, "TestDevice", "ACTIVE", "2026-10-14T12:00:00Z").unwrap();
+        let rec = reg
+            .register_device(&pub_hex, "TestDevice", "ACTIVE", "2026-10-14T12:00:00Z")
+            .unwrap();
 
         let expected_id = DeviceCrypto::derive_device_id(&pub_hex).unwrap();
         assert_eq!(rec.device_id, expected_id);
@@ -398,4 +412,3 @@ mod tests {
         assert_eq!(rec.device_id.len(), 25);
     }
 }
-

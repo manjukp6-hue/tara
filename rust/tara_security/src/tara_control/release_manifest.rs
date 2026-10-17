@@ -95,8 +95,9 @@ impl ReleaseManifestManager {
 
         let model_path = self.repo_root.join("storage/models/tara/model.safetensors");
         let model_sha = if model_path.exists() {
-            compute_file_sha256(&model_path)
-                .ok_or_else(|| "Failed to compute model SAFETENSORS SHA-256 (FailClosed)".to_string())?
+            compute_file_sha256(&model_path).ok_or_else(|| {
+                "Failed to compute model SAFETENSORS SHA-256 (FailClosed)".to_string()
+            })?
         } else {
             String::new()
         };
@@ -119,7 +120,9 @@ impl ReleaseManifestManager {
         if let Some(key) = signing_key {
             let payload =
                 canonical_manifest_payload(build_id, version, &timestamp, &model_sha, &file_hashes);
-            if let Ok(sig_bytes) = crate::cryptography::CryptoUtils::hmac_sha256(key, payload.as_bytes()) {
+            if let Ok(sig_bytes) =
+                crate::cryptography::CryptoUtils::hmac_sha256(key, payload.as_bytes())
+            {
                 manifest.signature = Some(hex::encode(sig_bytes));
             }
         }
@@ -172,7 +175,10 @@ impl ReleaseManifestManager {
         let mut mismatches = Vec::new();
         for (rel_path, expected_hash) in active_hashes {
             if let Err(e) = crate::path_security::check_lexical_traversal(Path::new(rel_path)) {
-                mismatches.push(format!("Illegal path traversal in manifest entry '{}': {e}", rel_path));
+                mismatches.push(format!(
+                    "Illegal path traversal in manifest entry '{}': {e}",
+                    rel_path
+                ));
                 continue;
             }
             let full_path = self.repo_root.join(rel_path);
@@ -183,7 +189,10 @@ impl ReleaseManifestManager {
             let current_hash = match compute_file_sha256(&full_path) {
                 Some(h) => h,
                 None => {
-                    mismatches.push(format!("Cannot read or hash file {}: integrity unverified", rel_path));
+                    mismatches.push(format!(
+                        "Cannot read or hash file {}: integrity unverified",
+                        rel_path
+                    ));
                     continue;
                 }
             };
@@ -225,7 +234,9 @@ impl ReleaseManifestManager {
                     &manifest.production_model_sha256,
                     &manifest.file_hashes,
                 );
-                if let Ok(expected_bytes) = crate::cryptography::CryptoUtils::hmac_sha256(key, payload.as_bytes()) {
+                if let Ok(expected_bytes) =
+                    crate::cryptography::CryptoUtils::hmac_sha256(key, payload.as_bytes())
+                {
                     let expected_sig = hex::encode(expected_bytes);
                     Some(crate::cryptography::CryptoUtils::constant_time_eq(
                         expected_sig.as_bytes(),
@@ -264,7 +275,8 @@ mod tests {
 
     #[test]
     fn test_manifest_signing_and_tamper_detection() {
-        let temp = std::env::temp_dir().join(format!("tara_sec_manifest_test_{}", std::process::id()));
+        let temp =
+            std::env::temp_dir().join(format!("tara_sec_manifest_test_{}", std::process::id()));
         let _ = fs::create_dir_all(&temp);
         let mgr = ReleaseManifestManager::new(Some(temp.to_str().unwrap()), None);
 
@@ -300,7 +312,10 @@ mod tests {
 
     #[test]
     fn test_manifest_signature_stripping_rejection() {
-        let temp = std::env::temp_dir().join(format!("tara_sec_manifest_strip_test_{}", std::process::id()));
+        let temp = std::env::temp_dir().join(format!(
+            "tara_sec_manifest_strip_test_{}",
+            std::process::id()
+        ));
         let _ = fs::create_dir_all(&temp);
         let mgr = ReleaseManifestManager::new(Some(temp.to_str().unwrap()), None);
 
@@ -334,4 +349,3 @@ mod tests {
         }
     }
 }
-

@@ -50,7 +50,9 @@ fn print_usage() {
     println!("  --heads <n>                 Explicit override for num_attention_heads (e.g. 32)");
     println!("  --kv-heads <n>              Explicit override for num_key_value_heads (e.g. 8)");
     println!("  --intermediate-size <n>     Explicit override for intermediate_size (e.g. 5504)");
-    println!("  --dataset-dir <path>        Dataset directory for data-driven vocabulary construction");
+    println!(
+        "  --dataset-dir <path>        Dataset directory for data-driven vocabulary construction"
+    );
     println!("  --init                      Initialize target weights fresh (no source safetensors needed)");
     println!("  --dry-run                   Solve and print architecture & exact parameter breakdown; do not write files");
     println!("  --verify                    Load and verify CPU + CUDA forward pass after writing");

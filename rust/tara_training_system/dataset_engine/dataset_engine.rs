@@ -325,8 +325,16 @@ impl DatasetEngine {
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
-        let manual_count = self.manual_registry.read().unwrap_or_else(|p| p.into_inner()).len();
-        let auto_count = self.autonomous_registry.read().unwrap_or_else(|p| p.into_inner()).len();
+        let manual_count = self
+            .manual_registry
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .len();
+        let auto_count = self
+            .autonomous_registry
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .len();
 
         let mut total_neural = 0;
         let mut total_world = 0;
@@ -421,12 +429,18 @@ impl DatasetEngine {
         // Store into appropriate isolated registry
         let (is_new, is_updated) = match source {
             DatasetSource::Manual => {
-                let mut reg = self.manual_registry.write().unwrap_or_else(|p| p.into_inner());
+                let mut reg = self
+                    .manual_registry
+                    .write()
+                    .unwrap_or_else(|p| p.into_inner());
                 let was_present = reg.insert(dataset_id, metadata).is_some();
                 (!was_present, was_present)
             }
             DatasetSource::Autonomous => {
-                let mut reg = self.autonomous_registry.write().unwrap_or_else(|p| p.into_inner());
+                let mut reg = self
+                    .autonomous_registry
+                    .write()
+                    .unwrap_or_else(|p| p.into_inner());
                 let was_present = reg.insert(dataset_id, metadata).is_some();
                 (!was_present, was_present)
             }
@@ -782,12 +796,18 @@ impl DatasetEngine {
 
     /// Get snapshot of manual datasets registry.
     pub fn get_manual_registry(&self) -> BTreeMap<String, DatasetMetadata> {
-        self.manual_registry.read().unwrap_or_else(|p| p.into_inner()).clone()
+        self.manual_registry
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
     }
 
     /// Get snapshot of autonomous datasets registry.
     pub fn get_autonomous_registry(&self) -> BTreeMap<String, DatasetMetadata> {
-        self.autonomous_registry.read().unwrap_or_else(|p| p.into_inner()).clone()
+        self.autonomous_registry
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
     }
 }
 

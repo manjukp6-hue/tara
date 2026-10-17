@@ -6,8 +6,8 @@
 //! - Creator-authorization requirement for seal generation.
 //! - Anti-rollback version verification and tamper detection.
 
-use std::path::Path;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use zeroize::Zeroize;
 
 use crate::cryptography::CryptoUtils;
@@ -45,7 +45,10 @@ impl ModelIntegrityGuard {
         expected_sha256: &str,
     ) -> Result<String, String> {
         if !model_file.exists() {
-            return Err(format!("ModelNotFound: Model checkpoint '{}' does not exist", model_file.display()));
+            return Err(format!(
+                "ModelNotFound: Model checkpoint '{}' does not exist",
+                model_file.display()
+            ));
         }
 
         let computed_sha256 = CryptoUtils::compute_file_sha256(model_file)?;
@@ -71,11 +74,17 @@ impl ModelIntegrityGuard {
         epoch_secs: u64,
     ) -> Result<ModelManifestSeal, String> {
         if principal.assurance_level().score() < AssuranceLevel::CREATOR_ROOT.score() {
-            return Err("UnauthorizedSealGeneration: Seal generation requires Creator Root assurance".into());
+            return Err(
+                "UnauthorizedSealGeneration: Seal generation requires Creator Root assurance"
+                    .into(),
+            );
         }
 
         let manifest_sha = CryptoUtils::sha256_hex(manifest_data);
-        let preimage = format!("{}:{}:{}:{}", model_id, manifest_sha, model_weights_sha256, epoch_secs);
+        let preimage = format!(
+            "{}:{}:{}:{}",
+            model_id, manifest_sha, model_weights_sha256, epoch_secs
+        );
 
         let hmac_bytes = CryptoUtils::hmac_sha256(seal_key, preimage.as_bytes())?;
         let sig_hex = hex::encode(hmac_bytes);
@@ -98,8 +107,13 @@ impl ModelIntegrityGuard {
         seal_key: &[u8],
     ) -> Result<(), String> {
         let computed_manifest_sha = CryptoUtils::sha256_hex(manifest_data);
-        if !CryptoUtils::constant_time_eq(computed_manifest_sha.as_bytes(), seal.manifest_sha256.as_bytes()) {
-            return Err("ManifestContentTampered: Manifest content hash does not match seal".into());
+        if !CryptoUtils::constant_time_eq(
+            computed_manifest_sha.as_bytes(),
+            seal.manifest_sha256.as_bytes(),
+        ) {
+            return Err(
+                "ManifestContentTampered: Manifest content hash does not match seal".into(),
+            );
         }
 
         let preimage = format!(
@@ -110,20 +124,23 @@ impl ModelIntegrityGuard {
         let expected_hex = hex::encode(expected_hmac);
 
         if !CryptoUtils::constant_time_eq(expected_hex.as_bytes(), seal.signature_hex.as_bytes()) {
-            return Err("SealSignatureInvalid: HMAC signature does not match; seal is forged or corrupted".into());
+            return Err(
+                "SealSignatureInvalid: HMAC signature does not match; seal is forged or corrupted"
+                    .into(),
+            );
         }
 
         Ok(())
     }
 }
 
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::path::PathBuf;
+use crate::primitives::AuthenticatedPrincipal;
 use constant_time_eq::constant_time_eq;
 use rand::RngCore;
 use serde_json::{json, Value};
-use crate::primitives::AuthenticatedPrincipal;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::PathBuf;
 
 /// Error type for model integrity operations.
 #[derive(Debug)]
@@ -210,26 +227,27 @@ impl ModelIntegrityEngine {
     pub fn new<P: AsRef<Path>>(repo_root: P) -> Self {
         let root = repo_root.as_ref();
         let candidate_dir = root.join("storage/models/tara_candidate_v1");
-        let (model_safetensors_path, config_json_path, tokenizer_json_path) = if candidate_dir.exists() {
-            let model_path = if candidate_dir.join("model.safetensors.index.json").exists() {
-                candidate_dir.join("model.safetensors.index.json")
-            } else if candidate_dir.join("model.safetensors").exists() {
-                candidate_dir.join("model.safetensors")
+        let (model_safetensors_path, config_json_path, tokenizer_json_path) =
+            if candidate_dir.exists() {
+                let model_path = if candidate_dir.join("model.safetensors.index.json").exists() {
+                    candidate_dir.join("model.safetensors.index.json")
+                } else if candidate_dir.join("model.safetensors").exists() {
+                    candidate_dir.join("model.safetensors")
+                } else {
+                    candidate_dir.clone()
+                };
+                (
+                    model_path,
+                    candidate_dir.join("config.json"),
+                    candidate_dir.join("tokenizer.json"),
+                )
             } else {
-                candidate_dir.clone()
+                (
+                    root.join("storage/models/tara/model.safetensors"),
+                    root.join("storage/models/tara/config.json"),
+                    root.join("storage/models/tara/tokenizer.json"),
+                )
             };
-            (
-                model_path,
-                candidate_dir.join("config.json"),
-                candidate_dir.join("tokenizer.json"),
-            )
-        } else {
-            (
-                root.join("storage/models/tara/model.safetensors"),
-                root.join("storage/models/tara/config.json"),
-                root.join("storage/models/tara/tokenizer.json"),
-            )
-        };
         Self {
             seal_path: root.join("storage/vault/access/manifest_seal.json"),
             manifest_path: root.join("storage/models/versions_manifest.json"),
@@ -281,8 +299,7 @@ impl ModelIntegrityEngine {
     }
 
     pub fn stream_file_sha256<P: AsRef<Path>>(path: P) -> Result<String, IntegrityError> {
-        CryptoUtils::compute256(path.as_ref())
-            .map_err(IntegrityError::IoError)
+        CryptoUtils::compute256(path.as_ref()).map_err(IntegrityError::IoError)
     }
 
     fn stream_optional_file_sha256<P: AsRef<Path>>(path: P) -> Result<String, IntegrityError> {
@@ -311,8 +328,7 @@ impl ModelIntegrityEngine {
     }
 
     fn compute_hmac(key: &[u8; 32], message: &[u8]) -> String {
-        CryptoUtils::hmac_sha256_hex(key, message)
-            .expect("HMAC-SHA256 accepts 32-byte key")
+        CryptoUtils::hmac_sha256_hex(key, message).expect("HMAC-SHA256 accepts 32-byte key")
     }
 
     pub fn seal_manifest_authorized(
@@ -334,9 +350,8 @@ impl ModelIntegrityEngine {
                 "Root creator authority required to seal model manifest".into(),
             ));
         }
-        if let Some(existing_wm) =
-            crate::dpapi::load_os_monotonic_watermark(&self.watermark_domain)
-                .map_err(|e| IntegrityError::Unauthorized(format!("WatermarkCheckFailed: {}", e)))?
+        if let Some(existing_wm) = crate::dpapi::load_os_monotonic_watermark(&self.watermark_domain)
+            .map_err(|e| IntegrityError::Unauthorized(format!("WatermarkCheckFailed: {}", e)))?
         {
             if version < existing_wm {
                 return Err(IntegrityError::Unauthorized(format!(
@@ -482,8 +497,9 @@ impl ModelIntegrityEngine {
         let stored_config_sha = seal["config_sha256"].as_str().unwrap_or("NONE");
         let stored_tokenizer_sha = seal["tokenizer_sha256"].as_str().unwrap_or("NONE");
 
-        if let Some(watermark) = crate::dpapi::load_os_monotonic_watermark(&self.watermark_domain)
-            .map_err(|e| IntegrityError::Unauthorized(format!("WatermarkCheckFailed: {}", e)))?
+        if let Some(watermark) =
+            crate::dpapi::load_os_monotonic_watermark(&self.watermark_domain)
+                .map_err(|e| IntegrityError::Unauthorized(format!("WatermarkCheckFailed: {}", e)))?
         {
             if version < watermark {
                 return Err(IntegrityError::Unauthorized(format!(
@@ -543,10 +559,18 @@ impl ModelIntegrityEngine {
 
         key.zeroize();
 
-        let manifest_sha_ok = constant_time_eq(current_manifest_sha.as_bytes(), stored_manifest_sha.as_bytes());
-        let model_sha_ok = constant_time_eq(current_model_sha.as_bytes(), stored_model_sha.as_bytes());
-        let config_sha_ok = constant_time_eq(current_config_sha.as_bytes(), stored_config_sha.as_bytes());
-        let tokenizer_sha_ok = constant_time_eq(current_tokenizer_sha.as_bytes(), stored_tokenizer_sha.as_bytes());
+        let manifest_sha_ok = constant_time_eq(
+            current_manifest_sha.as_bytes(),
+            stored_manifest_sha.as_bytes(),
+        );
+        let model_sha_ok =
+            constant_time_eq(current_model_sha.as_bytes(), stored_model_sha.as_bytes());
+        let config_sha_ok =
+            constant_time_eq(current_config_sha.as_bytes(), stored_config_sha.as_bytes());
+        let tokenizer_sha_ok = constant_time_eq(
+            current_tokenizer_sha.as_bytes(),
+            stored_tokenizer_sha.as_bytes(),
+        );
 
         if !hmac_ok || !manifest_sha_ok || !model_sha_ok || !config_sha_ok || !tokenizer_sha_ok {
             return Err(IntegrityError::HmacMismatch);

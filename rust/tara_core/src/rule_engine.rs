@@ -231,8 +231,14 @@ mod tests {
     fn test_rule_normalization_and_empty_action_denial() {
         let mut engine = RuleEngine::default();
         // Empty action is denied
-        assert_eq!(engine.evaluate_action("", Role::CREATOR), RuleDecision::Deny);
-        assert_eq!(engine.evaluate_action("   ", Role::CREATOR), RuleDecision::Deny);
+        assert_eq!(
+            engine.evaluate_action("", Role::CREATOR),
+            RuleDecision::Deny
+        );
+        assert_eq!(
+            engine.evaluate_action("   ", Role::CREATOR),
+            RuleDecision::Deny
+        );
 
         // Lowercase and whitespace normalization
         assert_eq!(

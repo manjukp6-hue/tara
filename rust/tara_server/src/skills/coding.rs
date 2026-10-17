@@ -194,8 +194,14 @@ pub struct MigrationSummary {
 }
 
 pub fn scan_and_migrate(config: &MigrationConfig) -> Result<MigrationSummary, String> {
-    if config.source_path.components().any(|c| c == std::path::Component::ParentDir)
-        || config.target_path.components().any(|c| c == std::path::Component::ParentDir)
+    if config
+        .source_path
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+        || config
+            .target_path
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
     {
         return Err("Parent directory traversal (..) is not allowed".to_string());
     }
@@ -265,7 +271,10 @@ pub fn create_basic_plugin(
     description: &str,
     out_dir: &Path,
 ) -> Result<PathBuf, String> {
-    if out_dir.components().any(|c| c == std::path::Component::ParentDir) {
+    if out_dir
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
         return Err("Parent directory traversal (..) is not allowed in out_dir".to_string());
     }
 
@@ -364,8 +373,12 @@ pub fn handle_coding_skill(action: &str, params: Value) -> Value {
                 .unwrap_or("codex_out");
             let src_path = PathBuf::from(src);
             let tgt_path = PathBuf::from(tgt);
-            if src_path.components().any(|c| c == std::path::Component::ParentDir)
-                || tgt_path.components().any(|c| c == std::path::Component::ParentDir)
+            if src_path
+                .components()
+                .any(|c| c == std::path::Component::ParentDir)
+                || tgt_path
+                    .components()
+                    .any(|c| c == std::path::Component::ParentDir)
             {
                 return json!({ "status": "ERROR", "error": "Parent directory traversal (..) is not allowed" });
             }
@@ -404,7 +417,10 @@ pub fn handle_coding_skill(action: &str, params: Value) -> Value {
                 .and_then(|v| v.as_str())
                 .unwrap_or("plugins");
             let out_path = Path::new(out);
-            if out_path.components().any(|c| c == std::path::Component::ParentDir) {
+            if out_path
+                .components()
+                .any(|c| c == std::path::Component::ParentDir)
+            {
                 return json!({ "status": "ERROR", "error": "Parent directory traversal (..) is not allowed in out_dir" });
             }
             match create_basic_plugin(name, desc, out_path) {

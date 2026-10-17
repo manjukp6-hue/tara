@@ -548,7 +548,12 @@ impl DistributedJobEngine {
         }
 
         let now = current_timestamp();
-        let job_id = format!("job_{}_{}_{}", task_type, now, &uuid::Uuid::new_v4().to_string()[..8]);
+        let job_id = format!(
+            "job_{}_{}_{}",
+            task_type,
+            now,
+            &uuid::Uuid::new_v4().to_string()[..8]
+        );
 
         // Intelligent sharding: do not over-shard small workloads
         let effective_chunk_size = if items.len() <= 2 {
@@ -884,14 +889,16 @@ impl CanonicalManifestManager {
     }
 
     pub fn get_manifest(&self) -> Value {
-        let candidate_tok = Path::new(&self.repo_root).join("storage/models/tara_candidate_v1/tokenizer.json");
+        let candidate_tok =
+            Path::new(&self.repo_root).join("storage/models/tara_candidate_v1/tokenizer.json");
         let tok_path = if candidate_tok.exists() {
             candidate_tok
         } else {
             Path::new(&self.repo_root).join("storage/models/tara/tokenizer.json")
         };
         let schema_path = Path::new(&self.repo_root).join("TARA/CONTRACTS/v1/schemas.json");
-        let contract_path = Path::new(&self.repo_root).join("rust/tara_server/src/rules/contract.rs");
+        let contract_path =
+            Path::new(&self.repo_root).join("rust/tara_server/src/rules/contract.rs");
 
         let tok_sha = tara_engine::compute256(&tok_path).unwrap_or_default();
         let schema_sha = tara_engine::compute256(&schema_path).unwrap_or_default();
@@ -929,7 +936,10 @@ impl CanonicalManifestManager {
         }
 
         let (canonical_model_sha256, canonical_param_count) = self.get_canonical_model_info();
-        let tok_rel_path = if Path::new(&self.repo_root).join("storage/models/tara_candidate_v1/tokenizer.json").exists() {
+        let tok_rel_path = if Path::new(&self.repo_root)
+            .join("storage/models/tara_candidate_v1/tokenizer.json")
+            .exists()
+        {
             "storage/models/tara_candidate_v1/tokenizer.json"
         } else {
             "storage/models/tara/tokenizer.json"
@@ -979,7 +989,10 @@ impl CanonicalManifestManager {
         let param_count = registry
             .list_versions()
             .iter()
-            .find(|v| v.get("version_id").and_then(Value::as_str) == registry.get_active_version().as_deref())
+            .find(|v| {
+                v.get("version_id").and_then(Value::as_str)
+                    == registry.get_active_version().as_deref()
+            })
             .and_then(|v| v.get("parameter_count").and_then(Value::as_u64))
             .unwrap_or(0) as usize;
         (sha, param_count)
@@ -991,12 +1004,10 @@ impl CanonicalManifestManager {
         }
         let (active_sha, _) = self.get_canonical_model_info();
         match active_sha {
-            Some(expected) => {
-                tara_security::cryptography::CryptoUtils::constant_time_eq(
-                    sha256.as_bytes(),
-                    expected.as_bytes(),
-                )
-            }
+            Some(expected) => tara_security::cryptography::CryptoUtils::constant_time_eq(
+                sha256.as_bytes(),
+                expected.as_bytes(),
+            ),
             None => false,
         }
     }
@@ -1068,7 +1079,8 @@ impl ControlPlane {
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
 
-        let (canonical_model_sha256, canonical_param_count) = self.manifest.get_canonical_model_info();
+        let (canonical_model_sha256, canonical_param_count) =
+            self.manifest.get_canonical_model_info();
 
         json!({
             "status": "HEALTHY",

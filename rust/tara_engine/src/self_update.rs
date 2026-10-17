@@ -338,7 +338,10 @@ impl SelfUpdateController {
         )?;
 
         if Path::new(&target_candidate_path) != Path::new(promoted_destination_dir) {
-            let staging_copy = PathBuf::from(format!("{}.promote_tmp_{}", promoted_destination_dir, now_stamp));
+            let staging_copy = PathBuf::from(format!(
+                "{}.promote_tmp_{}",
+                promoted_destination_dir, now_stamp
+            ));
             if staging_copy.exists() {
                 let _ = fs::remove_dir_all(&staging_copy);
             }
@@ -349,8 +352,11 @@ impl SelfUpdateController {
                     fs::copy(entry.path(), staging_copy.join(entry.file_name()))?;
                 }
             }
-            crate::trainer::promote_directory_atomically(&staging_copy, Path::new(promoted_destination_dir))
-                .map_err(|e| SelfUpdateError::Model(format!("Atomic promotion failed: {e}")))?;
+            crate::trainer::promote_directory_atomically(
+                &staging_copy,
+                Path::new(promoted_destination_dir),
+            )
+            .map_err(|e| SelfUpdateError::Model(format!("Atomic promotion failed: {e}")))?;
         }
 
         // 7. Verify runtime reload

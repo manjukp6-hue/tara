@@ -271,7 +271,9 @@ mod tests {
         gov.assign_quota("entity_res", quota);
 
         // Within limits
-        assert!(gov.update_memory_and_disk("entity_res", 512 * 1024, 1024 * 1024).is_ok());
+        assert!(gov
+            .update_memory_and_disk("entity_res", 512 * 1024, 1024 * 1024)
+            .is_ok());
         let usage = gov.get_usage("entity_res").unwrap();
         assert_eq!(usage.current_memory_bytes, 512 * 1024);
         assert_eq!(usage.peak_memory_bytes, 512 * 1024);

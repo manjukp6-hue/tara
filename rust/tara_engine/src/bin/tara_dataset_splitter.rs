@@ -129,8 +129,7 @@ type SemanticFingerprints = (HashMap<SemanticKey, usize>, HashSet<SemanticKey>, 
 /// two-stage `(SHA-256, combined_text)` canonical sample keys for a JSONL file.
 fn compute_semantic_fingerprints(
     jsonl_path: &Path,
-) -> Result<SemanticFingerprints, Box<dyn std::error::Error>>
-{
+) -> Result<SemanticFingerprints, Box<dyn std::error::Error>> {
     let file = File::open(jsonl_path)?;
     let reader = BufReader::with_capacity(128 * 1024, file);
     let mut line_multiset: HashMap<SemanticKey, usize> = HashMap::new();

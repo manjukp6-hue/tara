@@ -103,8 +103,9 @@ impl ApprovalGate {
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0);
 
-                self.pending_tickets
-                    .retain(|_, t| !t.consumed && now_ms.saturating_sub(t.created_at_ms) <= APPROVAL_TICKET_TTL_MS);
+                self.pending_tickets.retain(|_, t| {
+                    !t.consumed && now_ms.saturating_sub(t.created_at_ms) <= APPROVAL_TICKET_TTL_MS
+                });
 
                 let ticket_id = format!("appr_{:032x}", rand::random::<u128>());
                 let ticket = ApprovalTicket {
@@ -355,7 +356,8 @@ mod tests {
         let err1 = gate
             .evaluate_execution("requester", "host_tool", "vault")
             .unwrap_err();
-        let ticket_id1 = err1.split('\'').collect::<Vec<&str>>()[err1.split('\'').count() - 2].to_string();
+        let ticket_id1 =
+            err1.split('\'').collect::<Vec<&str>>()[err1.split('\'').count() - 2].to_string();
 
         let mut csprng = rand::rngs::OsRng;
         let signing_key = ed25519_dalek::SigningKey::generate(&mut csprng);
@@ -367,12 +369,14 @@ mod tests {
         let ticket1 = gate.get_ticket(&ticket_id1).unwrap();
         let msg1 = ApprovalGate::approval_signing_message(&ticket1);
         let sig1 = signing_key.sign(msg1.as_bytes()).to_bytes();
-        gate.grant_creator_approval(&ticket_id1, &authority, &sig1).unwrap();
+        gate.grant_creator_approval(&ticket_id1, &authority, &sig1)
+            .unwrap();
 
         assert!(gate.is_approved(&ticket_id1));
 
         // Consume ticket1
-        gate.consume_approved(&ticket_id1, "host_tool", "vault").unwrap();
+        gate.consume_approved(&ticket_id1, "host_tool", "vault")
+            .unwrap();
 
         // is_approved must return false once consumed!
         assert!(!gate.is_approved(&ticket_id1));

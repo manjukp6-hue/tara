@@ -15,10 +15,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
-use sha2::Digest;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::Digest;
 
 use crate::broker::{EnforcementGateway, EnforcementRequest, ProtectedCategory};
 use crate::hardware_root::AuthorityManager;
@@ -201,7 +201,9 @@ impl AutonomousGoalGating {
         // 2. State verification under lock
         let stale_info = {
             let mut map = self.goals.lock().map_err(|_| "Goals lock poisoned")?;
-            let goal = map.get_mut(goal_id).ok_or_else(|| format!("GoalNotFound: '{}'", goal_id))?;
+            let goal = map
+                .get_mut(goal_id)
+                .ok_or_else(|| format!("GoalNotFound: '{}'", goal_id))?;
 
             if goal.state == GoalState::Aborted {
                 return Err("GoalAborted: Cannot advance aborted goal".into());
@@ -224,8 +226,7 @@ impl AutonomousGoalGating {
             let _ = self.persist_goals(&map);
             return Err(format!(
                 "AuthorityGenerationMismatch: Goal generation {} is stale (current {})",
-                goal_gen,
-                curr_gen_val
+                goal_gen, curr_gen_val
             ));
         }
 
@@ -247,7 +248,9 @@ impl AutonomousGoalGating {
             },
         };
 
-        let result = self.gateway.enforce_protected_operation(request, step_closure);
+        let result = self
+            .gateway
+            .enforce_protected_operation(request, step_closure);
 
         // 4. Update goal state based on execution outcome
         {
@@ -563,11 +566,15 @@ impl GatedGoalVaultEngine {
         }
 
         if key_file.exists() {
-            let bytes = fs::read(&key_file)
-                .map_err(|e| format!("Failed to read goal vault key: {e}"))?;
+            let bytes =
+                fs::read(&key_file).map_err(|e| format!("Failed to read goal vault key: {e}"))?;
             #[cfg(windows)]
-            let raw = crate::dpapi::native_dpapi::unprotect_bytes(&bytes)
-                .map_err(|e| format!("FAIL CLOSED: Windows DPAPI unprotect failed for goal vault key: {}", e))?;
+            let raw = crate::dpapi::native_dpapi::unprotect_bytes(&bytes).map_err(|e| {
+                format!(
+                    "FAIL CLOSED: Windows DPAPI unprotect failed for goal vault key: {}",
+                    e
+                )
+            })?;
             #[cfg(not(windows))]
             let raw = bytes;
 
@@ -576,7 +583,8 @@ impl GatedGoalVaultEngine {
                 #[cfg(windows)]
                 {
                     if let Ok(protected) = crate::dpapi::native_dpapi::protect_bytes(&key_bytes) {
-                        let _ = crate::persistence::atomic_write_file_hardened(&key_file, &protected);
+                        let _ =
+                            crate::persistence::atomic_write_file_hardened(&key_file, &protected);
                     }
                 }
             } else {
@@ -603,7 +611,9 @@ impl GatedGoalVaultEngine {
         hierarchy: GoalHierarchySpec,
     ) -> Result<usize, String> {
         if !principal.is_creator_root() {
-            return Err("Unauthorized: Only verified Creator root authority can configure goals".into());
+            return Err(
+                "Unauthorized: Only verified Creator root authority can configure goals".into(),
+            );
         }
         self.configure_creator_goals_internal(hierarchy)
     }
@@ -804,9 +814,13 @@ impl GatedGoalVaultEngine {
         if let Ok(guard) = self.lockdown_coordinator.lock() {
             if let Some(ref coord) = *guard {
                 if let Some(gen) = expected_gen {
-                    coord.assert_unlocked(gen).map_err(|e| format!("SystemLockedDown: {}", e))?;
+                    coord
+                        .assert_unlocked(gen)
+                        .map_err(|e| format!("SystemLockedDown: {}", e))?;
                 } else if coord.is_locked_down() {
-                    return Err("SystemLockedDown: Cannot commit task during security lockdown".into());
+                    return Err(
+                        "SystemLockedDown: Cannot commit task during security lockdown".into(),
+                    );
                 }
             }
         }
@@ -923,10 +937,17 @@ impl GatedGoalVaultEngine {
             if !p.exists() {
                 return false;
             }
-            if let Some(expected_sha) = proof.get("sha256").or_else(|| proof.get("checksum")).and_then(|v| v.as_str()) {
+            if let Some(expected_sha) = proof
+                .get("sha256")
+                .or_else(|| proof.get("checksum"))
+                .and_then(|v| v.as_str())
+            {
                 if let Ok(bytes) = fs::read(p) {
                     let actual_digest = hex::encode(sha2::Sha256::digest(&bytes));
-                    if !crate::cryptography::CryptoUtils::constant_time_eq(actual_digest.as_bytes(), expected_sha.as_bytes()) {
+                    if !crate::cryptography::CryptoUtils::constant_time_eq(
+                        actual_digest.as_bytes(),
+                        expected_sha.as_bytes(),
+                    ) {
                         return false;
                     }
                 } else {
@@ -1092,7 +1113,8 @@ mod tests {
 
     #[test]
     fn test_milestone_enumeration_single_initial_active() {
-        let temp_dir = std::env::temp_dir().join(format!("gated_goals_test_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("gated_goals_test_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&temp_dir);
 
         let vault = GatedGoalVaultEngine::new(temp_dir.clone());
@@ -1133,19 +1155,17 @@ mod tests {
                     },
                     MilestoneSpec {
                         milestone_name: "Milestone B".to_string(),
-                        tasks: vec![
-                            TaskSpec {
-                                task_name: "Task B1".to_string(),
-                                task_order: 1,
-                                task_priority: 1.0,
-                                reward_points: 10.0,
-                                completion_criteria: "Complete B1".to_string(),
-                                verification_criteria: "None".to_string(),
-                                failure_rule: FailureRule::RetryWithAlternativeStrategy,
-                                max_retries: 3,
-                                backoff_ms: 100,
-                            },
-                        ],
+                        tasks: vec![TaskSpec {
+                            task_name: "Task B1".to_string(),
+                            task_order: 1,
+                            task_priority: 1.0,
+                            reward_points: 10.0,
+                            completion_criteria: "Complete B1".to_string(),
+                            verification_criteria: "None".to_string(),
+                            failure_rule: FailureRule::RetryWithAlternativeStrategy,
+                            max_retries: 3,
+                            backoff_ms: 100,
+                        }],
                     },
                 ],
             }],

@@ -195,6 +195,9 @@ mod tests {
                 break;
             }
         }
-        assert!(found, "Should find at least one invalid Ed25519 curve point");
+        assert!(
+            found,
+            "Should find at least one invalid Ed25519 curve point"
+        );
     }
 }

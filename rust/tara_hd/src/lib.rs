@@ -1,11 +1,13 @@
 //! TARA-HD: Dynamic Hardware Discovery, Universal Compute Orchestration & On-Demand Chunked CPU Streaming.
 
+pub mod auto_config;
 pub mod channel;
 pub mod device;
 pub mod discovery;
 pub mod streaming;
 pub mod types;
 
+pub use auto_config::AutoTrainingConfig;
 pub use channel::ComputeChannel;
 pub use device::{ComputeDevice, CpuDevice, CudaDevice, CustomDevice, TpuDevice};
 pub use discovery::DiscoveredInventory;

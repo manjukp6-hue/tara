@@ -35,7 +35,10 @@ fn upload_model_directory(
     println!("Local Source Directory : {}", source_dir.display());
 
     if !source_dir.exists() {
-        eprintln!("FATAL ERROR: Source directory '{}' does not exist", source_dir.display());
+        eprintln!(
+            "FATAL ERROR: Source directory '{}' does not exist",
+            source_dir.display()
+        );
         std::process::exit(1);
     }
 
@@ -51,7 +54,10 @@ fn upload_model_directory(
     local_files.sort_by(|a, b| a.0.cmp(&b.0));
 
     if local_files.is_empty() {
-        eprintln!("FATAL ERROR: Source directory '{}' contains 0 files to upload", source_dir.display());
+        eprintln!(
+            "FATAL ERROR: Source directory '{}' contains 0 files to upload",
+            source_dir.display()
+        );
         std::process::exit(1);
     }
 
@@ -67,7 +73,10 @@ fn upload_model_directory(
         total_bytes as f64 / (1024.0 * 1024.0 * 1024.0)
     );
 
-    println!("Checking remote tree on Hugging Face at prefix '{}'...", remote_prefix);
+    println!(
+        "Checking remote tree on Hugging Face at prefix '{}'...",
+        remote_prefix
+    );
     let remote_files = fetch_remote_tree(HfRepoType::Model, repo_id, token, remote_prefix)
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     println!("Existing Remote Files  : {}", remote_files.len());
@@ -83,9 +92,16 @@ fn upload_model_directory(
         pending_files.push((name.clone(), path.clone()));
     }
 
-    println!("Pending Files to Upload: {} of {}", pending_files.len(), local_files.len());
+    println!(
+        "Pending Files to Upload: {} of {}",
+        pending_files.len(),
+        local_files.len()
+    );
     if pending_files.is_empty() {
-        println!("All {} files already uploaded and verified on Hugging Face!", local_files.len());
+        println!(
+            "All {} files already uploaded and verified on Hugging Face!",
+            local_files.len()
+        );
         return Ok(true);
     }
 
@@ -97,7 +113,12 @@ fn upload_model_directory(
         let batch_num = batch_idx + 1;
         let total_batches = total_pending.div_ceil(batch_size);
         println!();
-        println!("--- Processing Batch {}/{} ({} files) ---", batch_num, total_batches, chunk.len());
+        println!(
+            "--- Processing Batch {}/{} ({} files) ---",
+            batch_num,
+            total_batches,
+            chunk.len()
+        );
 
         let mut hash_records: Vec<(String, PathBuf, String, u64)> = Vec::new();
         for (name, path) in chunk {
@@ -125,15 +146,24 @@ fn upload_model_directory(
                     if let Some(actions) = obj.actions {
                         if let Some(upload_link) = actions.upload {
                             println!("Streaming {} ({} MB) to S3...", name, size / (1024 * 1024));
-                            match upload_lfs_to_s3(path, &upload_link.href, upload_link.header.as_ref()) {
+                            match upload_lfs_to_s3(
+                                path,
+                                &upload_link.href,
+                                upload_link.header.as_ref(),
+                            ) {
                                 Ok(()) => {
                                     println!("S3 upload finished for {}.", name);
                                 }
                                 Err(e) => {
-                                    eprintln!("Upload error for {}: {}. Retrying in 10s...", name, e);
+                                    eprintln!(
+                                        "Upload error for {}: {}. Retrying in 10s...",
+                                        name, e
+                                    );
                                     sleep(Duration::from_secs(10));
                                     if attempts >= 10 {
-                                        return Err(format!("Max retries reached for {}", name).into());
+                                        return Err(
+                                            format!("Max retries reached for {}", name).into()
+                                        );
                                     }
                                     continue;
                                 }
@@ -146,7 +176,10 @@ fn upload_model_directory(
                                 println!("LFS upload verified for {}.", name);
                             }
                         } else {
-                            println!("File {} already present in LFS storage (deduplicated).", name);
+                            println!(
+                                "File {} already present in LFS storage (deduplicated).",
+                                name
+                            );
                         }
                     } else {
                         println!("File {} already exists on Hugging Face.", name);
@@ -172,7 +205,10 @@ fn upload_model_directory(
             label, first, last, batch_num, total_batches
         );
 
-        println!("Committing batch {} to Hugging Face repository...", batch_num);
+        println!(
+            "Committing batch {} to Hugging Face repository...",
+            batch_num
+        );
         commit_lfs_files(
             HfRepoType::Model,
             repo_id,
@@ -180,12 +216,16 @@ fn upload_model_directory(
             &summary,
             &format!("TARA Model Artifacts under prefix '{}'", remote_prefix),
             &commit_refs,
-        ).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        )
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
         println!("Commit successful: {}", summary);
     }
 
     println!();
-    println!("=== VERIFYING REMOTE TREE: {}/{} ===", repo_id, remote_prefix);
+    println!(
+        "=== VERIFYING REMOTE TREE: {}/{} ===",
+        repo_id, remote_prefix
+    );
     let final_remote = fetch_remote_tree(HfRepoType::Model, repo_id, token, remote_prefix)
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     let mut missing = Vec::new();
@@ -194,7 +234,10 @@ fn upload_model_directory(
         match final_remote.get(name) {
             Some(&rem_sz) if rem_sz == local_sz => {}
             Some(&rem_sz) => {
-                missing.push(format!("{} (size mismatch: local={}, remote={})", name, local_sz, rem_sz));
+                missing.push(format!(
+                    "{} (size mismatch: local={}, remote={})",
+                    name, local_sz, rem_sz
+                ));
             }
             None => {
                 missing.push(format!("{} (missing on remote)", name));
@@ -203,10 +246,19 @@ fn upload_model_directory(
     }
 
     if missing.is_empty() {
-        println!("VERIFICATION SUCCESS: All {} files verified live in {}/{}!", local_files.len(), repo_id, remote_prefix);
+        println!(
+            "VERIFICATION SUCCESS: All {} files verified live in {}/{}!",
+            local_files.len(),
+            repo_id,
+            remote_prefix
+        );
         Ok(true)
     } else {
-        Err(format!("Verification failed! Missing or mismatched files: {:?}", missing).into())
+        Err(format!(
+            "Verification failed! Missing or mismatched files: {:?}",
+            missing
+        )
+        .into())
     }
 }
 
@@ -224,7 +276,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let token = resolve_hf_token().map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     println!("Authentication         : Verified via Secure Credential Store");
-    println!("Target Model Hub Repo  : https://huggingface.co/{}", repo_id);
+    println!(
+        "Target Model Hub Repo  : https://huggingface.co/{}",
+        repo_id
+    );
 
     let neural_dir = PathBuf::from("storage/models/tara_candidate_v1");
     let world_dir = PathBuf::from("storage/models/tara_world_model");
@@ -239,7 +294,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!("Exceeded maximum recovery cycles ({MAX_RECOVERY_CYCLES})").into());
         }
         if neural_cycle > 1 {
-            println!("\n[CYCLE {}/{}] Resuming Neural Model upload pipeline...\n", neural_cycle, MAX_RECOVERY_CYCLES);
+            println!(
+                "\n[CYCLE {}/{}] Resuming Neural Model upload pipeline...\n",
+                neural_cycle, MAX_RECOVERY_CYCLES
+            );
         }
 
         match upload_model_directory(
@@ -255,7 +313,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 sleep(Duration::from_secs(10));
             }
             Err(e) => {
-                eprintln!("Neural Model upload encountered error: {}. Auto-recovering in 15s...", e);
+                eprintln!(
+                    "Neural Model upload encountered error: {}. Auto-recovering in 15s...",
+                    e
+                );
                 sleep(Duration::from_secs(15));
             }
         }
@@ -269,7 +330,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!("Exceeded maximum recovery cycles ({MAX_RECOVERY_CYCLES})").into());
         }
         if world_cycle > 1 {
-            println!("\n[CYCLE {}/{}] Resuming World Model upload pipeline...\n", world_cycle, MAX_RECOVERY_CYCLES);
+            println!(
+                "\n[CYCLE {}/{}] Resuming World Model upload pipeline...\n",
+                world_cycle, MAX_RECOVERY_CYCLES
+            );
         }
 
         match upload_model_directory(
@@ -285,7 +349,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 sleep(Duration::from_secs(10));
             }
             Err(e) => {
-                eprintln!("World Model upload encountered error: {}. Auto-recovering in 15s...", e);
+                eprintln!(
+                    "World Model upload encountered error: {}. Auto-recovering in 15s...",
+                    e
+                );
                 sleep(Duration::from_secs(15));
             }
         }
@@ -295,8 +362,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("================================================================================");
     println!("  ALL MODELS SUCCESSFULLY UPLOADED & VERIFIED ON HUGGING FACE!");
     println!("================================================================================");
-    println!("Neural Model V1 : https://huggingface.co/{}/tree/main/neural_model_v1", repo_id);
-    println!("World Model V1  : https://huggingface.co/{}/tree/main/world_model_v1", repo_id);
+    println!(
+        "Neural Model V1 : https://huggingface.co/{}/tree/main/neural_model_v1",
+        repo_id
+    );
+    println!(
+        "World Model V1  : https://huggingface.co/{}/tree/main/world_model_v1",
+        repo_id
+    );
     println!("100% Complete: Ready for autonomous Google Colab multi-stage training.");
     Ok(())
 }

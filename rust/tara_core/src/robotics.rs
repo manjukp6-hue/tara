@@ -654,9 +654,15 @@ mod tests {
         let measurement = 50.0;
         let u1 = pid.compute(setpoint, measurement, 0.1);
 
-        assert!(pid.initialized, "PID should be initialized after first step");
+        assert!(
+            pid.initialized,
+            "PID should be initialized after first step"
+        );
         // Error = 0.0, Integral = 0.0, Derivative = 0.0 (kick suppressed), so output = 0.0
-        assert_eq!(u1, 0.0, "Initial derivative kick must be suppressed to zero");
+        assert_eq!(
+            u1, 0.0,
+            "Initial derivative kick must be suppressed to zero"
+        );
 
         // Step 2 with changed measurement produces genuine derivative response
         let u2 = pid.compute(setpoint, 55.0, 0.1);

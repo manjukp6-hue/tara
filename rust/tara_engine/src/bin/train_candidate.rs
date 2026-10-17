@@ -31,7 +31,9 @@ fn print_usage() {
     );
     println!("  --epochs <n>            Number of training epochs (default: 1, must be >= 1)");
     println!("  --learning-rate <f>     Learning rate for AdamW optimizer (default: 0.001, must be > 0.0)");
-    println!("  --batch-size <n>        Gradient accumulation batch size (default: 4, must be >= 1)");
+    println!(
+        "  --batch-size <n>        Gradient accumulation batch size (default: 4, must be >= 1)"
+    );
     println!("  --max-steps <n>         Maximum training steps ceiling (optional, default: entire epoch)");
     println!(
         "  --checkpoint-dir <path> Directory for persistent periodic checkpoints and resumption"
@@ -93,7 +95,9 @@ fn main() {
             "--device" => {
                 i += 1;
                 if i >= args.len() {
-                    eprintln!("Error: --device requires an argument ('cpu', 'gpu', 'cuda', or 'auto')");
+                    eprintln!(
+                        "Error: --device requires an argument ('cpu', 'gpu', 'cuda', or 'auto')"
+                    );
                     exit(1);
                 }
                 let d = args[i].to_lowercase();
@@ -398,9 +402,7 @@ fn main() {
         .get("best_loss")
         .and_then(|v| v.as_f64())
         .unwrap_or(loss_after.min(loss_before));
-    let best_step = result
-        .get("best_step")
-        .and_then(|v| v.as_u64());
+    let best_step = result.get("best_step").and_then(|v| v.as_u64());
     let steps_done = result.get("steps").and_then(|v| v.as_u64()).unwrap_or(0);
     let epochs_done = result.get("epochs").and_then(|v| v.as_u64()).unwrap_or(0);
     let out_path = result
@@ -435,7 +437,10 @@ fn main() {
     println!("  Loss Before:              {:.6}", loss_before);
     println!("  Loss After (Final Step):  {:.6}", loss_after);
     if let Some(bs) = best_step {
-        println!("  Best Checkpoint Loss:     {:.6} (at step {})", best_loss, bs);
+        println!(
+            "  Best Checkpoint Loss:     {:.6} (at step {})",
+            best_loss, bs
+        );
     } else {
         println!("  Best Loss Observed:       {:.6}", best_loss);
     }

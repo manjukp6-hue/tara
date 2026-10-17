@@ -676,7 +676,8 @@ fn get_sources_registry() -> &'static SourcesRegistry {
                 license_spdx: "CC-BY-4.0".to_string(),
                 license_proof_url: "https://creativecommons.org/licenses/by/4.0/".to_string(),
                 author_publisher: "Siyavula Education / NIST".to_string(),
-                training_use_restriction: "None (Permissive Commercial & AI Training Allowed)".to_string(),
+                training_use_restriction: "None (Permissive Commercial & AI Training Allowed)"
+                    .to_string(),
                 attribution_requirement: "CC BY 4.0 Attribution".to_string(),
             },
             approved_sources: Vec::new(),
@@ -705,7 +706,11 @@ fn get_sources_registry() -> &'static SourcesRegistry {
 
 /// Repairs double-encoded UTF-8 strings (where UTF-8 bytes were misinterpreted as Windows-1252/Latin-1).
 pub fn repair_mojibake_if_needed(s: &str) -> String {
-    if !s.contains("\u{e0}\u{b2}") && !s.contains("\u{e0}\u{b3}") && !s.contains("\u{e2}\u{20ac}\u{2122}") && !s.contains("\u{c3}") {
+    if !s.contains("\u{e0}\u{b2}")
+        && !s.contains("\u{e0}\u{b3}")
+        && !s.contains("\u{e2}\u{20ac}\u{2122}")
+        && !s.contains("\u{c3}")
+    {
         return s.to_string();
     }
     let mut repaired = s
@@ -808,7 +813,10 @@ fn sanitize_version_or_page(raw: &str, fallback: &str) -> String {
             .replace("Non-Commercial", "")
             .trim()
             .to_string();
-        if cleaned.is_empty() || cleaned.to_uppercase().contains("WIKIBOOKS") || cleaned.to_uppercase().contains("-SA") {
+        if cleaned.is_empty()
+            || cleaned.to_uppercase().contains("WIKIBOOKS")
+            || cleaned.to_uppercase().contains("-SA")
+        {
             fallback.to_string()
         } else {
             cleaned
@@ -860,7 +868,10 @@ fn enrich_provenance(rec: &mut CurriculumRecord) {
 
     rec.source_title = template.source_title.clone();
     rec.source_url = template.source_url.clone();
-    rec.source_version_or_page = sanitize_version_or_page(&rec.source_version_or_page, &template.source_version_or_page);
+    rec.source_version_or_page = sanitize_version_or_page(
+        &rec.source_version_or_page,
+        &template.source_version_or_page,
+    );
     if rec.source_version_or_page.is_empty() {
         rec.source_version_or_page = template.source_version_or_page.clone();
     }
@@ -1089,7 +1100,11 @@ fn make_curriculum_record(args: GenericRecordArgs<'_>) -> CurriculumRecord {
         answer: args.answer.to_string(),
         reasoning: args.reasoning.to_string(),
         prerequisites: args.prerequisites.iter().map(|s| s.to_string()).collect(),
-        related_concepts: args.related_concepts.iter().map(|s| s.to_string()).collect(),
+        related_concepts: args
+            .related_concepts
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
         common_mistake: args.common_mistake.to_string(),
         edge_case: args.edge_case.to_string(),
         is_conjecture: args.is_conjecture,
@@ -5706,7 +5721,6 @@ pub fn build_domain10_quantum_records() -> Vec<CurriculumRecord> {
 // ============================================================================
 
 pub struct Domain9RecordArgs<'a> {
-
     pub id: &'a str,
     pub level: &'a str,
     pub order: u8,
@@ -6724,7 +6738,6 @@ pub fn build_domain9_records() -> Vec<CurriculumRecord> {
     ]
 }
 
-
 // ============================================================================
 // PART 4: MAIN COMPILER & COVERAGE MATRIX RUNNER
 // ============================================================================
@@ -6738,12 +6751,10 @@ fn main() {
     let foundational_path =
         PathBuf::from("storage/datasets/curriculum/foundational_curriculum.jsonl");
 
-    let domain_files = [
-        (
-            "autonomous_ability_acquisition",
-            "storage/datasets/curriculum/ability_acquisition.jsonl",
-        ),
-    ];
+    let domain_files = [(
+        "autonomous_ability_acquisition",
+        "storage/datasets/curriculum/ability_acquisition.jsonl",
+    )];
 
     // 1. Audit Existing Dataset
     println!("\n--- [PART 1: AUDIT & ENRICHMENT OF CANONICAL DATASET] ---");

@@ -92,7 +92,10 @@ impl SecretLeakScanner {
                 let candidate = &line[pos..];
                 if candidate.len() >= 35 {
                     let key_part = &candidate[..35];
-                    if key_part[3..].chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+                    if key_part[3..]
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                    {
                         findings.push(SecretFinding {
                             pattern_name: "OPENAI_API_KEY".to_string(),
                             line_number: line_num,
@@ -106,9 +109,19 @@ impl SecretLeakScanner {
             // 5. Generic Secret Keyword assignments (api_key, secret, password, auth_token)
             let lower = line.to_lowercase();
             let secret_keywords = [
-                "api_key", "apikey", "secret", "password", "auth_token",
-                "access_token", "passphrase", "credential", "master_key",
-                "signing_key", "private_key", "encryption_key", "jwt_secret",
+                "api_key",
+                "apikey",
+                "secret",
+                "password",
+                "auth_token",
+                "access_token",
+                "passphrase",
+                "credential",
+                "master_key",
+                "signing_key",
+                "private_key",
+                "encryption_key",
+                "jwt_secret",
                 "hmac_key",
             ];
             for kw in secret_keywords {
@@ -116,8 +129,13 @@ impl SecretLeakScanner {
                     let remainder = &line[kw_pos + kw.len()..];
                     // Look for delimiter = or :
                     if let Some(delim_pos) = remainder.find(['=', ':']) {
-                        let val_part = remainder[delim_pos + 1..].trim().trim_matches(['"', '\'', '`', ';']);
-                        if val_part.len() >= 16 && val_part.chars().all(|c| c.is_ascii_graphic()) && !val_part.contains(' ') {
+                        let val_part = remainder[delim_pos + 1..]
+                            .trim()
+                            .trim_matches(['"', '\'', '`', ';']);
+                        if val_part.len() >= 16
+                            && val_part.chars().all(|c| c.is_ascii_graphic())
+                            && !val_part.contains(' ')
+                        {
                             findings.push(SecretFinding {
                                 pattern_name: "GENERIC_SECRET_ASSIGNMENT".to_string(),
                                 line_number: line_num,

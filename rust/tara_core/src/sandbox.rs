@@ -178,7 +178,9 @@ impl ExecutionSandbox {
 
         match res {
             Ok(exec_res) => {
-                let success = exec_res.exit_code == 0 && !exec_res.timed_out && exec_res.violated_policy.is_none();
+                let success = exec_res.exit_code == 0
+                    && !exec_res.timed_out
+                    && exec_res.violated_policy.is_none();
                 let output = if !exec_res.stdout.is_empty() {
                     exec_res.stdout.trim().to_string()
                 } else {
@@ -231,15 +233,31 @@ mod tests {
         assert!(ExecutionSandbox::contains_forbidden_pattern("RM -RF /"));
         assert!(ExecutionSandbox::contains_forbidden_pattern("RM -FR /"));
         assert!(ExecutionSandbox::contains_forbidden_pattern("rm -r -f /"));
-        assert!(ExecutionSandbox::contains_forbidden_pattern("cmd /c DEL /S *.*"));
-        assert!(ExecutionSandbox::contains_forbidden_pattern("rd /s /q c:\\"));
-        assert!(ExecutionSandbox::contains_forbidden_pattern("rmdir /s /q c:\\"));
+        assert!(ExecutionSandbox::contains_forbidden_pattern(
+            "cmd /c DEL /S *.*"
+        ));
+        assert!(ExecutionSandbox::contains_forbidden_pattern(
+            "rd /s /q c:\\"
+        ));
+        assert!(ExecutionSandbox::contains_forbidden_pattern(
+            "rmdir /s /q c:\\"
+        ));
         assert!(ExecutionSandbox::contains_forbidden_pattern("format c:"));
-        assert!(ExecutionSandbox::contains_forbidden_pattern("mkfs.ext4 /dev/sda1"));
-        assert!(ExecutionSandbox::contains_forbidden_pattern(":(){ :|:& };:"));
-        assert!(ExecutionSandbox::contains_forbidden_pattern("SHUTDOWN /s /t 0"));
-        assert!(ExecutionSandbox::contains_forbidden_pattern("sudo reboot now"));
-        assert!(!ExecutionSandbox::contains_forbidden_pattern("echo hello world"));
+        assert!(ExecutionSandbox::contains_forbidden_pattern(
+            "mkfs.ext4 /dev/sda1"
+        ));
+        assert!(ExecutionSandbox::contains_forbidden_pattern(
+            ":(){ :|:& };:"
+        ));
+        assert!(ExecutionSandbox::contains_forbidden_pattern(
+            "SHUTDOWN /s /t 0"
+        ));
+        assert!(ExecutionSandbox::contains_forbidden_pattern(
+            "sudo reboot now"
+        ));
+        assert!(!ExecutionSandbox::contains_forbidden_pattern(
+            "echo hello world"
+        ));
     }
 
     #[test]

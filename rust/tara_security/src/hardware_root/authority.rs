@@ -86,13 +86,15 @@ impl AuthorityManager {
                         Some(AuthorityRecord {
                             generation: AuthorityGeneration::INITIAL,
                             root_public_key_hex: String::new(),
-                            root_principal_id: PrincipalId::new("creator_corrupted_state").unwrap_or_else(|_| PrincipalId::new("creator_root").unwrap()),
+                            root_principal_id: PrincipalId::new("creator_corrupted_state")
+                                .unwrap_or_else(|_| PrincipalId::new("creator_root").unwrap()),
                             created_epoch_secs: 0,
                             rotated_epoch_secs: None,
                             recovery_verifier_hash: String::new(),
                             state: SecurityState::LockedDown {
                                 generation: AuthorityGeneration::INITIAL,
-                                reason: "Authority state file corrupted on disk (FailClosed)".into(),
+                                reason: "Authority state file corrupted on disk (FailClosed)"
+                                    .into(),
                                 since_epoch_secs: 0,
                             },
                             revoked_keys: HashSet::new(),
@@ -104,7 +106,8 @@ impl AuthorityManager {
                     Some(AuthorityRecord {
                         generation: AuthorityGeneration::INITIAL,
                         root_public_key_hex: String::new(),
-                        root_principal_id: PrincipalId::new("creator_corrupted_state").unwrap_or_else(|_| PrincipalId::new("creator_root").unwrap()),
+                        root_principal_id: PrincipalId::new("creator_corrupted_state")
+                            .unwrap_or_else(|_| PrincipalId::new("creator_root").unwrap()),
                         created_epoch_secs: 0,
                         rotated_epoch_secs: None,
                         recovery_verifier_hash: String::new(),
@@ -120,12 +123,14 @@ impl AuthorityManager {
         } else {
             // Check if authority previously existed via monotonic watermark / companion access artifacts
             let parent_dir = path.parent();
-            let has_prior_authority = parent_dir.map(|p| {
-                p.join("access_seal.json").exists()
-                    || p.join("operator_record.json").exists()
-                    || p.join("restore_config.json").exists()
-                    || p.join(".authority_watermark").exists()
-            }).unwrap_or(false);
+            let has_prior_authority = parent_dir
+                .map(|p| {
+                    p.join("access_seal.json").exists()
+                        || p.join("operator_record.json").exists()
+                        || p.join("restore_config.json").exists()
+                        || p.join(".authority_watermark").exists()
+                })
+                .unwrap_or(false);
 
             if has_prior_authority {
                 // Missing authority_record.json when companion authority files exist:
@@ -172,7 +177,10 @@ impl AuthorityManager {
 
     /// Load existing authority record into memory. If data is corrupted or invalid, fails closed into lockdown!
     pub fn load_authority(&self, record: AuthorityRecord) -> Result<(), String> {
-        let mut rec_guard = self.record.lock().map_err(|_| "Record mutex poisoned (FailClosed)")?;
+        let mut rec_guard = self
+            .record
+            .lock()
+            .map_err(|_| "Record mutex poisoned (FailClosed)")?;
         if rec_guard.is_some() {
             return Err("Authority already initialized in memory".into());
         }
@@ -195,13 +203,18 @@ impl AuthorityManager {
         recovery_secret: &str,
         epoch_secs: u64,
     ) -> Result<(AuthorityRecord, String), String> {
-        let mut rec_guard = self.record.lock().map_err(|_| "Record mutex poisoned (FailClosed)")?;
+        let mut rec_guard = self
+            .record
+            .lock()
+            .map_err(|_| "Record mutex poisoned (FailClosed)")?;
         if rec_guard.is_some() {
             return Err("AuthorityCeremonyDenied: Authority has already been established; re-bootstrap is strictly prohibited (FailClosed)".into());
         }
 
         if recovery_secret.len() < 32 {
-            return Err("Recovery secret must be at least 32 characters of high-entropy data".into());
+            return Err(
+                "Recovery secret must be at least 32 characters of high-entropy data".into(),
+            );
         }
 
         // Generate root cryptographic signing keypair
@@ -213,7 +226,8 @@ impl AuthorityManager {
         rand::thread_rng().fill_bytes(&mut salt);
         let mut recovery_derived = [0u8; 32];
         CryptoUtils::derive_scrypt_key(recovery_secret.as_bytes(), &salt, &mut recovery_derived)?;
-        let recovery_verifier_hash = format!("{}:{}", hex::encode(salt), hex::encode(recovery_derived));
+        let recovery_verifier_hash =
+            format!("{}:{}", hex::encode(salt), hex::encode(recovery_derived));
 
         let gen = AuthorityGeneration::INITIAL;
         let record = AuthorityRecord {
@@ -230,7 +244,10 @@ impl AuthorityManager {
         *rec_guard = Some(record.clone());
         self.persist_record(&record)?;
 
-        let mut key_guard = self.root_signing_key.lock().map_err(|_| "Key mutex poisoned (FailClosed)")?;
+        let mut key_guard = self
+            .root_signing_key
+            .lock()
+            .map_err(|_| "Key mutex poisoned (FailClosed)")?;
         *key_guard = Some(signing_key);
 
         Ok((record, pub_hex))
@@ -238,7 +255,10 @@ impl AuthorityManager {
 
     /// Current authority generation.
     pub fn current_generation(&self) -> Result<AuthorityGeneration, String> {
-        let rec_guard = self.record.lock().map_err(|_| "Record mutex poisoned (FailClosed)")?;
+        let rec_guard = self
+            .record
+            .lock()
+            .map_err(|_| "Record mutex poisoned (FailClosed)")?;
         let rec = rec_guard.as_ref().ok_or("Authority is not initialized")?;
         Ok(rec.generation)
     }
@@ -257,7 +277,10 @@ impl AuthorityManager {
 
     /// Trigger strict security lockdown.
     pub fn trigger_lockdown(&self, reason: &str, epoch_secs: u64) -> Result<(), String> {
-        let mut rec_guard = self.record.lock().map_err(|_| "Record mutex poisoned (FailClosed)")?;
+        let mut rec_guard = self
+            .record
+            .lock()
+            .map_err(|_| "Record mutex poisoned (FailClosed)")?;
         let rec = rec_guard.as_mut().ok_or("Authority is not initialized")?;
         rec.state = SecurityState::LockedDown {
             generation: rec.generation,
@@ -270,7 +293,10 @@ impl AuthorityManager {
 
     /// Key Rotation: Increments generation, signs transition token, revokes old key.
     pub fn rotate_authority_key(&self, epoch_secs: u64) -> Result<RotationToken, String> {
-        let mut rec_guard = self.record.lock().map_err(|_| "Record mutex poisoned (FailClosed)")?;
+        let mut rec_guard = self
+            .record
+            .lock()
+            .map_err(|_| "Record mutex poisoned (FailClosed)")?;
         let rec = rec_guard.as_mut().ok_or("Authority is not initialized")?;
 
         if rec.state.is_locked_down() {
@@ -280,8 +306,13 @@ impl AuthorityManager {
         let old_gen = rec.generation;
         let new_gen = old_gen.next()?;
 
-        let mut key_guard = self.root_signing_key.lock().map_err(|_| "Key mutex poisoned (FailClosed)")?;
-        let old_signing_key = key_guard.as_ref().ok_or("Root signing key not loaded in memory")?;
+        let mut key_guard = self
+            .root_signing_key
+            .lock()
+            .map_err(|_| "Key mutex poisoned (FailClosed)")?;
+        let old_signing_key = key_guard
+            .as_ref()
+            .ok_or("Root signing key not loaded in memory")?;
 
         // Generate new keypair
         let (new_signing_key, new_verifying_key) = CryptoUtils::generate_ed25519_keypair();
@@ -297,7 +328,9 @@ impl AuthorityManager {
         rec.root_public_key_hex = new_pub_hex.clone();
         rec.generation = new_gen;
         rec.rotated_epoch_secs = Some(epoch_secs);
-        rec.state = SecurityState::Operational { generation: new_gen };
+        rec.state = SecurityState::Operational {
+            generation: new_gen,
+        };
         self.persist_record(rec)?;
 
         // Replace memory key
@@ -314,7 +347,10 @@ impl AuthorityManager {
 
     /// Emergency Recovery: High-entropy material verification with rate-limiting.
     pub fn execute_recovery(&self, proof: &RecoveryProof, epoch_secs: u64) -> Result<(), String> {
-        let mut rec_guard = self.record.lock().map_err(|_| "Record mutex poisoned (FailClosed)")?;
+        let mut rec_guard = self
+            .record
+            .lock()
+            .map_err(|_| "Record mutex poisoned (FailClosed)")?;
         let rec = rec_guard.as_mut().ok_or("Authority is not initialized")?;
 
         if proof.target_generation != rec.generation {
@@ -335,7 +371,10 @@ impl AuthorityManager {
             .flatten()
             .unwrap_or(0) as u32;
 
-        let mut attempts = self.failed_recovery_attempts.lock().map_err(|_| "Attempts lock poisoned")?;
+        let mut attempts = self
+            .failed_recovery_attempts
+            .lock()
+            .map_err(|_| "Attempts lock poisoned")?;
         let current_attempts = (*attempts).max(persisted_attempts);
         if current_attempts >= 3 {
             return Err("RecoveryExhausted: Too many failed recovery attempts; system is permanently locked".into());
@@ -349,20 +388,29 @@ impl AuthorityManager {
         let expected_hash = hex::decode(parts[1]).map_err(|_| "Failed to decode hash")?;
 
         let mut candidate_hash = [0u8; 32];
-        CryptoUtils::derive_scrypt_key(proof.recovery_secret.as_bytes(), &salt, &mut candidate_hash)?;
+        CryptoUtils::derive_scrypt_key(
+            proof.recovery_secret.as_bytes(),
+            &salt,
+            &mut candidate_hash,
+        )?;
 
         if !CryptoUtils::constant_time_eq(&candidate_hash, &expected_hash) {
             let new_attempts = current_attempts + 1;
             *attempts = new_attempts;
             let _ = crate::dpapi::store_monotonic_watermark(&watermark_path, new_attempts as u64);
-            return Err(format!("Invalid recovery secret (attempt {}/3)", new_attempts));
+            return Err(format!(
+                "Invalid recovery secret (attempt {}/3)",
+                new_attempts
+            ));
         }
 
         *attempts = 0;
         let next_gen = rec.generation.next()?;
         rec.generation = next_gen;
         rec.rotated_epoch_secs = Some(epoch_secs);
-        rec.state = SecurityState::Operational { generation: next_gen };
+        rec.state = SecurityState::Operational {
+            generation: next_gen,
+        };
         self.persist_record(rec)?;
 
         Ok(())
@@ -378,9 +426,14 @@ mod tests {
         let mgr = AuthorityManager::new();
         let creator_id = PrincipalId::new("creator_root_test").unwrap();
         let recovery_secret = "super_high_entropy_secret_min_32_chars_long!";
-        let (record, _) = mgr.initialize_root_ceremony(creator_id, recovery_secret, 1000).unwrap();
+        let (record, _) = mgr
+            .initialize_root_ceremony(creator_id, recovery_secret, 1000)
+            .unwrap();
 
-        let domain = format!("authority_recovery_failures_gen_{}", record.generation.get());
+        let domain = format!(
+            "authority_recovery_failures_gen_{}",
+            record.generation.get()
+        );
         let _ = crate::dpapi::delete_os_monotonic_watermark(&domain);
 
         // 1. Target generation mismatch
@@ -415,7 +468,9 @@ mod tests {
         let err_secret = mgr.execute_recovery(&proof_wrong_secret, 1050);
         assert!(err_secret.is_err());
         let err_str = err_secret.unwrap_err();
-        assert!(err_str.contains("Invalid recovery secret") || err_str.contains("RecoveryExhausted"));
+        assert!(
+            err_str.contains("Invalid recovery secret") || err_str.contains("RecoveryExhausted")
+        );
 
         // 4. Valid recovery execution
         let proof_valid = RecoveryProof {
@@ -429,7 +484,10 @@ mod tests {
 
         // Generation has advanced
         let rec_guard = mgr.record.lock().unwrap();
-        assert_eq!(rec_guard.as_ref().unwrap().generation, record.generation.next().unwrap());
+        assert_eq!(
+            rec_guard.as_ref().unwrap().generation,
+            record.generation.next().unwrap()
+        );
 
         let _ = crate::dpapi::delete_os_monotonic_watermark(&domain);
     }

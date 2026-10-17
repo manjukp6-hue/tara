@@ -862,10 +862,12 @@ impl FoundationalKnowledgeGraph {
         let tmp_path = base_dir.join("relationship_graph.json.tmp");
         let serialized = serde_json::to_string_pretty(self)
             .map_err(|e| KnowledgeError::Other(format!("Failed to serialize graph: {}", e)))?;
-        fs::write(&tmp_path, serialized)
-            .map_err(|e| KnowledgeError::Other(format!("Failed to save graph to tmp disk: {}", e)))?;
-        fs::rename(&tmp_path, &file_path)
-            .map_err(|e| KnowledgeError::Other(format!("Failed to atomically rename graph to disk: {}", e)))?;
+        fs::write(&tmp_path, serialized).map_err(|e| {
+            KnowledgeError::Other(format!("Failed to save graph to tmp disk: {}", e))
+        })?;
+        fs::rename(&tmp_path, &file_path).map_err(|e| {
+            KnowledgeError::Other(format!("Failed to atomically rename graph to disk: {}", e))
+        })?;
         Ok(())
     }
 

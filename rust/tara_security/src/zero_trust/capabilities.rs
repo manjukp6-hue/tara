@@ -49,12 +49,19 @@ impl CapabilityCaveat {
         match self {
             Self::ExpiresBefore(ts) => {
                 if context.request_epoch_secs >= *ts {
-                    return Err(format!("Capability expired: current {} >= expiry {}", context.request_epoch_secs, ts));
+                    return Err(format!(
+                        "Capability expired: current {} >= expiry {}",
+                        context.request_epoch_secs, ts
+                    ));
                 }
             }
             Self::AllowedAction(expected_action) => {
                 if action.canonical_name() != *expected_action && action.verb() != expected_action {
-                    return Err(format!("Action mismatch: capability permits '{}', attempted '{}'", expected_action, action.canonical_name()));
+                    return Err(format!(
+                        "Action mismatch: capability permits '{}', attempted '{}'",
+                        expected_action,
+                        action.canonical_name()
+                    ));
                 }
             }
             Self::ResourcePrefix(expected_prefix) => {
@@ -63,15 +70,21 @@ impl CapabilityCaveat {
                     return Err(format!("Resource scope violation: capability restricted to prefix hierarchy '{}', attempted '{}'", expected_prefix, res_urn));
                 }
             }
-            Self::BoundDevice(expected_device) => {
-                match bound_device {
-                    Some(dev) if dev.as_str() == expected_device => {}
-                    _ => return Err(format!("Device binding mismatch: capability requires device '{}'", expected_device)),
+            Self::BoundDevice(expected_device) => match bound_device {
+                Some(dev) if dev.as_str() == expected_device => {}
+                _ => {
+                    return Err(format!(
+                        "Device binding mismatch: capability requires device '{}'",
+                        expected_device
+                    ))
                 }
-            }
+            },
             Self::BoundClientIp(expected_ip) => {
                 if context.client_ip != *expected_ip {
-                    return Err(format!("Client IP binding mismatch: capability requires IP '{}', caller is '{}'", expected_ip, context.client_ip));
+                    return Err(format!(
+                        "Client IP binding mismatch: capability requires IP '{}', caller is '{}'",
+                        expected_ip, context.client_ip
+                    ));
                 }
             }
         }
@@ -121,9 +134,9 @@ impl CapabilityToken {
         now_epoch: u64,
     ) -> Result<Self, String> {
         let base = Self::mint_root(root_key, token_id)?;
-        let expires_at = now_epoch
-            .checked_add(ttl_seconds)
-            .ok_or_else(|| "Arithmetic overflow computing capability token expiration".to_string())?;
+        let expires_at = now_epoch.checked_add(ttl_seconds).ok_or_else(|| {
+            "Arithmetic overflow computing capability token expiration".to_string()
+        })?;
         base.attenuate(CapabilityCaveat::ExpiresBefore(expires_at))
     }
 
@@ -131,7 +144,10 @@ impl CapabilityToken {
     /// Can be performed offline by any caller holding the token.
     pub fn attenuate(&self, caveat: CapabilityCaveat) -> Result<Self, String> {
         if self.caveats.len() >= MAX_CAPABILITY_CAVEATS {
-            return Err(format!("MaxCaveatsExceeded: Token cannot exceed {} caveats", MAX_CAPABILITY_CAVEATS));
+            return Err(format!(
+                "MaxCaveatsExceeded: Token cannot exceed {} caveats",
+                MAX_CAPABILITY_CAVEATS
+            ));
         }
 
         let current_sig = hex::decode(&self.signature_hex)
@@ -173,12 +189,14 @@ impl CapabilityToken {
             running_sig = CryptoUtils::hmac_sha256(&running_sig, predicate.as_bytes())?;
         }
 
-        let expected_sig = hex::decode(&self.signature_hex)
-            .map_err(|e| format!("Invalid signature hex: {e}"))?;
+        let expected_sig =
+            hex::decode(&self.signature_hex).map_err(|e| format!("Invalid signature hex: {e}"))?;
 
         // Constant-time comparison ensures unforgeability
         if !CryptoUtils::constant_time_eq(&running_sig, &expected_sig) {
-            return Err("CapabilityTokenForged: HMAC signature chain validation failed (FailClosed)".into());
+            return Err(
+                "CapabilityTokenForged: HMAC signature chain validation failed (FailClosed)".into(),
+            );
         }
 
         // 2. Evaluate authenticated caveats against runtime parameters

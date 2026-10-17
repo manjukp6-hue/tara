@@ -115,7 +115,9 @@ impl ThresholdQuorumEngine {
         current_epoch_secs: u64,
     ) -> Result<QuorumProposal, String> {
         let policies = self.policies.read().map_err(|_| "Policy lock poisoned")?;
-        let pol = policies.get(policy_id).ok_or_else(|| format!("Quorum policy '{}' not found", policy_id))?;
+        let pol = policies
+            .get(policy_id)
+            .ok_or_else(|| format!("Quorum policy '{}' not found", policy_id))?;
 
         let proposal_nonce = hex::encode(rand::random::<[u8; 16]>());
         let proposal_id = format!("prop_{}", hex::encode(rand::random::<[u8; 12]>()));
@@ -131,7 +133,10 @@ impl ThresholdQuorumEngine {
             proposal_nonce,
         };
 
-        let mut proposals = self.active_proposals.write().map_err(|_| "Proposals lock poisoned")?;
+        let mut proposals = self
+            .active_proposals
+            .write()
+            .map_err(|_| "Proposals lock poisoned")?;
         proposals.retain(|_, (p, _)| p.expires_epoch_secs > current_epoch_secs);
         proposals.insert(proposal_id, (proposal.clone(), Vec::new()));
 
@@ -147,17 +152,25 @@ impl ThresholdQuorumEngine {
         current_epoch_secs: u64,
     ) -> Result<Option<QuorumAuthorizationToken>, String> {
         let policies = self.policies.read().map_err(|_| "Policy lock poisoned")?;
-        let pol = policies.get(policy_id).ok_or_else(|| format!("Quorum policy '{}' not found", policy_id))?;
+        let pol = policies
+            .get(policy_id)
+            .ok_or_else(|| format!("Quorum policy '{}' not found", policy_id))?;
 
         let signer_id = approval.signer.as_str();
         if !pol.authorized_signers_n.contains(&signer_id) {
-            return Err(format!("Signer '{}' is not authorized in quorum policy", signer_id));
+            return Err(format!(
+                "Signer '{}' is not authorized in quorum policy",
+                signer_id
+            ));
         }
 
-        let mut proposals = self.active_proposals.write().map_err(|_| "Proposals lock poisoned")?;
-        let (proposal, approvals) = proposals.get_mut(proposal_id).ok_or_else(|| {
-            format!("Proposal '{}' not found", proposal_id)
-        })?;
+        let mut proposals = self
+            .active_proposals
+            .write()
+            .map_err(|_| "Proposals lock poisoned")?;
+        let (proposal, approvals) = proposals
+            .get_mut(proposal_id)
+            .ok_or_else(|| format!("Proposal '{}' not found", proposal_id))?;
 
         if current_epoch_secs > proposal.expires_epoch_secs {
             return Err("ProposalExpired: Proposal validity window has lapsed".into());
@@ -168,7 +181,10 @@ impl ThresholdQuorumEngine {
             return Err("InvalidSignatureTimestamp: Signature timestamp is in the future beyond acceptable skew".into());
         }
         if approval.signed_epoch_secs < proposal.created_epoch_secs {
-            return Err("InvalidSignatureTimestamp: Signature timestamp precedes proposal creation time".into());
+            return Err(
+                "InvalidSignatureTimestamp: Signature timestamp precedes proposal creation time"
+                    .into(),
+            );
         }
 
         if let Some(pinned_pk) = pol.authorized_signer_keys.get(&signer_id) {
@@ -181,8 +197,14 @@ impl ThresholdQuorumEngine {
         }
 
         // Also ensure no two approvals reuse the exact same public key across different PrincipalIds!
-        if approvals.iter().any(|a| a.signer == approval.signer || CryptoUtils::constant_time_eq(&a.signer_public_key, &approval.signer_public_key)) {
-            return Err(format!("DuplicateApproval: Signer '{}' or public key has already signed this proposal", signer_id));
+        if approvals.iter().any(|a| {
+            a.signer == approval.signer
+                || CryptoUtils::constant_time_eq(&a.signer_public_key, &approval.signer_public_key)
+        }) {
+            return Err(format!(
+                "DuplicateApproval: Signer '{}' or public key has already signed this proposal",
+                signer_id
+            ));
         }
 
         let digest = proposal.compute_digest();
@@ -226,7 +248,10 @@ mod tests {
         authorized_signers.insert(signer2_id.as_str());
 
         let mut authorized_keys = HashMap::new();
-        authorized_keys.insert(signer1_id.as_str(), signer1_key.verifying_key().to_bytes().to_vec());
+        authorized_keys.insert(
+            signer1_id.as_str(),
+            signer1_key.verifying_key().to_bytes().to_vec(),
+        );
 
         let policy = QuorumPolicy {
             policy_id: "sec_ops_policy".into(),
@@ -261,7 +286,12 @@ mod tests {
             signature: future_sig.to_bytes().to_vec(),
             signed_epoch_secs: current_time + 120, // > 60s skew
         };
-        let err = engine.submit_approval("sec_ops_policy", &proposal.proposal_id, approval_future, current_time);
+        let err = engine.submit_approval(
+            "sec_ops_policy",
+            &proposal.proposal_id,
+            approval_future,
+            current_time,
+        );
         assert!(err.is_err());
         assert!(err.unwrap_err().contains("InvalidSignatureTimestamp"));
 
@@ -273,7 +303,12 @@ mod tests {
             signature: past_sig.to_bytes().to_vec(),
             signed_epoch_secs: current_time - 10,
         };
-        let err2 = engine.submit_approval("sec_ops_policy", &proposal.proposal_id, approval_past, current_time);
+        let err2 = engine.submit_approval(
+            "sec_ops_policy",
+            &proposal.proposal_id,
+            approval_past,
+            current_time,
+        );
         assert!(err2.is_err());
         assert!(err2.unwrap_err().contains("InvalidSignatureTimestamp"));
 
@@ -285,7 +320,12 @@ mod tests {
             signature: mismatched_sig.to_bytes().to_vec(),
             signed_epoch_secs: current_time,
         };
-        let err3 = engine.submit_approval("sec_ops_policy", &proposal.proposal_id, approval_mismatched, current_time);
+        let err3 = engine.submit_approval(
+            "sec_ops_policy",
+            &proposal.proposal_id,
+            approval_mismatched,
+            current_time,
+        );
         assert!(err3.is_err());
         assert!(err3.unwrap_err().contains("SignerPublicKeyMismatch"));
 
@@ -297,7 +337,14 @@ mod tests {
             signature: valid_sig1.to_bytes().to_vec(),
             signed_epoch_secs: current_time,
         };
-        let res1 = engine.submit_approval("sec_ops_policy", &proposal.proposal_id, approval1, current_time).unwrap();
+        let res1 = engine
+            .submit_approval(
+                "sec_ops_policy",
+                &proposal.proposal_id,
+                approval1,
+                current_time,
+            )
+            .unwrap();
         assert!(res1.is_none()); // Threshold is 2, only 1 approval so far
 
         // 5. Signer2 tries to submit using signer1's public key (duplicate public key check)
@@ -308,7 +355,12 @@ mod tests {
             signature: dup_key_sig.to_bytes().to_vec(),
             signed_epoch_secs: current_time,
         };
-        let err4 = engine.submit_approval("sec_ops_policy", &proposal.proposal_id, approval_dup_key, current_time);
+        let err4 = engine.submit_approval(
+            "sec_ops_policy",
+            &proposal.proposal_id,
+            approval_dup_key,
+            current_time,
+        );
         assert!(err4.is_err());
         assert!(err4.unwrap_err().contains("DuplicateApproval"));
 
@@ -320,7 +372,14 @@ mod tests {
             signature: valid_sig2.to_bytes().to_vec(),
             signed_epoch_secs: current_time,
         };
-        let res2 = engine.submit_approval("sec_ops_policy", &proposal.proposal_id, approval2, current_time).unwrap();
+        let res2 = engine
+            .submit_approval(
+                "sec_ops_policy",
+                &proposal.proposal_id,
+                approval2,
+                current_time,
+            )
+            .unwrap();
         assert!(res2.is_some());
         let token = res2.unwrap();
         assert_eq!(token.approvals.len(), 2);
@@ -344,27 +403,34 @@ mod tests {
 
         let proposer = PrincipalId::new("proposer_admin").unwrap();
         // Create first proposal at t = 100, expires at t = 150
-        let prop1 = engine.create_proposal(
-            "ephemeral_policy",
-            SecurityAction::rotate_authority_key(),
-            SecurityResource::SystemVault,
-            "Key rotation".into(),
-            proposer.clone(),
-            100,
-        ).unwrap();
+        let prop1 = engine
+            .create_proposal(
+                "ephemeral_policy",
+                SecurityAction::rotate_authority_key(),
+                SecurityResource::SystemVault,
+                "Key rotation".into(),
+                proposer.clone(),
+                100,
+            )
+            .unwrap();
 
         // Create second proposal at t = 200 (prop1 has expired)
-        let _prop2 = engine.create_proposal(
-            "ephemeral_policy",
-            SecurityAction::rotate_authority_key(),
-            SecurityResource::SystemVault,
-            "Key rotation round 2".into(),
-            proposer,
-            200,
-        ).unwrap();
+        let _prop2 = engine
+            .create_proposal(
+                "ephemeral_policy",
+                SecurityAction::rotate_authority_key(),
+                SecurityResource::SystemVault,
+                "Key rotation round 2".into(),
+                proposer,
+                200,
+            )
+            .unwrap();
 
         let proposals = engine.active_proposals.read().unwrap();
-        assert!(!proposals.contains_key(&prop1.proposal_id), "Expired proposal must be pruned on new proposal creation");
+        assert!(
+            !proposals.contains_key(&prop1.proposal_id),
+            "Expired proposal must be pruned on new proposal creation"
+        );
         assert_eq!(proposals.len(), 1);
     }
 }

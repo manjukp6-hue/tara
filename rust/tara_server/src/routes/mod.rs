@@ -655,9 +655,10 @@ route_handler!(
             .get("session_token")
             .and_then(|v| v.as_str())
             .or_else(|| {
-                req.headers
-                    .get("authorization")
-                    .and_then(|a| a.strip_prefix("Bearer ").or_else(|| a.strip_prefix("bearer ")))
+                req.headers.get("authorization").and_then(|a| {
+                    a.strip_prefix("Bearer ")
+                        .or_else(|| a.strip_prefix("bearer "))
+                })
             })
             .unwrap_or("")
             .to_string();
@@ -1099,7 +1100,9 @@ route_handler!(
             if let Some(dev) = brain.identity_manager.get_device(device_id) {
                 if let Ok(dev_id) = tara_security::primitives::DeviceId::new(&dev.device_id) {
                     if let Ok(pub_bytes) = hex::decode(&dev.device_public_key) {
-                        if let Ok(principal) = tara_security::primitives::PrincipalId::new("creator_root_operator") {
+                        if let Ok(principal) =
+                            tara_security::primitives::PrincipalId::new("creator_root_operator")
+                        {
                             let zero_rec = tara_security::zero_trust::DeviceEnrollmentRecord {
                                 device_id: dev_id,
                                 enrolled_public_key: pub_bytes,
@@ -1175,7 +1178,12 @@ route_handler!(ControlPlaneWorkerRegisterHandler, |req: &RouteRequest,
                 .or_else(|| h.strip_prefix("bearer "))
                 .or(Some(h.as_str()))
         })
-        .map(|t| brain.creator_auth_service.verify_session(t.trim()).is_some())
+        .map(|t| {
+            brain
+                .creator_auth_service
+                .verify_session(t.trim())
+                .is_some()
+        })
         .unwrap_or(false);
 
     let is_admin_key = req
@@ -1204,7 +1212,6 @@ route_handler!(ControlPlaneWorkerRegisterHandler, |req: &RouteRequest,
         .write()
         .unwrap_or_else(|p| p.into_inner())
         .register_with_token(&req.body)
-
     {
         Ok((node, worker_token)) => json!({
             "status": "SUCCESS",
@@ -1360,13 +1367,18 @@ route_handler!(
         let idempotency_key = req.body.get("idempotency_key").and_then(|v| v.as_str());
         let target_provider = req.body.get("target_provider").and_then(|v| v.as_str());
 
-        let job = match brain.control_plane.jobs.write().unwrap_or_else(|p| p.into_inner()).submit_job(
-            task_type,
-            items,
-            chunk_size,
-            idempotency_key,
-            target_provider,
-        ) {
+        let job = match brain
+            .control_plane
+            .jobs
+            .write()
+            .unwrap_or_else(|p| p.into_inner())
+            .submit_job(
+                task_type,
+                items,
+                chunk_size,
+                idempotency_key,
+                target_provider,
+            ) {
             Ok(j) => j,
             Err(e) => {
                 return json!({ "status": "ERROR", "error": format!("Failed to submit job: {}", e) })
@@ -1375,7 +1387,11 @@ route_handler!(
 
         // Attempt chunk assignment immediately
         {
-            let workers = brain.control_plane.workers.read().unwrap_or_else(|p| p.into_inner());
+            let workers = brain
+                .control_plane
+                .workers
+                .read()
+                .unwrap_or_else(|p| p.into_inner());
             if let Err(e) = brain
                 .control_plane
                 .jobs
@@ -1426,7 +1442,12 @@ route_handler!(
         }
 
         if job_id.is_empty() {
-            let all_jobs = brain.control_plane.jobs.read().unwrap_or_else(|p| p.into_inner()).list_jobs();
+            let all_jobs = brain
+                .control_plane
+                .jobs
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .list_jobs();
             return json!({
                 "status": "SUCCESS",
                 "count": all_jobs.len(),
@@ -1434,7 +1455,13 @@ route_handler!(
             });
         }
 
-        match brain.control_plane.jobs.read().unwrap_or_else(|p| p.into_inner()).get_job(&job_id) {
+        match brain
+            .control_plane
+            .jobs
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .get_job(&job_id)
+        {
             Some(j) => json!({
                 "status": "SUCCESS",
                 "job": j
@@ -1527,7 +1554,11 @@ route_handler!(
             .unwrap_or("Primary PC");
         let device_public_key = req.body.get("device_public_key").and_then(|v| v.as_str());
         let passphrase = req.body.get("passphrase").and_then(|v| v.as_str());
-        let nonce = req.body.get("nonce").or_else(|| req.body.get("challenge_nonce")).and_then(|v| v.as_str());
+        let nonce = req
+            .body
+            .get("nonce")
+            .or_else(|| req.body.get("challenge_nonce"))
+            .and_then(|v| v.as_str());
 
         let setup_req = tara_security::creator::CreatorCeremonyRequest {
             google_id_token,
@@ -1558,7 +1589,10 @@ route_handler!(
             .or_else(|| {
                 req.headers
                     .get("authorization")
-                    .and_then(|h| h.strip_prefix("Bearer ").or_else(|| h.strip_prefix("bearer ")))
+                    .and_then(|h| {
+                        h.strip_prefix("Bearer ")
+                            .or_else(|| h.strip_prefix("bearer "))
+                    })
                     .map(|s| s.trim().to_string())
             });
 
@@ -1576,9 +1610,11 @@ route_handler!(
                 .or(req.body.get("nonce"))
                 .or(req.body.get("challenge_nonce"))
                 .and_then(|v| v.as_str());
-            let auth_res = brain
-                .creator_auth_service
-                .authenticate_google_token(gtok, google_nonce, &req.client_ip);
+            let auth_res = brain.creator_auth_service.authenticate_google_token(
+                gtok,
+                google_nonce,
+                &req.client_ip,
+            );
             if auth_res.get("status").and_then(|v| v.as_str()) == Some("SUCCESS") {
                 authenticated_creator = auth_res
                     .get("creator_id")
@@ -1606,29 +1642,32 @@ route_handler!(
             .get("device_name")
             .and_then(|v| v.as_str())
             .unwrap_or("Secondary PC");
-        let dev_rec =
-            match brain
-                .identity_manager
-                .register_device(device_pub, device_name, "AUTHORIZED", &crate::now_iso())
-            {
-                Ok(rec) => {
-                    if let Ok(dev_id) = tara_security::primitives::DeviceId::new(&rec.device_id) {
-                        if let Ok(pub_bytes) = hex::decode(&rec.device_public_key) {
-                            if let Ok(principal) = tara_security::primitives::PrincipalId::new("creator_root_operator") {
-                                let zero_rec = tara_security::zero_trust::DeviceEnrollmentRecord {
-                                    device_id: dev_id,
-                                    enrolled_public_key: pub_bytes,
-                                    bound_principal_id: principal,
-                                    is_revoked: false,
-                                };
-                                let _ = brain.centralized_device_registry.enroll_device(zero_rec);
-                            }
+        let dev_rec = match brain.identity_manager.register_device(
+            device_pub,
+            device_name,
+            "AUTHORIZED",
+            &crate::now_iso(),
+        ) {
+            Ok(rec) => {
+                if let Ok(dev_id) = tara_security::primitives::DeviceId::new(&rec.device_id) {
+                    if let Ok(pub_bytes) = hex::decode(&rec.device_public_key) {
+                        if let Ok(principal) =
+                            tara_security::primitives::PrincipalId::new("creator_root_operator")
+                        {
+                            let zero_rec = tara_security::zero_trust::DeviceEnrollmentRecord {
+                                device_id: dev_id,
+                                enrolled_public_key: pub_bytes,
+                                bound_principal_id: principal,
+                                is_revoked: false,
+                            };
+                            let _ = brain.centralized_device_registry.enroll_device(zero_rec);
                         }
                     }
-                    rec
                 }
-                Err(e) => return json!({ "status": "ERROR", "error": e }),
-            };
+                rec
+            }
+            Err(e) => return json!({ "status": "ERROR", "error": e }),
+        };
 
         json!({
             "status": "SUCCESS",
@@ -1652,7 +1691,10 @@ route_handler!(
             .or_else(|| {
                 req.headers
                     .get("authorization")
-                    .and_then(|h| h.strip_prefix("Bearer ").or_else(|| h.strip_prefix("bearer ")))
+                    .and_then(|h| {
+                        h.strip_prefix("Bearer ")
+                            .or_else(|| h.strip_prefix("bearer "))
+                    })
                     .map(|s| s.trim().to_string())
             });
 
@@ -1713,7 +1755,10 @@ route_handler!(
             .or_else(|| {
                 req.headers
                     .get("authorization")
-                    .and_then(|h| h.strip_prefix("Bearer ").or_else(|| h.strip_prefix("bearer ")))
+                    .and_then(|h| {
+                        h.strip_prefix("Bearer ")
+                            .or_else(|| h.strip_prefix("bearer "))
+                    })
                     .map(|s| s.trim().to_string())
             });
 
@@ -2200,8 +2245,12 @@ route_handler!(
 
         let keystore_path = std::path::Path::new(&brain.repo_root).join(".keys");
         let session_path = std::path::Path::new(&brain.repo_root).join(".sessions");
-        let vault_path = std::path::Path::new(&brain.repo_root).join("storage").join("vault");
-        let tara_access_path = std::path::Path::new(&brain.repo_root).join("TARA").join("ACCESS");
+        let vault_path = std::path::Path::new(&brain.repo_root)
+            .join("storage")
+            .join("vault");
+        let tara_access_path = std::path::Path::new(&brain.repo_root)
+            .join("TARA")
+            .join("ACCESS");
 
         let destroy_res = tara_core::SecureDestructionEngine::trigger_emergency_destruction(
             &keystore_path,
@@ -2336,7 +2385,12 @@ route_handler!(SecurityQuarantineEvaluateHandler, |req: &RouteRequest,
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    match brain.quarantine_engine.evaluate_artifact(name, artifact_type, content.as_bytes(), epoch_secs) {
+    match brain.quarantine_engine.evaluate_artifact(
+        name,
+        artifact_type,
+        content.as_bytes(),
+        epoch_secs,
+    ) {
         Ok(record) => json!({
             "status": "SUCCESS",
             "record": record
@@ -2585,7 +2639,8 @@ route_handler!(
             .and_then(Value::as_str)
             .unwrap_or("analyze_code");
 
-        if (op == "cargo_check" || op == "cargo_test") && !is_privileged_actor(req.actor.as_deref()) {
+        if (op == "cargo_check" || op == "cargo_test") && !is_privileged_actor(req.actor.as_deref())
+        {
             return json!({
                 "status": "UNAUTHORIZED",
                 "error": "Privileged operation (cargo_check/cargo_test) requires operator or admin role"
@@ -2712,7 +2767,6 @@ route_handler!(
 
 /// Register all routes into the provided router.
 pub fn register_all_routes(router: &crate::server::ApiRouter) {
-
     // Specialist Engines
     router.register(
         "POST",
@@ -3494,10 +3548,16 @@ mod tests {
         assert_eq!(extract_bearer_token(&headers), None);
 
         headers.insert("authorization".into(), "Bearer my_secret_token_123".into());
-        assert_eq!(extract_bearer_token(&headers), Some("my_secret_token_123".into()));
+        assert_eq!(
+            extract_bearer_token(&headers),
+            Some("my_secret_token_123".into())
+        );
 
         headers.insert("authorization".into(), "bearer lowercase_token_456".into());
-        assert_eq!(extract_bearer_token(&headers), Some("lowercase_token_456".into()));
+        assert_eq!(
+            extract_bearer_token(&headers),
+            Some("lowercase_token_456".into())
+        );
 
         headers.insert("authorization".into(), "Basic dXNlcjpwYXNz".into());
         assert_eq!(extract_bearer_token(&headers), None);

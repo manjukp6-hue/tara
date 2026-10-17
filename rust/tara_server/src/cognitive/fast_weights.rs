@@ -455,7 +455,10 @@ impl FastWeightMemory {
             let len = weights.len();
             let dim = (len as f64).sqrt().round() as usize;
             if dim * dim != len || dim == 0 {
-                return Err(format!("Cannot determine square dimension for {} weights", len));
+                return Err(format!(
+                    "Cannot determine square dimension for {} weights",
+                    len
+                ));
             }
             let mut mem = Self::new(dim, DEFAULT_LAMBDA, DEFAULT_ETA)?;
             mem.weights = weights;
@@ -615,4 +618,3 @@ mod tests {
         );
     }
 }
-

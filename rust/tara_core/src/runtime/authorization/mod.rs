@@ -288,45 +288,141 @@ mod tests {
         let empty_caps = HashSet::new();
 
         // 1. CreateSandbox requires sandbox:create
-        let res = AuthorizationGate::evaluate("actor", EntityState::Ready, &ActionType::CreateSandbox, None, None, &empty_caps, false);
+        let res = AuthorizationGate::evaluate(
+            "actor",
+            EntityState::Ready,
+            &ActionType::CreateSandbox,
+            None,
+            None,
+            &empty_caps,
+            false,
+        );
         assert!(!res.is_allowed());
         let mut caps = HashSet::from(["sandbox:create".to_string()]);
-        let res = AuthorizationGate::evaluate("actor", EntityState::Ready, &ActionType::CreateSandbox, None, None, &caps, false);
+        let res = AuthorizationGate::evaluate(
+            "actor",
+            EntityState::Ready,
+            &ActionType::CreateSandbox,
+            None,
+            None,
+            &caps,
+            false,
+        );
         assert!(res.is_allowed());
 
         // 2. StartSandbox requires sandbox:start
-        let res = AuthorizationGate::evaluate("actor", EntityState::Ready, &ActionType::StartSandbox, None, None, &empty_caps, false);
+        let res = AuthorizationGate::evaluate(
+            "actor",
+            EntityState::Ready,
+            &ActionType::StartSandbox,
+            None,
+            None,
+            &empty_caps,
+            false,
+        );
         assert!(!res.is_allowed());
         caps.insert("sandbox:start".to_string());
-        let res = AuthorizationGate::evaluate("actor", EntityState::Ready, &ActionType::StartSandbox, None, None, &caps, false);
+        let res = AuthorizationGate::evaluate(
+            "actor",
+            EntityState::Ready,
+            &ActionType::StartSandbox,
+            None,
+            None,
+            &caps,
+            false,
+        );
         assert!(res.is_allowed());
 
         // 3. ExecuteWorkload requires sandbox:execute
-        let res = AuthorizationGate::evaluate("actor", EntityState::Ready, &ActionType::ExecuteWorkload, None, None, &empty_caps, false);
+        let res = AuthorizationGate::evaluate(
+            "actor",
+            EntityState::Ready,
+            &ActionType::ExecuteWorkload,
+            None,
+            None,
+            &empty_caps,
+            false,
+        );
         assert!(!res.is_allowed());
         caps.insert("sandbox:execute".to_string());
-        let res = AuthorizationGate::evaluate("actor", EntityState::Ready, &ActionType::ExecuteWorkload, None, None, &caps, false);
+        let res = AuthorizationGate::evaluate(
+            "actor",
+            EntityState::Ready,
+            &ActionType::ExecuteWorkload,
+            None,
+            None,
+            &caps,
+            false,
+        );
         assert!(res.is_allowed());
 
         // 4. AssignAgent requires agent:assign
-        let res = AuthorizationGate::evaluate("actor", EntityState::Ready, &ActionType::AssignAgent, None, None, &empty_caps, false);
+        let res = AuthorizationGate::evaluate(
+            "actor",
+            EntityState::Ready,
+            &ActionType::AssignAgent,
+            None,
+            None,
+            &empty_caps,
+            false,
+        );
         assert!(!res.is_allowed());
         caps.insert("agent:assign".to_string());
-        let res = AuthorizationGate::evaluate("actor", EntityState::Ready, &ActionType::AssignAgent, None, None, &caps, false);
+        let res = AuthorizationGate::evaluate(
+            "actor",
+            EntityState::Ready,
+            &ActionType::AssignAgent,
+            None,
+            None,
+            &caps,
+            false,
+        );
         assert!(res.is_allowed());
 
         // 5. AssignWorker requires worker:assign
-        let res = AuthorizationGate::evaluate("actor", EntityState::Ready, &ActionType::AssignWorker, None, None, &empty_caps, false);
+        let res = AuthorizationGate::evaluate(
+            "actor",
+            EntityState::Ready,
+            &ActionType::AssignWorker,
+            None,
+            None,
+            &empty_caps,
+            false,
+        );
         assert!(!res.is_allowed());
         caps.insert("worker:assign".to_string());
-        let res = AuthorizationGate::evaluate("actor", EntityState::Ready, &ActionType::AssignWorker, None, None, &caps, false);
+        let res = AuthorizationGate::evaluate(
+            "actor",
+            EntityState::Ready,
+            &ActionType::AssignWorker,
+            None,
+            None,
+            &caps,
+            false,
+        );
         assert!(res.is_allowed());
 
         // 6. TransferData requires broker:transfer
-        let res = AuthorizationGate::evaluate("actor", EntityState::Ready, &ActionType::TransferData, None, None, &empty_caps, false);
+        let res = AuthorizationGate::evaluate(
+            "actor",
+            EntityState::Ready,
+            &ActionType::TransferData,
+            None,
+            None,
+            &empty_caps,
+            false,
+        );
         assert!(!res.is_allowed());
         caps.insert("broker:transfer".to_string());
-        let res = AuthorizationGate::evaluate("actor", EntityState::Ready, &ActionType::TransferData, None, None, &caps, false);
+        let res = AuthorizationGate::evaluate(
+            "actor",
+            EntityState::Ready,
+            &ActionType::TransferData,
+            None,
+            None,
+            &caps,
+            false,
+        );
         assert!(res.is_allowed());
     }
 }

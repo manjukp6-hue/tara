@@ -80,7 +80,7 @@ impl SessionManager {
                 revoked_principals: HashSet::new(),
                 revoked_devices: HashSet::new(),
             })),
-            default_session_ttl_secs: 3600, // 1 hour
+            default_session_ttl_secs: 3600,                  // 1 hour
             default_challenge_ttl: Duration::from_secs(300), // 5 minutes
             storage_path: None,
         }
@@ -147,14 +147,19 @@ impl SessionManager {
 
         // Strict audience check (fail closed against empty audience)
         if audience.trim().is_empty() {
-            return Err("EmptyAudience: Session creation requires non-empty audience (FailClosed)".into());
+            return Err(
+                "EmptyAudience: Session creation requires non-empty audience (FailClosed)".into(),
+            );
         }
 
         let principal_key = principal.id().as_str();
         let bound_device = principal.bound_device().cloned();
 
         // 2. Atomic check and insertion under unified lock (ID-11, ID-17)
-        let mut state = self.state.lock().map_err(|_| "Session state lock poisoned (FailClosed)")?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Session state lock poisoned (FailClosed)")?;
 
         if state.revoked_principals.contains(&principal_key) {
             return Err("PrincipalRevoked: Cannot issue session to revoked principal".into());
@@ -162,7 +167,9 @@ impl SessionManager {
 
         if let Some(ref dev) = bound_device {
             if state.revoked_devices.contains(dev.as_str()) {
-                return Err("DeviceRevoked: Cannot issue session with a revoked bound device".into());
+                return Err(
+                    "DeviceRevoked: Cannot issue session with a revoked bound device".into(),
+                );
             }
         }
 
@@ -186,7 +193,9 @@ impl SessionManager {
             expires_epoch_secs,
         };
 
-        state.sessions.insert(session_id.as_str().to_string(), record.clone());
+        state
+            .sessions
+            .insert(session_id.as_str().to_string(), record.clone());
 
         Ok(record)
     }
@@ -199,7 +208,10 @@ impl SessionManager {
         current_generation: AuthorityGeneration,
         current_epoch_secs: u64,
     ) -> Result<(), String> {
-        let mut state = self.state.lock().map_err(|_| "Session state lock poisoned (FailClosed)")?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Session state lock poisoned (FailClosed)")?;
         if state.revoked_principals.contains(&principal.id().as_str()) {
             return Err("PrincipalRevoked: Principal has been revoked in zero-trust session store (FailClosed)".into());
         }
@@ -209,7 +221,8 @@ impl SessionManager {
             }
         }
         if !state.sessions.contains_key(session_id_str) {
-            let expires_epoch_secs = current_epoch_secs.saturating_add(self.default_session_ttl_secs);
+            let expires_epoch_secs =
+                current_epoch_secs.saturating_add(self.default_session_ttl_secs);
             let s_id = SessionId::new(session_id_str)?;
             let record = SessionRecord {
                 session_id: s_id,
@@ -233,7 +246,10 @@ impl SessionManager {
         current_generation: AuthorityGeneration,
         current_epoch_secs: u64,
     ) -> Result<SessionRecord, String> {
-        let mut state = self.state.lock().map_err(|_| "Session state lock poisoned (FailClosed)")?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Session state lock poisoned (FailClosed)")?;
 
         let record = state.sessions.get(session_id_str).cloned().ok_or_else(|| {
             "InvalidSession: Session ID not found or already terminated".to_string()
@@ -256,7 +272,10 @@ impl SessionManager {
         }
 
         // 3. Check principal revocation
-        if state.revoked_principals.contains(&record.principal.id().as_str()) {
+        if state
+            .revoked_principals
+            .contains(&record.principal.id().as_str())
+        {
             state.sessions.remove(session_id_str);
             return Err("PrincipalRevoked: Session terminated due to principal revocation".into());
         }
@@ -265,7 +284,9 @@ impl SessionManager {
         if let Some(ref dev) = record.bound_device {
             if state.revoked_devices.contains(dev.as_str()) {
                 state.sessions.remove(session_id_str);
-                return Err("DeviceRevoked: Session terminated due to bound device revocation".into());
+                return Err(
+                    "DeviceRevoked: Session terminated due to bound device revocation".into(),
+                );
             }
         }
 
@@ -274,7 +295,8 @@ impl SessionManager {
             state.sessions.remove(session_id_str);
             return Err("EmptyAudience: Session record has empty audience (FailClosed)".into());
         }
-        if record.audience != crate::primitives::CANONICAL_AUDIENCE && record.audience != "tara_api" {
+        if record.audience != crate::primitives::CANONICAL_AUDIENCE && record.audience != "tara_api"
+        {
             state.sessions.remove(session_id_str);
             return Err(format!(
                 "AudienceMismatch: Session audience '{}' is not an authorized server audience (FailClosed)",
@@ -291,10 +313,15 @@ impl SessionManager {
         session_id: Option<SessionId>,
         bound_action: Option<SecurityAction>,
     ) -> Result<ChallengeId, String> {
-        let mut state = self.state.lock().map_err(|_| "Session state lock poisoned (FailClosed)")?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Session state lock poisoned (FailClosed)")?;
 
         // Evict expired challenges automatically (ID-16)
-        state.challenges.retain(|_, c| c.created_at.elapsed() < c.ttl);
+        state
+            .challenges
+            .retain(|_, c| c.created_at.elapsed() < c.ttl);
 
         if state.challenges.len() >= MAX_ACTIVE_CHALLENGES {
             return Err(format!(
@@ -315,7 +342,9 @@ impl SessionManager {
             ttl: self.default_challenge_ttl,
         };
 
-        state.challenges.insert(challenge_id.as_str().to_string(), record);
+        state
+            .challenges
+            .insert(challenge_id.as_str().to_string(), record);
 
         Ok(challenge_id)
     }
@@ -327,7 +356,10 @@ impl SessionManager {
         session_id: Option<&SessionId>,
         action: Option<&SecurityAction>,
     ) -> Result<(), String> {
-        let mut state = self.state.lock().map_err(|_| "Session state lock poisoned (FailClosed)")?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Session state lock poisoned (FailClosed)")?;
 
         // Atomic removal
         let record = state.challenges.remove(challenge_id_str).ok_or_else(|| {
@@ -343,7 +375,12 @@ impl SessionManager {
         if let Some(ref bound_s) = record.session_id {
             match session_id {
                 Some(s) if s == bound_s => {}
-                _ => return Err("ChallengeBindingViolation: Challenge is bound to a different session".into()),
+                _ => {
+                    return Err(
+                        "ChallengeBindingViolation: Challenge is bound to a different session"
+                            .into(),
+                    )
+                }
             }
         }
 
@@ -351,7 +388,12 @@ impl SessionManager {
         if let Some(ref bound_a) = record.bound_action {
             match action {
                 Some(a) if a == bound_a => {}
-                _ => return Err("ChallengeBindingViolation: Challenge is bound to a different action".into()),
+                _ => {
+                    return Err(
+                        "ChallengeBindingViolation: Challenge is bound to a different action"
+                            .into(),
+                    )
+                }
             }
         }
 
@@ -360,18 +402,28 @@ impl SessionManager {
 
     /// Revoke principal and atomically terminate all associated sessions (ID-11).
     pub fn revoke_principal(&self, principal_id: &PrincipalId) -> Result<(), String> {
-        let mut state = self.state.lock().map_err(|_| "Session state lock poisoned (FailClosed)")?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Session state lock poisoned (FailClosed)")?;
         state.revoked_principals.insert(principal_id.as_str());
-        state.sessions.retain(|_, s| s.principal.id() != principal_id);
+        state
+            .sessions
+            .retain(|_, s| s.principal.id() != principal_id);
         self.persist_revocations(&state);
         Ok(())
     }
 
     /// Revoke device and atomically terminate all associated sessions (ID-17).
     pub fn revoke_device(&self, device_id: &DeviceId) -> Result<(), String> {
-        let mut state = self.state.lock().map_err(|_| "Session state lock poisoned (FailClosed)")?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Session state lock poisoned (FailClosed)")?;
         state.revoked_devices.insert(device_id.as_str().to_string());
-        state.sessions.retain(|_, s| s.bound_device.as_ref() != Some(device_id));
+        state
+            .sessions
+            .retain(|_, s| s.bound_device.as_ref() != Some(device_id));
         self.persist_revocations(&state);
         Ok(())
     }
@@ -396,7 +448,10 @@ impl SessionManager {
 
     /// Explicitly terminate and revoke a single session ID.
     pub fn revoke_session(&self, session_id: &str) -> Result<bool, String> {
-        let mut state = self.state.lock().map_err(|_| "Session state lock poisoned (FailClosed)")?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Session state lock poisoned (FailClosed)")?;
         Ok(state.sessions.remove(session_id).is_some())
     }
 }

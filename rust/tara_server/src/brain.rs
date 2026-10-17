@@ -16,29 +16,31 @@ use tara_engine::{
     TaraForCausalLM, TaraTokenizer,
 };
 
-use tara_security::creator::CreatorAuthService;
-use tara_security::devices::IdentityManager;
-use crate::control_plane::auto_connect::AutoConnectSyncEngine;
-use crate::cognitive::{CognitiveCapabilitiesHub, DecisionRecordParams};
 use crate::cognitive::context::SessionContextManager;
-use crate::engines::engine_system::DynamicEngineSystem;
-use crate::learning::evaluator::{RecoveryEngine, SelfEvaluator, TaskVerifier, UncertaintyDetector};
-use crate::knowledge::GlobalKnowledgeBase;
-use crate::learning::{AutonomousOnlineLearner, CapabilitySynthesizer, UserSearchLearner};
-use crate::memory::{EpisodeRecordParams, MemoryEngine};
-use crate::memory::hub::DynamicMemoryHub;
-use crate::learning::model_registry::ModelRegistry;
-use crate::language::nlu::{IntentResult, SemanticIntentParser};
 use crate::cognitive::planner::{GoalTracker, TaskPlanner};
+use crate::cognitive::{CognitiveCapabilitiesHub, DecisionRecordParams};
+use crate::control_plane::auto_connect::AutoConnectSyncEngine;
 use crate::control_plane::registry::CapabilityRegistry;
+use crate::engines::engine_system::DynamicEngineSystem;
+use crate::knowledge::GlobalKnowledgeBase;
+use crate::language::nlu::{IntentResult, SemanticIntentParser};
+use crate::learning::evaluator::{
+    RecoveryEngine, SelfEvaluator, TaskVerifier, UncertaintyDetector,
+};
+use crate::learning::model_registry::ModelRegistry;
+use crate::learning::{AutonomousOnlineLearner, CapabilitySynthesizer, UserSearchLearner};
+use crate::memory::hub::DynamicMemoryHub;
+use crate::memory::{EpisodeRecordParams, MemoryEngine};
 use crate::rules::ExecutionGuard;
 use crate::server::WebSessionStore;
+use crate::skills::tools_registry::ToolRegistry;
 use crate::skills::SkillEngine;
 use crate::subsystems::{
-    agent_orchestrator::AgentOrchestrator,
-    plugin_engine::PluginEngine, resilience::ResilienceEngine, user_model::UserManager,
+    agent_orchestrator::AgentOrchestrator, plugin_engine::PluginEngine,
+    resilience::ResilienceEngine, user_model::UserManager,
 };
-use crate::skills::tools_registry::ToolRegistry;
+use tara_security::creator::CreatorAuthService;
+use tara_security::devices::IdentityManager;
 
 static TRANSACTION_SEQ: AtomicU64 = AtomicU64::new(1);
 
@@ -493,9 +495,7 @@ impl TaraBrain {
         // Model integrity check before loading
         let model_file_path = resolve_model_artifact_path(&resolved_model_dir);
         let sha = tara_engine::compute_sha256(&model_file_path).unwrap_or_default();
-        let registry_sha = registry
-            .get_active_version_sha()
-            .unwrap_or_default();
+        let registry_sha = registry.get_active_version_sha().unwrap_or_default();
 
         let integrity_engine = tara_security::tara_control::ModelIntegrityEngine::new(&repo_root);
         let seal_valid = match integrity_engine.verify() {
@@ -549,7 +549,9 @@ impl TaraBrain {
 
         // Lockdown Coordinator must be established before vault-populating services
         // so that the initial verified lockdown state record exists prior to key provisioning.
-        let lockdown_coordinator = Arc::new(tara_security::lockdown::LockdownCoordinator::new_with_root(&repo_root));
+        let lockdown_coordinator = Arc::new(
+            tara_security::lockdown::LockdownCoordinator::new_with_root(&repo_root),
+        );
 
         // Identity
         let identity_manager = IdentityManager::new(&format!("{}/TARA/ACCESS", repo_root));
@@ -559,7 +561,10 @@ impl TaraBrain {
         let policy_path = format!("{}/TARA/RULES/compiled_policy.json", repo_root);
         let guard = {
             let loaded_policy = crate::rules::CompiledPolicy::from_json_file(&policy_path).ok();
-            Arc::new(ExecutionGuard::with_lockdown(loaded_policy, lockdown_coordinator.clone()))
+            Arc::new(ExecutionGuard::with_lockdown(
+                loaded_policy,
+                lockdown_coordinator.clone(),
+            ))
         };
         let training_gate = Arc::new(Mutex::new(TrainingLifecycleState::Idle));
 
@@ -617,14 +622,17 @@ impl TaraBrain {
         let web_sessions = Arc::new(WebSessionStore::new());
         let specialist_engines = Arc::new(crate::engines::SpecialistEngines::new(&repo_root));
 
-        let tripwire_defense = Arc::new(tara_security::fail_closed_defense::TripwireDefenseEngine::new());
+        let tripwire_defense =
+            Arc::new(tara_security::fail_closed_defense::TripwireDefenseEngine::new());
         let centralized_policy = Arc::new(tara_security::zero_trust::PolicyEngine::new());
-        let transparency_tree = Arc::new(tara_security::transparency_log::merkle::MerkleTree::new());
+        let transparency_tree =
+            Arc::new(tara_security::transparency_log::merkle::MerkleTree::new());
         let quorum_engine = Arc::new(tara_security::threshold_quorum::ThresholdQuorumEngine::new());
-        let rollback_anchor = Box::new(tara_security::anti_rollback::LocalHostMonotonicAnchor::new(
-            "tara_server_monotonic_watermark",
-            1,
-        ));
+        let rollback_anchor =
+            Box::new(tara_security::anti_rollback::LocalHostMonotonicAnchor::new(
+                "tara_server_monotonic_watermark",
+                1,
+            ));
         let rollback_guard = Arc::new(tara_security::anti_rollback::RollbackGuard::new(
             rollback_anchor,
             tara_security::anti_rollback::AnchorAssuranceType::LocalHostWitness,
@@ -636,11 +644,14 @@ impl TaraBrain {
             .join("vault")
             .join("access")
             .join("authority_record.json");
-        let authority_manager = Arc::new(tara_security::hardware_root::AuthorityManager::load_or_new(&authority_path));
+        let authority_manager = Arc::new(
+            tara_security::hardware_root::AuthorityManager::load_or_new(&authority_path),
+        );
         if !authority_manager.is_initialized() {
             if let Ok(recovery_secret) = std::env::var("TARA_ROOT_RECOVERY_SECRET") {
                 if !recovery_secret.trim().is_empty() {
-                    let creator_principal_id = tara_security::primitives::PrincipalId::new("creator_system_root").unwrap();
+                    let creator_principal_id =
+                        tara_security::primitives::PrincipalId::new("creator_system_root").unwrap();
                     let now_epoch = crate::now_secs();
                     let _ = authority_manager.initialize_root_ceremony(
                         creator_principal_id,
@@ -656,10 +667,14 @@ impl TaraBrain {
             .join("vault")
             .join("access")
             .join("revocations.json");
-        let centralized_session_manager = Arc::new(tara_security::zero_trust::SessionManager::with_storage(&revocations_path));
-        let centralized_risk_engine = Arc::new(tara_security::zero_trust::ContinuousRiskEngine::new());
-        let audit_key = tara_security::dpapi::derive_authority_hmac_key("transparency_audit_logger")
-            .map_err(|e| format!("FAIL CLOSED: {e}"))?;
+        let centralized_session_manager = Arc::new(
+            tara_security::zero_trust::SessionManager::with_storage(&revocations_path),
+        );
+        let centralized_risk_engine =
+            Arc::new(tara_security::zero_trust::ContinuousRiskEngine::new());
+        let audit_key =
+            tara_security::dpapi::derive_authority_hmac_key("transparency_audit_logger")
+                .map_err(|e| format!("FAIL CLOSED: {e}"))?;
         let audit_sink_path = if let Some(p) = config.audit_sink_path_override.clone() {
             p
         } else if let Ok(custom_audit) = std::env::var("TARA_AUDIT_LOG_PATH") {
@@ -667,8 +682,11 @@ impl TaraBrain {
         } else if cfg!(test) {
             let thread_id = format!("{:?}", std::thread::current().id());
             let clean_tid = thread_id.replace("ThreadId(", "").replace(")", "");
-            std::env::temp_dir()
-                .join(format!("tara_test_audit_{}_{}.jsonl", std::process::id(), clean_tid))
+            std::env::temp_dir().join(format!(
+                "tara_test_audit_{}_{}.jsonl",
+                std::process::id(),
+                clean_tid
+            ))
         } else {
             std::path::Path::new(&repo_root)
                 .join("storage")
@@ -680,10 +698,9 @@ impl TaraBrain {
             tara_security::transparency_log::FileAuditSink::new(audit_sink_path)
                 .map_err(|e| format!("FAIL CLOSED: {e}"))?,
         );
-        let centralized_audit_logger = Arc::new(tara_security::transparency_log::AuthenticatedAuditLogger::new(
-            audit_key,
-            audit_sink,
-        ));
+        let centralized_audit_logger = Arc::new(
+            tara_security::transparency_log::AuthenticatedAuditLogger::new(audit_key, audit_sink),
+        );
         centralized_audit_logger.recover_from_sink().map_err(|e| {
             format!("FAIL CLOSED: Mandatory audit log recovery failed (integrity verification failure): {e}")
         })?;
@@ -704,7 +721,8 @@ impl TaraBrain {
                 target_role: Some("operator".into()),
                 action_pattern: "http:*".into(),
                 resource_pattern: "*".into(),
-                min_assurance_level: tara_security::primitives::AssuranceLevel::HARDWARE_ATTESTED.score(),
+                min_assurance_level: tara_security::primitives::AssuranceLevel::HARDWARE_ATTESTED
+                    .score(),
                 allow: true,
             },
             tara_security::zero_trust::PolicyRule {
@@ -713,7 +731,8 @@ impl TaraBrain {
                 target_role: Some("operator".into()),
                 action_pattern: "http:*".into(),
                 resource_pattern: "tara:res:route:*".into(),
-                min_assurance_level: tara_security::primitives::AssuranceLevel::STANDARD_TOKEN.score(),
+                min_assurance_level: tara_security::primitives::AssuranceLevel::STANDARD_TOKEN
+                    .score(),
                 allow: true,
             },
             tara_security::zero_trust::PolicyRule {
@@ -722,7 +741,8 @@ impl TaraBrain {
                 target_role: Some("worker".into()),
                 action_pattern: "http:*".into(),
                 resource_pattern: "tara:res:route:/api/*".into(),
-                min_assurance_level: tara_security::primitives::AssuranceLevel::STANDARD_TOKEN.score(),
+                min_assurance_level: tara_security::primitives::AssuranceLevel::STANDARD_TOKEN
+                    .score(),
                 allow: true,
             },
             tara_security::zero_trust::PolicyRule {
@@ -731,7 +751,8 @@ impl TaraBrain {
                 target_role: Some("user".into()),
                 action_pattern: "http:*".into(),
                 resource_pattern: "tara:res:route:*".into(),
-                min_assurance_level: tara_security::primitives::AssuranceLevel::STANDARD_TOKEN.score(),
+                min_assurance_level: tara_security::primitives::AssuranceLevel::STANDARD_TOKEN
+                    .score(),
                 allow: true,
             },
             tara_security::zero_trust::PolicyRule {
@@ -776,7 +797,8 @@ impl TaraBrain {
                 target_role: Some("worker".into()),
                 action_pattern: "http:*".into(),
                 resource_pattern: "tara:res:route:/api/v1/admin/*".into(),
-                min_assurance_level: tara_security::primitives::AssuranceLevel::STANDARD_TOKEN.score(),
+                min_assurance_level: tara_security::primitives::AssuranceLevel::STANDARD_TOKEN
+                    .score(),
                 allow: false,
             },
             tara_security::zero_trust::PolicyRule {
@@ -785,7 +807,8 @@ impl TaraBrain {
                 target_role: Some("user".into()),
                 action_pattern: "http:*".into(),
                 resource_pattern: "tara:res:route:/api/v1/admin/*".into(),
-                min_assurance_level: tara_security::primitives::AssuranceLevel::STANDARD_TOKEN.score(),
+                min_assurance_level: tara_security::primitives::AssuranceLevel::STANDARD_TOKEN
+                    .score(),
                 allow: false,
             },
         ];
@@ -794,9 +817,11 @@ impl TaraBrain {
             let _ = centralized_policy.add_system_rule(rule);
         }
 
-        let biometric_provider = Arc::new(tara_security::hardware_root::BiometricFactorProvider::new());
+        let biometric_provider =
+            Arc::new(tara_security::hardware_root::BiometricFactorProvider::new());
 
-        let centralized_device_registry = Arc::new(tara_security::zero_trust::DeviceEnrollmentRegistry::new());
+        let centralized_device_registry =
+            Arc::new(tara_security::zero_trust::DeviceEnrollmentRegistry::new());
         // Hydrate from identity_manager persistent devices (bridging persistent disk and zero-trust registry)
         for dev in identity_manager.list_devices() {
             if dev.status == "AUTHORIZED" {
@@ -805,7 +830,10 @@ impl TaraBrain {
                         let rec = tara_security::zero_trust::DeviceEnrollmentRecord {
                             device_id: dev_id,
                             enrolled_public_key: pub_bytes,
-                            bound_principal_id: tara_security::primitives::PrincipalId::new("creator_root_operator").unwrap(),
+                            bound_principal_id: tara_security::primitives::PrincipalId::new(
+                                "creator_root_operator",
+                            )
+                            .unwrap(),
                             is_revoked: false,
                         };
                         let _ = centralized_device_registry.enroll_device(rec);
@@ -814,19 +842,23 @@ impl TaraBrain {
             }
         }
 
-        let centralized_identity_registry = Arc::new(tara_security::zero_trust::IdentityVerifierRegistry::new());
+        let centralized_identity_registry =
+            Arc::new(tara_security::zero_trust::IdentityVerifierRegistry::new());
         let _ = centralized_identity_registry.register_verifier(Box::new(
-            tara_security::zero_trust::DeviceSignatureVerifier::new(centralized_device_registry.clone()),
+            tara_security::zero_trust::DeviceSignatureVerifier::new(
+                centralized_device_registry.clone(),
+            ),
         ));
         let passkey_path = std::path::Path::new(&repo_root)
             .join("storage")
             .join("vault")
             .join("access")
             .join("enrolled_passkeys.json");
-        let passkey_verifier = Arc::new(tara_security::hardware_root::CentralizedPasskeyVerifier::load_or_new(&passkey_path)?);
-        let _ = centralized_identity_registry.register_verifier(Box::new(
-            (*passkey_verifier).clone(),
-        ));
+        let passkey_verifier = Arc::new(
+            tara_security::hardware_root::CentralizedPasskeyVerifier::load_or_new(&passkey_path)?,
+        );
+        let _ =
+            centralized_identity_registry.register_verifier(Box::new((*passkey_verifier).clone()));
 
         Ok(Self {
             repo_root: repo_root.clone(),
@@ -867,7 +899,9 @@ impl TaraBrain {
             web_sessions,
             bridge: crate::routes::bridge::UnifiedBridge::new(),
             control_plane: Arc::new(crate::control_plane::ControlPlane::new(&repo_root)),
-            code_evolution: Arc::new(crate::learning::code_evolution::CodeEvolutionEngine::new(&repo_root)),
+            code_evolution: Arc::new(crate::learning::code_evolution::CodeEvolutionEngine::new(
+                &repo_root,
+            )),
             robotics_hal: Arc::new(tara_core::RoboticsHal::new()),
             biometric_provider,
             continual_governor: Arc::new(crate::learning::ContinualLearningGovernor::default()),
@@ -877,9 +911,16 @@ impl TaraBrain {
                 std::path::PathBuf::from(&repo_root),
                 enforcement_gateway.clone(),
             )),
-            containment_manager: Arc::new(tara_security::tara_control::ContainmentManager::new_with_storage(format!("{}/storage/security", repo_root))),
+            containment_manager: Arc::new(
+                tara_security::tara_control::ContainmentManager::new_with_storage(format!(
+                    "{}/storage/security",
+                    repo_root
+                )),
+            ),
             lockdown_coordinator,
-            license_provenance: Arc::new(tara_security::tara_control::LicenseProvenanceEngine::from_repo(&repo_root)),
+            license_provenance: Arc::new(
+                tara_security::tara_control::LicenseProvenanceEngine::from_repo(&repo_root),
+            ),
             skill_certifier: Arc::new(crate::skills::SkillCertificationAuthority::new(&repo_root)),
             wake_word_spotter: Arc::new(crate::voice::WakeWordSpotter::new()),
             barge_in: Arc::new(crate::voice::BargeInCoordinator::new()),
@@ -1085,7 +1126,8 @@ impl TaraBrain {
             .and_then(|tokenizer| tokenizer.as_ref())
             .is_some();
         let integrity = if model_loaded && tokenizer_loaded {
-            let integrity_engine = tara_security::tara_control::ModelIntegrityEngine::new(&self.repo_root);
+            let integrity_engine =
+                tara_security::tara_control::ModelIntegrityEngine::new(&self.repo_root);
             match integrity_engine.verify() {
                 Ok(_) => "PASS",
                 Err(tara_security::tara_control::IntegrityError::KeyNotSet) => {
@@ -1199,10 +1241,11 @@ impl TaraBrain {
             .map_err(|error| error.to_string())?;
         let training_summary = self.get_self_training_status();
         if training_summary.get("status").and_then(Value::as_str) == Some("COMPLETED") {
-            if let Err(error) = self
-                .model_registry
-                .register_active_training_guarded(&self.model_dir, &training_summary, Some(&self.lockdown_coordinator))
-            {
+            if let Err(error) = self.model_registry.register_active_training_guarded(
+                &self.model_dir,
+                &training_summary,
+                Some(&self.lockdown_coordinator),
+            ) {
                 let archive = training_summary
                     .get("previous_artifact_location")
                     .and_then(Value::as_str)
@@ -1261,7 +1304,11 @@ impl TaraBrain {
 
     pub fn _execute_skill(&self, skill_name: &str, params: Value) -> Value {
         // Check capability registry first, otherwise execute via canonical SkillEngine
-        if self.capability_registry.get_capability(skill_name).is_some() {
+        if self
+            .capability_registry
+            .get_capability(skill_name)
+            .is_some()
+        {
             self.capability_registry.invoke(skill_name, params)
         } else {
             self.skill_engine.execute_skill(skill_name, params)
@@ -1398,7 +1445,9 @@ impl TaraBrain {
         let mut creator_verified = false;
         let mut creator_auth_result: Option<Value> = None;
 
-        let mut verified_creator_principal: Option<tara_security::primitives::AuthenticatedPrincipal> = None;
+        let mut verified_creator_principal: Option<
+            tara_security::primitives::AuthenticatedPrincipal,
+        > = None;
         if let Some(t) = context
             .get("creator_session_token")
             .and_then(|v| v.as_str())
@@ -1562,8 +1611,9 @@ impl TaraBrain {
         let guard_result = {
             let epoch_secs = crate::now_secs();
             let sec_action = tara_security::primitives::SecurityAction::execute_task();
-            let sec_resource = tara_security::primitives::SecurityResource::custom("action", action_to_eval)
-                .unwrap_or(tara_security::primitives::SecurityResource::SystemVault);
+            let sec_resource =
+                tara_security::primitives::SecurityResource::custom("action", action_to_eval)
+                    .unwrap_or(tara_security::primitives::SecurityResource::SystemVault);
 
             let enf_res = if let Some(ref principal) = verified_creator_principal {
                 match tara_security::primitives::VerifiedPrincipal::try_from(principal) {
@@ -1572,7 +1622,10 @@ impl TaraBrain {
                             vp,
                             sec_action,
                             sec_resource,
-                            tara_security::primitives::SecurityContext::new("127.0.0.1", epoch_secs),
+                            tara_security::primitives::SecurityContext::new(
+                                "127.0.0.1",
+                                epoch_secs,
+                            ),
                         );
                         self.enforcement_gateway.evaluate_request(&op_req)
                     }
@@ -1596,11 +1649,16 @@ impl TaraBrain {
                                     anon_vp,
                                     sec_action,
                                     sec_resource,
-                                    tara_security::primitives::SecurityContext::new("127.0.0.1", epoch_secs),
+                                    tara_security::primitives::SecurityContext::new(
+                                        "127.0.0.1",
+                                        epoch_secs,
+                                    ),
                                 );
                                 self.enforcement_gateway.evaluate_request(&op_req)
                             }
-                            Err(e) => Err(format!("Anonymous principal construction failed: {}", e)),
+                            Err(e) => {
+                                Err(format!("Anonymous principal construction failed: {}", e))
+                            }
                         }
                     }
                     Err(e) => Err(format!("Anonymous principal ID invalid: {}", e)),
@@ -1609,16 +1667,26 @@ impl TaraBrain {
 
             match enf_res {
                 Err(e) => {
-                    eprintln!("[BLOCKED] Centralized EnforcementGateway blocked action '{}': {}", action_to_eval, e);
+                    eprintln!(
+                        "[BLOCKED] Centralized EnforcementGateway blocked action '{}': {}",
+                        action_to_eval, e
+                    );
                     crate::rules::GuardResult {
                         decision: "BLOCK".to_string(),
-                        reason: format!("Centralized zero-trust enforcement gateway blocked action: {}", e),
+                        reason: format!(
+                            "Centralized zero-trust enforcement gateway blocked action: {}",
+                            e
+                        ),
                         creator_verified: false,
                     }
                 }
                 Ok(()) => {
                     if let Some(ref principal) = verified_creator_principal {
-                        self.guard.evaluate_with_principal(action_to_eval, principal, &guard_context)
+                        self.guard.evaluate_with_principal(
+                            action_to_eval,
+                            principal,
+                            &guard_context,
+                        )
                     } else {
                         self.guard.evaluate_action(action_to_eval, &guard_context)
                     }
@@ -1780,7 +1848,11 @@ impl TaraBrain {
                     }));
                 } else {
                     if steps.len() > 1 {
-                        let mut mcts = self.cognitive.mcts.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut mcts = self
+                            .cognitive
+                            .mcts
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
                         let step_names: Vec<String> =
                             steps.iter().map(|s| s.target_name.clone()).collect();
                         let root_state = format!("plan_{}", step_names.join("_"));
@@ -1817,12 +1889,11 @@ impl TaraBrain {
                         step_guard_ctx.insert("target".to_string(), json!(step.target_name));
                         step_guard_ctx.insert("parameters".to_string(), step.parameters.clone());
                         let step_guard = if let Some(ref principal) = verified_creator_principal {
-                            self.guard
-                                .evaluate_with_principal(
-                                    &step.action_intent,
-                                    principal,
-                                    &step_guard_ctx,
-                                )
+                            self.guard.evaluate_with_principal(
+                                &step.action_intent,
+                                principal,
+                                &step_guard_ctx,
+                            )
                         } else {
                             self.guard
                                 .evaluate_action(&step.action_intent, &step_guard_ctx)
@@ -2418,7 +2489,9 @@ impl TaraBrain {
             || self.authority_manager.is_locked_down();
         if is_locked && !self.authority_manager.is_locked_down() {
             let now_epoch = crate::now_secs();
-            let _ = self.authority_manager.trigger_lockdown("Unified subsystem lockdown synchronization", now_epoch);
+            let _ = self
+                .authority_manager
+                .trigger_lockdown("Unified subsystem lockdown synchronization", now_epoch);
         }
         is_locked
     }

@@ -117,7 +117,10 @@ mod tests {
             60_000,
         );
 
-        assert!(ctrl.get_grant("sbx_task_net").map(|g| g.granted_at_ms > 0).unwrap_or(false));
+        assert!(ctrl
+            .get_grant("sbx_task_net")
+            .map(|g| g.granted_at_ms > 0)
+            .unwrap_or(false));
         assert!(ctrl.is_domain_allowed("sbx_task_net", "api.local"));
         assert!(ctrl.is_domain_allowed("sbx_task_net", "crates.io"));
         assert!(!ctrl.is_domain_allowed("sbx_task_net", "malicious.org"));

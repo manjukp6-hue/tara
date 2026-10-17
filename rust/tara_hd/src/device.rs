@@ -68,11 +68,7 @@ pub trait ComputeDevice: Send + Sync + Debug {
                 let x_row = &x[i * in_dim..(i + 1) * in_dim];
                 for j in 0..out_dim {
                     let w_row = &weight[j * in_dim..(j + 1) * in_dim];
-                    out_row[j] = x_row
-                        .iter()
-                        .zip(w_row.iter())
-                        .map(|(&a, &b)| a * b)
-                        .sum();
+                    out_row[j] = x_row.iter().zip(w_row.iter()).map(|(&a, &b)| a * b).sum();
                 }
             });
         Ok(out)
@@ -100,13 +96,18 @@ pub trait ComputeDevice: Send + Sync + Debug {
             ));
         }
         use rayon::prelude::*;
-        let safe_eps = if eps.is_finite() && eps > 0.0 { eps } else { 1e-5 };
+        let safe_eps = if eps.is_finite() && eps > 0.0 {
+            eps
+        } else {
+            1e-5
+        };
         let mut out = vec![0.0f32; seq_len * hidden_dim];
         out.par_chunks_exact_mut(hidden_dim)
             .enumerate()
             .for_each(|(i, out_row)| {
                 let x_row = &x[i * hidden_dim..(i + 1) * hidden_dim];
-                let mean_sq: f32 = x_row.iter().map(|&v| v * v).sum::<f32>() / (hidden_dim as f32).max(1.0);
+                let mean_sq: f32 =
+                    x_row.iter().map(|&v| v * v).sum::<f32>() / (hidden_dim as f32).max(1.0);
                 let inv_rms = 1.0 / (mean_sq + safe_eps).sqrt();
                 for (j, (&xv, &wv)) in x_row.iter().zip(weight.iter()).enumerate() {
                     out_row[j] = xv * inv_rms * wv;
@@ -158,7 +159,10 @@ pub trait ComputeDevice: Send + Sync + Debug {
         if seq_len == 0 || in_dim == 0 || out_dim == 0 {
             return Ok((Vec::new(), Vec::new()));
         }
-        if d_out.len() < seq_len * out_dim || x.len() < seq_len * in_dim || weight.len() < out_dim * in_dim {
+        if d_out.len() < seq_len * out_dim
+            || x.len() < seq_len * in_dim
+            || weight.len() < out_dim * in_dim
+        {
             return Err("backward_linear buffer length mismatch".to_string());
         }
         use rayon::prelude::*;
@@ -348,16 +352,42 @@ pub struct CpuDevice {
 
 impl CpuDevice {
     pub fn new(info: DeviceCapability) -> Self {
-        // Dynamically size memory budget to 50% of available RAM (or 25% of total RAM), clamped to [512 MB, 16384 MB]
+        // CPU streaming memory budget is computed from available RAM with overridable bounds.
+        // Set TARA_CPU_STREAM_MIN_MB / TARA_CPU_STREAM_MAX_MB to clamp to different ranges.
+        // Set TARA_CPU_CHUNK_TOKENS to control the token window size per streaming chunk.
+        // Set TARA_CPU_RESIDENT_LAYERS to control how many layer activation buffers stay resident.
         let usable_bytes = info
             .available_memory_bytes
             .map(|avail| avail / 2)
             .unwrap_or(info.total_memory_bytes / 4);
-        let budget_mb = ((usable_bytes / (1024 * 1024)) as usize).clamp(512, 16384);
+
+        let min_mb = std::env::var("TARA_CPU_STREAM_MIN_MB")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(512);
+        let max_mb = std::env::var("TARA_CPU_STREAM_MAX_MB")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(16384);
+        let effective_min = min_mb.max(64); // absolute floor: 64 MB for correctness
+        let effective_max = max_mb.max(effective_min);
+        let budget_mb =
+            ((usable_bytes / (1024 * 1024)) as usize).clamp(effective_min, effective_max);
+
+        let chunk_size_tokens = std::env::var("TARA_CPU_CHUNK_TOKENS")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(256)
+            .max(1);
+        let max_resident_layers = std::env::var("TARA_CPU_RESIDENT_LAYERS")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(2)
+            .max(1);
 
         let config = StreamConfig {
-            chunk_size_tokens: 256,
-            max_resident_layers: 2,
+            chunk_size_tokens,
+            max_resident_layers,
             memory_budget_mb: budget_mb,
         };
 

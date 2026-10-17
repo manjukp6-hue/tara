@@ -9,10 +9,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::device_detector::{DeviceCapabilityDetector, DeviceProfile};
 use super::loading_policy::{LoadingPlan, LoadingPolicyEngine, ModelLoadingStrategy};
-use crate::safetensors::SafeTensorsError;
 use super::shard_manager::ShardedSafeTensorsManager;
+use crate::device_detector::{DeviceCapabilityDetector, DeviceProfile};
+use crate::safetensors::SafeTensorsError;
 
 pub struct LoadedTaraModel {
     pub model_dir: PathBuf,

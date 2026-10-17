@@ -21,7 +21,9 @@ impl Physics {
     /// Average speed: v = distance / time.
     pub fn velocity(distance: f64, time: f64) -> Result<f64, PhysicsError> {
         if !distance.is_finite() || !time.is_finite() || time <= 0.0 {
-            return Err(PhysicsError::DivisionByZero("time must be > 0 and finite".into()));
+            return Err(PhysicsError::DivisionByZero(
+                "time must be > 0 and finite".into(),
+            ));
         }
         Ok(distance / time)
     }
@@ -29,7 +31,9 @@ impl Physics {
     /// Acceleration: a = (v - u) / t.
     pub fn acceleration(initial_v: f64, final_v: f64, time: f64) -> Result<f64, PhysicsError> {
         if !initial_v.is_finite() || !final_v.is_finite() || !time.is_finite() || time <= 0.0 {
-            return Err(PhysicsError::DivisionByZero("time must be > 0 and finite".into()));
+            return Err(PhysicsError::DivisionByZero(
+                "time must be > 0 and finite".into(),
+            ));
         }
         Ok((final_v - initial_v) / time)
     }
@@ -94,7 +98,9 @@ impl Physics {
             });
         }
         if !distance.is_finite() || distance <= 0.0 {
-            return Err(PhysicsError::DivisionByZero("distance must be > 0 and finite".into()));
+            return Err(PhysicsError::DivisionByZero(
+                "distance must be > 0 and finite".into(),
+            ));
         }
         Ok((GRAVITATIONAL_CONSTANT * m1 * m2) / (distance * distance))
     }
@@ -131,7 +137,9 @@ impl Physics {
     /// Power: P = Work / time.
     pub fn power(work: f64, time: f64) -> Result<f64, PhysicsError> {
         if !work.is_finite() || !time.is_finite() || time <= 0.0 {
-            return Err(PhysicsError::DivisionByZero("time must be > 0 and finite".into()));
+            return Err(PhysicsError::DivisionByZero(
+                "time must be > 0 and finite".into(),
+            ));
         }
         Ok(work / time)
     }
@@ -226,7 +234,9 @@ impl Physics {
     /// Coulomb's Law electric force: F = k * q1 * q2 / r^2.
     pub fn coulomb_force(q1: f64, q2: f64, distance: f64) -> Result<f64, PhysicsError> {
         if !q1.is_finite() || !q2.is_finite() || !distance.is_finite() || distance <= 0.0 {
-            return Err(PhysicsError::DivisionByZero("distance must be > 0 and charges must be finite".into()));
+            return Err(PhysicsError::DivisionByZero(
+                "distance must be > 0 and charges must be finite".into(),
+            ));
         }
         let k_e = 8.9875517923e9; // 1 / (4*pi*epsilon_0)
         Ok((k_e * q1 * q2) / (distance * distance))
@@ -236,7 +246,8 @@ impl Physics {
 
     /// Wave speed: v = f * lambda.
     pub fn wave_speed(frequency: f64, wavelength: f64) -> Result<f64, PhysicsError> {
-        if !frequency.is_finite() || !wavelength.is_finite() || frequency < 0.0 || wavelength < 0.0 {
+        if !frequency.is_finite() || !wavelength.is_finite() || frequency < 0.0 || wavelength < 0.0
+        {
             return Err(PhysicsError::InvalidPhysicalQuantity {
                 param: "frequency/wavelength".into(),
                 val: frequency.min(wavelength),

@@ -141,7 +141,10 @@ impl WakeWordSpotter {
             };
 
             let dist = self.levenshtein_distance(&candidate_slice, &kw_lower);
-            let max_len = candidate_slice.chars().count().max(kw_lower.chars().count());
+            let max_len = candidate_slice
+                .chars()
+                .count()
+                .max(kw_lower.chars().count());
             if max_len > 0 {
                 let similarity = 1.0 - (dist as f64 / max_len as f64);
                 if similarity > best_score {

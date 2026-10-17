@@ -209,12 +209,7 @@ impl SecureKeyStorage {
     }
 
     /// Encrypt and persist private key material using Scrypt + AES-256-GCM + Windows DPAPI.
-    pub fn store_key(
-        &self,
-        key_id: &str,
-        raw_key: &[u8],
-        passphrase: &str,
-    ) -> Result<(), String> {
+    pub fn store_key(&self, key_id: &str, raw_key: &[u8], passphrase: &str) -> Result<(), String> {
         Self::validate_key_id(key_id)?;
 
         if raw_key.len() != Self::KEY_SIZE_BYTES {
@@ -254,7 +249,7 @@ impl SecureKeyStorage {
         #[cfg(windows)]
         let dpapi_blob = Some(hex::encode(
             native_dpapi::protect_bytes(&ciphertext)
-                .map_err(|e| format!("FAIL CLOSED: Windows DPAPI protection failure: {e}"))?
+                .map_err(|e| format!("FAIL CLOSED: Windows DPAPI protection failure: {e}"))?,
         ));
         #[cfg(not(windows))]
         let dpapi_blob: Option<String> = None;
@@ -279,11 +274,9 @@ impl SecureKeyStorage {
         let serialized = serde_json::to_vec_pretty(&keystore_doc)
             .map_err(|e| format!("Keystore serialization error: {}", e))?;
 
-        let temp_path = self.storage_dir.join(format!(
-            "{}.tmp.{}",
-            key_id,
-            rand::random::<u64>()
-        ));
+        let temp_path = self
+            .storage_dir
+            .join(format!("{}.tmp.{}", key_id, rand::random::<u64>()));
 
         {
             let mut file = OpenOptions::new()
@@ -369,8 +362,8 @@ impl SecureKeyStorage {
                 .get("dpapi_blob")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "FailClosed: Missing mandatory DPAPI envelope binding in keystore document on Windows".to_string())?;
-            let dpapi_bytes = hex::decode(dpapi_hex)
-                .map_err(|e| format!("Invalid dpapi_blob hex: {}", e))?;
+            let dpapi_bytes =
+                hex::decode(dpapi_hex).map_err(|e| format!("Invalid dpapi_blob hex: {}", e))?;
             let unprot = native_dpapi::unprotect_bytes(&dpapi_bytes)
                 .map_err(|e| format!("DPAPI machine/user binding verification failed: {}", e))?;
             if !crate::cryptography::CryptoUtils::constant_time_eq(&unprot, &ciphertext) {
@@ -422,7 +415,9 @@ impl SecureKeyStorage {
         if Self::validate_key_id(key_id).is_err() {
             return false;
         }
-        self.storage_dir.join(format!("{}.key.json", key_id)).exists()
+        self.storage_dir
+            .join(format!("{}.key.json", key_id))
+            .exists()
     }
 }
 
@@ -788,7 +783,10 @@ pub mod win_registry {
         }
 
         if set_res != ERROR_SUCCESS {
-            return Err(format!("RegSetValueExW failed with error code: {}", set_res));
+            return Err(format!(
+                "RegSetValueExW failed with error code: {}",
+                set_res
+            ));
         }
         Ok(())
     }
@@ -811,7 +809,10 @@ pub mod win_registry {
             return Ok(None);
         }
         if open_res != ERROR_SUCCESS {
-            return Err(format!("RegOpenKeyExW failed with error code: {}", open_res));
+            return Err(format!(
+                "RegOpenKeyExW failed with error code: {}",
+                open_res
+            ));
         }
 
         let mut val_type: u32 = 0;
@@ -836,10 +837,16 @@ pub mod win_registry {
             return Ok(None);
         }
         if query_res != ERROR_SUCCESS {
-            return Err(format!("RegQueryValueExW failed with error code: {}", query_res));
+            return Err(format!(
+                "RegQueryValueExW failed with error code: {}",
+                query_res
+            ));
         }
         if val_type != REG_QWORD || data_len != 8 {
-            return Err(format!("Registry value is not REG_QWORD or invalid length: type={}, len={}", val_type, data_len));
+            return Err(format!(
+                "Registry value is not REG_QWORD or invalid length: type={}, len={}",
+                val_type, data_len
+            ));
         }
 
         Ok(Some(u64::from_ne_bytes(data)))
@@ -997,8 +1004,7 @@ pub fn get_unix_secondary_watermark_path(domain: &str) -> PathBuf {
                 .join("vault")
                 .join(format!("{}_secondary_watermark.bin", domain));
         }
-        PathBuf::from("/etc/taracore/vault")
-            .join(format!("{}_secondary_watermark.bin", domain))
+        PathBuf::from("/etc/taracore/vault").join(format!("{}_secondary_watermark.bin", domain))
     }
 }
 
@@ -1271,15 +1277,20 @@ mod tests {
 
     #[test]
     fn test_secure_key_storage_roundtrip() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_test_keystore_{}", rand::random::<u64>()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_test_keystore_{}", rand::random::<u64>()));
         let store = SecureKeyStorage::new(&temp_dir);
         let raw_key = [0x42u8; 32];
         let passphrase = "test_creator_strong_passphrase_123!";
 
-        store.store_key("test_operator_key", &raw_key, passphrase).expect("store");
+        store
+            .store_key("test_operator_key", &raw_key, passphrase)
+            .expect("store");
         assert!(store.key_exists("test_operator_key"));
 
-        let loaded = store.load_key("test_operator_key", passphrase).expect("load");
+        let loaded = store
+            .load_key("test_operator_key", passphrase)
+            .expect("load");
         assert_eq!(loaded, raw_key);
 
         let wrong_res = store.load_key("test_operator_key", "wrong_passphrase");

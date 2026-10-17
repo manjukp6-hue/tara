@@ -251,13 +251,19 @@ impl ShardState {
                     .reader
                     .as_mut()
                     .expect("ShardState::ensure_open must be called before next_sample");
-                reader.by_ref().take(MAX_LINE_READ_BYTES).read_line(line_buf)?
+                reader
+                    .by_ref()
+                    .take(MAX_LINE_READ_BYTES)
+                    .read_line(line_buf)?
             };
             if bytes_read as u64 >= MAX_LINE_READ_BYTES && !line_buf.ends_with('\n') {
                 return Err(ReaderError::InvalidRecord {
                     path: self.path.display().to_string(),
-                    line: usize::try_from(self.current_line.saturating_add(1)).unwrap_or(usize::MAX),
-                    reason: "Line length exceeds maximum allowed buffer size (16 MiB) without newline".to_string(),
+                    line: usize::try_from(self.current_line.saturating_add(1))
+                        .unwrap_or(usize::MAX),
+                    reason:
+                        "Line length exceeds maximum allowed buffer size (16 MiB) without newline"
+                            .to_string(),
                 });
             }
             if bytes_read == 0 {
@@ -309,7 +315,10 @@ impl ShardState {
                 },
             };
 
-            let has_text = val.get("text").or_else(|| val.get("content")).and_then(Value::as_str);
+            let has_text = val
+                .get("text")
+                .or_else(|| val.get("content"))
+                .and_then(Value::as_str);
 
             let input = val
                 .get("formatted_input")
@@ -326,15 +335,24 @@ impl ShardState {
                 })
                 .or_else(|| {
                     if has_text.is_some() {
-                        let source = val.get("source").and_then(Value::as_str).unwrap_or("Knowledge");
+                        let source = val
+                            .get("source")
+                            .and_then(Value::as_str)
+                            .unwrap_or("Knowledge");
                         let book = val.get("book").and_then(Value::as_str).unwrap_or("");
-                        let chapter = val.get("chapter").and_then(|c| c.as_u64()).map(|c| format!(" Chapter {c}")).unwrap_or_default();
+                        let chapter = val
+                            .get("chapter")
+                            .and_then(|c| c.as_u64())
+                            .map(|c| format!(" Chapter {c}"))
+                            .unwrap_or_default();
                         let header = if !book.is_empty() {
                             format!("{source}: {book}{chapter}")
                         } else {
                             source.to_string()
                         };
-                        Some(format!("<|im_start|>user\n{header}\n<|im_end|>\n<|im_start|>assistant\n"))
+                        Some(format!(
+                            "<|im_start|>user\n{header}\n<|im_end|>\n<|im_start|>assistant\n"
+                        ))
                     } else {
                         None
                     }

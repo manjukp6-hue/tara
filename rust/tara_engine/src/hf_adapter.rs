@@ -27,10 +27,16 @@ impl HfRepoType {
     pub fn lfs_batch_url(&self, repo_id: &str) -> String {
         match self {
             Self::Dataset => {
-                format!("https://huggingface.co/datasets/{}.git/info/lfs/objects/batch", repo_id)
+                format!(
+                    "https://huggingface.co/datasets/{}.git/info/lfs/objects/batch",
+                    repo_id
+                )
             }
             Self::Model => {
-                format!("https://huggingface.co/{}.git/info/lfs/objects/batch", repo_id)
+                format!(
+                    "https://huggingface.co/{}.git/info/lfs/objects/batch",
+                    repo_id
+                )
             }
         }
     }
@@ -39,10 +45,16 @@ impl HfRepoType {
     pub fn commit_url(&self, repo_id: &str, branch: &str) -> String {
         match self {
             Self::Dataset => {
-                format!("https://huggingface.co/api/datasets/{}/commit/{}", repo_id, branch)
+                format!(
+                    "https://huggingface.co/api/datasets/{}/commit/{}",
+                    repo_id, branch
+                )
             }
             Self::Model => {
-                format!("https://huggingface.co/api/models/{}/commit/{}", repo_id, branch)
+                format!(
+                    "https://huggingface.co/api/models/{}/commit/{}",
+                    repo_id, branch
+                )
             }
         }
     }
@@ -53,16 +65,28 @@ impl HfRepoType {
         match self {
             Self::Dataset => {
                 if clean.is_empty() {
-                    format!("https://huggingface.co/api/datasets/{}/tree/{}", repo_id, branch)
+                    format!(
+                        "https://huggingface.co/api/datasets/{}/tree/{}",
+                        repo_id, branch
+                    )
                 } else {
-                    format!("https://huggingface.co/api/datasets/{}/tree/{}/{}", repo_id, branch, clean)
+                    format!(
+                        "https://huggingface.co/api/datasets/{}/tree/{}/{}",
+                        repo_id, branch, clean
+                    )
                 }
             }
             Self::Model => {
                 if clean.is_empty() {
-                    format!("https://huggingface.co/api/models/{}/tree/{}", repo_id, branch)
+                    format!(
+                        "https://huggingface.co/api/models/{}/tree/{}",
+                        repo_id, branch
+                    )
                 } else {
-                    format!("https://huggingface.co/api/models/{}/tree/{}/{}", repo_id, branch, clean)
+                    format!(
+                        "https://huggingface.co/api/models/{}/tree/{}/{}",
+                        repo_id, branch, clean
+                    )
                 }
             }
         }
@@ -158,7 +182,10 @@ pub fn resolve_hf_token() -> Result<String, String> {
         }
     }
 
-    Err("Hugging Face API token not found in HF_TOKEN environment variable or Git credential store".into())
+    Err(
+        "Hugging Face API token not found in HF_TOKEN environment variable or Git credential store"
+            .into(),
+    )
 }
 
 /// Computes streaming SHA-256 and byte length of a file on disk.
@@ -207,13 +234,20 @@ pub fn query_lfs_batch(
         #[cfg(windows)]
         cmd.arg("--ssl-no-revoke");
         cmd.args([
-            "--retry", "5",
-            "--retry-delay", "3",
-            "-X", "POST",
-            "-H", &format!("Authorization: Bearer {}", token),
-            "-H", "Accept: application/vnd.git-lfs+json",
-            "-H", "Content-Type: application/vnd.git-lfs+json",
-            "--data-binary", "@-",
+            "--retry",
+            "5",
+            "--retry-delay",
+            "3",
+            "-X",
+            "POST",
+            "-H",
+            &format!("Authorization: Bearer {}", token),
+            "-H",
+            "Accept: application/vnd.git-lfs+json",
+            "-H",
+            "Content-Type: application/vnd.git-lfs+json",
+            "--data-binary",
+            "@-",
             &url,
         ]);
 
@@ -252,7 +286,10 @@ pub fn query_lfs_batch(
         sleep(Duration::from_secs(5));
     }
 
-    Err(format!("LFS batch request failed after {} attempts", attempts))
+    Err(format!(
+        "LFS batch request failed after {} attempts",
+        attempts
+    ))
 }
 
 /// Uploads an LFS file to S3 via HTTP PUT with resilient streaming parameters.
@@ -262,20 +299,18 @@ pub fn upload_lfs_to_s3(
     extra_headers: Option<&HashMap<String, String>>,
 ) -> Result<(), String> {
     let mut cmd = Command::new(curl_bin());
-    cmd.args([
-        "-4",
-        "-f",
-        "-s",
-        "-S",
-    ]);
+    cmd.args(["-4", "-f", "-s", "-S"]);
     #[cfg(windows)]
     cmd.arg("--ssl-no-revoke");
     cmd.args([
         "--http1.1",
         "--tcp-nodelay",
-        "--keepalive-time", "10",
-        "--connect-timeout", "30",
-        "-X", "PUT",
+        "--keepalive-time",
+        "10",
+        "--connect-timeout",
+        "30",
+        "-X",
+        "PUT",
         "-T",
     ]);
     cmd.arg(file_path);
@@ -321,13 +356,20 @@ pub fn verify_lfs_upload(
         #[cfg(windows)]
         cmd.arg("--ssl-no-revoke");
         cmd.args([
-            "--retry", "3",
-            "--retry-delay", "2",
-            "-X", "POST",
-            "-H", &format!("Authorization: Bearer {}", token),
-            "-H", "Accept: application/vnd.git-lfs+json",
-            "-H", "Content-Type: application/vnd.git-lfs+json",
-            "--data-binary", "@-",
+            "--retry",
+            "3",
+            "--retry-delay",
+            "2",
+            "-X",
+            "POST",
+            "-H",
+            &format!("Authorization: Bearer {}", token),
+            "-H",
+            "Accept: application/vnd.git-lfs+json",
+            "-H",
+            "Content-Type: application/vnd.git-lfs+json",
+            "--data-binary",
+            "@-",
             verify_url,
         ]);
         let mut child = match cmd
@@ -352,7 +394,10 @@ pub fn verify_lfs_upload(
                 return Ok(());
             }
         }
-        eprintln!("LFS verification call attempt {}/10 retrying in 3s...", attempt);
+        eprintln!(
+            "LFS verification call attempt {}/10 retrying in 3s...",
+            attempt
+        );
         sleep(Duration::from_secs(3));
     }
 
@@ -401,12 +446,18 @@ pub fn commit_lfs_files(
         #[cfg(windows)]
         cmd.arg("--ssl-no-revoke");
         cmd.args([
-            "--retry", "3",
-            "--retry-delay", "2",
-            "-X", "POST",
-            "-H", &format!("Authorization: Bearer {}", token),
-            "-H", "Content-Type: application/x-ndjson",
-            "--data-binary", "@-",
+            "--retry",
+            "3",
+            "--retry-delay",
+            "2",
+            "-X",
+            "POST",
+            "-H",
+            &format!("Authorization: Bearer {}", token),
+            "-H",
+            "Content-Type: application/x-ndjson",
+            "--data-binary",
+            "@-",
             &url,
         ]);
         let mut child = match cmd
@@ -466,8 +517,10 @@ pub fn fetch_remote_tree(
         #[cfg(windows)]
         cmd.arg("--ssl-no-revoke");
         cmd.args([
-            "-w", "\n%{http_code}",
-            "-H", &format!("Authorization: Bearer {}", token),
+            "-w",
+            "\n%{http_code}",
+            "-H",
+            &format!("Authorization: Bearer {}", token),
             &url,
         ]);
         let output = match cmd.output() {

@@ -6,9 +6,9 @@
 //! - Blocks copyleft taints (AGPL, GPL, LGPL, MPL), NC (Non-Commercial), ND (No-Derivatives), and ambiguous licenses.
 //! - Maintains dynamic operational provenance ledger.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use serde::{Deserialize, Serialize};
 
 /// License family categories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -101,9 +101,7 @@ impl ProvenanceLedgerGuard {
             };
         }
 
-        if lower.contains("mozilla public license")
-            || lower.contains("mpl-2.0")
-        {
+        if lower.contains("mozilla public license") || lower.contains("mpl-2.0") {
             return SpdxLicenseInfo {
                 spdx_id: "MPL-2.0".to_string(),
                 name: "Mozilla Public License 2.0".to_string(),
@@ -114,9 +112,7 @@ impl ProvenanceLedgerGuard {
             };
         }
 
-        if lower.contains("eclipse public license")
-            || lower.contains("epl-2.0")
-        {
+        if lower.contains("eclipse public license") || lower.contains("epl-2.0") {
             return SpdxLicenseInfo {
                 spdx_id: "EPL-2.0".to_string(),
                 name: "Eclipse Public License 2.0".to_string(),
@@ -162,7 +158,10 @@ impl ProvenanceLedgerGuard {
         }
 
         // 5. No-Derivatives Restrictions (ND)
-        if lower.contains("no-derivatives") || lower.contains("noderivatives") || lower.contains("nd-4.0") {
+        if lower.contains("no-derivatives")
+            || lower.contains("noderivatives")
+            || lower.contains("nd-4.0")
+        {
             return SpdxLicenseInfo {
                 spdx_id: "CC-BY-ND-4.0".to_string(),
                 name: "No-Derivatives Restricted".to_string(),
@@ -190,7 +189,8 @@ impl ProvenanceLedgerGuard {
 
         // 7. Permissive: MIT
         if lower.contains("mit license")
-            || (lower.contains("permission is hereby granted, free of charge") && lower.contains("without restriction"))
+            || (lower.contains("permission is hereby granted, free of charge")
+                && lower.contains("without restriction"))
         {
             return SpdxLicenseInfo {
                 spdx_id: "MIT".to_string(),
@@ -264,14 +264,20 @@ impl ProvenanceLedgerGuard {
 
     /// Records an authentic, verified provenance record in the runtime ledger.
     pub fn record_provenance(&self, record: ProvenanceRecord) -> Result<(), String> {
-        let mut map = self.records.lock().map_err(|_| "Provenance lock poisoned")?;
+        let mut map = self
+            .records
+            .lock()
+            .map_err(|_| "Provenance lock poisoned")?;
         map.insert(record.component_name.clone(), record);
         Ok(())
     }
 
     /// Persists the provenance ledger to disk.
     pub fn save_ledger_to_disk(&self, ledger_path: &std::path::Path) -> Result<(), String> {
-        let map = self.records.lock().map_err(|_| "Provenance lock poisoned")?;
+        let map = self
+            .records
+            .lock()
+            .map_err(|_| "Provenance lock poisoned")?;
         let records: Vec<ProvenanceRecord> = map.values().cloned().collect();
         let serialized = serde_json::to_vec_pretty(&records)
             .map_err(|e| format!("Serialization error for provenance ledger: {e}"))?;
@@ -290,7 +296,10 @@ impl ProvenanceLedgerGuard {
             .map_err(|e| format!("Corrupted provenance ledger JSON: {e}"))?;
 
         let count = records.len();
-        let mut map = self.records.lock().map_err(|_| "Provenance lock poisoned")?;
+        let mut map = self
+            .records
+            .lock()
+            .map_err(|_| "Provenance lock poisoned")?;
         for r in records {
             map.insert(r.component_name.clone(), r);
         }
@@ -303,7 +312,9 @@ impl ProvenanceLedgerGuard {
         for (name, rec) in map.iter() {
             if matches!(
                 rec.family,
-                LicenseFamily::NetworkCopyleft | LicenseFamily::StrongCopyleft | LicenseFamily::WeakCopyleft
+                LicenseFamily::NetworkCopyleft
+                    | LicenseFamily::StrongCopyleft
+                    | LicenseFamily::WeakCopyleft
             ) {
                 conflicting.push(format!("{}: {}", name, rec.detected_spdx));
             }
@@ -317,7 +328,10 @@ impl ProvenanceLedgerGuard {
                 conflicting.join(", ")
             )
         } else {
-            format!("All components compatible with target '{}'", project_target_license)
+            format!(
+                "All components compatible with target '{}'",
+                project_target_license
+            )
         };
 
         CopyleftConflictReport {
@@ -356,15 +370,23 @@ mod tests {
     #[test]
     fn test_weak_copyleft_classification_mpl_and_epl() {
         let guard = ProvenanceLedgerGuard::new();
-        let mpl = guard.classify_license_text("This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0");
+        let mpl = guard.classify_license_text(
+            "This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0",
+        );
         assert_eq!(mpl.spdx_id, "MPL-2.0");
         assert_eq!(mpl.family, LicenseFamily::WeakCopyleft);
 
-        let epl = guard.classify_license_text("Distributed under the Eclipse Public License - v 2.0 (EPL-2.0)");
+        let epl = guard.classify_license_text(
+            "Distributed under the Eclipse Public License - v 2.0 (EPL-2.0)",
+        );
         assert_eq!(epl.spdx_id, "EPL-2.0");
         assert_eq!(epl.family, LicenseFamily::WeakCopyleft);
 
-        assert!(guard.assert_ingestion_compliant("Mozilla Public License 2.0").is_err());
-        assert!(guard.assert_ingestion_compliant("Eclipse Public License 2.0").is_err());
+        assert!(guard
+            .assert_ingestion_compliant("Mozilla Public License 2.0")
+            .is_err());
+        assert!(guard
+            .assert_ingestion_compliant("Eclipse Public License 2.0")
+            .is_err());
     }
 }

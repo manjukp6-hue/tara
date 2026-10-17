@@ -36,7 +36,9 @@ impl HardenedFileSystemStorage {
         let canonical_root = root
             .canonicalize()
             .map_err(|e| format!("Failed to canonicalize base root: {e}"))?;
-        Ok(Self { base_root: canonical_root })
+        Ok(Self {
+            base_root: canonical_root,
+        })
     }
 
     /// Verifies that candidate path does not escape the canonical base root (traversal defense).
@@ -74,7 +76,8 @@ impl HardenedFileSystemStorage {
 
         if let Some(parent) = secure_path.parent() {
             if !parent.exists() {
-                fs::create_dir_all(parent).map_err(|e| format!("Failed to create parent directory: {e}"))?;
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create parent directory: {e}"))?;
             }
         }
 
@@ -92,7 +95,13 @@ impl HardenedFileSystemStorage {
                 .create(true)
                 .truncate(true)
                 .open(&temp_file)
-                .map_err(|e| format!("Failed to create temporary file {}: {}", temp_file.display(), e))?;
+                .map_err(|e| {
+                    format!(
+                        "Failed to create temporary file {}: {}",
+                        temp_file.display(),
+                        e
+                    )
+                })?;
 
             f.write_all(data)
                 .map_err(|e| format!("Failed to write data to temp file: {e}"))?;
@@ -135,7 +144,8 @@ impl SecureStorage for HardenedFileSystemStorage {
 
         let mut f = File::open(&secure_path).map_err(|e| format!("Open error: {e}"))?;
         let mut buffer = Vec::with_capacity(metadata.len() as usize);
-        f.read_to_end(&mut buffer).map_err(|e| format!("Read error: {e}"))?;
+        f.read_to_end(&mut buffer)
+            .map_err(|e| format!("Read error: {e}"))?;
         Ok(buffer)
     }
 
@@ -184,9 +194,8 @@ pub fn atomic_write_file_hardened(path: &Path, data: &[u8]) -> Result<(), String
     }
 
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            format!("Failed to create directory {}: {}", parent.display(), e)
-        })?;
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
     }
 
     let nonce = rand::random::<u128>();

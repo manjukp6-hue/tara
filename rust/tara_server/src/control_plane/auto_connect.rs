@@ -134,7 +134,10 @@ impl AutoConnectSyncEngine {
             registered_at: Instant::now(),
         };
 
-        self.endpoints.lock().unwrap_or_else(|p| p.into_inner()).insert(node_id.clone(), ep);
+        self.endpoints
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(node_id.clone(), ep);
         let probe = self.probe_endpoint(&node_id, &parsed_url);
         json!({ "status": if probe["reachable"] == true { "SUCCESS" } else { "ERROR" }, "registered": node_id, "probe": probe })
     }
@@ -163,7 +166,9 @@ impl AutoConnectSyncEngine {
             .min_by(|a, b| {
                 let score_a = a.current_load / a.cpu_capacity.max(0.01);
                 let score_b = b.current_load / b.cpu_capacity.max(0.01);
-                score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
+                score_a
+                    .partial_cmp(&score_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             });
         best.map(|ep| ep.to_json())
     }
@@ -203,7 +208,10 @@ impl AutoConnectSyncEngine {
 
             let ip = address.ip();
             if is_ssrf_forbidden_ip(ip) {
-                return Err(format!("SSRFBlocked: Probing cloud metadata or link-local address {} is prohibited", ip));
+                return Err(format!(
+                    "SSRFBlocked: Probing cloud metadata or link-local address {} is prohibited",
+                    ip
+                ));
             }
 
             let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(2))
@@ -235,7 +243,12 @@ impl AutoConnectSyncEngine {
         })();
         let latency_ms = started.elapsed().as_secs_f32() * 1000.0;
         let reachable = result.is_ok();
-        if let Some(endpoint) = self.endpoints.lock().unwrap_or_else(|p| p.into_inner()).get_mut(node_id) {
+        if let Some(endpoint) = self
+            .endpoints
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get_mut(node_id)
+        {
             endpoint.health = if reachable { 1.0 } else { 0.0 };
             endpoint.latency_ms = latency_ms;
         }
@@ -257,9 +270,15 @@ impl AutoConnectSyncEngine {
             .unwrap_or("")
             .trim();
         if node_id.is_empty() || node_id.len() > 128 {
-            return (false, "Missing or invalid node_id in sync package".to_string());
+            return (
+                false,
+                "Missing or invalid node_id in sync package".to_string(),
+            );
         }
-        let mut journal = self.offline_journal.lock().unwrap_or_else(|p| p.into_inner());
+        let mut journal = self
+            .offline_journal
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         if journal.len() >= 1000 {
             journal.drain(0..200);
         }
@@ -270,7 +289,11 @@ impl AutoConnectSyncEngine {
     /// Get current sync status.
     pub fn get_status(&self) -> Value {
         let endpoints = self.endpoints.lock().unwrap_or_else(|p| p.into_inner());
-        let journal_len = self.offline_journal.lock().unwrap_or_else(|p| p.into_inner()).len();
+        let journal_len = self
+            .offline_journal
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .len();
         json!({
             "registered_endpoints": endpoints.len(),
             "offline_journal_entries": journal_len,
@@ -280,7 +303,10 @@ impl AutoConnectSyncEngine {
 
     /// Flush the offline journal (return and clear).
     pub fn flush_offline_journal(&self) -> Value {
-        let mut journal = self.offline_journal.lock().unwrap_or_else(|p| p.into_inner());
+        let mut journal = self
+            .offline_journal
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let entries = journal.drain(..).collect::<Vec<_>>();
         json!({ "flushed": entries.len(), "entries": entries })
     }
@@ -319,9 +345,8 @@ pub fn is_ssrf_forbidden_ip(ip: IpAddr) -> bool {
             if let Some(mapped_v4) = v6.to_ipv4_mapped() {
                 return is_ssrf_forbidden_ip(IpAddr::V4(mapped_v4));
             }
-            v6.is_unspecified()
-                || v6.is_multicast()
-                || (v6.segments()[0] & 0xffc0) == 0xfe80 // link-local fe80::/10
+            v6.is_unspecified() || v6.is_multicast() || (v6.segments()[0] & 0xffc0) == 0xfe80
+            // link-local fe80::/10
         }
     }
 }
@@ -335,18 +360,28 @@ mod tests {
     fn test_is_ssrf_forbidden_ip() {
         // Forbidden IPv4
         assert!(is_ssrf_forbidden_ip(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))));
-        assert!(is_ssrf_forbidden_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254))));
+        assert!(is_ssrf_forbidden_ip(IpAddr::V4(Ipv4Addr::new(
+            169, 254, 169, 254
+        ))));
         assert!(is_ssrf_forbidden_ip(IpAddr::V4(Ipv4Addr::BROADCAST)));
-        assert!(is_ssrf_forbidden_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1))));
+        assert!(is_ssrf_forbidden_ip(IpAddr::V4(Ipv4Addr::new(
+            224, 0, 0, 1
+        ))));
 
         // Allowed IPv4
-        assert!(!is_ssrf_forbidden_ip(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+        assert!(!is_ssrf_forbidden_ip(IpAddr::V4(Ipv4Addr::new(
+            192, 168, 1, 1
+        ))));
         assert!(!is_ssrf_forbidden_ip(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
 
         // Forbidden IPv6
         assert!(is_ssrf_forbidden_ip(IpAddr::V6(Ipv6Addr::UNSPECIFIED)));
-        assert!(is_ssrf_forbidden_ip(IpAddr::V6(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 1))));
-        assert!(is_ssrf_forbidden_ip(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1))));
+        assert!(is_ssrf_forbidden_ip(IpAddr::V6(Ipv6Addr::new(
+            0xff02, 0, 0, 0, 0, 0, 0, 1
+        ))));
+        assert!(is_ssrf_forbidden_ip(IpAddr::V6(Ipv6Addr::new(
+            0xfe80, 0, 0, 0, 0, 0, 0, 1
+        ))));
 
         // Forbidden IPv4-mapped IPv6
         let mapped_link_local = Ipv4Addr::new(169, 254, 169, 254).to_ipv6_mapped();

@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use tara_engine::{
-    generate_response, GenerateOptions, TaraForCausalLM, TaraTokenizer,
-};
+use tara_engine::{generate_response, GenerateOptions, TaraForCausalLM, TaraTokenizer};
 
 fn resolve_candidate_path() -> PathBuf {
     let rel_crate = Path::new("../../storage/models/tara_candidate_v1");
@@ -93,7 +91,10 @@ fn test_live_checkpoint_load_generation_and_evaluation() {
     // 1. Checkpoint load test
     println!("\n[1/3] CHECKPOINT LOAD TEST");
     let tok_path = dir.join("tokenizer.json");
-    assert!(tok_path.exists(), "tokenizer.json must exist in candidate directory");
+    assert!(
+        tok_path.exists(),
+        "tokenizer.json must exist in candidate directory"
+    );
 
     let tokenizer = TaraTokenizer::from_file(&tok_path.to_string_lossy())
         .expect("Tokenizer must parse and load successfully");
@@ -117,64 +118,112 @@ fn test_live_checkpoint_load_generation_and_evaluation() {
 
     for val in &model.embed_tokens {
         total_params += 1;
-        if val.is_nan() { nan_weights += 1; }
-        if val.is_infinite() { inf_weights += 1; }
+        if val.is_nan() {
+            nan_weights += 1;
+        }
+        if val.is_infinite() {
+            inf_weights += 1;
+        }
     }
     for val in &model.norm.weight {
         total_params += 1;
-        if val.is_nan() { nan_weights += 1; }
-        if val.is_infinite() { inf_weights += 1; }
+        if val.is_nan() {
+            nan_weights += 1;
+        }
+        if val.is_infinite() {
+            inf_weights += 1;
+        }
     }
     for val in &model.lm_head {
         total_params += 1;
-        if val.is_nan() { nan_weights += 1; }
-        if val.is_infinite() { inf_weights += 1; }
+        if val.is_nan() {
+            nan_weights += 1;
+        }
+        if val.is_infinite() {
+            inf_weights += 1;
+        }
     }
     for layer in &model.layers {
         for val in &layer.self_attn.q_proj {
             total_params += 1;
-            if val.is_nan() { nan_weights += 1; }
-            if val.is_infinite() { inf_weights += 1; }
+            if val.is_nan() {
+                nan_weights += 1;
+            }
+            if val.is_infinite() {
+                inf_weights += 1;
+            }
         }
         for val in &layer.self_attn.k_proj {
             total_params += 1;
-            if val.is_nan() { nan_weights += 1; }
-            if val.is_infinite() { inf_weights += 1; }
+            if val.is_nan() {
+                nan_weights += 1;
+            }
+            if val.is_infinite() {
+                inf_weights += 1;
+            }
         }
         for val in &layer.self_attn.v_proj {
             total_params += 1;
-            if val.is_nan() { nan_weights += 1; }
-            if val.is_infinite() { inf_weights += 1; }
+            if val.is_nan() {
+                nan_weights += 1;
+            }
+            if val.is_infinite() {
+                inf_weights += 1;
+            }
         }
         for val in &layer.self_attn.o_proj {
             total_params += 1;
-            if val.is_nan() { nan_weights += 1; }
-            if val.is_infinite() { inf_weights += 1; }
+            if val.is_nan() {
+                nan_weights += 1;
+            }
+            if val.is_infinite() {
+                inf_weights += 1;
+            }
         }
         for val in &layer.input_layernorm.weight {
             total_params += 1;
-            if val.is_nan() { nan_weights += 1; }
-            if val.is_infinite() { inf_weights += 1; }
+            if val.is_nan() {
+                nan_weights += 1;
+            }
+            if val.is_infinite() {
+                inf_weights += 1;
+            }
         }
         for val in &layer.post_attention_layernorm.weight {
             total_params += 1;
-            if val.is_nan() { nan_weights += 1; }
-            if val.is_infinite() { inf_weights += 1; }
+            if val.is_nan() {
+                nan_weights += 1;
+            }
+            if val.is_infinite() {
+                inf_weights += 1;
+            }
         }
         for val in &layer.mlp.gate_proj {
             total_params += 1;
-            if val.is_nan() { nan_weights += 1; }
-            if val.is_infinite() { inf_weights += 1; }
+            if val.is_nan() {
+                nan_weights += 1;
+            }
+            if val.is_infinite() {
+                inf_weights += 1;
+            }
         }
         for val in &layer.mlp.up_proj {
             total_params += 1;
-            if val.is_nan() { nan_weights += 1; }
-            if val.is_infinite() { inf_weights += 1; }
+            if val.is_nan() {
+                nan_weights += 1;
+            }
+            if val.is_infinite() {
+                inf_weights += 1;
+            }
         }
         for val in &layer.mlp.down_proj {
             total_params += 1;
-            if val.is_nan() { nan_weights += 1; }
-            if val.is_infinite() { inf_weights += 1; }
+            if val.is_nan() {
+                nan_weights += 1;
+            }
+            if val.is_infinite() {
+                inf_weights += 1;
+            }
         }
     }
 
@@ -215,7 +264,10 @@ fn test_live_checkpoint_load_generation_and_evaluation() {
 
         let gen_ids = tokenizer.encode(&res.text);
         println!("  Generated token count: {}", res.token_count);
-        println!("  Total latency: {:.2}ms ({:.2} tokens/sec)", res.total_latency_ms, res.tps);
+        println!(
+            "  Total latency: {:.2}ms ({:.2} tokens/sec)",
+            res.total_latency_ms, res.tps
+        );
         println!("  Generated output:\n--------------------------------------------------");
         println!("{}", res.text);
         println!("--------------------------------------------------");
@@ -239,12 +291,20 @@ fn test_live_checkpoint_load_generation_and_evaluation() {
         let loss_opt = compute_causal_cross_entropy(&model, &enc);
         match loss_opt {
             Some(l) => {
-                println!("    {}: Loss = {:.4} (is_finite: {})", name, l, l.is_finite());
+                println!(
+                    "    {}: Loss = {:.4} (is_finite: {})",
+                    name,
+                    l,
+                    l.is_finite()
+                );
                 assert!(l.is_finite(), "Loss must be finite");
                 assert!(l > 0.0, "Loss must be strictly positive");
             }
             None => {
-                println!("    {}: Loss could not be evaluated (sequence too short or vocab mismatch)", name);
+                println!(
+                    "    {}: Loss could not be evaluated (sequence too short or vocab mismatch)",
+                    name
+                );
             }
         }
     }
@@ -257,12 +317,22 @@ fn test_live_checkpoint_load_generation_and_evaluation() {
 
         println!("    {} prompt evaluation:", label);
         println!("      - Output empty: {}", is_empty);
-        println!("      - Unique tokens: {} / {}", unique_count, gen_ids.len());
+        println!(
+            "      - Unique tokens: {} / {}",
+            unique_count,
+            gen_ids.len()
+        );
         println!("      - Unique token ratio: {:.2}%", unique_ratio * 100.0);
-        println!("      - Max consecutive identical token repetitions: {}", max_consecutive);
+        println!(
+            "      - Max consecutive identical token repetitions: {}",
+            max_consecutive
+        );
 
         let is_stuck_in_loop = max_consecutive > 10;
-        println!("      - Stuck in single-token repetition loop: {}", is_stuck_in_loop);
+        println!(
+            "      - Stuck in single-token repetition loop: {}",
+            is_stuck_in_loop
+        );
 
         assert!(!is_empty, "Generated text should not be empty");
     }

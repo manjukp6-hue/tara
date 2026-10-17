@@ -72,8 +72,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let cap_graph_raw = fs::read_to_string(&cap_graph_path)?;
         let cap_graph_json: serde_json::Value =
             serde_json::from_str(cap_graph_raw.trim_start_matches('\u{feff}'))?;
-        let nodes = cap_graph_json["nodes"].as_array().cloned().unwrap_or_default();
-        let edges = cap_graph_json["edges"].as_array().cloned().unwrap_or_default();
+        let nodes = cap_graph_json["nodes"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let edges = cap_graph_json["edges"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         (nodes, edges)
     } else {
         let nodes = vec![
@@ -568,7 +574,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 3. Mathematical Invariant & Validation Enforcement Proof (User Audit Point 1)
-    println!("  Validating TopologicalConfidenceConfig Mathematical Invariants (Dynamic Extensibility):");
+    println!(
+        "  Validating TopologicalConfidenceConfig Mathematical Invariants (Dynamic Extensibility):"
+    );
     assert!(
         TopologicalConfidenceConfig::new(-0.1, 0.2, 0.1, 0.98).is_err(),
         "Negative weights must be rejected"
@@ -687,7 +695,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ──────────────────────────────────────────────────────────────────────────
     // PHASE 7: STAGED FINAL DELETION & COMPLETE CLEANUP VERIFICATION (POST-SUITE CLEANUP)
     // ──────────────────────────────────────────────────────────────────────────
-    println!("\n=== PHASE 7: STAGED FINAL DELETION & FILESYSTEM CLEAN SCAN (POST-SUITE CLEANUP) ===");
+    println!(
+        "\n=== PHASE 7: STAGED FINAL DELETION & FILESYSTEM CLEAN SCAN (POST-SUITE CLEANUP) ==="
+    );
 
     // Delete test datasets only after entire test suite passes
     fs::remove_file(&manual_neural_file)?;
@@ -713,9 +723,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     println!("  Filesystem Scan Result: ZERO test artifacts or residual files remain.");
-    println!(
-        "PASS: Phase 7 Staged Final Deletion & Complete Cleanup verified."
-    );
+    println!("PASS: Phase 7 Staged Final Deletion & Complete Cleanup verified.");
 
     println!("\n================================================================================");
     println!("  DATASET & CURRICULUM ENGINE VERIFICATION SUMMARY");

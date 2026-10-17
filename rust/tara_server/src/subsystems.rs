@@ -206,7 +206,6 @@ pub mod agent_orchestrator {
     }
 }
 
-
 // ── Plugin Engine ─────────────────────────────────────────────────────────────
 pub mod plugin_engine {
     use serde::{Deserialize, Serialize};
@@ -393,7 +392,12 @@ pub mod plugin_engine {
             self.execute_plugin_internal(id, params, false)
         }
 
-        fn execute_plugin_internal(&self, id: &str, params: Value, allow_os_process: bool) -> Value {
+        fn execute_plugin_internal(
+            &self,
+            id: &str,
+            params: Value,
+            allow_os_process: bool,
+        ) -> Value {
             let map = self.plugins.lock().unwrap_or_else(|e| e.into_inner());
             let plugin = match map.get(id) {
                 Some(p) => p.clone(),
@@ -565,7 +569,6 @@ pub mod plugin_engine {
     }
 }
 
-
 // ── Resilience Engine ─────────────────────────────────────────────────────────
 pub mod resilience {
     use serde_json::{json, Value};
@@ -588,18 +591,24 @@ pub mod resilience {
                 .unwrap_or(false);
 
             // Dynamically query active model artifact from authoritative ModelRegistry
-            let active_artifact = crate::learning::model_registry::ModelRegistry::new(&self.repo_root)
-                .get_active_version_location();
+            let active_artifact =
+                crate::learning::model_registry::ModelRegistry::new(&self.repo_root)
+                    .get_active_version_location();
 
             let model_path = if let Some(ref rel_path) = active_artifact {
                 format!("{}/{}", self.repo_root, rel_path)
             } else {
                 format!("{}/storage/models/tara/model.safetensors", self.repo_root)
             };
-            let index_path = model_path.replace("model.safetensors", "model.safetensors.index.json");
+            let index_path =
+                model_path.replace("model.safetensors", "model.safetensors.index.json");
             let model_exists = fs::metadata(&model_path).is_ok()
                 || fs::metadata(&index_path).is_ok()
-                || fs::metadata(format!("{}/storage/models/tara/model.safetensors.index.json", self.repo_root)).is_ok();
+                || fs::metadata(format!(
+                    "{}/storage/models/tara/model.safetensors.index.json",
+                    self.repo_root
+                ))
+                .is_ok();
             let is_healthy = storage_accessible && model_exists;
             json!({
                 "model_file_exists": model_exists,
@@ -623,7 +632,13 @@ mod tests {
 
     #[test]
     fn test_plugin_engine_disk_scan_defaults_to_disabled() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_plugin_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tara_plugin_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let plugin_dir = temp_dir.join("test_plugin");
         fs::create_dir_all(&plugin_dir).unwrap();
 
@@ -638,7 +653,10 @@ mod tests {
 
         let engine = PluginEngine::new_with_dir(temp_dir.to_str().unwrap());
         let list = engine.list_plugins();
-        let p = list.iter().find(|item| item["plugin_id"] == "test_plugin").unwrap();
+        let p = list
+            .iter()
+            .find(|item| item["plugin_id"] == "test_plugin")
+            .unwrap();
         assert_eq!(p["enabled"], false);
 
         let _ = fs::remove_dir_all(temp_dir);
@@ -646,7 +664,13 @@ mod tests {
 
     #[test]
     fn test_plugin_engine_unauthenticated_blocks_os_processes_and_allows_arithmetic() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_plugin_arith_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tara_plugin_arith_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         fs::create_dir_all(&temp_dir).unwrap();
         let engine = PluginEngine::new_with_dir(temp_dir.to_str().unwrap());
 
@@ -668,7 +692,8 @@ mod tests {
         let dummy_exe = temp_dir.join("calc.exe");
         fs::write(&dummy_exe, b"dummy").unwrap();
 
-        let blocked_res = engine.execute_plugin("calc", json!({ "op": "add", "a": 10.0, "b": 25.0 }));
+        let blocked_res =
+            engine.execute_plugin("calc", json!({ "op": "add", "a": 10.0, "b": 25.0 }));
         assert_eq!(blocked_res["status"], "ERROR");
         assert!(blocked_res["error"].as_str().unwrap().contains("Unauthorized: OS process execution requires execute_plugin_authorized with Creator principal."));
 
@@ -677,7 +702,13 @@ mod tests {
 
     #[test]
     fn test_resilience_engine_sharded_model_health_check() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_resilience_test_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "tara_resilience_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let model_dir = temp_dir.join("storage").join("models").join("tara");
         fs::create_dir_all(&model_dir).unwrap();
         fs::write(model_dir.join("model.safetensors.index.json"), "{}").unwrap();

@@ -139,7 +139,11 @@ impl PermissionEngine {
         if !self.can_grant_permission(granter_role, target_role, &capability) {
             return Err("Permission modification rejected: requires CREATOR authority".to_string());
         }
-        Ok(self.role_capabilities.entry(target_role).or_default().insert(capability))
+        Ok(self
+            .role_capabilities
+            .entry(target_role)
+            .or_default()
+            .insert(capability))
     }
 
     /// Dynamically revokes a capability from a role, gated strictly by Role::CREATOR authority.
@@ -151,7 +155,10 @@ impl PermissionEngine {
         capability: &Capability,
     ) -> Result<bool, String> {
         if revoker_role != Role::CREATOR || target_role == Role::CREATOR {
-            return Err("Permission modification rejected: illegal permission revocation attempt".to_string());
+            return Err(
+                "Permission modification rejected: illegal permission revocation attempt"
+                    .to_string(),
+            );
         }
         if let Some(caps) = self.role_capabilities.get_mut(&target_role) {
             Ok(caps.remove(capability))

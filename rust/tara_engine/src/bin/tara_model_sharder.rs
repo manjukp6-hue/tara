@@ -28,7 +28,9 @@ fn print_usage() {
     println!("  --f32                        Store weights in F32 precision");
     println!("  --clean-old                  Delete obsolete shards after verified sharding (default: true)");
     println!("  --no-clean-old               Keep old shard files");
-    println!("  --rebuild-world-model        Rebuild world model architecture aligned with neural model");
+    println!(
+        "  --rebuild-world-model        Rebuild world model architecture aligned with neural model"
+    );
     println!("  -h, --help                   Print help information");
 }
 
@@ -125,10 +127,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(" TARA PART-WISE SAFETENSORS MODEL SHARDER & BUILDER (100% NATIVE RUST)");
     println!("================================================================================");
     println!("Target Model Directory  : {}", model_dir.display());
-    println!("Source Model Directory  : {}", source_dir.as_ref().unwrap_or(&model_dir).display());
-    println!("Max Shard Size Limit    : {} MB ({} bytes)", max_shard_mb, max_shard_bytes);
+    println!(
+        "Source Model Directory  : {}",
+        source_dir.as_ref().unwrap_or(&model_dir).display()
+    );
+    println!(
+        "Max Shard Size Limit    : {} MB ({} bytes)",
+        max_shard_mb, max_shard_bytes
+    );
     println!("Shard Prefix            : {}", prefix);
-    println!("Precision               : {}", if is_bf16 { "BF16" } else { "F32" });
+    println!(
+        "Precision               : {}",
+        if is_bf16 { "BF16" } else { "F32" }
+    );
     println!("Rebuild World Model     : {}", rebuild_world_model);
     println!("Clean Obsolete Files    : {}", clean_old);
     println!("--------------------------------------------------------------------------------");
@@ -139,11 +150,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Rebuilding World Model aligned with Neural Model architecture...");
         let neural_dir = Path::new("storage/models/tara_candidate_v1");
         if !neural_dir.exists() {
-            return Err("Neural model directory storage/models/tara_candidate_v1 does not exist".into());
+            return Err(
+                "Neural model directory storage/models/tara_candidate_v1 does not exist".into(),
+            );
         }
 
         // Copy tokenizer files to ensure 100% compatibility
-        for file_name in &["tokenizer.json", "tokenizer_config.json", "special_tokens_map.json"] {
+        for file_name in &[
+            "tokenizer.json",
+            "tokenizer_config.json",
+            "special_tokens_map.json",
+        ] {
             let src_file = neural_dir.join(file_name);
             let dst_file = model_dir.join(file_name);
             if src_file.exists() {
@@ -181,32 +198,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .iter()
             .map(|(k, v)| (k.clone(), tensor_shape(k, v.len(), &world_config)))
             .collect();
-        println!("  Initialized {} tensors in {:.2}s.", w.len(), t0.elapsed().as_secs_f64());
+        println!(
+            "  Initialized {} tensors in {:.2}s.",
+            w.len(),
+            t0.elapsed().as_secs_f64()
+        );
         (w, s)
     } else if init_fresh {
-        println!("Initializing FRESH weights for {} from existing config.json...", model_dir.display());
+        println!(
+            "Initializing FRESH weights for {} from existing config.json...",
+            model_dir.display()
+        );
         let config_path = model_dir.join("config.json");
         let cfg = TaraConfig::from_json_file(&config_path.to_string_lossy())?;
-        println!("  Preserved model config: {} layers, {} hidden_size, {} intermediate_size, vocab {}.",
-            cfg.num_hidden_layers, cfg.hidden_size, cfg.intermediate_size, cfg.vocab_size);
+        println!(
+            "  Preserved model config: {} layers, {} hidden_size, {} intermediate_size, vocab {}.",
+            cfg.num_hidden_layers, cfg.hidden_size, cfg.intermediate_size, cfg.vocab_size
+        );
         let t0 = Instant::now();
         let w = ModelExpansionEngine::init_target_weights(&cfg);
         let s: HashMap<String, Vec<usize>> = w
             .iter()
             .map(|(k, v)| (k.clone(), tensor_shape(k, v.len(), &cfg)))
             .collect();
-        println!("  Initialized {} fresh tensors in {:.2}s.", w.len(), t0.elapsed().as_secs_f64());
+        println!(
+            "  Initialized {} fresh tensors in {:.2}s.",
+            w.len(),
+            t0.elapsed().as_secs_f64()
+        );
         (w, s)
     } else {
         let load_dir = source_dir.as_ref().unwrap_or(&model_dir);
         println!("Loading weights from {} ...", load_dir.display());
         let t0 = Instant::now();
         let (w, s) = load_model_weights_with_shapes(&load_dir.to_string_lossy())?;
-        println!("  Loaded {} tensors in {:.2}s.", w.len(), t0.elapsed().as_secs_f64());
+        println!(
+            "  Loaded {} tensors in {:.2}s.",
+            w.len(),
+            t0.elapsed().as_secs_f64()
+        );
         (w, s)
     };
 
-    println!("Writing sharded SafeTensors to {} with prefix '{}'...", model_dir.display(), prefix);
+    println!(
+        "Writing sharded SafeTensors to {} with prefix '{}'...",
+        model_dir.display(),
+        prefix
+    );
     let t1 = Instant::now();
     let written_shards = write_safetensors_sharded_with_prefix(
         &weights,
@@ -217,13 +255,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         is_bf16,
     )?;
 
-    println!("  Wrote {} shards in {:.2}s:", written_shards.len(), t1.elapsed().as_secs_f64());
+    println!(
+        "  Wrote {} shards in {:.2}s:",
+        written_shards.len(),
+        t1.elapsed().as_secs_f64()
+    );
     for shard_name in &written_shards {
         let shard_path = model_dir.join(shard_name);
         let sz = fs::metadata(&shard_path)?.len();
-        println!("    - {} ({:.2} MB)", shard_name, sz as f64 / (1024.0 * 1024.0));
+        println!(
+            "    - {} ({:.2} MB)",
+            shard_name,
+            sz as f64 / (1024.0 * 1024.0)
+        );
         if sz > max_shard_bytes as u64 {
-            return Err(format!("Shard {} exceeds max limit of {} bytes (was {} bytes)", shard_name, max_shard_bytes, sz).into());
+            return Err(format!(
+                "Shard {} exceeds max limit of {} bytes (was {} bytes)",
+                shard_name, max_shard_bytes, sz
+            )
+            .into());
         }
     }
 
@@ -239,23 +289,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let t2 = Instant::now();
     let (reloaded_weights, _) = load_model_weights_with_shapes(&model_dir.to_string_lossy())?;
     if reloaded_weights.len() != weights.len() {
-        return Err(format!("Reload mismatch: expected {} tensors, got {}", weights.len(), reloaded_weights.len()).into());
+        return Err(format!(
+            "Reload mismatch: expected {} tensors, got {}",
+            weights.len(),
+            reloaded_weights.len()
+        )
+        .into());
     }
 
     for (k, v) in &weights {
-        let reloaded_v = reloaded_weights.get(k).ok_or_else(|| format!("Missing tensor in reloaded weights: {k}"))?;
+        let reloaded_v = reloaded_weights
+            .get(k)
+            .ok_or_else(|| format!("Missing tensor in reloaded weights: {k}"))?;
         if reloaded_v.len() != v.len() {
-            return Err(format!("Tensor length mismatch for {k}: expected {}, got {}", v.len(), reloaded_v.len()).into());
+            return Err(format!(
+                "Tensor length mismatch for {k}: expected {}, got {}",
+                v.len(),
+                reloaded_v.len()
+            )
+            .into());
         }
         if !is_bf16 {
             for (idx, (&a, &b)) in v.iter().zip(reloaded_v.iter()).enumerate() {
                 if (a - b).abs() > 1e-6 {
-                    return Err(format!("Tensor bit mismatch for {k} at index {idx}: {a} vs {b}").into());
+                    return Err(
+                        format!("Tensor bit mismatch for {k} at index {idx}: {a} vs {b}").into(),
+                    );
                 }
             }
         }
     }
-    println!("  Weight verification SUCCESS in {:.2}s!", t2.elapsed().as_secs_f64());
+    println!(
+        "  Weight verification SUCCESS in {:.2}s!",
+        t2.elapsed().as_secs_f64()
+    );
 
     // Verify full model instantiation and forward pass
     println!("Verifying full TaraForCausalLM load and forward pass ...");
@@ -265,11 +332,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if logits.is_empty() || logits.iter().any(|x| !x.is_finite()) {
         return Err("Model forward pass failed: non-finite or empty logits!".into());
     }
-    println!("  Forward pass SUCCESS! (Logits len: {}, last token logits: {})", logits.len(), model.config.vocab_size);
+    println!(
+        "  Forward pass SUCCESS! (Logits len: {}, last token logits: {})",
+        logits.len(),
+        model.config.vocab_size
+    );
 
     // Clean old/obsolete shards
     if clean_old {
-        println!("Cleaning obsolete safetensors shards in {} ...", model_dir.display());
+        println!(
+            "Cleaning obsolete safetensors shards in {} ...",
+            model_dir.display()
+        );
         let entries = fs::read_dir(&model_dir)?;
         for entry in entries {
             let entry = entry?;
@@ -277,7 +351,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if file_name.ends_with(".safetensors") && !written_shards.contains(&file_name) {
                 let p = entry.path();
                 let sz = fs::metadata(&p)?.len();
-                println!("  Removing obsolete shard: {} ({:.2} MB)", file_name, sz as f64 / (1024.0 * 1024.0));
+                println!(
+                    "  Removing obsolete shard: {} ({:.2} MB)",
+                    file_name,
+                    sz as f64 / (1024.0 * 1024.0)
+                );
                 fs::remove_file(p)?;
             }
         }

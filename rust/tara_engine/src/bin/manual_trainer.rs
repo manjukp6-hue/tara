@@ -184,7 +184,6 @@ impl RunStatus {
     }
 }
 
-
 pub fn validate_manual_config(config: &ManualTrainingConfig) -> Result<(), String> {
     if config.version.trim() != "1.0.0" {
         return Err(format!(
@@ -338,7 +337,6 @@ pub fn load_manual_config(
         )
     })
 }
-
 
 #[derive(Debug, Default)]
 pub struct ParsedManualCli {
@@ -1140,8 +1138,12 @@ fn verify_pretraining_authorization(checkpoints_dir: &Path) -> Result<(), String
         }
     };
 
-    let content = fs::read_to_string(&auth_path)
-        .map_err(|e| format!("Failed to read pre-training authorization file '{}': {e}", auth_path.display()))?;
+    let content = fs::read_to_string(&auth_path).map_err(|e| {
+        format!(
+            "Failed to read pre-training authorization file '{}': {e}",
+            auth_path.display()
+        )
+    })?;
     let val: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
         format!(
             "Failed to parse pre-training authorization file '{}': {e}",
@@ -1176,8 +1178,12 @@ fn verify_pretraining_authorization(checkpoints_dir: &Path) -> Result<(), String
 /// Enforces cloud / Google Colab training environment to protect local developer PC hardware.
 fn verify_cloud_training_environment() -> Result<(), String> {
     let is_colab = std::env::var("COLAB_GPU").is_ok() || std::env::var("COLAB_RELEASE_TAG").is_ok();
-    let is_cloud = std::env::var("TARA_CLOUD_TRAINING").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false);
-    let allow_local = std::env::var("TARA_ALLOW_LOCAL_TRAINING").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false);
+    let is_cloud = std::env::var("TARA_CLOUD_TRAINING")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let allow_local = std::env::var("TARA_ALLOW_LOCAL_TRAINING")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
 
     if !is_colab && !is_cloud && !allow_local {
         return Err(
@@ -1423,8 +1429,7 @@ fn execute_manual_trainer() -> Result<RunStatus, (RunStatus, String)> {
         let neural_out = PathBuf::from(&config.neural_checkpoint_dir);
         let _ = recover_interrupted_promotion(&neural_out)
             .map_err(|e| (RunStatus::ExecutionFailed, e.to_string()))?;
-        verify_cloud_training_environment()
-            .map_err(|e| (RunStatus::ExecutionFailed, e))?;
+        verify_cloud_training_environment().map_err(|e| (RunStatus::ExecutionFailed, e))?;
         verify_pretraining_authorization(&neural_out)
             .map_err(|e| (RunStatus::ExecutionFailed, e))?;
         let intermediate_cp_dir = run_dir.join("checkpoints");

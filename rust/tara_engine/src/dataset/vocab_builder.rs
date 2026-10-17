@@ -133,12 +133,18 @@ impl VocabBuilder {
             })?;
         let baseline_vocab_size = base_tokenizer.vocab_size;
 
-        let cache_path = self.dataset_dir.join(format!("candidate_tokens_{}.json", self.target_vocab_size));
+        let cache_path = self
+            .dataset_dir
+            .join(format!("candidate_tokens_{}.json", self.target_vocab_size));
         if cache_path.exists() {
             if let Ok(file) = File::open(&cache_path) {
-                if let Ok((cached_tokens, cached_report)) = serde_json::from_reader::<_, (Vec<String>, VocabBuildReport)>(file) {
+                if let Ok((cached_tokens, cached_report)) =
+                    serde_json::from_reader::<_, (Vec<String>, VocabBuildReport)>(file)
+                {
                     let required = self.target_vocab_size.saturating_sub(baseline_vocab_size);
-                    if cached_tokens.len() == required && cached_report.baseline_vocab_size == baseline_vocab_size {
+                    if cached_tokens.len() == required
+                        && cached_report.baseline_vocab_size == baseline_vocab_size
+                    {
                         println!("  [VocabBuilder] Loaded {} verified candidate tokens from operational cache '{}'", cached_tokens.len(), cache_path.display());
                         return Ok((cached_tokens, cached_report));
                     }
@@ -226,7 +232,11 @@ impl VocabBuilder {
         // Collect all missing characters found in the scanned dataset records
         for &ch in char_counts.keys() {
             let s = ch.to_string();
-            if !existing_vocab.contains(&s) && !ch.is_control() && ch != '\0' && !s.trim().is_empty() {
+            if !existing_vocab.contains(&s)
+                && !ch.is_control()
+                && ch != '\0'
+                && !s.trim().is_empty()
+            {
                 missing_chars_set.insert(ch);
             }
         }
@@ -363,7 +373,9 @@ impl VocabBuilder {
             shard_hashes,
         };
 
-        let cache_path = self.dataset_dir.join(format!("candidate_tokens_{}.json", self.target_vocab_size));
+        let cache_path = self
+            .dataset_dir
+            .join(format!("candidate_tokens_{}.json", self.target_vocab_size));
         if let Ok(file) = File::create(&cache_path) {
             let _ = serde_json::to_writer_pretty(file, &(&added_tokens, &report));
         }
@@ -694,132 +706,24 @@ pub fn char_script_priority_tier(ch: char) -> u8 {
 pub fn canonical_coding_and_symbols() -> Vec<String> {
     let tokens = [
         // Indentation & Whitespace
-        "  ",        // 2-space indentation
-        "    ",      // 4-space indentation
-        "        ",  // 8-space indentation
-        "\r\n",
-
-        // Comparison, Logic & Assignment Operators
-        "==",
-        "!=",
-        "<=",
-        ">=",
-        "===",
-        "!==",
-        "&&",
-        "||",
-        "+=",
-        "-=",
-        "*=",
-        "/=",
-        "%=",
-        "++",
-        "--",
-        "**",
-        ":=",
-
-        // Scope, Navigation & Pointers
-        "::",
-        "->",
-        "=>",
-        "<-",
-        "..",
-        "...",
-        "..=",
-
-        // Bitwise & Shift Operators
-        "<<",
-        ">>",
-        "&=",
-        "|=",
-        "^=",
-        "<<=",
-        ">>=",
-
+        "  ",       // 2-space indentation
+        "    ",     // 4-space indentation
+        "        ", // 8-space indentation
+        "\r\n",     // Comparison, Logic & Assignment Operators
+        "==", "!=", "<=", ">=", "===", "!==", "&&", "||", "+=", "-=", "*=", "/=", "%=", "++", "--",
+        "**", ":=", // Scope, Navigation & Pointers
+        "::", "->", "=>", "<-", "..", "...", "..=", // Bitwise & Shift Operators
+        "<<", ">>", "&=", "|=", "^=", "<<=", ">>=",
         // Code Comments, Markup & Syntax Delimiters
-        "//",
-        "/*",
-        "*/",
-        "/**",
-        "///",
-        "//!",
-        "</",
-        "/>",
-        "<!--",
-        "-->",
-        "<?",
-        "?>",
-        "${",
-        "#{",
-
+        "//", "/*", "*/", "/**", "///", "//!", "</", "/>", "<!--", "-->", "<?", "?>", "${", "#{",
         // Common Typographic, Currency & Mathematical Symbols
-        "“",
-        "”",
-        "‘",
-        "’",
-        "—",
-        "–",
-        "…",
-        "•",
-        "°",
-        "±",
-        "×",
-        "÷",
-        "≠",
-        "≤",
-        "≥",
-        "≈",
-        "∞",
-        "√",
-        "∑",
-        "∏",
-        "∫",
-        "∂",
-        "∆",
-        "∇",
-        "∈",
-        "∉",
-        "$",
-        "₹",
-        "€",
-        "£",
-        "¥",
-
+        "“", "”", "‘", "’", "—", "–", "…", "•", "°", "±", "×", "÷", "≠", "≤", "≥", "≈", "∞", "√",
+        "∑", "∏", "∫", "∂", "∆", "∇", "∈", "∉", "$", "₹", "€", "£", "¥",
         // Core Programming Keywords
-        "fn",
-        "let",
-        "mut",
-        "pub",
-        "struct",
-        "impl",
-        "enum",
-        "trait",
-        "type",
-        "match",
-        "const",
-        "async",
-        "await",
-        "self",
-        "Self",
-        "def",
-        "class",
-        "import",
-        "from",
-        "return",
-        "yield",
-        "if",
-        "else",
-        "elif",
-        "while",
-        "for",
-        "in",
-        "loop",
-        "break",
-        "continue",
-        "true",
-        "false",
-        "null",
-        "None",
+        "fn", "let", "mut", "pub", "struct", "impl", "enum", "trait", "type", "match", "const",
+        "async", "await", "self", "Self", "def", "class", "import", "from", "return", "yield",
+        "if", "else", "elif", "while", "for", "in", "loop", "break", "continue", "true", "false",
+        "null", "None",
     ];
 
     tokens.iter().map(|&s| s.to_string()).collect()
@@ -829,18 +733,104 @@ pub fn canonical_coding_and_symbols() -> Vec<String> {
 pub fn is_coding_token(token: &str) -> bool {
     matches!(
         token,
-        "  " | "    " | "        " | "\r\n"
-            | "==" | "!=" | "<=" | ">=" | "===" | "!==" | "&&" | "||"
-            | "+=" | "-=" | "*=" | "/=" | "%=" | "++" | "--" | "**" | ":="
-            | "::" | "->" | "=>" | "<-" | ".." | "..." | "..="
-            | "<<" | ">>" | "&=" | "|=" | "^=" | "<<=" | ">>="
-            | "//" | "/*" | "*/" | "/**" | "///" | "//!" | "</" | "/>" | "<!--" | "-->"
-            | "fn" | "let" | "mut" | "pub" | "struct" | "impl" | "enum" | "trait" | "type"
-            | "def" | "class" | "import" | "from" | "return" | "async" | "await"
-            | "true" | "false" | "null" | "None" | "self" | "Self" | "const"
-            | "“" | "”" | "‘" | "’" | "—" | "–" | "…" | "•" | "°" | "±" | "×" | "÷"
-            | "≠" | "≤" | "≥" | "≈" | "∞" | "√" | "∑" | "∏" | "∫" | "∂" | "∆" | "∇" | "∈" | "∉"
-            | "$" | "₹" | "€" | "£" | "¥"
+        "  " | "    "
+            | "        "
+            | "\r\n"
+            | "=="
+            | "!="
+            | "<="
+            | ">="
+            | "==="
+            | "!=="
+            | "&&"
+            | "||"
+            | "+="
+            | "-="
+            | "*="
+            | "/="
+            | "%="
+            | "++"
+            | "--"
+            | "**"
+            | ":="
+            | "::"
+            | "->"
+            | "=>"
+            | "<-"
+            | ".."
+            | "..."
+            | "..="
+            | "<<"
+            | ">>"
+            | "&="
+            | "|="
+            | "^="
+            | "<<="
+            | ">>="
+            | "//"
+            | "/*"
+            | "*/"
+            | "/**"
+            | "///"
+            | "//!"
+            | "</"
+            | "/>"
+            | "<!--"
+            | "-->"
+            | "fn"
+            | "let"
+            | "mut"
+            | "pub"
+            | "struct"
+            | "impl"
+            | "enum"
+            | "trait"
+            | "type"
+            | "def"
+            | "class"
+            | "import"
+            | "from"
+            | "return"
+            | "async"
+            | "await"
+            | "true"
+            | "false"
+            | "null"
+            | "None"
+            | "self"
+            | "Self"
+            | "const"
+            | "“"
+            | "”"
+            | "‘"
+            | "’"
+            | "—"
+            | "–"
+            | "…"
+            | "•"
+            | "°"
+            | "±"
+            | "×"
+            | "÷"
+            | "≠"
+            | "≤"
+            | "≥"
+            | "≈"
+            | "∞"
+            | "√"
+            | "∑"
+            | "∏"
+            | "∫"
+            | "∂"
+            | "∆"
+            | "∇"
+            | "∈"
+            | "∉"
+            | "$"
+            | "₹"
+            | "€"
+            | "£"
+            | "¥"
     )
 }
 
@@ -958,7 +948,8 @@ mod tests {
 
     #[test]
     fn test_indic_priority_and_kannada_numerals() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_indic_vocab_test_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_indic_vocab_test_{}", std::process::id()));
         let ds_dir = temp_dir.join("dataset");
         let model_dir = temp_dir.join("model");
 
@@ -1003,33 +994,88 @@ mod tests {
         let (tokens, _report) = builder.build_candidate_tokens().unwrap();
 
         // 1. Kannada numerals must be present
-        assert!(tokens.iter().any(|t| t == "೧"), "Kannada numeral ೧ must be present");
-        assert!(tokens.iter().any(|t| t == "೨"), "Kannada numeral ೨ must be present");
-        assert!(tokens.iter().any(|t| t == "೦"), "Kannada numeral ೦ must be present");
-        assert!(tokens.iter().any(|t| t == "೯"), "Kannada numeral ೯ must be present");
+        assert!(
+            tokens.iter().any(|t| t == "೧"),
+            "Kannada numeral ೧ must be present"
+        );
+        assert!(
+            tokens.iter().any(|t| t == "೨"),
+            "Kannada numeral ೨ must be present"
+        );
+        assert!(
+            tokens.iter().any(|t| t == "೦"),
+            "Kannada numeral ೦ must be present"
+        );
+        assert!(
+            tokens.iter().any(|t| t == "೯"),
+            "Kannada numeral ೯ must be present"
+        );
         // 2. Devanagari numerals must be present
-        assert!(tokens.iter().any(|t| t == "०"), "Devanagari numeral ० must be present");
-        assert!(tokens.iter().any(|t| t == "९"), "Devanagari numeral ९ must be present");
+        assert!(
+            tokens.iter().any(|t| t == "०"),
+            "Devanagari numeral ० must be present"
+        );
+        assert!(
+            tokens.iter().any(|t| t == "९"),
+            "Devanagari numeral ९ must be present"
+        );
         // 3. Kannada candidate subwords must be present
-        assert!(tokens.iter().any(|t| t == "ಕನ್ನಡ"), "Kannada word ಕನ್ನಡ must be present");
-        assert!(tokens.iter().any(|t| t == "ಗಣಕಯಂತ್ರ"), "Kannada word ಗಣಕಯಂತ್ರ must be present");
+        assert!(
+            tokens.iter().any(|t| t == "ಕನ್ನಡ"),
+            "Kannada word ಕನ್ನಡ must be present"
+        );
+        assert!(
+            tokens.iter().any(|t| t == "ಗಣಕಯಂತ್ರ"),
+            "Kannada word ಗಣಕಯಂತ್ರ must be present"
+        );
         // 4. Devanagari subwords must be present
-        assert!(tokens.iter().any(|t| t == "भारत" || t == "नमस्ते" || t == "धर्मक्षेत्रे" || t == "कुरुक्षेत्रे"), "Devanagari word must be present");
+        assert!(
+            tokens
+                .iter()
+                .any(|t| t == "भारत" || t == "नमस्ते" || t == "धर्मक्षेत्रे" || t == "कुरुक्षेत्रे"),
+            "Devanagari word must be present"
+        );
 
         // 5. Canonical Coding Operators, Indentations & Core Keywords must be present
-        assert!(tokens.iter().any(|t| t == "::"), "Scope operator :: must be present");
-        assert!(tokens.iter().any(|t| t == "->"), "Arrow operator -> must be present");
-        assert!(tokens.iter().any(|t| t == "=="), "Equality operator == must be present");
-        assert!(tokens.iter().any(|t| t == "fn"), "Rust fn keyword must be present");
-        assert!(tokens.iter().any(|t| t == "let"), "Rust let keyword must be present");
-        assert!(tokens.iter().any(|t| t == "    "), "4-space indentation must be present");
-        assert!(tokens.iter().any(|t| t == "₹"), "Currency symbol ₹ must be present");
+        assert!(
+            tokens.iter().any(|t| t == "::"),
+            "Scope operator :: must be present"
+        );
+        assert!(
+            tokens.iter().any(|t| t == "->"),
+            "Arrow operator -> must be present"
+        );
+        assert!(
+            tokens.iter().any(|t| t == "=="),
+            "Equality operator == must be present"
+        );
+        assert!(
+            tokens.iter().any(|t| t == "fn"),
+            "Rust fn keyword must be present"
+        );
+        assert!(
+            tokens.iter().any(|t| t == "let"),
+            "Rust let keyword must be present"
+        );
+        assert!(
+            tokens.iter().any(|t| t == "    "),
+            "4-space indentation must be present"
+        );
+        assert!(
+            tokens.iter().any(|t| t == "₹"),
+            "Currency symbol ₹ must be present"
+        );
 
         // 6. Script priority test: Kannada subwords rank before pure English words
         let kannada_pos = tokens.iter().position(|t| t == "ಕನ್ನಡ");
         let english_pos = tokens.iter().position(|t| t == "system");
         if let (Some(k_pos), Some(e_pos)) = (kannada_pos, english_pos) {
-            assert!(k_pos < e_pos, "Kannada token must rank ahead of English token (k_pos: {}, e_pos: {})", k_pos, e_pos);
+            assert!(
+                k_pos < e_pos,
+                "Kannada token must rank ahead of English token (k_pos: {}, e_pos: {})",
+                k_pos,
+                e_pos
+            );
         }
 
         let _ = fs::remove_dir_all(&temp_dir);

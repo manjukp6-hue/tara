@@ -35,7 +35,13 @@ fn sanitize_skill_slug(name: &str) -> Result<String, String> {
         .trim()
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     let trimmed = clean.trim_matches('-').to_string();
     if trimmed.is_empty() || trimmed.len() > 64 || trimmed.contains("..") {
@@ -51,7 +57,10 @@ pub fn init_skill(
     description: &str,
     out_dir: &Path,
 ) -> Result<PathBuf, String> {
-    if out_dir.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+    if out_dir
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
         return Err("Output directory cannot contain '..' path traversal".to_string());
     }
 
@@ -88,7 +97,10 @@ pub fn init_skill(
 
 /// Generates native tool specification YAML/JSON for a TARA skill.
 pub fn generate_skill_spec(skill_dir: &Path) -> Result<String, String> {
-    if skill_dir.components().any(|c| c == std::path::Component::ParentDir) {
+    if skill_dir
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
         return Err("Parent directory traversal (..) is not allowed in skill_dir".to_string());
     }
 
@@ -120,7 +132,10 @@ pub fn generate_skill_spec(skill_dir: &Path) -> Result<String, String> {
 
 /// Validates skill structure and metadata.
 pub fn quick_validate(skill_dir: &Path) -> Result<ValidationReport, String> {
-    if skill_dir.components().any(|c| c == std::path::Component::ParentDir) {
+    if skill_dir
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
         return Err("Parent directory traversal (..) is not allowed in skill_dir".to_string());
     }
 
@@ -157,7 +172,10 @@ pub fn quick_validate(skill_dir: &Path) -> Result<ValidationReport, String> {
 
 /// Lists available skills in a local directory or repository.
 pub fn list_skills(skills_root: &Path) -> Vec<SkillManifest> {
-    if skills_root.components().any(|c| c == std::path::Component::ParentDir) {
+    if skills_root
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
         return Vec::new();
     }
 
@@ -215,7 +233,10 @@ pub fn handle_automation_skill(action: &str, params: Value) -> Value {
                 .and_then(|v| v.as_str())
                 .unwrap_or("TARA/SKILLS");
             let out_path = Path::new(out);
-            if out_path.components().any(|c| c == std::path::Component::ParentDir) {
+            if out_path
+                .components()
+                .any(|c| c == std::path::Component::ParentDir)
+            {
                 return json!({ "status": "ERROR", "error": "Parent directory traversal (..) is not allowed in out_dir" });
             }
             match init_skill(name, category, desc, out_path) {
@@ -229,7 +250,10 @@ pub fn handle_automation_skill(action: &str, params: Value) -> Value {
                 .and_then(|v| v.as_str())
                 .unwrap_or(".");
             let dir_path = Path::new(dir);
-            if dir_path.components().any(|c| c == std::path::Component::ParentDir) {
+            if dir_path
+                .components()
+                .any(|c| c == std::path::Component::ParentDir)
+            {
                 return json!({ "status": "ERROR", "error": "Parent directory traversal (..) is not allowed in skill_dir" });
             }
             match quick_validate(dir_path) {
@@ -243,7 +267,10 @@ pub fn handle_automation_skill(action: &str, params: Value) -> Value {
                 .and_then(|v| v.as_str())
                 .unwrap_or(".");
             let dir_path = Path::new(dir);
-            if dir_path.components().any(|c| c == std::path::Component::ParentDir) {
+            if dir_path
+                .components()
+                .any(|c| c == std::path::Component::ParentDir)
+            {
                 return json!({ "status": "ERROR", "error": "Parent directory traversal (..) is not allowed in skill_dir" });
             }
             match generate_skill_spec(dir_path) {
@@ -257,7 +284,10 @@ pub fn handle_automation_skill(action: &str, params: Value) -> Value {
                 .and_then(|v| v.as_str())
                 .unwrap_or("TARA/SKILLS");
             let root_path = Path::new(root);
-            if root_path.components().any(|c| c == std::path::Component::ParentDir) {
+            if root_path
+                .components()
+                .any(|c| c == std::path::Component::ParentDir)
+            {
                 return json!({ "status": "ERROR", "error": "Parent directory traversal (..) is not allowed in skills_root" });
             }
             let list = list_skills(root_path);

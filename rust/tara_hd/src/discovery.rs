@@ -212,14 +212,25 @@ fn probe_cuda_gpus() -> Vec<DeviceCapability> {
     // Fallback detection via Linux device node or explicit CUDA device environment variable if nvidia-smi binary wasn't in PATH
     if discovered.is_empty()
         && (Path::new("/dev/nvidia0").exists()
-            || env::var("TARA_CUDA_DEVICE").map(|v| !v.trim().is_empty()).unwrap_or(false))
+            || env::var("TARA_CUDA_DEVICE")
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false))
     {
+        // GPU VRAM is dynamically read from the environment; set TARA_FALLBACK_GPU_VRAM_GB to
+        // match the actual hardware when nvidia-smi is unavailable.
+        // A value of 0 means the capacity is genuinely unknown at probe time.
+        let fallback_vram_bytes = env::var("TARA_FALLBACK_GPU_VRAM_GB")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map(|gb| gb.saturating_mul(1024 * 1024 * 1024))
+            .unwrap_or(0);
+
         discovered.push(DeviceCapability {
             kind: DeviceKind::Gpu,
             device_id: 0,
             name: "NVIDIA CUDA GPU".to_string(),
             backend: "cuda".to_string(),
-            total_memory_bytes: 16 * 1024 * 1024 * 1024,
+            total_memory_bytes: fallback_vram_bytes,
             available_memory_bytes: None,
             supported_precisions: vec![
                 PrecisionMode::Fp32,
@@ -271,6 +282,15 @@ fn probe_cloud_tpus() -> Vec<DeviceCapability> {
         let base_name =
             env::var("TPU_NAME").unwrap_or_else(|_| "Google Cloud TPU (XLA)".to_string());
 
+        // TPU device memory is read from the environment; set TARA_TPU_VRAM_GB to match the
+        // actual TPU slice (e.g. 16 for v2/v3-8, 32 for v3-32, 128 for TPUv4 pod slice).
+        // A value of 0 means the capacity is genuinely unknown at probe time.
+        let tpu_memory_bytes = env::var("TARA_TPU_VRAM_GB")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map(|gb| gb.saturating_mul(1024 * 1024 * 1024))
+            .unwrap_or(0);
+
         for idx in 0..num_devices {
             discovered.push(DeviceCapability {
                 kind: DeviceKind::Tpu,
@@ -281,7 +301,7 @@ fn probe_cloud_tpus() -> Vec<DeviceCapability> {
                     base_name.clone()
                 },
                 backend: "tpu_xla".to_string(),
-                total_memory_bytes: 32 * 1024 * 1024 * 1024,
+                total_memory_bytes: tpu_memory_bytes,
                 available_memory_bytes: None,
                 supported_precisions: vec![PrecisionMode::Bf16, PrecisionMode::Fp32],
                 supports_matrix_multiply: true,

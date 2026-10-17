@@ -15,9 +15,14 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use tara_engine::config::TaraConfig;
-use tara_engine::cuda::{is_cuda_available, log_flushed_memory_checkpoint, CudaTrainer, TrainingPrecision};
+use tara_engine::cuda::{
+    is_cuda_available, log_flushed_memory_checkpoint, CudaTrainer, TrainingPrecision,
+};
 use tara_engine::internal_diagnostics::write_safetensors_sharded_with_callback;
-use tara_engine::{load_model_weights_with_purpose, load_safetensors_with_shapes, read_model_metadata_shapes, TaraForCausalLM};
+use tara_engine::{
+    load_model_weights_with_purpose, load_safetensors_with_shapes, read_model_metadata_shapes,
+    TaraForCausalLM,
+};
 
 fn print_usage() {
     println!("TARA Standalone GPU 1-Step Verification Utility");
@@ -25,7 +30,9 @@ fn print_usage() {
     println!("  tara_gpu_step_test [OPTIONS]");
     println!();
     println!("Options:");
-    println!("  --model <path>       Base model directory (default: storage/models/tara_candidate_v1)");
+    println!(
+        "  --model <path>       Base model directory (default: storage/models/tara_candidate_v1)"
+    );
     println!("  --precision <prec>   Precision: auto, fp16, fp32 (default: auto)");
     println!("  --device <dev>       Device backend: auto, gpu, cuda (default: auto)");
     println!("  --force              Force full execution (ignore cached verification marker)");
@@ -115,22 +122,33 @@ fn check_cached_marker(
     current_precision: &str,
 ) -> Result<serde_json::Value, String> {
     if !marker_path.exists() {
-        return Err(format!("marker file '{}' does not exist", marker_path.display()));
+        return Err(format!(
+            "marker file '{}' does not exist",
+            marker_path.display()
+        ));
     }
-    let content = fs::read_to_string(marker_path)
-        .map_err(|e| format!("failed to read marker file: {e}"))?;
-    let val: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("failed to parse marker JSON: {e}"))?;
+    let content =
+        fs::read_to_string(marker_path).map_err(|e| format!("failed to read marker file: {e}"))?;
+    let val: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("failed to parse marker JSON: {e}"))?;
 
     let status = val.get("status").and_then(|v| v.as_str()).unwrap_or("");
     if status != "PASSED" {
         return Err(format!("marker status is '{status}', expected 'PASSED'"));
     }
 
-    let adamw = val.get("adamw_updated").and_then(|v| v.as_bool()).unwrap_or(false);
-    let parity = val.get("checkpoint_parity_verified").and_then(|v| v.as_bool()).unwrap_or(false);
+    let adamw = val
+        .get("adamw_updated")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let parity = val
+        .get("checkpoint_parity_verified")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if !adamw || !parity {
-        return Err("marker indicates incomplete AdamW or checkpoint parity verification".to_string());
+        return Err(
+            "marker indicates incomplete AdamW or checkpoint parity verification".to_string(),
+        );
     }
 
     let marker_commit = val.get("git_commit").and_then(|v| v.as_str()).unwrap_or("");
@@ -141,7 +159,10 @@ fn check_cached_marker(
         ));
     }
 
-    let marker_fp = val.get("model_config_fingerprint").and_then(|v| v.as_str()).unwrap_or("");
+    let marker_fp = val
+        .get("model_config_fingerprint")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if marker_fp.is_empty() || marker_fp != current_fingerprint {
         return Err(format!(
             "model config fingerprint mismatch: cached='{}', current='{}'",
@@ -173,10 +194,7 @@ fn check_cached_marker(
 /// against the standard combined absolute/relative tolerance bound grounded in IEEE 754 arithmetic.
 fn verify_cross_entropy_finite_differences() {
     println!("[GPU Step Test] Running Deterministic Finite-Difference Gradient Verification...");
-    let test_logits: [f32; 10] = [
-        1.2f32, -0.5, 2.1, 0.0, -1.8,
-        -0.2, 0.8, -1.1, 2.5, 0.4,
-    ];
+    let test_logits: [f32; 10] = [1.2f32, -0.5, 2.1, 0.0, -1.8, -0.2, 0.8, -1.1, 2.5, 0.4];
     let vs = 5usize;
     let seq_len = 2usize;
     let targets = [2usize, 3usize];
@@ -216,12 +234,17 @@ fn verify_cross_entropy_finite_differences() {
             p_plus[idx] += eps;
             p_minus[idx] -= eps;
 
-            let num_grad = (compute_loss_for_logits(&p_plus) - compute_loss_for_logits(&p_minus)) / (2.0 * eps);
+            let num_grad = (compute_loss_for_logits(&p_plus) - compute_loss_for_logits(&p_minus))
+                / (2.0 * eps);
             let ana_grad = analytical_grad[idx];
             let abs_err = (num_grad - ana_grad).abs();
             let rel_err = abs_err / ana_grad.abs().max(1e-4);
-            if abs_err > max_abs_err { max_abs_err = abs_err; }
-            if rel_err > max_rel_err { max_rel_err = rel_err; }
+            if abs_err > max_abs_err {
+                max_abs_err = abs_err;
+            }
+            if rel_err > max_rel_err {
+                max_rel_err = rel_err;
+            }
         }
         println!(
             "[GPU Step Test] [Finite-Diff Sweep] eps={:e} | max_abs_err={:.6e} | max_rel_err={:.6e}",
@@ -322,7 +345,9 @@ fn main() {
     // Hardware GPU Validation
     log_flushed_memory_checkpoint("01_PRE_HARDWARE_CHECK", None);
     if !is_cuda_available() {
-        eprintln!("[GPU Step Test] FATAL: CUDA hardware acceleration is NOT available on this system.");
+        eprintln!(
+            "[GPU Step Test] FATAL: CUDA hardware acceleration is NOT available on this system."
+        );
         eprintln!("[GPU Step Test] Under strict verification, GPU tests will never silently fall back to CPU.");
         exit(1);
     }
@@ -350,7 +375,10 @@ fn main() {
         dev_info.compute_capability.1,
         dev_info.total_vram_bytes as f64 / (1024.0 * 1024.0)
     );
-    println!("[GPU Step Test] Resolved Training Precision: {:?}", gpu_trainer.precision());
+    println!(
+        "[GPU Step Test] Resolved Training Precision: {:?}",
+        gpu_trainer.precision()
+    );
 
     let current_gpu_name = dev_info.name.clone();
     let current_commit = get_current_git_commit();
@@ -419,13 +447,14 @@ fn main() {
     );
 
     println!("[GPU Step Test] Loading production model weights into host memory...");
-    let (weights, loaded_shapes) = match load_model_weights_with_purpose(&model_dir, "GPU_STEP_TEST") {
-        Ok(w) => w,
-        Err(e) => {
-            eprintln!("[GPU Step Test] FATAL: Failed to load model weights: {e}");
-            exit(1);
-        }
-    };
+    let (weights, loaded_shapes) =
+        match load_model_weights_with_purpose(&model_dir, "GPU_STEP_TEST") {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("[GPU Step Test] FATAL: Failed to load model weights: {e}");
+                exit(1);
+            }
+        };
 
     let total_params: usize = weights.values().map(|v| v.len()).sum();
     println!(
@@ -439,7 +468,9 @@ fn main() {
 
     // Milestone 4: Model Weight Registration on GPU
     log_flushed_memory_checkpoint("04_PRE_WEIGHT_REGISTRATION", vram_info);
-    println!("[GPU Step Test] Registering model weights on GPU (Zero Duplicate Allocation Mode)...");
+    println!(
+        "[GPU Step Test] Registering model weights on GPU (Zero Duplicate Allocation Mode)..."
+    );
     if let Err(e) = gpu_trainer.register_weights(&weights) {
         eprintln!("[GPU Step Test] FATAL: Failed to register weights on GPU: {e}");
         exit(1);
@@ -448,7 +479,11 @@ fn main() {
     let is_streaming = gpu_trainer.is_streaming();
     println!(
         "[GPU Step Test] Weight Registration Completed. Optimizer Execution Mode: {}",
-        if is_streaming { "STREAMED (Host Master Weights + GPU Compute Chunks)" } else { "GPU_RESIDENT (All states in VRAM)" }
+        if is_streaming {
+            "STREAMED (Host Master Weights + GPU Compute Chunks)"
+        } else {
+            "GPU_RESIDENT (All states in VRAM)"
+        }
     );
 
     let vram_info = gpu_trainer.get_vram_info().ok();
@@ -479,8 +514,12 @@ fn main() {
     // Milestone 7: Full 13-Layer Forward Pass Execution & Layer Tracing
     let vram_info = gpu_trainer.get_vram_info().ok();
     log_flushed_memory_checkpoint("05_PRE_FORWARD_PASS", vram_info);
-    println!("[GPU Step Test] Running Full Forward Pass across all {} Decoder Layers...", model.layers.len());
-    let (mut layer_inputs, final_normed, _cpu_logits) = model.forward_with_cache(&micro_batch_tokens);
+    println!(
+        "[GPU Step Test] Running Full Forward Pass across all {} Decoder Layers...",
+        model.layers.len()
+    );
+    let (mut layer_inputs, final_normed, _cpu_logits) =
+        model.forward_with_cache(&micro_batch_tokens);
     drop(_cpu_logits);
 
     if layer_inputs.len() != model.layers.len() + 1 {
@@ -495,7 +534,11 @@ fn main() {
     // Trace and verify every decoder layer
     for l in 0..model.layers.len() {
         let l_in = &layer_inputs[l];
-        let l_in_norm: f64 = l_in.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
+        let l_in_norm: f64 = l_in
+            .iter()
+            .map(|&x| (x as f64) * (x as f64))
+            .sum::<f64>()
+            .sqrt();
         if !l_in_norm.is_finite() || l_in_norm <= 0.0 {
             eprintln!("[GPU Step Test] FATAL: Layer {l} input activations must be finite and non-zero (got {l_in_norm})");
             exit(1);
@@ -506,7 +549,11 @@ fn main() {
         );
     }
 
-    let final_norm_l2: f64 = final_normed.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
+    let final_norm_l2: f64 = final_normed
+        .iter()
+        .map(|&x| (x as f64) * (x as f64))
+        .sum::<f64>()
+        .sqrt();
     println!(
         "[GPU Step Test] [Forward Trace] Final RMSNorm executed | Output L2 Norm = {:.4}",
         final_norm_l2
@@ -537,7 +584,9 @@ fn main() {
 
     // Milestone 8: Causal Cross-Entropy Loss and Gradient Calculation
     log_flushed_memory_checkpoint("06_PRE_LOSS_COMPUTATION", vram_info);
-    println!("[GPU Step Test] Calculating Causal Cross-Entropy Loss & Exact Analytical Derivatives...");
+    println!(
+        "[GPU Step Test] Calculating Causal Cross-Entropy Loss & Exact Analytical Derivatives..."
+    );
     let mut d_logits = vec![0.0f32; seq_len * vs];
     let mut total_loss = 0.0f64;
     let mut target_count = 0usize;
@@ -550,8 +599,14 @@ fn main() {
         }
         let logit_start = predictor * vs;
         let logits_slice = &logits[logit_start..logit_start + vs];
-        let max_logit = logits_slice.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-        let sum_exp: f64 = logits_slice.iter().map(|&l| ((l - max_logit) as f64).exp()).sum();
+        let max_logit = logits_slice
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
+        let sum_exp: f64 = logits_slice
+            .iter()
+            .map(|&l| ((l - max_logit) as f64).exp())
+            .sum();
 
         if sum_exp > 0.0 && sum_exp.is_finite() {
             let p_target = ((logits_slice[target] - max_logit) as f64).exp() / sum_exp;
@@ -578,7 +633,11 @@ fn main() {
         *g *= scale_factor;
     }
 
-    let mean_loss = if target_count > 0 { total_loss / target_count as f64 } else { f64::NAN };
+    let mean_loss = if target_count > 0 {
+        total_loss / target_count as f64
+    } else {
+        f64::NAN
+    };
     println!(
         "[GPU Step Test] Cross-Entropy Loss: {:.4} (computed over {} target tokens)",
         mean_loss, target_count
@@ -588,10 +647,19 @@ fn main() {
         exit(1);
     }
 
-    let d_logits_norm: f64 = d_logits.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
-    println!("[GPU Step Test] [Backward Trace] d_logits L2 Norm = {:.6} (non-zero confirmed)", d_logits_norm);
+    let d_logits_norm: f64 = d_logits
+        .iter()
+        .map(|&x| (x as f64) * (x as f64))
+        .sum::<f64>()
+        .sqrt();
+    println!(
+        "[GPU Step Test] [Backward Trace] d_logits L2 Norm = {:.6} (non-zero confirmed)",
+        d_logits_norm
+    );
     if !d_logits_norm.is_finite() || d_logits_norm <= 0.0 {
-        eprintln!("[GPU Step Test] FATAL: d_logits must be non-zero and finite (got {d_logits_norm})");
+        eprintln!(
+            "[GPU Step Test] FATAL: d_logits must be non-zero and finite (got {d_logits_norm})"
+        );
         exit(1);
     }
 
@@ -601,24 +669,35 @@ fn main() {
     // Milestone 9: Backward Pass with Streamed Layer-by-Layer Gradient Accumulation
     log_flushed_memory_checkpoint("07_PRE_LM_HEAD_BACKWARD", vram_info);
     println!("[GPU Step Test] Running Backward LM Head on GPU...");
-    let (gpu_dlm, gpu_dnorm) = match gpu_trainer.backward_lm_head(&d_logits, &final_normed, seq_len, hs, vs) {
-        Ok(res) => res,
-        Err(e) => {
-            eprintln!("[GPU Step Test] FATAL: GPU backward LM head failed: {e}");
-            exit(1);
-        }
-    };
+    let (gpu_dlm, gpu_dnorm) =
+        match gpu_trainer.backward_lm_head(&d_logits, &final_normed, seq_len, hs, vs) {
+            Ok(res) => res,
+            Err(e) => {
+                eprintln!("[GPU Step Test] FATAL: GPU backward LM head failed: {e}");
+                exit(1);
+            }
+        };
     drop(d_logits);
 
-    let d_lm_norm: f64 = gpu_dlm.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
-    let d_norm_norm: f64 = gpu_dnorm.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
+    let d_lm_norm: f64 = gpu_dlm
+        .iter()
+        .map(|&x| (x as f64) * (x as f64))
+        .sum::<f64>()
+        .sqrt();
+    let d_norm_norm: f64 = gpu_dnorm
+        .iter()
+        .map(|&x| (x as f64) * (x as f64))
+        .sum::<f64>()
+        .sqrt();
     println!("[GPU Step Test] [Backward Trace] LM Head Backward: d_lm_head L2 Norm = {:.6}, d_final_normed L2 Norm = {:.6}", d_lm_norm, d_norm_norm);
     if !d_lm_norm.is_finite() || d_lm_norm <= 0.0 {
         eprintln!("[GPU Step Test] FATAL: d_lm_head must be non-zero and finite (got {d_lm_norm})");
         exit(1);
     }
     if !d_norm_norm.is_finite() || d_norm_norm <= 0.0 {
-        eprintln!("[GPU Step Test] FATAL: d_final_normed must be non-zero and finite (got {d_norm_norm})");
+        eprintln!(
+            "[GPU Step Test] FATAL: d_final_normed must be non-zero and finite (got {d_norm_norm})"
+        );
         exit(1);
     }
 
@@ -630,21 +709,24 @@ fn main() {
     let mut accumulated_tensor_count = 0usize;
 
     // Accumulate LM Head gradient onto GPU immediately and free host buffer
-    host_sq_sum += gpu_dlm.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>();
+    host_sq_sum += gpu_dlm
+        .iter()
+        .map(|&x| (x as f64) * (x as f64))
+        .sum::<f64>();
     if let Err(e) = gpu_trainer.accumulate_gradient("lm_head.weight", &gpu_dlm) {
-        eprintln!("[GPU Step Test] FATAL: Failed to accumulate gradient for 'lm_head.weight' on GPU: {e}");
+        eprintln!(
+            "[GPU Step Test] FATAL: Failed to accumulate gradient for 'lm_head.weight' on GPU: {e}"
+        );
         exit(1);
     }
     accumulated_tensor_count += 1;
     drop(gpu_dlm);
 
     println!("[GPU Step Test] Running Backward through Final RMSNorm...");
-    let (mut dx, d_norm) = model.norm.backward(
-        &gpu_dnorm,
-        layer_inputs.last().unwrap(),
-        seq_len,
-        hs,
-    );
+    let (mut dx, d_norm) =
+        model
+            .norm
+            .backward(&gpu_dnorm, layer_inputs.last().unwrap(), seq_len, hs);
     drop(gpu_dnorm);
     drop(final_normed);
     layer_inputs.pop(); // drop layer 12 output / norm input
@@ -669,9 +751,23 @@ fn main() {
         drop(l_in);
         dx = l_grads.dx;
 
-        let q_norm: f64 = l_grads.d_q_proj.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
-        let mlp_norm: f64 = l_grads.d_down_proj.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
-        let dx_norm: f64 = dx.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
+        let q_norm: f64 = l_grads
+            .d_q_proj
+            .iter()
+            .map(|&x| (x as f64) * (x as f64))
+            .sum::<f64>()
+            .sqrt();
+        let mlp_norm: f64 = l_grads
+            .d_down_proj
+            .iter()
+            .map(|&x| (x as f64) * (x as f64))
+            .sum::<f64>()
+            .sqrt();
+        let dx_norm: f64 = dx
+            .iter()
+            .map(|&x| (x as f64) * (x as f64))
+            .sum::<f64>()
+            .sqrt();
         println!(
             "[GPU Step Test] [Backward Trace] Layer {:02}/{:02} Backward: dQ Norm = {:.6}, dDown Norm = {:.6}, dx Norm = {:.6}",
             l, model.layers.len(), q_norm, mlp_norm, dx_norm
@@ -679,15 +775,39 @@ fn main() {
 
         let prefix = format!("model.layers.{l}");
         let layer_tensor_grads = [
-            (format!("{prefix}.input_layernorm.weight"), l_grads.d_input_layernorm),
-            (format!("{prefix}.self_attn.q_proj.weight"), l_grads.d_q_proj),
-            (format!("{prefix}.self_attn.k_proj.weight"), l_grads.d_k_proj),
-            (format!("{prefix}.self_attn.v_proj.weight"), l_grads.d_v_proj),
-            (format!("{prefix}.self_attn.o_proj.weight"), l_grads.d_o_proj),
-            (format!("{prefix}.post_attention_layernorm.weight"), l_grads.d_post_attention_layernorm),
-            (format!("{prefix}.mlp.gate_proj.weight"), l_grads.d_gate_proj),
+            (
+                format!("{prefix}.input_layernorm.weight"),
+                l_grads.d_input_layernorm,
+            ),
+            (
+                format!("{prefix}.self_attn.q_proj.weight"),
+                l_grads.d_q_proj,
+            ),
+            (
+                format!("{prefix}.self_attn.k_proj.weight"),
+                l_grads.d_k_proj,
+            ),
+            (
+                format!("{prefix}.self_attn.v_proj.weight"),
+                l_grads.d_v_proj,
+            ),
+            (
+                format!("{prefix}.self_attn.o_proj.weight"),
+                l_grads.d_o_proj,
+            ),
+            (
+                format!("{prefix}.post_attention_layernorm.weight"),
+                l_grads.d_post_attention_layernorm,
+            ),
+            (
+                format!("{prefix}.mlp.gate_proj.weight"),
+                l_grads.d_gate_proj,
+            ),
             (format!("{prefix}.mlp.up_proj.weight"), l_grads.d_up_proj),
-            (format!("{prefix}.mlp.down_proj.weight"), l_grads.d_down_proj),
+            (
+                format!("{prefix}.mlp.down_proj.weight"),
+                l_grads.d_down_proj,
+            ),
         ];
 
         for (name, g_vec) in layer_tensor_grads {
@@ -698,7 +818,9 @@ fn main() {
             }
             host_sq_sum += t_sq;
             if let Err(e) = gpu_trainer.accumulate_gradient(&name, &g_vec) {
-                eprintln!("[GPU Step Test] FATAL: Failed to accumulate gradient for '{name}' on GPU: {e}");
+                eprintln!(
+                    "[GPU Step Test] FATAL: Failed to accumulate gradient for '{name}' on GPU: {e}"
+                );
                 exit(1);
             }
             accumulated_tensor_count += 1;
@@ -722,14 +844,21 @@ fn main() {
     drop(dx);
     drop(layer_inputs);
 
-    let emb_grad_norm: f64 = d_embed_tokens.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>().sqrt();
+    let emb_grad_norm: f64 = d_embed_tokens
+        .iter()
+        .map(|&x| (x as f64) * (x as f64))
+        .sum::<f64>()
+        .sqrt();
     println!("[GPU Step Test] [Backward Trace] Token Embeddings Backward: d_embed_tokens L2 Norm = {:.6}", emb_grad_norm);
     if !emb_grad_norm.is_finite() || emb_grad_norm <= 0.0 {
         eprintln!("[GPU Step Test] FATAL: Token embeddings gradient must be non-zero and finite (got {emb_grad_norm})");
         exit(1);
     }
 
-    host_sq_sum += d_embed_tokens.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>();
+    host_sq_sum += d_embed_tokens
+        .iter()
+        .map(|&x| (x as f64) * (x as f64))
+        .sum::<f64>();
     if let Err(e) = gpu_trainer.accumulate_gradient("model.embed_tokens.weight", &d_embed_tokens) {
         eprintln!("[GPU Step Test] FATAL: Failed to accumulate gradient for 'model.embed_tokens.weight' on GPU: {e}");
         exit(1);
@@ -745,7 +874,10 @@ fn main() {
 
     // Convert in-memory model back into canonical weights map without cloning
     let mut weights = model.into_weights_map();
-    println!("[GPU Step Test] Deconstructed in-memory model back into weights map with {} tensors.", weights.len());
+    println!(
+        "[GPU Step Test] Deconstructed in-memory model back into weights map with {} tensors.",
+        weights.len()
+    );
     if accumulated_tensor_count != weights.len() {
         eprintln!(
             "[GPU Step Test] FATAL: Accumulated gradient count ({accumulated_tensor_count}) does not match weights count ({})",
@@ -755,7 +887,10 @@ fn main() {
     }
 
     let host_global_grad_norm = host_sq_sum.sqrt() as f32;
-    println!("[GPU Step Test] Host Reference FP32 Global Gradient L2 Norm: {:.6}", host_global_grad_norm);
+    println!(
+        "[GPU Step Test] Host Reference FP32 Global Gradient L2 Norm: {:.6}",
+        host_global_grad_norm
+    );
     if !host_global_grad_norm.is_finite() || host_global_grad_norm <= 0.0 {
         eprintln!("[GPU Step Test] FATAL: Host gradient norm must be positive and finite (got {host_global_grad_norm})");
         exit(1);
@@ -774,7 +909,10 @@ fn main() {
         }
     };
 
-    println!("[GPU Step Test] Measured Global Gradient L2 Norm on GPU: {:.6}", gpu_global_grad_norm);
+    println!(
+        "[GPU Step Test] Measured Global Gradient L2 Norm on GPU: {:.6}",
+        gpu_global_grad_norm
+    );
     if !gpu_global_grad_norm.is_finite() || gpu_global_grad_norm <= 0.0 {
         eprintln!("[GPU Step Test] FATAL: Degenerate or non-finite GPU gradient norm: {gpu_global_grad_norm}");
         exit(1);
@@ -806,13 +944,23 @@ fn main() {
     println!("[GPU Step Test] Capturing bounded parameter snapshots before AdamW update...");
     // Snapshot full small tensors across architecture tiers (bounded to a few KB total)
     let initial_norm = weights.get("model.norm.weight").cloned().expect("norm");
-    let initial_layer0_ln = weights.get("model.layers.0.input_layernorm.weight").cloned().expect("layer0.input_layernorm");
-    let initial_layer12_ln = weights.get("model.layers.12.input_layernorm.weight").cloned().expect("layer12.input_layernorm");
+    let initial_layer0_ln = weights
+        .get("model.layers.0.input_layernorm.weight")
+        .cloned()
+        .expect("layer0.input_layernorm");
+    let initial_layer12_ln = weights
+        .get("model.layers.12.input_layernorm.weight")
+        .cloned()
+        .expect("layer12.input_layernorm");
 
     // Snapshot bounded representative slices of massive projection tensors (4096 elements = 16 KB)
     let lm_head_ref = weights.get("lm_head.weight").expect("lm_head");
-    let embed_ref = weights.get("model.embed_tokens.weight").expect("embed_tokens");
-    let layer0_q_ref = weights.get("model.layers.0.self_attn.q_proj.weight").expect("layer0.q_proj");
+    let embed_ref = weights
+        .get("model.embed_tokens.weight")
+        .expect("embed_tokens");
+    let layer0_q_ref = weights
+        .get("model.layers.0.self_attn.q_proj.weight")
+        .expect("layer0.q_proj");
 
     let slice_len = 4096.min(lm_head_ref.len());
     let initial_lm_head_slice = lm_head_ref[..slice_len].to_vec();
@@ -826,8 +974,8 @@ fn main() {
     println!("[GPU Step Test] Executing GPU AdamW Step across all parameters...");
     let step_result = match gpu_trainer.step_adamw_with_weights(
         &mut weights,
-        1e-3, // lr
-        0.9,  // beta1
+        1e-3,  // lr
+        0.9,   // beta1
         0.999, // beta2
         1e-8,  // eps
         0.01,  // weight_decay
@@ -875,15 +1023,55 @@ fn main() {
         max_d
     };
 
-    check_param_delta("model.norm.weight", &initial_norm, weights.get("model.norm.weight").unwrap());
-    check_param_delta("model.layers.0.input_layernorm.weight", &initial_layer0_ln, weights.get("model.layers.0.input_layernorm.weight").unwrap());
-    check_param_delta("model.layers.12.input_layernorm.weight", &initial_layer12_ln, weights.get("model.layers.12.input_layernorm.weight").unwrap());
-    check_param_delta("lm_head.weight[..slice]", &initial_lm_head_slice, &weights.get("lm_head.weight").unwrap()[..slice_len]);
-    check_param_delta("model.embed_tokens.weight[..slice]", &initial_embed_slice, &weights.get("model.embed_tokens.weight").unwrap()[..slice_len]);
-    check_param_delta("model.layers.0.self_attn.q_proj.weight[..slice]", &initial_layer0_q_slice, &weights.get("model.layers.0.self_attn.q_proj.weight").unwrap()[..slice_len]);
+    check_param_delta(
+        "model.norm.weight",
+        &initial_norm,
+        weights.get("model.norm.weight").unwrap(),
+    );
+    check_param_delta(
+        "model.layers.0.input_layernorm.weight",
+        &initial_layer0_ln,
+        weights
+            .get("model.layers.0.input_layernorm.weight")
+            .unwrap(),
+    );
+    check_param_delta(
+        "model.layers.12.input_layernorm.weight",
+        &initial_layer12_ln,
+        weights
+            .get("model.layers.12.input_layernorm.weight")
+            .unwrap(),
+    );
+    check_param_delta(
+        "lm_head.weight[..slice]",
+        &initial_lm_head_slice,
+        &weights.get("lm_head.weight").unwrap()[..slice_len],
+    );
+    check_param_delta(
+        "model.embed_tokens.weight[..slice]",
+        &initial_embed_slice,
+        &weights.get("model.embed_tokens.weight").unwrap()[..slice_len],
+    );
+    check_param_delta(
+        "model.layers.0.self_attn.q_proj.weight[..slice]",
+        &initial_layer0_q_slice,
+        &weights
+            .get("model.layers.0.self_attn.q_proj.weight")
+            .unwrap()[..slice_len],
+    );
 
-    let updated_lm_head_sum: f64 = weights.get("lm_head.weight").unwrap().iter().map(|&x| x as f64).sum();
-    let updated_embed_sum: f64 = weights.get("model.embed_tokens.weight").unwrap().iter().map(|&x| x as f64).sum();
+    let updated_lm_head_sum: f64 = weights
+        .get("lm_head.weight")
+        .unwrap()
+        .iter()
+        .map(|&x| x as f64)
+        .sum();
+    let updated_embed_sum: f64 = weights
+        .get("model.embed_tokens.weight")
+        .unwrap()
+        .iter()
+        .map(|&x| x as f64)
+        .sum();
     let delta_lm_head_sum = (updated_lm_head_sum - initial_lm_head_sum).abs();
     let delta_embed_sum = (updated_embed_sum - initial_embed_sum).abs();
     println!(
@@ -906,7 +1094,10 @@ fn main() {
     fs::create_dir_all(&temp_cp_dir).expect("Create temp test checkpoint directory");
 
     log_flushed_memory_checkpoint("13_PRE_CHECKPOINT_WRITE", vram_info);
-    println!("[GPU Step Test] Saving checkpoint to: {}", temp_cp_dir.display());
+    println!(
+        "[GPU Step Test] Saving checkpoint to: {}",
+        temp_cp_dir.display()
+    );
     let shapes = if !loaded_shapes.is_empty() {
         loaded_shapes
     } else {
@@ -952,7 +1143,10 @@ fn main() {
 
     let index_file_path = temp_cp_dir.join("model.safetensors.index.json");
     if !index_file_path.exists() {
-        eprintln!("[GPU Step Test] FATAL: Checkpoint index missing at {}", index_file_path.display());
+        eprintln!(
+            "[GPU Step Test] FATAL: Checkpoint index missing at {}",
+            index_file_path.display()
+        );
         let _ = fs::remove_dir_all(&temp_cp_dir);
         exit(1);
     }
@@ -1001,14 +1195,18 @@ fn main() {
             shard_files.len(),
             shard_path.display()
         );
-        let (shard_tensors, shard_shapes) = match load_safetensors_with_shapes(&shard_path.to_string_lossy()) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("[GPU Step Test] FATAL: Failed to load shard '{}': {e}", shard_path.display());
-                let _ = fs::remove_dir_all(&temp_cp_dir);
-                exit(1);
-            }
-        };
+        let (shard_tensors, shard_shapes) =
+            match load_safetensors_with_shapes(&shard_path.to_string_lossy()) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!(
+                        "[GPU Step Test] FATAL: Failed to load shard '{}': {e}",
+                        shard_path.display()
+                    );
+                    let _ = fs::remove_dir_all(&temp_cp_dir);
+                    exit(1);
+                }
+            };
 
         for (name, rel_vals) in shard_tensors {
             if let Some(orig_vals) = weights.get(&name) {
@@ -1052,7 +1250,10 @@ fn main() {
 
         // Shard is dropped here, reclaiming memory immediately before next shard is read
         let vram_snap = gpu_trainer.get_vram_info().ok();
-        log_flushed_memory_checkpoint(&format!("14_POST_SHARD_PARITY_{}", shard_idx + 1), vram_snap);
+        log_flushed_memory_checkpoint(
+            &format!("14_POST_SHARD_PARITY_{}", shard_idx + 1),
+            vram_snap,
+        );
     }
 
     if verified_tensor_count != weights.len() {
@@ -1102,7 +1303,10 @@ fn main() {
     });
     if let Ok(marker_str) = serde_json::to_string_pretty(&marker_json) {
         let _ = fs::write(&marker_path, marker_str);
-        println!("[GPU Step Test] Verified completion marker written to: {}", marker_path.display());
+        println!(
+            "[GPU Step Test] Verified completion marker written to: {}",
+            marker_path.display()
+        );
     }
 
     log_flushed_memory_checkpoint("15_FINAL_COMPLETION", vram_info);
@@ -1126,7 +1330,10 @@ mod tests {
 
         let fp1 = compute_model_config_fingerprint(&temp_dir).expect("fingerprint 1");
         let fp2 = compute_model_config_fingerprint(&temp_dir).expect("fingerprint 2");
-        assert_eq!(fp1, fp2, "Fingerprint of unchanged directory must be identical");
+        assert_eq!(
+            fp1, fp2,
+            "Fingerprint of unchanged directory must be identical"
+        );
 
         // Mutating config must change fingerprint
         fs::write(&config_path, r#"{"vocab_size": 200, "hidden_size": 64}"#).unwrap();
@@ -1138,7 +1345,8 @@ mod tests {
 
     #[test]
     fn test_check_cached_marker_matching_and_rejection() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_test_marker_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_test_marker_{}", std::process::id()));
         let _ = fs::create_dir_all(&temp_dir);
         let marker_path = temp_dir.join("gpu_step_test_complete.json");
 
@@ -1157,18 +1365,38 @@ mod tests {
         fs::write(&marker_path, serde_json::to_string(&valid_marker).unwrap()).unwrap();
 
         // 1. Exact match must succeed
-        let res = check_cached_marker(&marker_path, "abc1234", "fp_test_123", "NVIDIA A100", "fp16");
+        let res = check_cached_marker(
+            &marker_path,
+            "abc1234",
+            "fp_test_123",
+            "NVIDIA A100",
+            "fp16",
+        );
         assert!(res.is_ok(), "Exact match must succeed: {:?}", res);
 
         // 2. Commit mismatch must be rejected
-        let res = check_cached_marker(&marker_path, "different_commit", "fp_test_123", "NVIDIA A100", "fp16");
+        let res = check_cached_marker(
+            &marker_path,
+            "different_commit",
+            "fp_test_123",
+            "NVIDIA A100",
+            "fp16",
+        );
         assert!(res.is_err());
         assert!(res.unwrap_err().contains("git commit mismatch"));
 
         // 3. Model fingerprint mismatch must be rejected
-        let res = check_cached_marker(&marker_path, "abc1234", "fp_modified", "NVIDIA A100", "fp16");
+        let res = check_cached_marker(
+            &marker_path,
+            "abc1234",
+            "fp_modified",
+            "NVIDIA A100",
+            "fp16",
+        );
         assert!(res.is_err());
-        assert!(res.unwrap_err().contains("model config fingerprint mismatch"));
+        assert!(res
+            .unwrap_err()
+            .contains("model config fingerprint mismatch"));
 
         // 4. GPU hardware mismatch must be rejected
         let res = check_cached_marker(&marker_path, "abc1234", "fp_test_123", "Tesla T4", "fp16");
@@ -1176,17 +1404,28 @@ mod tests {
         assert!(res.unwrap_err().contains("GPU hardware mismatch"));
 
         // 5. Precision mismatch must be rejected
-        let res = check_cached_marker(&marker_path, "abc1234", "fp_test_123", "NVIDIA A100", "fp32");
+        let res = check_cached_marker(
+            &marker_path,
+            "abc1234",
+            "fp_test_123",
+            "NVIDIA A100",
+            "fp32",
+        );
         assert!(res.is_err());
         assert!(res.unwrap_err().contains("precision mismatch"));
 
         // 6. Missing marker must be rejected
         let non_existent = temp_dir.join("missing.json");
-        let res = check_cached_marker(&non_existent, "abc1234", "fp_test_123", "NVIDIA A100", "fp16");
+        let res = check_cached_marker(
+            &non_existent,
+            "abc1234",
+            "fp_test_123",
+            "NVIDIA A100",
+            "fp16",
+        );
         assert!(res.is_err());
         assert!(res.unwrap_err().contains("does not exist"));
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }
-

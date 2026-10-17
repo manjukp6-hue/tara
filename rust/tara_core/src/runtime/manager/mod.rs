@@ -145,10 +145,8 @@ impl TaraManager {
         } = params;
 
         // Least-privilege capability set scoped specifically to the task
-        let mut caller_caps = HashSet::from([
-            "sandbox:create".to_string(),
-            "sandbox:execute".to_string(),
-        ]);
+        let mut caller_caps =
+            HashSet::from(["sandbox:create".to_string(), "sandbox:execute".to_string()]);
         for tool in required_tools {
             caller_caps.insert(format!("tool:{}", tool));
         }
@@ -213,9 +211,9 @@ impl TaraManager {
                 res
             }
             Err(e) => {
-                let _ = self
-                    .recovery
-                    .handle_failure(&sbx_id, FailureCategory::SecurityViolation, &e);
+                let _ =
+                    self.recovery
+                        .handle_failure(&sbx_id, FailureCategory::SecurityViolation, &e);
                 let _ = self.release(&sbx_id);
                 return Err(format!("Execution failed: {}", e));
             }
@@ -944,7 +942,11 @@ mod tests {
 
         assert!(RuntimeManagerOps::delete(&mut mgr, &team_id).is_ok());
         assert!(!mgr.teams.contains_key(&team_id));
-        assert!(mgr.naming.list_retired_names().iter().any(|r| r.internal_id == team_id));
+        assert!(mgr
+            .naming
+            .list_retired_names()
+            .iter()
+            .any(|r| r.internal_id == team_id));
         assert!(mgr.agents.get(&agt_id).unwrap().team_id.is_none());
         assert!(mgr.workers.get(&wrk_id).unwrap().team_id.is_none());
 
@@ -957,17 +959,40 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert!(mgr.teams.get(&team2_id).unwrap().member_ids.contains(&agt_id));
+        assert!(mgr
+            .teams
+            .get(&team2_id)
+            .unwrap()
+            .member_ids
+            .contains(&agt_id));
 
         assert!(RuntimeManagerOps::delete(&mut mgr, &agt_id).is_ok());
         assert!(!mgr.agents.contains_key(&agt_id));
-        assert!(mgr.naming.list_retired_names().iter().any(|r| r.internal_id == agt_id));
-        assert!(!mgr.teams.get(&team2_id).unwrap().member_ids.contains(&agt_id));
+        assert!(mgr
+            .naming
+            .list_retired_names()
+            .iter()
+            .any(|r| r.internal_id == agt_id));
+        assert!(!mgr
+            .teams
+            .get(&team2_id)
+            .unwrap()
+            .member_ids
+            .contains(&agt_id));
 
         assert!(RuntimeManagerOps::delete(&mut mgr, &wrk_id).is_ok());
         assert!(!mgr.workers.contains_key(&wrk_id));
-        assert!(mgr.naming.list_retired_names().iter().any(|r| r.internal_id == wrk_id));
-        assert!(!mgr.teams.get(&team2_id).unwrap().member_ids.contains(&wrk_id));
+        assert!(mgr
+            .naming
+            .list_retired_names()
+            .iter()
+            .any(|r| r.internal_id == wrk_id));
+        assert!(!mgr
+            .teams
+            .get(&team2_id)
+            .unwrap()
+            .member_ids
+            .contains(&wrk_id));
     }
 
     #[test]

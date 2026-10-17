@@ -34,16 +34,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tara_security::primitives::AuthenticatedPrincipal;
+use super::tools_registry::ToolRegistry;
 use crate::brain::TrainingLifecycleState;
+use crate::control_plane::registry::{Capability, CapabilityCategory, CapabilityRegistry};
 use crate::learning::{
     AutonomousOnlineLearner, CapabilitySynthesizer, ContinualLearningGovernor, SelfUpgradeEngine,
 };
-use crate::control_plane::registry::{Capability, CapabilityCategory, CapabilityRegistry};
 use crate::rules::ExecutionGuard;
 use crate::skills::SkillEngine;
-use super::tools_registry::ToolRegistry;
 use tara_engine::{SelfUpdateController, SkillsEvaluator};
+use tara_security::primitives::AuthenticatedPrincipal;
 
 /// Unified orchestrator coordinating TARA's existing capability and self-evolution systems.
 pub struct AbilityEngine {

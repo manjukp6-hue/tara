@@ -3,13 +3,13 @@
 //! Direct server adapter over the canonical `tara_security::tara_control::gated_goals::GatedGoalVaultEngine`.
 //! Connects the server's `RewardSystem` via `GoalRewardDisburser` without circular crate dependencies.
 
+use serde_json::Value;
 use std::path::Path;
 use std::sync::Arc;
-use serde_json::Value;
 
+use crate::reward::{RewardCategory, RewardSystem};
 use tara_security::lockdown::LockdownCoordinator;
 use tara_security::primitives::{AuthenticatedPrincipal, VerifiedPrincipal};
-use crate::reward::{RewardCategory, RewardSystem};
 
 // Re-export canonical types from tara_security
 pub use tara_security::tara_control::gated_goals::{
@@ -39,17 +39,11 @@ impl GoalRewardDisburser for ServerRewardDisburser {
     ) -> Result<String, String> {
         let rew_event = self
             .reward_system
-            .record_reward(
-                recipient,
-                RewardCategory::TaskCompletion,
-                points,
-                reason,
-            )
+            .record_reward(recipient, RewardCategory::TaskCompletion, points, reason)
             .map_err(|e| format!("RewardDisbursementError: {}", e))?;
         Ok(rew_event.event_id)
     }
 }
-
 
 /// Canonical Creator-Gated Goal System facade for TARA Server.
 /// Delegates all storage, encryption, and milestone logic to `GatedGoalVaultEngine` in `tara_security`.
@@ -193,6 +187,7 @@ impl GatedGoalSystem {
     /// Strictly hidden from public docs and forbidden in production code.
     #[doc(hidden)]
     pub fn test_inject_tampered_task_reward(&self, task_id: &str, tampered_points: f64) {
-        self.engine.test_inject_tampered_task_reward(task_id, tampered_points);
+        self.engine
+            .test_inject_tampered_task_reward(task_id, tampered_points);
     }
 }

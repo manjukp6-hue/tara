@@ -178,7 +178,8 @@ impl ComputeChannel {
         in_dim: usize,
         out_dim: usize,
     ) -> Result<Vec<f32>, String> {
-        self.active_device.forward_linear(weight, x, seq_len, in_dim, out_dim)
+        self.active_device
+            .forward_linear(weight, x, seq_len, in_dim, out_dim)
     }
 
     /// Dispatch RMSNorm forward pass through the active compute device.
@@ -190,7 +191,8 @@ impl ComputeChannel {
         hidden_dim: usize,
         eps: f32,
     ) -> Result<Vec<f32>, String> {
-        self.active_device.forward_rmsnorm(weight, x, seq_len, hidden_dim, eps)
+        self.active_device
+            .forward_rmsnorm(weight, x, seq_len, hidden_dim, eps)
     }
 
     /// Dispatch SwiGLU forward pass through the active compute device.
@@ -213,7 +215,8 @@ impl ComputeChannel {
         in_dim: usize,
         out_dim: usize,
     ) -> Result<(Vec<f32>, Vec<f32>), String> {
-        self.active_device.backward_linear(weight, d_out, x, seq_len, in_dim, out_dim)
+        self.active_device
+            .backward_linear(weight, d_out, x, seq_len, in_dim, out_dim)
     }
 
     /// Dispatch named linear forward projection through the active compute device.
@@ -226,7 +229,14 @@ impl ComputeChannel {
         in_dim: usize,
         out_dim: usize,
     ) -> Result<Vec<f32>, String> {
-        self.active_device.forward_linear_named(weight_name, weight_slice, x, seq_len, in_dim, out_dim)
+        self.active_device.forward_linear_named(
+            weight_name,
+            weight_slice,
+            x,
+            seq_len,
+            in_dim,
+            out_dim,
+        )
     }
 
     /// Dispatch named RMSNorm forward pass through the active compute device.
@@ -239,7 +249,14 @@ impl ComputeChannel {
         hidden_dim: usize,
         eps: f32,
     ) -> Result<Vec<f32>, String> {
-        self.active_device.forward_rmsnorm_named(weight_name, weight_slice, x, seq_len, hidden_dim, eps)
+        self.active_device.forward_rmsnorm_named(
+            weight_name,
+            weight_slice,
+            x,
+            seq_len,
+            hidden_dim,
+            eps,
+        )
     }
 
     /// Dispatch named linear backward projection through the active compute device.
@@ -253,7 +270,15 @@ impl ComputeChannel {
         in_dim: usize,
         out_dim: usize,
     ) -> Result<(Vec<f32>, Vec<f32>), String> {
-        self.active_device.backward_linear_named(weight_name, weight_slice, d_out, x, seq_len, in_dim, out_dim)
+        self.active_device.backward_linear_named(
+            weight_name,
+            weight_slice,
+            d_out,
+            x,
+            seq_len,
+            in_dim,
+            out_dim,
+        )
     }
 
     /// Dispatch embedding forward lookup through the active compute device.
@@ -263,7 +288,8 @@ impl ComputeChannel {
         embed_table: &[f32],
         hidden_size: usize,
     ) -> Result<Vec<f32>, String> {
-        self.active_device.forward_embedding(token_ids, embed_table, hidden_size)
+        self.active_device
+            .forward_embedding(token_ids, embed_table, hidden_size)
     }
 
     /// Dispatch gradient accumulation into device parameter buffer.

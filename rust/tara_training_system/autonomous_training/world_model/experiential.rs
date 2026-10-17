@@ -273,7 +273,10 @@ impl ExperientialLearningEngine {
 
         // Stage 11: Strategy Adaptation (In-memory update)
         {
-            let mut mem = self.in_memory_lessons.lock().unwrap_or_else(|p| p.into_inner());
+            let mut mem = self
+                .in_memory_lessons
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             mem.push(lesson.clone());
         }
         traces.push(StageTrace {
@@ -321,7 +324,10 @@ impl ExperientialLearningEngine {
         category: &str,
         description: &str,
     ) -> Vec<LessonLearned> {
-        let mem = self.in_memory_lessons.lock().unwrap_or_else(|p| p.into_inner());
+        let mem = self
+            .in_memory_lessons
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let desc_lower = description.to_lowercase();
         let cat_lower = category.to_lowercase();
 
@@ -349,13 +355,19 @@ impl ExperientialLearningEngine {
 
     /// Returns all registered lessons count.
     pub fn lesson_count(&self) -> usize {
-        self.in_memory_lessons.lock().unwrap_or_else(|p| p.into_inner()).len()
+        self.in_memory_lessons
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .len()
     }
 
     /// Records and persists a lesson learned from a cognitive turn.
     pub fn record_lesson(&self, lesson: LessonLearned) {
         {
-            let mut mem = self.in_memory_lessons.lock().unwrap_or_else(|p| p.into_inner());
+            let mut mem = self
+                .in_memory_lessons
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             mem.push(lesson.clone());
         }
         if let Ok(mut file) = OpenOptions::new()
@@ -377,7 +389,10 @@ impl ExperientialLearningEngine {
         min_confidence: f64,
         dataset_subdir: Option<&str>,
     ) -> Result<Value, std::io::Error> {
-        let mem = self.in_memory_lessons.lock().unwrap_or_else(|p| p.into_inner());
+        let mem = self
+            .in_memory_lessons
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let safe_subdir: String = dataset_subdir
             .unwrap_or("reasoning")
             .trim()

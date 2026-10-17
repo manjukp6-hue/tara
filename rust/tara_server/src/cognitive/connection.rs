@@ -544,7 +544,10 @@ impl ConnectionManager {
         }
         drop(profiles);
 
-        tara_security::persistence::atomic_write_file_hardened(&self.storage_path, content.as_bytes())?;
+        tara_security::persistence::atomic_write_file_hardened(
+            &self.storage_path,
+            content.as_bytes(),
+        )?;
 
         // Cryptographic HMAC integrity seal for user connections
         let parent_dir = self
@@ -553,7 +556,10 @@ impl ConnectionManager {
             .ok_or_else(|| "Invalid storage path parent".to_string())?;
         let sig_path = parent_dir.join("user_connections.sig");
         let hmac_key = tara_security::dpapi::derive_authority_hmac_key("user_connections")?;
-        let sig_hex = tara_security::cryptography::CryptoUtils::hmac_sha256_hex(&hmac_key, content.as_bytes())?;
+        let sig_hex = tara_security::cryptography::CryptoUtils::hmac_sha256_hex(
+            &hmac_key,
+            content.as_bytes(),
+        )?;
         tara_security::persistence::atomic_write_file_hardened(&sig_path, sig_hex.as_bytes())?;
 
         Ok(())
@@ -616,8 +622,9 @@ mod tests {
         assert_eq!(style["include_formal_proofs"], true);
         assert_eq!(style["heuristic_telemetry"], true);
 
-        let governed =
-            manager.enforce_family_respect_and_honorifics(" ನೀನು ಇಲ್ಲಿ ಬಾ ಮತ್ತು ನಿನ್ನ ಕೆಲಸ ಮಾಡು ಹಾಗೂ ನಿನಗೆ ಒಳ್ಳೆಯದಾಗಲಿ ");
+        let governed = manager.enforce_family_respect_and_honorifics(
+            " ನೀನು ಇಲ್ಲಿ ಬಾ ಮತ್ತು ನಿನ್ನ ಕೆಲಸ ಮಾಡು ಹಾಗೂ ನಿನಗೆ ಒಳ್ಳೆಯದಾಗಲಿ ",
+        );
         assert!(governed.contains(" ನೀವು "));
         assert!(governed.contains(" ಬನ್ನಿ "));
         assert!(governed.contains(" ತಮ್ಮ "));
@@ -656,12 +663,16 @@ mod tests {
 
     #[test]
     fn test_user_connection_hmac_tamper_rejection() {
-        let tmp = std::env::temp_dir().join(format!("tara_hmac_tamper_test_{}", uuid::Uuid::new_v4()));
+        let tmp =
+            std::env::temp_dir().join(format!("tara_hmac_tamper_test_{}", uuid::Uuid::new_v4()));
         let manager = ConnectionManager::new(&tmp);
         let _ = manager.record_interaction_turn("actor_one", "Kannada input", true);
 
         // Tamper with storage file directly on disk
-        let storage_path = tmp.join("storage").join("persistence").join("user_connections.jsonl");
+        let storage_path = tmp
+            .join("storage")
+            .join("persistence")
+            .join("user_connections.jsonl");
         let content = fs::read_to_string(&storage_path).unwrap();
         let tampered = content.replace("actor_one", "hacked_actor");
         fs::write(&storage_path, tampered).unwrap();

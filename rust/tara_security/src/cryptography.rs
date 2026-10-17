@@ -70,11 +70,15 @@ impl SignatureVerifier for Ed25519Verifier {
             return Err("Invalid Ed25519 signature length: expected 64 bytes".into());
         }
 
-        let key_bytes: [u8; 32] = public_key.try_into().map_err(|_| "Failed to cast key bytes")?;
+        let key_bytes: [u8; 32] = public_key
+            .try_into()
+            .map_err(|_| "Failed to cast key bytes")?;
         let verifier = VerifyingKey::from_bytes(&key_bytes)
             .map_err(|e| format!("Invalid Ed25519 public key: {e}"))?;
 
-        let sig_bytes: [u8; 64] = signature.try_into().map_err(|_| "Failed to cast signature bytes")?;
+        let sig_bytes: [u8; 64] = signature
+            .try_into()
+            .map_err(|_| "Failed to cast signature bytes")?;
         let sig = Ed25519Sig::from_bytes(&sig_bytes);
 
         verifier
@@ -91,7 +95,12 @@ impl SignatureVerifier for Rs256Verifier {
         AlgorithmId::Rs256
     }
 
-    fn verify(&self, public_key_der: &[u8], message: &[u8], signature: &[u8]) -> Result<(), String> {
+    fn verify(
+        &self,
+        public_key_der: &[u8],
+        message: &[u8],
+        signature: &[u8],
+    ) -> Result<(), String> {
         let pub_key = RsaPublicKey::from_pkcs1_der(public_key_der)
             .or_else(|_| rsa::pkcs8::DecodePublicKey::from_public_key_der(public_key_der))
             .map_err(|e| format!("Failed to parse RSA public key: {e}"))?;
@@ -149,11 +158,7 @@ pub fn verify_p256_pure_rust(
     message: &[u8],
     sig64: &[u8; 64],
 ) -> Result<(), String> {
-    let encoded_point = p256::EncodedPoint::from_affine_coordinates(
-        x.into(),
-        y.into(),
-        false,
-    );
+    let encoded_point = p256::EncodedPoint::from_affine_coordinates(x.into(), y.into(), false);
     let verifying_key = p256::ecdsa::VerifyingKey::from_encoded_point(&encoded_point)
         .map_err(|e| format!("Invalid P-256 public key point coordinates: {e}"))?;
 
@@ -213,14 +218,23 @@ fn parse_spki_p256(pk: &[u8]) -> Result<([u8; 32], [u8; 32]), String> {
 
     // Check OID id-ecPublicKey: 1.2.840.10045.2.1 = 06 07 2A 86 48 CE 3D 02 01
     const EC_PUB_KEY_OID: [u8; 9] = [0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01];
-    if !alg_bytes.windows(EC_PUB_KEY_OID.len()).any(|w| w == EC_PUB_KEY_OID) {
+    if !alg_bytes
+        .windows(EC_PUB_KEY_OID.len())
+        .any(|w| w == EC_PUB_KEY_OID)
+    {
         return Err("AlgorithmIdentifier is not id-ecPublicKey (1.2.840.10045.2.1)".into());
     }
 
     // Check curve parameter OID prime256v1 / secp256r1: 1.2.840.10045.3.1.7 = 06 08 2A 86 48 CE 3D 03 01 07
     const SECP256R1_OID: [u8; 10] = [0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07];
-    if !alg_bytes.windows(SECP256R1_OID.len()).any(|w| w == SECP256R1_OID) {
-        return Err("AlgorithmIdentifier curve parameter is not secp256r1/prime256v1 (1.2.840.10045.3.1.7)".into());
+    if !alg_bytes
+        .windows(SECP256R1_OID.len())
+        .any(|w| w == SECP256R1_OID)
+    {
+        return Err(
+            "AlgorithmIdentifier curve parameter is not secp256r1/prime256v1 (1.2.840.10045.3.1.7)"
+                .into(),
+        );
     }
 
     // 2. subjectPublicKey BIT STRING
@@ -267,8 +281,12 @@ pub fn extract_p256_public_coords(pk: &[u8]) -> Result<([u8; 32], [u8; 32]), Str
         let vk = p256::ecdsa::VerifyingKey::from_encoded_point(&point)
             .map_err(|e| format!("Invalid compressed P-256 curve point: {e}"))?;
         let decompressed = vk.to_encoded_point(false);
-        let x_bytes = decompressed.x().ok_or_else(|| "Missing X coordinate".to_string())?;
-        let y_bytes = decompressed.y().ok_or_else(|| "Missing Y coordinate".to_string())?;
+        let x_bytes = decompressed
+            .x()
+            .ok_or_else(|| "Missing X coordinate".to_string())?;
+        let y_bytes = decompressed
+            .y()
+            .ok_or_else(|| "Missing Y coordinate".to_string())?;
         let mut x = [0u8; 32];
         let mut y = [0u8; 32];
         x.copy_from_slice(x_bytes);
@@ -348,7 +366,10 @@ fn normalize_p256_signature(sig: &[u8]) -> Result<[u8; 64], String> {
         out[32 + s_pad..64].copy_from_slice(s_slice);
         return Ok(out);
     }
-    Err(format!("Invalid ECDSA P-256 signature length: {}, expected 64 raw or valid ASN.1 DER", sig.len()))
+    Err(format!(
+        "Invalid ECDSA P-256 signature length: {}, expected 64 raw or valid ASN.1 DER",
+        sig.len()
+    ))
 }
 
 #[cfg(windows)]
@@ -357,13 +378,12 @@ mod cng_p256 {
 
     const BCRYPT_ECDSA_PUBLIC_P256_MAGIC: u32 = 0x31534345; // "ECS1"
     const BCRYPT_ECDSA_P256_ALGORITHM: &[u16] = &[
-        'E' as u16, 'C' as u16, 'D' as u16, 'S' as u16, 'A' as u16, '_' as u16,
-        'P' as u16, '2' as u16, '5' as u16, '6' as u16, 0
+        'E' as u16, 'C' as u16, 'D' as u16, 'S' as u16, 'A' as u16, '_' as u16, 'P' as u16,
+        '2' as u16, '5' as u16, '6' as u16, 0,
     ];
     const BCRYPT_ECCPUBLIC_BLOB: &[u16] = &[
-        'E' as u16, 'C' as u16, 'C' as u16, 'P' as u16, 'U' as u16, 'B' as u16,
-        'L' as u16, 'I' as u16, 'C' as u16, 'B' as u16, 'L' as u16, 'O' as u16,
-        'B' as u16, 0
+        'E' as u16, 'C' as u16, 'C' as u16, 'P' as u16, 'U' as u16, 'B' as u16, 'L' as u16,
+        'I' as u16, 'C' as u16, 'B' as u16, 'L' as u16, 'O' as u16, 'B' as u16, 0,
     ];
 
     #[link(name = "bcrypt")]
@@ -375,10 +395,7 @@ mod cng_p256 {
             dwFlags: u32,
         ) -> i32;
 
-        fn BCryptCloseAlgorithmProvider(
-            hAlgorithm: *mut std::ffi::c_void,
-            dwFlags: u32,
-        ) -> i32;
+        fn BCryptCloseAlgorithmProvider(hAlgorithm: *mut std::ffi::c_void, dwFlags: u32) -> i32;
 
         fn BCryptImportKeyPair(
             hAlgorithm: *mut std::ffi::c_void,
@@ -418,7 +435,10 @@ mod cng_p256 {
                 0,
             );
             if status != 0 {
-                return Err(format!("BCryptOpenAlgorithmProvider failed (NTSTATUS 0x{:08X})", status));
+                return Err(format!(
+                    "BCryptOpenAlgorithmProvider failed (NTSTATUS 0x{:08X})",
+                    status
+                ));
             }
 
             let mut blob = Vec::with_capacity(8 + 32 + 32);
@@ -440,7 +460,10 @@ mod cng_p256 {
 
             if import_status != 0 {
                 BCryptCloseAlgorithmProvider(h_alg, 0);
-                return Err(format!("BCryptImportKeyPair failed (NTSTATUS 0x{:08X})", import_status));
+                return Err(format!(
+                    "BCryptImportKeyPair failed (NTSTATUS 0x{:08X})",
+                    import_status
+                ));
             }
 
             let verify_status = BCryptVerifySignature(
@@ -459,7 +482,10 @@ mod cng_p256 {
             if verify_status == 0 {
                 Ok(())
             } else {
-                Err(format!("ECDSA P-256 signature verification failed (NTSTATUS 0x{:08X})", verify_status))
+                Err(format!(
+                    "ECDSA P-256 signature verification failed (NTSTATUS 0x{:08X})",
+                    verify_status
+                ))
             }
         }
     }
@@ -468,7 +494,12 @@ mod cng_p256 {
 /// Standard Authenticated Encryption (AEAD) provider.
 pub trait AeadProvider: Send + Sync {
     fn encrypt(&self, key: &[u8], plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>, String>;
-    fn decrypt(&self, key: &[u8], ciphertext_with_nonce: &[u8], aad: &[u8]) -> Result<Vec<u8>, String>;
+    fn decrypt(
+        &self,
+        key: &[u8],
+        ciphertext_with_nonce: &[u8],
+        aad: &[u8],
+    ) -> Result<Vec<u8>, String>;
 }
 
 /// AES-256-GCM AEAD implementation with random 96-bit nonce prepended and authenticated AAD.
@@ -486,7 +517,13 @@ impl AeadProvider for Aes256GcmProvider {
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         let ciphertext = cipher
-            .encrypt(nonce, aes_gcm::aead::Payload { msg: plaintext, aad })
+            .encrypt(
+                nonce,
+                aes_gcm::aead::Payload {
+                    msg: plaintext,
+                    aad,
+                },
+            )
             .map_err(|e| format!("AEAD encryption failed: {e}"))?;
 
         let mut out = Vec::with_capacity(12 + ciphertext.len());
@@ -508,8 +545,16 @@ impl AeadProvider for Aes256GcmProvider {
         let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| e.to_string())?;
 
         cipher
-            .decrypt(nonce, aes_gcm::aead::Payload { msg: ciphertext, aad })
-            .map_err(|e| format!("AEAD authentication/decryption failed (tampered data or wrong key): {e}"))
+            .decrypt(
+                nonce,
+                aes_gcm::aead::Payload {
+                    msg: ciphertext,
+                    aad,
+                },
+            )
+            .map_err(|e| {
+                format!("AEAD authentication/decryption failed (tampered data or wrong key): {e}")
+            })
     }
 }
 
@@ -582,15 +627,23 @@ impl CryptoUtils {
     }
 
     /// Derive key using Scrypt with bounded secure parameters.
-    pub fn derive_scrypt_key(passphrase: &[u8], salt: &[u8], output: &mut [u8; 32]) -> Result<(), String> {
+    pub fn derive_scrypt_key(
+        passphrase: &[u8],
+        salt: &[u8],
+        output: &mut [u8; 32],
+    ) -> Result<(), String> {
         if salt.len() < 16 {
-            return Err("InsecureSalt: Scrypt salt must be at least 16 bytes of independent entropy".into());
+            return Err(
+                "InsecureSalt: Scrypt salt must be at least 16 bytes of independent entropy".into(),
+            );
         }
         const LOG_N: u8 = 15; // N = 32768
         const R: u32 = 8;
         const P: u32 = 1;
-        let params = scrypt::Params::new(LOG_N, R, P, 32).map_err(|e| format!("Scrypt params error: {e}"))?;
-        scrypt::scrypt(passphrase, salt, &params, output).map_err(|e| format!("Scrypt derivation error: {e}"))
+        let params = scrypt::Params::new(LOG_N, R, P, 32)
+            .map_err(|e| format!("Scrypt params error: {e}"))?;
+        scrypt::scrypt(passphrase, salt, &params, output)
+            .map_err(|e| format!("Scrypt derivation error: {e}"))
     }
 
     /// Generate an authentic Ed25519 signing keypair with stack-zeroizing memory hygiene.
@@ -611,15 +664,19 @@ impl CryptoUtils {
     /// Authentically computes SHA-256 hash of a file on disk using a streaming 64KB buffer.
     pub fn compute256<P: AsRef<Path>>(path: P) -> Result<String, String> {
         let p = path.as_ref();
-        let mut file = File::open(p)
-            .map_err(|e| format!("Failed to open file '{}' for SHA-256 computation: {e}", p.display()))?;
+        let mut file = File::open(p).map_err(|e| {
+            format!(
+                "Failed to open file '{}' for SHA-256 computation: {e}",
+                p.display()
+            )
+        })?;
         let mut hasher = Sha256::new();
         let mut buffer = [0u8; 65536];
 
         loop {
-            let bytes_read = file
-                .read(&mut buffer)
-                .map_err(|e| format!("Failed reading file '{}' during hashing: {e}", p.display()))?;
+            let bytes_read = file.read(&mut buffer).map_err(|e| {
+                format!("Failed reading file '{}' during hashing: {e}", p.display())
+            })?;
             if bytes_read == 0 {
                 break;
             }

@@ -213,7 +213,10 @@ mod tests {
             confidence: -0.5,
         });
         assert_eq!(engine.count(), 2);
-        assert!(engine.retrieve("k1").is_none(), "k1 should have been evicted via FIFO");
+        assert!(
+            engine.retrieve("k1").is_none(),
+            "k1 should have been evicted via FIFO"
+        );
         assert!(engine.retrieve("k2").is_some());
         assert_eq!(engine.retrieve("k3").unwrap().confidence, 0.0);
     }

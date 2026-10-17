@@ -249,26 +249,28 @@ fn validate_and_resolve_sandboxed_path(
         )
     })?;
 
-    let candidate_canonical = tara_security::path_security::canonical_containment(repo_root, raw_path)
-        .map_err(|e| match e {
-            tara_security::path_security::PathSecurityError::LexicalTraversal(_)
-            | tara_security::path_security::PathSecurityError::SuspiciousTraversalSequence(_)
-            | tara_security::path_security::PathSecurityError::NullByteInjection => {
-                (
+    let candidate_canonical =
+        tara_security::path_security::canonical_containment(repo_root, raw_path).map_err(|e| {
+            match e {
+                tara_security::path_security::PathSecurityError::LexicalTraversal(_)
+                | tara_security::path_security::PathSecurityError::SuspiciousTraversalSequence(_)
+                | tara_security::path_security::PathSecurityError::NullByteInjection => (
                     "access_denied_sandbox_violation".into(),
                     format!("Path traversal prohibited: {}", e),
-                )
-            }
-            tara_security::path_security::PathSecurityError::ContainmentViolation { .. }
-            | tara_security::path_security::PathSecurityError::SymlinkEscape { .. }
-            | tara_security::path_security::PathSecurityError::UnauthorizedToolPath { .. } => {
-                (
+                ),
+                tara_security::path_security::PathSecurityError::ContainmentViolation {
+                    ..
+                }
+                | tara_security::path_security::PathSecurityError::SymlinkEscape { .. }
+                | tara_security::path_security::PathSecurityError::UnauthorizedToolPath {
+                    ..
+                } => (
                     "access_denied_sandbox_violation".into(),
                     format!("Path escapes repository sandbox boundary: {}", e),
-                )
-            }
-            tara_security::path_security::PathSecurityError::IoError(msg) => {
-                ("file_not_found".into(), msg)
+                ),
+                tara_security::path_security::PathSecurityError::IoError(msg) => {
+                    ("file_not_found".into(), msg)
+                }
             }
         })?;
 

@@ -374,7 +374,9 @@ mod tests {
         let boundary_test = "ನೀನು ಇಲ್ಲಿ ಬಾ.";
         let res_boundary = engine.check_honorifics(boundary_test);
         assert!(!res_boundary.is_respectful);
-        assert!(res_boundary.singular_violations.contains(&"ನೀನು".to_string()));
+        assert!(res_boundary
+            .singular_violations
+            .contains(&"ನೀನು".to_string()));
         assert!(res_boundary.singular_violations.contains(&"ಬಾ".to_string()));
         assert_eq!(res_boundary.normalized_text, "ನೀವು ಇಲ್ಲಿ ಬನ್ನಿ.");
 

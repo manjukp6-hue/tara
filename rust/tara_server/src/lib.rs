@@ -24,7 +24,6 @@ pub mod skills;
 pub mod voice;
 pub mod workload;
 
-
 /// Return current UTC epoch timestamp in milliseconds.
 #[inline]
 pub fn now_millis() -> u64 {

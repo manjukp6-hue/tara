@@ -343,14 +343,41 @@ mod tests {
 
     #[test]
     fn test_lifecycle_allowed_transitions() {
-        assert!(StateMachine::is_valid_transition(EntityState::Ready, EntityState::Quarantined));
-        assert!(StateMachine::is_valid_transition(EntityState::Busy, EntityState::Paused));
-        assert!(StateMachine::is_valid_transition(EntityState::Idle, EntityState::Degraded));
-        assert!(StateMachine::is_valid_transition(EntityState::Idle, EntityState::Quarantined));
-        assert!(StateMachine::is_valid_transition(EntityState::Paused, EntityState::Busy));
-        assert!(StateMachine::is_valid_transition(EntityState::Degraded, EntityState::Ready));
-        assert!(StateMachine::is_valid_transition(EntityState::Degraded, EntityState::Idle));
-        assert!(StateMachine::is_valid_transition(EntityState::Recovering, EntityState::Idle));
-        assert!(StateMachine::is_valid_transition(EntityState::Quarantined, EntityState::Stopped));
+        assert!(StateMachine::is_valid_transition(
+            EntityState::Ready,
+            EntityState::Quarantined
+        ));
+        assert!(StateMachine::is_valid_transition(
+            EntityState::Busy,
+            EntityState::Paused
+        ));
+        assert!(StateMachine::is_valid_transition(
+            EntityState::Idle,
+            EntityState::Degraded
+        ));
+        assert!(StateMachine::is_valid_transition(
+            EntityState::Idle,
+            EntityState::Quarantined
+        ));
+        assert!(StateMachine::is_valid_transition(
+            EntityState::Paused,
+            EntityState::Busy
+        ));
+        assert!(StateMachine::is_valid_transition(
+            EntityState::Degraded,
+            EntityState::Ready
+        ));
+        assert!(StateMachine::is_valid_transition(
+            EntityState::Degraded,
+            EntityState::Idle
+        ));
+        assert!(StateMachine::is_valid_transition(
+            EntityState::Recovering,
+            EntityState::Idle
+        ));
+        assert!(StateMachine::is_valid_transition(
+            EntityState::Quarantined,
+            EntityState::Stopped
+        ));
     }
 }

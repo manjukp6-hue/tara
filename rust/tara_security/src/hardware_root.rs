@@ -19,10 +19,10 @@ pub mod authority;
 pub mod pcr_quote;
 pub mod platform;
 
+pub use crate::cbor;
 pub use authority::{AuthorityManager, AuthorityRecord, RecoveryProof, RotationToken};
 pub use pcr_quote::{PcrQuoteVerificationResult, TpmPcrQuoteStatement, TpmPcrQuoteVerifier};
 pub use platform::{harden_file_permissions, sync_directory_metadata};
-pub use crate::cbor;
 
 use crate::cryptography::{CryptoUtils, SignatureVerifier};
 
@@ -34,9 +34,9 @@ pub const TPM_GENERATED_VALUE: u32 = 0xFF544347;
 /// COSE Key Algorithm identifiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CoseAlgorithm {
-    EdDsa,   // -8: Ed25519
-    Es256,   // -7: ECDSA with SHA-256
-    Rs256,   // -257: RSASSA-PKCS1-v1_5 with SHA-256
+    EdDsa, // -8: Ed25519
+    Es256, // -7: ECDSA with SHA-256
+    Rs256, // -257: RSASSA-PKCS1-v1_5 with SHA-256
     Unsupported(i64),
 }
 
@@ -161,7 +161,10 @@ impl AttestationRegistry {
             return Err(format!("Unknown attestation format: '{}'", stmt.format));
         }
 
-        let map = self.supported_verifiers.read().map_err(|_| "Verifier registry lock poisoned (FailClosed)")?;
+        let map = self
+            .supported_verifiers
+            .read()
+            .map_err(|_| "Verifier registry lock poisoned (FailClosed)")?;
         let verifier = map.get(&stmt.format).ok_or_else(|| {
             format!(
                 "FormatPolicyRejection: Attestation format '{}' is recognized by specification but prohibited or unsupported by security policy",
@@ -226,7 +229,10 @@ impl AttestationFormatVerifier for PackedAttestationVerifier {
     ) -> Result<AttestationVerificationResult, String> {
         let alg_id = stmt.alg.ok_or("Packed attestation missing alg parameter")?;
         let cose_alg = CoseAlgorithm::from(alg_id);
-        let sig = stmt.sig.as_ref().ok_or("Packed attestation missing sig parameter")?;
+        let sig = stmt
+            .sig
+            .as_ref()
+            .ok_or("Packed attestation missing sig parameter")?;
 
         let mut signed_data = Vec::with_capacity(auth_data.len() + client_data_hash.len());
         signed_data.extend_from_slice(auth_data);
@@ -282,7 +288,10 @@ fn verify_tpm_pub_area_matches_cred_pk(pub_area: &[u8], cred_pk: &[u8]) -> Resul
     }
 
     // For RSA or raw credentials, match in constant time
-    if pub_area.windows(cred_pk.len()).any(|w| constant_time_eq(w, cred_pk)) {
+    if pub_area
+        .windows(cred_pk.len())
+        .any(|w| constant_time_eq(w, cred_pk))
+    {
         return Ok(());
     }
 
@@ -305,10 +314,22 @@ impl AttestationFormatVerifier for TpmAttestationVerifier {
     ) -> Result<AttestationVerificationResult, String> {
         let alg_id = stmt.alg.ok_or("TPM attestation missing alg parameter")?;
         let cose_alg = CoseAlgorithm::from(alg_id);
-        let sig = stmt.sig.as_ref().ok_or("TPM attestation missing sig parameter")?;
-        let cert_info = stmt.cert_info.as_ref().ok_or("TPM attestation missing certInfo parameter")?;
-        let pub_area = stmt.pub_area.as_ref().ok_or("TPM attestation missing pubArea parameter")?;
-        let x5c = stmt.x5c.as_ref().ok_or("TPM attestation missing x5c parameter")?;
+        let sig = stmt
+            .sig
+            .as_ref()
+            .ok_or("TPM attestation missing sig parameter")?;
+        let cert_info = stmt
+            .cert_info
+            .as_ref()
+            .ok_or("TPM attestation missing certInfo parameter")?;
+        let pub_area = stmt
+            .pub_area
+            .as_ref()
+            .ok_or("TPM attestation missing pubArea parameter")?;
+        let x5c = stmt
+            .x5c
+            .as_ref()
+            .ok_or("TPM attestation missing x5c parameter")?;
 
         if x5c.is_empty() {
             return Err("TPM attestation x5c certificate chain cannot be empty".into());
@@ -320,7 +341,10 @@ impl AttestationFormatVerifier for TpmAttestationVerifier {
 
         let magic = BigEndian::read_u32(&cert_info[0..4]);
         if magic != TPM_GENERATED_VALUE {
-            return Err(format!("TPM certInfo magic mismatch: expected 0x{:08X}, got 0x{:08X}", TPM_GENERATED_VALUE, magic));
+            return Err(format!(
+                "TPM certInfo magic mismatch: expected 0x{:08X}, got 0x{:08X}",
+                TPM_GENERATED_VALUE, magic
+            ));
         }
 
         let struct_type = BigEndian::read_u16(&cert_info[4..6]);
@@ -352,7 +376,10 @@ impl AttestationFormatVerifier for TpmAttestationVerifier {
         let extra_data = &cert_info[offset..offset + extra_len];
 
         if !constant_time_eq(extra_data, &expected_digest) {
-            return Err("TPM certInfo.extraData does not match expected hash of authData || clientDataHash".into());
+            return Err(
+                "TPM certInfo.extraData does not match expected hash of authData || clientDataHash"
+                    .into(),
+            );
         }
 
         let aik_cert = &x5c[0];
@@ -374,8 +401,12 @@ impl AttestationFormatVerifier for TpmAttestationVerifier {
     }
 }
 
-const APPLE_ANON_ATTESTATION_OID: &[u8] = &[0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x63, 0x64, 0x08, 0x02]; // 1.2.840.113635.100.8.2
-const ANDROID_KEY_ATTESTATION_OID: &[u8] = &[0x06, 0x0A, 0x2B, 0x06, 0x01, 0x04, 0x01, 0xD6, 0x79, 0x02, 0x01, 0x11]; // 1.3.6.1.4.1.11129.2.1.17
+const APPLE_ANON_ATTESTATION_OID: &[u8] = &[
+    0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x63, 0x64, 0x08, 0x02,
+]; // 1.2.840.113635.100.8.2
+const ANDROID_KEY_ATTESTATION_OID: &[u8] = &[
+    0x06, 0x0A, 0x2B, 0x06, 0x01, 0x04, 0x01, 0xD6, 0x79, 0x02, 0x01, 0x11,
+]; // 1.3.6.1.4.1.11129.2.1.17
 
 fn parse_der_tlv<'a>(input: &'a [u8], offset: &mut usize) -> Result<(u8, &'a [u8]), String> {
     if *offset >= input.len() {
@@ -421,21 +452,37 @@ fn find_x509_extension_value(cert_der: &[u8], target_oid: &[u8]) -> Result<Vec<u
                 if let Ok((elem_tag, elem_val)) = parse_der_tlv(tbs_seq, &mut cur) {
                     if elem_tag == 0xA3 {
                         let mut ext_list_offset = 0;
-                        if let Ok((0x30, ext_seq_val)) = parse_der_tlv(elem_val, &mut ext_list_offset) {
+                        if let Ok((0x30, ext_seq_val)) =
+                            parse_der_tlv(elem_val, &mut ext_list_offset)
+                        {
                             let mut ext_cur = 0;
                             while ext_cur < ext_seq_val.len() {
-                                if let Ok((0x30, single_ext_val)) = parse_der_tlv(ext_seq_val, &mut ext_cur) {
+                                if let Ok((0x30, single_ext_val)) =
+                                    parse_der_tlv(ext_seq_val, &mut ext_cur)
+                                {
                                     let mut single_cur = 0;
-                                    if let Ok((0x06, oid_val)) = parse_der_tlv(single_ext_val, &mut single_cur) {
-                                        let target_raw_oid = if target_oid.starts_with(&[0x06]) && target_oid.len() > 2 {
+                                    if let Ok((0x06, oid_val)) =
+                                        parse_der_tlv(single_ext_val, &mut single_cur)
+                                    {
+                                        let target_raw_oid = if target_oid.starts_with(&[0x06])
+                                            && target_oid.len() > 2
+                                        {
                                             &target_oid[2..]
                                         } else {
                                             target_oid
                                         };
-                                        if oid_val == target_raw_oid || (target_oid.starts_with(&[0x06]) && single_ext_val.starts_with(target_oid)) {
-                                            if let Ok((next_tag, next_val)) = parse_der_tlv(single_ext_val, &mut single_cur) {
+                                        if oid_val == target_raw_oid
+                                            || (target_oid.starts_with(&[0x06])
+                                                && single_ext_val.starts_with(target_oid))
+                                        {
+                                            if let Ok((next_tag, next_val)) =
+                                                parse_der_tlv(single_ext_val, &mut single_cur)
+                                            {
                                                 let octet_val = if next_tag == 0x01 {
-                                                    if let Ok((0x04, oct_val)) = parse_der_tlv(single_ext_val, &mut single_cur) {
+                                                    if let Ok((0x04, oct_val)) = parse_der_tlv(
+                                                        single_ext_val,
+                                                        &mut single_cur,
+                                                    ) {
                                                         oct_val
                                                     } else {
                                                         next_val
@@ -463,7 +510,10 @@ fn find_x509_extension_value(cert_der: &[u8], target_oid: &[u8]) -> Result<Vec<u
     while pos + target_oid.len() <= cert_der.len() {
         if &cert_der[pos..pos + target_oid.len()] == target_oid {
             let mut ext_pos = pos + target_oid.len();
-            if ext_pos + 3 <= cert_der.len() && cert_der[ext_pos] == 0x01 && cert_der[ext_pos + 1] == 0x01 {
+            if ext_pos + 3 <= cert_der.len()
+                && cert_der[ext_pos] == 0x01
+                && cert_der[ext_pos + 1] == 0x01
+            {
                 ext_pos += 3;
             }
             if ext_pos < cert_der.len() && cert_der[ext_pos] == 0x04 {
@@ -511,7 +561,10 @@ impl AttestationFormatVerifier for AppleAttestationVerifier {
         client_data_hash: &[u8],
         trust_store: &AttestationTrustStore,
     ) -> Result<AttestationVerificationResult, String> {
-        let x5c = stmt.x5c.as_ref().ok_or("Apple attestation missing x5c certificate chain")?;
+        let x5c = stmt
+            .x5c
+            .as_ref()
+            .ok_or("Apple attestation missing x5c certificate chain")?;
         if x5c.is_empty() {
             return Err("Apple attestation x5c certificate chain cannot be empty".into());
         }
@@ -530,9 +583,13 @@ impl AttestationFormatVerifier for AppleAttestationVerifier {
         let matches_nonce = if ext_value.len() == 32 {
             constant_time_eq(&ext_value, &expected_nonce)
         } else if ext_value.len() >= 34 && ext_value[0] == 0x30 {
-            ext_value.windows(34).any(|w| w[0] == 0x04 && w[1] == 32 && constant_time_eq(&w[2..34], &expected_nonce))
+            ext_value
+                .windows(34)
+                .any(|w| w[0] == 0x04 && w[1] == 32 && constant_time_eq(&w[2..34], &expected_nonce))
         } else {
-            ext_value.windows(expected_nonce.len()).any(|w| constant_time_eq(w, &expected_nonce))
+            ext_value
+                .windows(expected_nonce.len())
+                .any(|w| constant_time_eq(w, &expected_nonce))
         };
 
         if !matches_nonce {
@@ -545,7 +602,9 @@ impl AttestationFormatVerifier for AppleAttestationVerifier {
         // Verify that credential public key in authData matches SubjectPublicKeyInfo in cred_cert
         let spki_bytes = extract_subject_public_key_info(cred_cert)?;
         let (cert_x, cert_y) = crate::cryptography::extract_p256_public_coords(spki_bytes)
-            .map_err(|e| format!("Apple attestation leaf certificate SPKI is not a valid P-256 key: {e}"))?;
+            .map_err(|e| {
+                format!("Apple attestation leaf certificate SPKI is not a valid P-256 key: {e}")
+            })?;
         let (cred_x, cred_y) = crate::cryptography::extract_p256_public_coords(&cred_pk)
             .map_err(|e| format!("Apple attestation authData credential public key is not a valid P-256 key: {e}"))?;
 
@@ -578,10 +637,18 @@ impl AttestationFormatVerifier for AndroidKeyAttestationVerifier {
         client_data_hash: &[u8],
         trust_store: &AttestationTrustStore,
     ) -> Result<AttestationVerificationResult, String> {
-        let alg_id = stmt.alg.ok_or("Android Key attestation missing alg parameter")?;
+        let alg_id = stmt
+            .alg
+            .ok_or("Android Key attestation missing alg parameter")?;
         let cose_alg = CoseAlgorithm::from(alg_id);
-        let sig = stmt.sig.as_ref().ok_or("Android Key attestation missing sig parameter")?;
-        let x5c = stmt.x5c.as_ref().ok_or("Android Key attestation missing x5c parameter")?;
+        let sig = stmt
+            .sig
+            .as_ref()
+            .ok_or("Android Key attestation missing sig parameter")?;
+        let x5c = stmt
+            .x5c
+            .as_ref()
+            .ok_or("Android Key attestation missing x5c parameter")?;
 
         if x5c.is_empty() {
             return Err("Android Key attestation x5c certificate chain cannot be empty".into());
@@ -616,8 +683,13 @@ impl AttestationFormatVerifier for AndroidKeyAttestationVerifier {
             return Err("Android Key attestation rejected: key is software-backed (securityLevel 0, hardware attestation required)".into());
         }
 
-        if !ext_value.windows(client_data_hash.len()).any(|w| constant_time_eq(w, client_data_hash)) {
-            return Err("Android Key attestation challenge mismatch in KeyDescription extension".into());
+        if !ext_value
+            .windows(client_data_hash.len())
+            .any(|w| constant_time_eq(w, client_data_hash))
+        {
+            return Err(
+                "Android Key attestation challenge mismatch in KeyDescription extension".into(),
+            );
         }
 
         let mut signed_data = Vec::with_capacity(auth_data.len() + client_data_hash.len());
@@ -675,7 +747,10 @@ fn extract_ed25519_public_key(key_or_cert: &[u8]) -> Result<&[u8], String> {
     // If it's an X.509 cert or SPKI containing an Ed25519 subjectPublicKey:
     // Ed25519 OID is 1.3.101.112 = 0x06, 0x03, 0x2B, 0x65, 0x70
     const ED25519_OID: [u8; 5] = [0x06, 0x03, 0x2B, 0x65, 0x70];
-    if let Some(pos) = key_or_cert.windows(ED25519_OID.len()).position(|w| w == ED25519_OID) {
+    if let Some(pos) = key_or_cert
+        .windows(ED25519_OID.len())
+        .position(|w| w == ED25519_OID)
+    {
         let after_oid = &key_or_cert[pos + ED25519_OID.len()..];
         if let Some(bit_pos) = after_oid.windows(3).position(|w| w == [0x03, 0x21, 0x00]) {
             let key_start = pos + ED25519_OID.len() + bit_pos + 3;
@@ -787,11 +862,14 @@ pub fn verify_x5c_chain(
     // For each certificate in the chain, ensure basic structure is valid
     for (idx, cert) in x5c.iter().enumerate() {
         if cert.len() < 32 || cert[0] != 0x30 {
-            return Err(format!("Malformed X.509 DER certificate in attestation chain at depth {idx}"));
+            return Err(format!(
+                "Malformed X.509 DER certificate in attestation chain at depth {idx}"
+            ));
         }
         // Extract SPKI to ensure valid DER encoding
-        extract_subject_public_key_info(cert)
-            .map_err(|e| format!("Certificate at depth {idx} has invalid SubjectPublicKeyInfo: {e}"))?;
+        extract_subject_public_key_info(cert).map_err(|e| {
+            format!("Certificate at depth {idx} has invalid SubjectPublicKeyInfo: {e}")
+        })?;
     }
 
     // For multi-cert chains, verify each certificate in the chain is well-formed DER
@@ -805,8 +883,12 @@ pub fn verify_x5c_chain(
         match find_x509_extension_value(parent, BASIC_CONSTRAINTS_OID) {
             Ok(bc_val) => {
                 let mut bc_cur = 0;
-                let (seq_tag, bc_seq) = parse_der_tlv(&bc_val, &mut bc_cur)
-                    .map_err(|e| format!("Invalid BasicConstraints SEQUENCE in parent at depth {}: {e}", i + 1))?;
+                let (seq_tag, bc_seq) = parse_der_tlv(&bc_val, &mut bc_cur).map_err(|e| {
+                    format!(
+                        "Invalid BasicConstraints SEQUENCE in parent at depth {}: {e}",
+                        i + 1
+                    )
+                })?;
                 if seq_tag != 0x30 {
                     return Err(format!("AttestationRejected: BasicConstraints in parent at depth {} must be SEQUENCE", i + 1));
                 }
@@ -814,7 +896,10 @@ pub fn verify_x5c_chain(
                 match parse_der_tlv(bc_seq, &mut inner_bc) {
                     Ok((0x01, bool_val)) => {
                         if bool_val.is_empty() || bool_val[0] == 0x00 {
-                            return Err(format!("AttestationRejected: Parent certificate at depth {} has cA=FALSE", i + 1));
+                            return Err(format!(
+                                "AttestationRejected: Parent certificate at depth {} has cA=FALSE",
+                                i + 1
+                            ));
                         }
                     }
                     _ => {
@@ -847,13 +932,18 @@ pub fn verify_x5c_chain(
             return Err("Child signatureAlgorithm must be SEQUENCE".into());
         }
 
-        const SHA256_RSA: &[u8] = &[0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B];
+        const SHA256_RSA: &[u8] = &[
+            0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B,
+        ];
         const ECDSA_SHA256: &[u8] = &[0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02];
         const ED25519: &[u8] = &[0x06, 0x03, 0x2B, 0x65, 0x70];
 
         let cose_alg = if alg_bytes.windows(SHA256_RSA.len()).any(|w| w == SHA256_RSA) {
             CoseAlgorithm::Rs256
-        } else if alg_bytes.windows(ECDSA_SHA256.len()).any(|w| w == ECDSA_SHA256) {
+        } else if alg_bytes
+            .windows(ECDSA_SHA256.len())
+            .any(|w| w == ECDSA_SHA256)
+        {
             CoseAlgorithm::Es256
         } else if alg_bytes.windows(ED25519.len()).any(|w| w == ED25519) {
             CoseAlgorithm::EdDsa
@@ -871,11 +961,16 @@ pub fn verify_x5c_chain(
         }
         let sig_raw = &sig_bytes[1..];
 
-        let parent_spki = extract_subject_public_key_info(parent)
-            .map_err(|e| format!("Failed to extract parent SubjectPublicKeyInfo at depth {}: {e}", i + 1))?;
+        let parent_spki = extract_subject_public_key_info(parent).map_err(|e| {
+            format!(
+                "Failed to extract parent SubjectPublicKeyInfo at depth {}: {e}",
+                i + 1
+            )
+        })?;
 
-        verify_signed_data(parent_spki, tbs_bytes, sig_raw, cose_alg)
-            .map_err(|e| format!("X.509 certificate chain signature verification failed at depth {i}: {e}"))?;
+        verify_signed_data(parent_spki, tbs_bytes, sig_raw, cose_alg).map_err(|e| {
+            format!("X.509 certificate chain signature verification failed at depth {i}: {e}")
+        })?;
     }
 
     Ok(true)
@@ -1228,7 +1323,8 @@ impl PlatformBiometricReport {
     pub fn detect_capabilities() -> Self {
         #[cfg(target_os = "windows")]
         {
-            let winbio_available = std::path::Path::new("C:\\Windows\\System32\\WinBio.dll").exists();
+            let winbio_available =
+                std::path::Path::new("C:\\Windows\\System32\\WinBio.dll").exists();
             let ngc_available = std::path::Path::new("C:\\Windows\\System32\\ngc.dll").exists();
             let tpm_ncrypt = std::path::Path::new("C:\\Windows\\System32\\ncrypt.dll").exists();
 
@@ -1321,7 +1417,12 @@ impl BiometricChallengeService {
         }
     }
 
-    pub fn register_biometric_credential(&self, credential_id: &str, public_key: &[u8], algorithm: CoseAlgorithm) {
+    pub fn register_biometric_credential(
+        &self,
+        credential_id: &str,
+        public_key: &[u8],
+        algorithm: CoseAlgorithm,
+    ) {
         if let Ok(mut map) = self.enrolled_credentials.write() {
             map.insert(credential_id.to_string(), (public_key.to_vec(), algorithm));
         }
@@ -1363,11 +1464,17 @@ impl BiometricChallengeService {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        let mut nonces = self.consumed_challenge_nonces.lock().unwrap_or_else(|p| p.into_inner());
+        let mut nonces = self
+            .consumed_challenge_nonces
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         // Purge expired nonces only
         nonces.retain(|_, exp| now <= *exp);
         if nonces.contains_key(nonce) {
-            return Err(format!("PasskeyAssertionReplayDetected: Challenge nonce '{}' already consumed", nonce));
+            return Err(format!(
+                "PasskeyAssertionReplayDetected: Challenge nonce '{}' already consumed",
+                nonce
+            ));
         }
         if nonces.len() >= MAX_CONSUMED_NONCES_CACHE {
             return Err("Biometric factor issuance rejected: consumed nonce cache capacity reached with unexpired nonces (fail-closed replay defense)".to_string());
@@ -1386,7 +1493,10 @@ impl BiometricChallengeService {
         assertion: &PlatformBiometricAssertion,
     ) -> Result<String, String> {
         let (pk, alg) = {
-            let cred_guard = self.enrolled_credentials.read().map_err(|_| "Credential lock poisoned")?;
+            let cred_guard = self
+                .enrolled_credentials
+                .read()
+                .map_err(|_| "Credential lock poisoned")?;
             let (pk, alg) = cred_guard.get(&assertion.credential_id).ok_or_else(|| {
                 format!(
                     "Biometric factor issuance rejected: credential '{}' is not registered in enrolled credentials (FailClosed)",
@@ -1410,7 +1520,10 @@ impl BiometricChallengeService {
     ) -> Result<String, String> {
         // 1. Mandatory authenticator_data length & flag verification (UP=0x01, UV=0x04)
         if assertion.authenticator_data.len() < 37 {
-            return Err("Biometric factor issuance rejected: authenticator_data too short (< 37 bytes)".to_string());
+            return Err(
+                "Biometric factor issuance rejected: authenticator_data too short (< 37 bytes)"
+                    .to_string(),
+            );
         }
         let flags = assertion.authenticator_data[32];
         let user_present = (flags & 0x01) != 0;
@@ -1424,12 +1537,18 @@ impl BiometricChallengeService {
 
         // 2. Cryptographic binding check: nonce mismatch check
         if assertion.client_data_challenge != challenge.nonce {
-            return Err("Biometric factor issuance rejected: client data challenge nonce mismatch".to_string());
+            return Err(
+                "Biometric factor issuance rejected: client data challenge nonce mismatch"
+                    .to_string(),
+            );
         }
 
         // 3. Authenticator signature check
         if assertion.authenticator_signature.is_empty() {
-            return Err("Biometric factor issuance rejected: authenticator signature is empty or missing".to_string());
+            return Err(
+                "Biometric factor issuance rejected: authenticator signature is empty or missing"
+                    .to_string(),
+            );
         }
 
         // 3b. Verify signature with provided public_key using clientDataJSON SHA-256 hash (cdh)
@@ -1437,12 +1556,26 @@ impl BiometricChallengeService {
             return Err("Biometric factor issuance rejected: clientDataJSON is empty (WebAuthn specification violation)".to_string());
         }
         let cd_json: serde_json::Value = serde_json::from_slice(&assertion.client_data_json)
-            .map_err(|e| format!("Biometric factor issuance rejected: invalid clientDataJSON: {}", e))?;
-        let parsed_challenge = cd_json.get("challenge").and_then(|v| v.as_str()).ok_or_else(|| {
-            "Biometric factor issuance rejected: clientDataJSON missing 'challenge' field".to_string()
-        })?;
-        if !crate::cryptography::CryptoUtils::constant_time_eq(parsed_challenge.as_bytes(), challenge.nonce.as_bytes()) {
-            return Err("Biometric factor issuance rejected: clientDataJSON challenge mismatch".to_string());
+            .map_err(|e| {
+                format!(
+                    "Biometric factor issuance rejected: invalid clientDataJSON: {}",
+                    e
+                )
+            })?;
+        let parsed_challenge = cd_json
+            .get("challenge")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                "Biometric factor issuance rejected: clientDataJSON missing 'challenge' field"
+                    .to_string()
+            })?;
+        if !crate::cryptography::CryptoUtils::constant_time_eq(
+            parsed_challenge.as_bytes(),
+            challenge.nonce.as_bytes(),
+        ) {
+            return Err(
+                "Biometric factor issuance rejected: clientDataJSON challenge mismatch".to_string(),
+            );
         }
 
         let cdh = CryptoUtils::sha256(&assertion.client_data_json);
@@ -1450,7 +1583,12 @@ impl BiometricChallengeService {
         signed_data.extend_from_slice(&assertion.authenticator_data);
         signed_data.extend_from_slice(&cdh);
 
-        verify_signed_data(public_key, &signed_data, &assertion.authenticator_signature, algorithm)?;
+        verify_signed_data(
+            public_key,
+            &signed_data,
+            &assertion.authenticator_signature,
+            algorithm,
+        )?;
 
         // 4. Expiration and clock skew check
         let now = SystemTime::now()
@@ -1458,15 +1596,24 @@ impl BiometricChallengeService {
             .unwrap_or_default()
             .as_secs();
         if challenge.timestamp > now.saturating_add(5) {
-            return Err("Biometric factor issuance rejected: challenge timestamp is in the future".to_string());
+            return Err(
+                "Biometric factor issuance rejected: challenge timestamp is in the future"
+                    .to_string(),
+            );
         }
         if now.saturating_sub(challenge.timestamp) > MAX_BIOMETRIC_TOKEN_LIFETIME_SECS {
-            return Err("Biometric factor issuance rejected: challenge has expired (exceeds 60s lifetime)".to_string());
+            return Err(
+                "Biometric factor issuance rejected: challenge has expired (exceeds 60s lifetime)"
+                    .to_string(),
+            );
         }
 
         // 5. Anti-replay nonce check: challenge nonce must NOT be consumed
         {
-            let mut nonces = self.consumed_challenge_nonces.lock().unwrap_or_else(|p| p.into_inner());
+            let mut nonces = self
+                .consumed_challenge_nonces
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             nonces.retain(|_, exp| now <= *exp);
             if nonces.contains_key(&challenge.nonce) {
                 return Err("Biometric factor issuance rejected: challenge nonce already consumed (replay attack detected)".to_string());
@@ -1474,7 +1621,10 @@ impl BiometricChallengeService {
             if nonces.len() >= MAX_CONSUMED_NONCES_CACHE {
                 return Err("Biometric factor issuance rejected: consumed nonce cache capacity reached (fail-closed defense against replay/DoS)".to_string());
             }
-            nonces.insert(challenge.nonce.clone(), now + MAX_BIOMETRIC_TOKEN_LIFETIME_SECS);
+            nonces.insert(
+                challenge.nonce.clone(),
+                now + MAX_BIOMETRIC_TOKEN_LIFETIME_SECS,
+            );
         }
 
         // 6. Mint HMAC-SHA256 authenticated factor token
@@ -1509,14 +1659,18 @@ impl BiometricChallengeService {
     ) -> Result<serde_json::Value, String> {
         let parts: Vec<&str> = token.split('.').collect();
         if parts.len() != 2 {
-            return Err("Malformed biometric token structure (expected payload.signature)".to_string());
+            return Err(
+                "Malformed biometric token structure (expected payload.signature)".to_string(),
+            );
         }
 
         let payload_bytes = hex::decode(parts[0])
             .map_err(|e| format!("Failed to hex decode token payload: {}", e))?;
         // 1. Verify HMAC-SHA256 signature in constant time
         if !CryptoUtils::verify_hmac_sha256_hex(&self.secret_salt, &payload_bytes, parts[1]) {
-            return Err("Biometric token signature verification failed (tampered token)".to_string());
+            return Err(
+                "Biometric token signature verification failed (tampered token)".to_string(),
+            );
         }
 
         let val: serde_json::Value = serde_json::from_slice(&payload_bytes)
@@ -1528,10 +1682,16 @@ impl BiometricChallengeService {
         let exp = val.get("expires_at").and_then(|v| v.as_u64()).unwrap_or(0);
 
         if creator != expected_creator {
-            return Err(format!("Creator mismatch: expected '{}', got '{}'", expected_creator, creator));
+            return Err(format!(
+                "Creator mismatch: expected '{}', got '{}'",
+                expected_creator, creator
+            ));
         }
         if action != expected_action {
-            return Err(format!("Action mismatch: expected '{}', got '{}'", expected_action, action));
+            return Err(format!(
+                "Action mismatch: expected '{}', got '{}'",
+                expected_action, action
+            ));
         }
 
         let now = SystemTime::now()
@@ -1540,15 +1700,24 @@ impl BiometricChallengeService {
             .as_secs();
 
         if now > exp {
-            return Err(format!("Biometric token expired at {}, current time {}", exp, now));
+            return Err(format!(
+                "Biometric token expired at {}, current time {}",
+                exp, now
+            ));
         }
 
         // 2. Consume token nonce strictly
         {
-            let mut nonces = self.consumed_token_nonces.lock().unwrap_or_else(|p| p.into_inner());
+            let mut nonces = self
+                .consumed_token_nonces
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             nonces.retain(|_, exp_time| now <= *exp_time);
             if nonces.contains_key(token_nonce) {
-                return Err("Biometric token nonce has already been consumed (replay attack detected)".to_string());
+                return Err(
+                    "Biometric token nonce has already been consumed (replay attack detected)"
+                        .to_string(),
+                );
             }
             if nonces.len() >= MAX_CONSUMED_NONCES_CACHE {
                 return Err("Biometric token validation rejected: consumed token capacity reached (fail-closed defense)".to_string());
@@ -1569,20 +1738,28 @@ impl BiometricChallengeService {
     ) -> Result<String, String> {
         let parts: Vec<&str> = token.split('.').collect();
         if parts.len() != 2 {
-            return Err("Malformed biometric token structure (expected payload.signature)".to_string());
+            return Err(
+                "Malformed biometric token structure (expected payload.signature)".to_string(),
+            );
         }
 
         let payload_bytes = hex::decode(parts[0])
             .map_err(|e| format!("Failed to hex decode token payload: {}", e))?;
         // 1. Verify HMAC-SHA256 signature in constant time
         if !CryptoUtils::verify_hmac_sha256_hex(&self.secret_salt, &payload_bytes, parts[1]) {
-            return Err("Biometric token signature verification failed (tampered token)".to_string());
+            return Err(
+                "Biometric token signature verification failed (tampered token)".to_string(),
+            );
         }
 
         let val: serde_json::Value = serde_json::from_slice(&payload_bytes)
             .map_err(|e| format!("Invalid token JSON: {}", e))?;
 
-        let creator = val.get("creator_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let creator = val
+            .get("creator_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let session = val.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
         let action = val.get("action").and_then(|v| v.as_str()).unwrap_or("");
         let token_nonce = val.get("nonce").and_then(|v| v.as_str()).unwrap_or("");
@@ -1590,10 +1767,16 @@ impl BiometricChallengeService {
         let exp = val.get("expires_at").and_then(|v| v.as_u64()).unwrap_or(0);
 
         if !expected_session.is_empty() && session != expected_session {
-            return Err(format!("Session mismatch: expected '{}', got '{}'", expected_session, session));
+            return Err(format!(
+                "Session mismatch: expected '{}', got '{}'",
+                expected_session, session
+            ));
         }
         if !expected_action.is_empty() && action != expected_action {
-            return Err(format!("Action mismatch: expected '{}', got '{}'", expected_action, action));
+            return Err(format!(
+                "Action mismatch: expected '{}', got '{}'",
+                expected_action, action
+            ));
         }
 
         let now = SystemTime::now()
@@ -1602,18 +1785,31 @@ impl BiometricChallengeService {
             .as_secs();
 
         if max_age > 0 && now.saturating_sub(issued_at) > max_age {
-            return Err(format!("Biometric token expired: age {} exceeds max_age {}", now.saturating_sub(issued_at), max_age));
+            return Err(format!(
+                "Biometric token expired: age {} exceeds max_age {}",
+                now.saturating_sub(issued_at),
+                max_age
+            ));
         }
         if now > exp {
-            return Err(format!("Biometric token expired at {}, current time {}", exp, now));
+            return Err(format!(
+                "Biometric token expired at {}, current time {}",
+                exp, now
+            ));
         }
 
         // Anti-replay: consume token nonce strictly
         {
-            let mut nonces = self.consumed_token_nonces.lock().unwrap_or_else(|p| p.into_inner());
+            let mut nonces = self
+                .consumed_token_nonces
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             nonces.retain(|_, exp_time| now <= *exp_time);
             if nonces.contains_key(token_nonce) {
-                return Err("Biometric token nonce has already been consumed (replay attack detected)".to_string());
+                return Err(
+                    "Biometric token nonce has already been consumed (replay attack detected)"
+                        .to_string(),
+                );
             }
             if nonces.len() >= MAX_CONSUMED_NONCES_CACHE {
                 return Err("Biometric token validation rejected: consumed token capacity reached (fail-closed defense)".to_string());
@@ -1709,10 +1905,22 @@ impl CentralizedPasskeyVerifier {
         let path = storage_path.as_ref().to_path_buf();
         let mut map = HashMap::new();
         if path.exists() {
-            let data = std::fs::read(&path)
-                .map_err(|e| format!("Failed to read enrolled passkeys from '{}': {}", path.display(), e))?;
-            let loaded = serde_json::from_slice::<HashMap<String, EnrolledBiometricCredential>>(&data)
-                .map_err(|e| format!("Failed to parse corrupted enrolled passkeys from '{}': {}", path.display(), e))?;
+            let data = std::fs::read(&path).map_err(|e| {
+                format!(
+                    "Failed to read enrolled passkeys from '{}': {}",
+                    path.display(),
+                    e
+                )
+            })?;
+            let loaded =
+                serde_json::from_slice::<HashMap<String, EnrolledBiometricCredential>>(&data)
+                    .map_err(|e| {
+                        format!(
+                            "Failed to parse corrupted enrolled passkeys from '{}': {}",
+                            path.display(),
+                            e
+                        )
+                    })?;
             map = loaded;
         }
         let bio_service = Arc::new(BiometricChallengeService::new());
@@ -1721,7 +1929,11 @@ impl CentralizedPasskeyVerifier {
                 "packed" => CoseAlgorithm::Es256,
                 _ => CoseAlgorithm::EdDsa,
             };
-            bio_service.register_biometric_credential(&cred.credential_id, &cred.public_key_bytes, alg);
+            bio_service.register_biometric_credential(
+                &cred.credential_id,
+                &cred.public_key_bytes,
+                alg,
+            );
         }
         Ok(Self {
             biometric_service: bio_service,
@@ -1735,8 +1947,15 @@ impl CentralizedPasskeyVerifier {
             "packed" => CoseAlgorithm::Es256,
             _ => CoseAlgorithm::EdDsa,
         };
-        self.biometric_service.register_biometric_credential(&cred.credential_id, &cred.public_key_bytes, alg);
-        let mut map = self.enrolled_credentials.write().map_err(|_| "Credentials lock poisoned")?;
+        self.biometric_service.register_biometric_credential(
+            &cred.credential_id,
+            &cred.public_key_bytes,
+            alg,
+        );
+        let mut map = self
+            .enrolled_credentials
+            .write()
+            .map_err(|_| "Credentials lock poisoned")?;
         map.insert(cred.credential_id.clone(), cred);
         if let Some(ref path) = self.storage_path {
             if let Some(parent) = path.parent() {
@@ -1777,13 +1996,21 @@ impl crate::zero_trust::IdentityVerifier for CentralizedPasskeyVerifier {
                 authenticator_data,
                 client_data_json,
                 signature,
-            } => (credential_id, authenticator_data, client_data_json, signature),
+            } => (
+                credential_id,
+                authenticator_data,
+                client_data_json,
+                signature,
+            ),
             _ => return Err("Invalid proof variant for CentralizedPasskeyVerifier".into()),
         };
 
         // 1. Mandatory authenticator_data length check (must be at least 37 bytes)
         if auth_data.len() < 37 {
-            return Err("PasskeyAssertion verification rejected: authenticator_data too short (<37 bytes)".into());
+            return Err(
+                "PasskeyAssertion verification rejected: authenticator_data too short (<37 bytes)"
+                    .into(),
+            );
         }
 
         // 1b. Validate RP ID Hash (first 32 bytes of authenticator_data)
@@ -1799,7 +2026,9 @@ impl crate::zero_trust::IdentityVerifier for CentralizedPasskeyVerifier {
         // 2. Check User Present (bit 0 = 0x01) and User Verified (bit 2 = 0x04) flags
         let flags = auth_data[32];
         if flags & 0x01 == 0 {
-            return Err("PasskeyAssertion verification rejected: User Present (UP) flag not set".into());
+            return Err(
+                "PasskeyAssertion verification rejected: User Present (UP) flag not set".into(),
+            );
         }
         let user_verified = (flags & 0x04) != 0;
 
@@ -1807,7 +2036,8 @@ impl crate::zero_trust::IdentityVerifier for CentralizedPasskeyVerifier {
         if auth_data.len() < 37 {
             return Err("PasskeyAssertion verification rejected: authenticator_data too short (minimum 37 bytes required)".into());
         }
-        let _sign_count = u32::from_be_bytes([auth_data[33], auth_data[34], auth_data[35], auth_data[36]]);
+        let _sign_count =
+            u32::from_be_bytes([auth_data[33], auth_data[34], auth_data[35], auth_data[36]]);
 
         // 3. Validate client_data_json (required for WebAuthn assertion cryptographic verification)
         if client_data_json.is_empty() {
@@ -1819,25 +2049,43 @@ impl crate::zero_trust::IdentityVerifier for CentralizedPasskeyVerifier {
             .map_err(|e| format!("Invalid clientDataJSON JSON structure: {}", e))?;
         let cd_type = parsed.get("type").and_then(|v| v.as_str()).unwrap_or("");
         if cd_type != "webauthn.get" {
-            return Err(format!("Invalid clientDataJSON type '{}', expected 'webauthn.get'", cd_type));
+            return Err(format!(
+                "Invalid clientDataJSON type '{}', expected 'webauthn.get'",
+                cd_type
+            ));
         }
 
         let origin = parsed.get("origin").and_then(|v| v.as_str()).unwrap_or("");
-        if origin != "https://taracore.ai" && !origin.starts_with("https://localhost") && !origin.starts_with("http://localhost") {
-            return Err(format!("PasskeyAssertion verification rejected: unauthorized clientDataJSON origin '{}'", origin));
+        if origin != "https://taracore.ai"
+            && !origin.starts_with("https://localhost")
+            && !origin.starts_with("http://localhost")
+        {
+            return Err(format!(
+                "PasskeyAssertion verification rejected: unauthorized clientDataJSON origin '{}'",
+                origin
+            ));
         }
 
-        let challenge_nonce = parsed.get("challenge").and_then(|v| v.as_str()).unwrap_or("");
+        let challenge_nonce = parsed
+            .get("challenge")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         if challenge_nonce.is_empty() {
-            return Err("PasskeyAssertion verification rejected: clientDataJSON missing challenge nonce".into());
+            return Err(
+                "PasskeyAssertion verification rejected: clientDataJSON missing challenge nonce"
+                    .into(),
+            );
         }
 
         // Replay protection: challenge nonce must be single-use and not previously consumed
-        self.biometric_service.check_and_consume_nonce(challenge_nonce)?;
+        self.biometric_service
+            .check_and_consume_nonce(challenge_nonce)?;
 
         // 4. Verify signature is present and cryptographically authentic
         if sig.is_empty() {
-            return Err("PasskeyAssertion verification rejected: authenticator signature is empty".into());
+            return Err(
+                "PasskeyAssertion verification rejected: authenticator signature is empty".into(),
+            );
         }
 
         let cred_hex = hex::encode(cred_id);
@@ -1850,7 +2098,10 @@ impl crate::zero_trust::IdentityVerifier for CentralizedPasskeyVerifier {
         // 5. Look up enrolled credential strictly in Authoritative Registry (fixes finding #3)
         // Public keys supplied in the assertion itself must NEVER be trusted!
         let cred_opt = {
-            let map = self.enrolled_credentials.read().map_err(|_| "Credentials lock poisoned")?;
+            let map = self
+                .enrolled_credentials
+                .read()
+                .map_err(|_| "Credentials lock poisoned")?;
             map.get(&cred_hex).cloned()
         };
 
@@ -1874,8 +2125,12 @@ impl crate::zero_trust::IdentityVerifier for CentralizedPasskeyVerifier {
         } else {
             CoseAlgorithm::Es256
         };
-        verify_signed_data(&cred.public_key_bytes, &signed_data, sig, cose_alg)
-            .map_err(|e| format!("PasskeyAssertion signature verification failed against enrolled credential: {}", e))?;
+        verify_signed_data(&cred.public_key_bytes, &signed_data, sig, cose_alg).map_err(|e| {
+            format!(
+                "PasskeyAssertion signature verification failed against enrolled credential: {}",
+                e
+            )
+        })?;
 
         // 5. Build verified principal with appropriate role and assurance level
         let is_canonical_creator = cred.creator_id == crate::primitives::CANONICAL_CREATOR_ID
@@ -1898,7 +2153,11 @@ impl crate::zero_trust::IdentityVerifier for CentralizedPasskeyVerifier {
             )
         };
 
-        let pid_suffix = if cred_hex.is_empty() { "creator_root" } else { &cred_hex[..cred_hex.len().min(32)] };
+        let pid_suffix = if cred_hex.is_empty() {
+            "creator_root"
+        } else {
+            &cred_hex[..cred_hex.len().min(32)]
+        };
         let pid = crate::primitives::PrincipalId::with_namespace("passkey", pid_suffix)?;
 
         let s_id = format!("passkey_session_{}", pid.as_str());
@@ -1907,11 +2166,20 @@ impl crate::zero_trust::IdentityVerifier for CentralizedPasskeyVerifier {
         let mut claims = std::collections::HashMap::new();
         claims.insert("session_id".into(), serde_json::Value::String(s_id));
         claims.insert("session_proof".into(), serde_json::Value::String(proof));
-        claims.insert("verified_via".into(), serde_json::Value::String("webauthn_hardware_passkey".into()));
+        claims.insert(
+            "verified_via".into(),
+            serde_json::Value::String("webauthn_hardware_passkey".into()),
+        );
         claims.insert("credential_id".into(), serde_json::Value::String(cred_hex));
-        claims.insert("user_verified".into(), serde_json::Value::Bool(user_verified));
+        claims.insert(
+            "user_verified".into(),
+            serde_json::Value::Bool(user_verified),
+        );
         claims.insert("signature_verified".into(), serde_json::Value::Bool(true));
-        claims.insert("authenticator_type".into(), serde_json::Value::String("WebAuthn_Passkey".into()));
+        claims.insert(
+            "authenticator_type".into(),
+            serde_json::Value::String("WebAuthn_Passkey".into()),
+        );
 
         crate::primitives::VerifiedPrincipal::construct_verified(
             pid,
@@ -1934,7 +2202,8 @@ mod tests {
     #[test]
     fn test_centralized_passkey_verifier_signature_verification() {
         let verifier = CentralizedPasskeyVerifier::new();
-        let (signing_key, verifying_key) = crate::cryptography::CryptoUtils::generate_ed25519_keypair();
+        let (signing_key, verifying_key) =
+            crate::cryptography::CryptoUtils::generate_ed25519_keypair();
         let cred_id = vec![0x10, 0x20, 0x30, 0x40];
         let cred_hex = hex::encode(&cred_id);
 
@@ -1962,7 +2231,8 @@ mod tests {
         auth_data[32] = 0x05; // UP | UV
         auth_data[36] = 1;
 
-        let client_data_json = br#"{"type":"webauthn.get","challenge":"sec_chal_123","origin":"https://localhost"}"#;
+        let client_data_json =
+            br#"{"type":"webauthn.get","challenge":"sec_chal_123","origin":"https://localhost"}"#;
         let client_data_hash = crate::cryptography::CryptoUtils::sha256(client_data_json);
 
         let mut signed_data = Vec::new();
@@ -1981,10 +2251,20 @@ mod tests {
             signature: signature.clone(),
         };
         let p_res = verifier.verify_proof(&valid_proof, current_gen, 1000);
-        assert!(p_res.is_ok(), "Authentic passkey assertion must verify: {:?}", p_res.err());
+        assert!(
+            p_res.is_ok(),
+            "Authentic passkey assertion must verify: {:?}",
+            p_res.err()
+        );
         let principal = p_res.unwrap();
-        assert_eq!(principal.assurance_level(), crate::primitives::AssuranceLevel::CREATOR_ROOT);
-        assert_eq!(principal.role(), &crate::primitives::PrincipalRole::creator());
+        assert_eq!(
+            principal.assurance_level(),
+            crate::primitives::AssuranceLevel::CREATOR_ROOT
+        );
+        assert_eq!(
+            principal.role(),
+            &crate::primitives::PrincipalRole::creator()
+        );
 
         // 2. Tampered signature fails closed
         let mut tampered_sig = signature.clone();
@@ -2006,7 +2286,10 @@ mod tests {
             signature: signature.clone(),
         };
         let unreg_res = verifier.verify_proof(&unreg_proof, current_gen, 1000);
-        assert!(unreg_res.is_err(), "Unregistered credential must fail closed");
+        assert!(
+            unreg_res.is_err(),
+            "Unregistered credential must fail closed"
+        );
 
         // 4. Empty signature fails closed
         let empty_proof = IdentityProof::PasskeyAssertion {
@@ -2020,15 +2303,23 @@ mod tests {
 
         // 5. Replayed challenge nonce fails closed (anti-replay defense)
         let replay_res = verifier.verify_proof(&valid_proof, current_gen, 1000);
-        assert!(replay_res.is_err(), "Replay of same assertion challenge nonce must fail closed");
+        assert!(
+            replay_res.is_err(),
+            "Replay of same assertion challenge nonce must fail closed"
+        );
     }
 
     #[test]
     fn test_biometric_challenge_service() {
         let service = BiometricChallengeService::new();
-        let (signing_key, verifying_key) = crate::cryptography::CryptoUtils::generate_ed25519_keypair();
+        let (signing_key, verifying_key) =
+            crate::cryptography::CryptoUtils::generate_ed25519_keypair();
         let cred_id = "bio_cred_001";
-        service.register_biometric_credential(cred_id, &verifying_key.to_bytes(), CoseAlgorithm::EdDsa);
+        service.register_biometric_credential(
+            cred_id,
+            &verifying_key.to_bytes(),
+            CoseAlgorithm::EdDsa,
+        );
 
         let challenge = service.issue_challenge("creator_test", "session_123", "action_sign");
 
@@ -2038,7 +2329,8 @@ mod tests {
             "type": "webauthn.get",
             "challenge": challenge.nonce,
             "origin": "https://tara.local"
-        })).unwrap();
+        }))
+        .unwrap();
         let cdh = crate::cryptography::CryptoUtils::sha256(&client_data_json);
         let mut signed_data = Vec::new();
         signed_data.extend_from_slice(&auth_data);
@@ -2059,7 +2351,11 @@ mod tests {
 
         // 1. Valid signature verifies successfully and mints token
         let token_res = service.verify_platform_assertion_and_mint_token(&challenge, &assertion);
-        assert!(token_res.is_ok(), "Valid biometric assertion must succeed: {:?}", token_res.err());
+        assert!(
+            token_res.is_ok(),
+            "Valid biometric assertion must succeed: {:?}",
+            token_res.err()
+        );
 
         // 2. Tampered signature fails closed
         let mut bad_assertion = assertion.clone();
@@ -2070,14 +2366,22 @@ mod tests {
         // 3. Unverified assertion fails closed
         let mut unverified_assertion = assertion.clone();
         unverified_assertion.user_verified = false;
-        let unverified_res = service.verify_platform_assertion_and_mint_token(&challenge, &unverified_assertion);
-        assert!(unverified_res.is_err(), "Unverified assertion must fail closed");
+        let unverified_res =
+            service.verify_platform_assertion_and_mint_token(&challenge, &unverified_assertion);
+        assert!(
+            unverified_res.is_err(),
+            "Unverified assertion must fail closed"
+        );
 
         // 4. Unregistered credential fails closed (Fixes cryptographic verification bypass)
         let mut unregistered_assertion = assertion;
         unregistered_assertion.credential_id = "unknown_unregistered_cred".to_string();
-        let unreg_res = service.verify_platform_assertion_and_mint_token(&challenge, &unregistered_assertion);
-        assert!(unreg_res.is_err(), "Unregistered credential must fail closed");
+        let unreg_res =
+            service.verify_platform_assertion_and_mint_token(&challenge, &unregistered_assertion);
+        assert!(
+            unreg_res.is_err(),
+            "Unregistered credential must fail closed"
+        );
 
         // 5. Direct verification with explicit public key succeeds for external keys
         let challenge2 = service.issue_challenge("creator_test", "session_456", "action_direct");
@@ -2085,7 +2389,8 @@ mod tests {
             "type": "webauthn.get",
             "challenge": challenge2.nonce,
             "origin": "https://tara.local"
-        })).unwrap();
+        }))
+        .unwrap();
         let cdh2 = crate::cryptography::CryptoUtils::sha256(&client_data_json2);
         let mut signed_data2 = Vec::new();
         signed_data2.extend_from_slice(&auth_data);
@@ -2109,7 +2414,11 @@ mod tests {
             &verifying_key.to_bytes(),
             CoseAlgorithm::EdDsa,
         );
-        assert!(direct_token_res.is_ok(), "Direct public key assertion verification must succeed: {:?}", direct_token_res.err());
+        assert!(
+            direct_token_res.is_ok(),
+            "Direct public key assertion verification must succeed: {:?}",
+            direct_token_res.err()
+        );
     }
 
     #[test]
@@ -2134,17 +2443,22 @@ mod tests {
 
         // 1. Valid matching TPM pub_area succeeds
         let match_res = verify_tpm_pub_area_matches_cred_pk(&pub_area, &cred_pk);
-        assert!(match_res.is_ok(), "Valid TPM pubArea coordinates must match");
+        assert!(
+            match_res.is_ok(),
+            "Valid TPM pubArea coordinates must match"
+        );
 
         // 2. Tampered pub_area fails closed
         let mut bad_pub_area = pub_area.clone();
         bad_pub_area[20] ^= 0xff;
         let bad_res = verify_tpm_pub_area_matches_cred_pk(&bad_pub_area, &cred_pk);
-        assert!(bad_res.is_err(), "Tampered pubArea coordinates must fail closed");
+        assert!(
+            bad_res.is_err(),
+            "Tampered pubArea coordinates must fail closed"
+        );
 
         // 3. Empty pub_area fails closed
         let empty_res = verify_tpm_pub_area_matches_cred_pk(&[], &cred_pk);
         assert!(empty_res.is_err(), "Empty pubArea must fail closed");
     }
 }
-

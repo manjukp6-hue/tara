@@ -15,7 +15,8 @@ use std::sync::Arc;
 use crate::hardware_root::AuthorityManager;
 use crate::path_security::{canonical_containment, validate_tool_command_path};
 use crate::primitives::{
-    AssuranceLevel, SecurityAction, SecurityContext, SecurityResource, SecurityState, VerifiedPrincipal,
+    AssuranceLevel, SecurityAction, SecurityContext, SecurityResource, SecurityState,
+    VerifiedPrincipal,
 };
 use crate::transparency_log::{AuthenticatedAuditLogger, MerkleTree};
 use crate::zero_trust::{ContinuousRiskEngine, PolicyEngine, RiskVerdict, SessionManager};
@@ -208,8 +209,20 @@ impl EnforcementGateway {
                 let verb = request.action.verb().to_lowercase();
                 let is_write = matches!(
                     verb.as_str(),
-                    "write" | "create" | "delete" | "update" | "modify" | "append" | "truncate" | "remove" | "put" | "post" | "patch"
-                ) || verb.contains("write") || verb.contains("delete") || verb.contains("create");
+                    "write"
+                        | "create"
+                        | "delete"
+                        | "update"
+                        | "modify"
+                        | "append"
+                        | "truncate"
+                        | "remove"
+                        | "put"
+                        | "post"
+                        | "patch"
+                ) || verb.contains("write")
+                    || verb.contains("delete")
+                    || verb.contains("create");
                 ProtectedCategory::Files {
                     path: p.clone(),
                     permitted_root,
@@ -299,10 +312,15 @@ impl EnforcementGateway {
             ));
         }
 
-        let current_state = SecurityState::Operational { generation: current_gen };
+        let current_state = SecurityState::Operational {
+            generation: current_gen,
+        };
 
         // Stage 2: Dynamic Principal & Device Revocation Check, and Session Validity
-        if self.session_manager.is_principal_revoked(request.principal.id()) {
+        if self
+            .session_manager
+            .is_principal_revoked(request.principal.id())
+        {
             self.risk_engine.record_failure(request.principal.id());
             let _ = self.audit_logger.log_event(
                 request.principal.id().clone(),
@@ -331,7 +349,10 @@ impl EnforcementGateway {
         }
 
         if let Some(ref sess_id) = request.session_id {
-            match self.session_manager.validate_session(sess_id, current_gen, epoch_secs) {
+            match self
+                .session_manager
+                .validate_session(sess_id, current_gen, epoch_secs)
+            {
                 Ok(session_rec) => {
                     if session_rec.principal.id() != request.principal.id() {
                         self.risk_engine.record_failure(request.principal.id());
@@ -363,7 +384,11 @@ impl EnforcementGateway {
 
         // Stage 3: Central Path Security Validation
         match &request.category {
-            ProtectedCategory::Files { path, permitted_root, .. } => {
+            ProtectedCategory::Files {
+                path,
+                permitted_root,
+                ..
+            } => {
                 if let Err(e) = canonical_containment(permitted_root, path) {
                     self.risk_engine.record_failure(request.principal.id());
                     let _ = self.audit_logger.log_event(
@@ -377,7 +402,11 @@ impl EnforcementGateway {
                     return Err(format!("PathSecurityViolation: {}", e));
                 }
             }
-            ProtectedCategory::Models { model_path, models_dir, .. } => {
+            ProtectedCategory::Models {
+                model_path,
+                models_dir,
+                ..
+            } => {
                 if let Err(e) = canonical_containment(models_dir, model_path) {
                     self.risk_engine.record_failure(request.principal.id());
                     let _ = self.audit_logger.log_event(
@@ -391,7 +420,10 @@ impl EnforcementGateway {
                     return Err(format!("ModelPathSecurityViolation: {}", e));
                 }
             }
-            ProtectedCategory::Tools { command_or_script, allowed_dirs } => {
+            ProtectedCategory::Tools {
+                command_or_script,
+                allowed_dirs,
+            } => {
                 if let Err(e) = validate_tool_command_path(command_or_script, allowed_dirs) {
                     self.risk_engine.record_failure(request.principal.id());
                     let _ = self.audit_logger.log_event(
@@ -419,18 +451,25 @@ impl EnforcementGateway {
                     return Err("InvalidNetworkEndpoint: Endpoint format or port invalid".into());
                 }
             }
-            ProtectedCategory::AutonomousGoals { goal_id, target_subsystem } => {
+            ProtectedCategory::AutonomousGoals {
+                goal_id,
+                target_subsystem,
+            } => {
                 if goal_id.trim().is_empty() || target_subsystem.trim().is_empty() {
                     self.risk_engine.record_failure(request.principal.id());
                     return Err("InvalidAutonomousGoalRequest: Goal ID and target subsystem must not be empty".into());
                 }
             }
-            ProtectedCategory::AdministrativeActions { action_type, requires_quorum } => {
+            ProtectedCategory::AdministrativeActions {
+                action_type,
+                requires_quorum,
+            } => {
                 if action_type.trim().is_empty() {
                     return Err("InvalidAdministrativeAction: Action type cannot be empty".into());
                 }
                 if *requires_quorum
-                    && request.principal.assurance_level().score() < AssuranceLevel::MULTI_FACTOR_AUTHENTICATED.score()
+                    && request.principal.assurance_level().score()
+                        < AssuranceLevel::MULTI_FACTOR_AUTHENTICATED.score()
                 {
                     self.risk_engine.record_failure(request.principal.id());
                     let _ = self.audit_logger.log_event(
@@ -460,14 +499,19 @@ impl EnforcementGateway {
                     request.principal.id().clone(),
                     request.action.clone(),
                     request.resource.clone(),
-                    &format!("CRITICAL_RISK_LOCKDOWN_ENGAGED (score {}): {}", risk_score, reason),
+                    &format!(
+                        "CRITICAL_RISK_LOCKDOWN_ENGAGED (score {}): {}",
+                        risk_score, reason
+                    ),
                     request.principal.authority_generation(),
                     epoch_secs,
                 );
                 return Err(format!("CriticalRiskLockdown: {}", reason));
             }
             RiskVerdict::RequireCreatorStepUp { risk_score, reason } => {
-                if request.principal.assurance_level().score() < AssuranceLevel::CREATOR_ROOT.score() {
+                if request.principal.assurance_level().score()
+                    < AssuranceLevel::CREATOR_ROOT.score()
+                {
                     self.risk_engine.record_failure(request.principal.id());
                     let _ = self.audit_logger.log_event(
                         request.principal.id().clone(),
@@ -484,7 +528,9 @@ impl EnforcementGateway {
                 }
             }
             RiskVerdict::RequireHardwareStepUp { risk_score, reason } => {
-                if request.principal.assurance_level().score() < AssuranceLevel::HARDWARE_ATTESTED.score() {
+                if request.principal.assurance_level().score()
+                    < AssuranceLevel::HARDWARE_ATTESTED.score()
+                {
                     self.risk_engine.record_failure(request.principal.id());
                     let _ = self.audit_logger.log_event(
                         request.principal.id().clone(),
@@ -640,8 +686,20 @@ impl OperationBroker {
                 let verb = request.action.verb().to_lowercase();
                 let is_write = matches!(
                     verb.as_str(),
-                    "write" | "create" | "delete" | "update" | "modify" | "append" | "truncate" | "remove" | "put" | "post" | "patch"
-                ) || verb.contains("write") || verb.contains("delete") || verb.contains("create");
+                    "write"
+                        | "create"
+                        | "delete"
+                        | "update"
+                        | "modify"
+                        | "append"
+                        | "truncate"
+                        | "remove"
+                        | "put"
+                        | "post"
+                        | "patch"
+                ) || verb.contains("write")
+                    || verb.contains("delete")
+                    || verb.contains("create");
                 ProtectedCategory::Files {
                     path: p.clone(),
                     permitted_root,

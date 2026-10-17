@@ -28,14 +28,14 @@ pub mod computation;
 pub mod config;
 pub mod dataset;
 pub mod inference;
-pub use inference::generate as generate;
+pub use inference::generate;
 pub mod tokenizer;
 pub mod train_candidate;
 
 // ============================================================================
 // Tier 2: Domain & Verification Subsystems
 // ============================================================================
-pub use inference::auto_loader as auto_loader;
+pub use inference::auto_loader;
 pub mod control_tokens;
 #[path = "../../tara_training_system/curriculum_engine/curriculum_engine.rs"]
 pub mod curriculum_engine;
@@ -44,7 +44,7 @@ pub use dataset::classifier as dataset_classifier;
 pub mod dataset_engine;
 pub mod device_detector;
 pub mod hf_adapter;
-pub use inference::loading_policy as loading_policy;
+pub use inference::loading_policy;
 
 // ============================================================================
 // Tier 3: Private Low-Level Engine & Training Implementation Modules
@@ -53,11 +53,11 @@ pub use inference::loading_policy as loading_policy;
 pub mod cuda;
 #[path = "../../tara_training_system/neural_model/model/mod.rs"]
 mod model;
-pub use inference::model_expansion as model_expansion;
+pub use inference::model_expansion;
 #[path = "../../tara_training_system/shared_training_infrastructure/safetensors.rs"]
 mod safetensors;
 mod self_update;
-pub use inference::shard_manager as shard_manager;
+pub use inference::shard_manager;
 #[path = "../../tara_training_system/shared_training_infrastructure/skills_evaluator.rs"]
 mod skills_evaluator;
 #[path = "../../tara_training_system/shared_training_infrastructure/trainer.rs"]
@@ -69,7 +69,6 @@ pub const OWNED_TRAINING_SYSTEM_MODULES: &[&str] = &[
     "rust/tara_training_system/curriculum_engine/curriculum_engine.rs",
     "rust/tara_training_system/dataset_engine/dataset_engine.rs",
     "rust/tara_training_system/neural_model/model/mod.rs",
-    "rust/tara_training_system/shared_training_infrastructure/reader.rs",
     "rust/tara_training_system/shared_training_infrastructure/safetensors.rs",
     "rust/tara_training_system/shared_training_infrastructure/skills_evaluator.rs",
     "rust/tara_training_system/shared_training_infrastructure/trainer.rs",
@@ -89,8 +88,8 @@ pub use config::TaraConfig;
 pub use control_tokens::{ControlTokenAction, ControlTokenActionParser};
 pub use cuda::{
     capture_memory_snapshot, is_cuda_available, is_cuda_required, is_cuda_required_value,
-    log_flushed_memory_checkpoint, validate_ptx_registers, AdamWMemoryAudit, CudaDeviceInfo, CudaError,
-    CudaTrainer, MemorySnapshot, TrainingPrecision,
+    log_flushed_memory_checkpoint, validate_ptx_registers, AdamWMemoryAudit, CudaDeviceInfo,
+    CudaError, CudaTrainer, MemorySnapshot, TrainingPrecision,
 };
 pub use curriculum_engine::{
     CurriculumBatch, CurriculumConfig, CurriculumEngine, CurriculumReport, CurriculumStage,
@@ -218,7 +217,10 @@ pub fn compute_file_sha256<P: AsRef<std::path::Path>>(path: P) -> std::io::Resul
 
 /// Helper function to compute dynamic SHA-256 of a file without hardcoded literals.
 /// Delegates to canonical `compute256`.
-pub fn compute_dynamic_sha256(path: &std::path::Path, _buffer_size: usize) -> std::io::Result<String> {
+pub fn compute_dynamic_sha256(
+    path: &std::path::Path,
+    _buffer_size: usize,
+) -> std::io::Result<String> {
     compute256(path)
 }
 
@@ -230,8 +232,7 @@ pub fn compute_bytes_sha256(bytes: &[u8]) -> String {
 
 /// Computes RFC 2104 HMAC-SHA256 authoritatively using CryptoUtils.
 pub fn compute_hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
-    tara_security::cryptography::CryptoUtils::hmac_sha256(key, data)
-        .unwrap_or([0u8; 32])
+    tara_security::cryptography::CryptoUtils::hmac_sha256(key, data).unwrap_or([0u8; 32])
 }
 
 /// Normalizes path separators to forward slash ('/') and resolves '.' and '..' components.
@@ -474,9 +475,14 @@ mod tests {
     fn test_curriculum_compiler_cleanliness() {
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let target_file = manifest_dir.join("src/bin/curriculum_compiler.rs");
-        assert!(target_file.exists(), "Target file must exist: {:?}", target_file);
+        assert!(
+            target_file.exists(),
+            "Target file must exist: {:?}",
+            target_file
+        );
 
-        let mut content = std::fs::read_to_string(&target_file).expect("Failed to read curriculum_compiler.rs");
+        let mut content =
+            std::fs::read_to_string(&target_file).expect("Failed to read curriculum_compiler.rs");
 
         if content.contains("à²") || content.contains("à³") {
             let replacements: &[(&str, &str)] = &[
@@ -536,16 +542,11 @@ mod tests {
             for (from, to) in replacements {
                 content = content.replace(from, to);
             }
-            std::fs::write(&target_file, &content).expect("Failed to write sanitized curriculum_compiler.rs");
+            std::fs::write(&target_file, &content)
+                .expect("Failed to write sanitized curriculum_compiler.rs");
         }
 
-        let mojibake_patterns = [
-            "SchrÃ¶dinger",
-            "SpÃ¤rck",
-            "â€”",
-            "à²",
-            "à³",
-        ];
+        let mojibake_patterns = ["SchrÃ¶dinger", "SpÃ¤rck", "â€”", "à²", "à³"];
 
         for pat in mojibake_patterns {
             let matches: Vec<(usize, String)> = content
@@ -562,12 +563,7 @@ mod tests {
             );
         }
 
-        let record_disallowed = [
-            "Wikibooks",
-            "CC BY-SA",
-            "CC-BY-SA",
-            "ShareAlike",
-        ];
+        let record_disallowed = ["Wikibooks", "CC BY-SA", "CC-BY-SA", "ShareAlike"];
 
         for pat in record_disallowed {
             // Check lines starting where build_domain1 through build_domain10 are defined

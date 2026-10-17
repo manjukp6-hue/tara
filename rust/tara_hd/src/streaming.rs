@@ -86,7 +86,10 @@ impl CpuStreamHelper {
 
     /// Stream a long sequence of tokens (e.g., 1419 tokens) into smaller, bounded compute chunks.
     /// Never loads or computes quadratic attention over the full sequence simultaneously.
-    pub fn stream_sequence_chunks<'a>(&'a self, full_tokens: &'a [u32]) -> SequenceChunkIterator<'a> {
+    pub fn stream_sequence_chunks<'a>(
+        &'a self,
+        full_tokens: &'a [u32],
+    ) -> SequenceChunkIterator<'a> {
         SequenceChunkIterator {
             tokens: full_tokens,
             chunk_size: self.config.chunk_size_tokens.max(1),
@@ -102,8 +105,8 @@ impl CpuStreamHelper {
         let resident_layers = self.config.max_resident_layers.max(1);
         let bytes_per_token_approx = hidden_size.max(1) * 4 * 4 * resident_layers;
         // Allocate up to 1/16th of the total stream memory budget per active chunk window
-        let target_bytes_per_chunk =
-            (self.config.memory_budget_mb * 1024 * 1024 / 16).clamp(16 * 1024 * 1024, 256 * 1024 * 1024);
+        let target_bytes_per_chunk = (self.config.memory_budget_mb * 1024 * 1024 / 16)
+            .clamp(16 * 1024 * 1024, 256 * 1024 * 1024);
 
         let max_tokens = target_bytes_per_chunk / bytes_per_token_approx.max(1);
         max_tokens.clamp(64, 512).min(total_seq_len)

@@ -74,6 +74,25 @@ impl DynamicAdamW {
         }
     }
 
+    /// Construct a DynamicAdamW optimizer with eagerly pre-allocated moment buffers.
+    ///
+    /// Allocating moment vectors upfront prevents unexpected host memory spikes
+    /// and OOM-killer invocations during the first optimizer step.
+    pub fn with_preallocated_moments(weights: &HashMap<String, Vec<f32>>) -> Self {
+        let mut m = HashMap::with_capacity(weights.len());
+        let mut v = HashMap::with_capacity(weights.len());
+        for (name, param) in weights {
+            m.insert(name.clone(), vec![0.0f32; param.len()]);
+            v.insert(name.clone(), vec![0.0f32; param.len()]);
+        }
+        Self {
+            m,
+            v,
+            step: 0,
+            last_grad_norm: 0.0,
+        }
+    }
+
     pub fn last_grad_norm(&self) -> f32 {
         self.last_grad_norm
     }
@@ -214,7 +233,10 @@ impl StreamingDatasetReader {
             let val: Value = serde_json::from_str(trimmed)
                 .map_err(|e| TrainerError::Dataset(format!("{}: {e}", self.path)))?;
             line.clear();
-            let has_text = val.get("text").or_else(|| val.get("content")).and_then(Value::as_str);
+            let has_text = val
+                .get("text")
+                .or_else(|| val.get("content"))
+                .and_then(Value::as_str);
 
             let input = val
                 .get("formatted_input")
@@ -231,15 +253,24 @@ impl StreamingDatasetReader {
                 })
                 .or_else(|| {
                     if has_text.is_some() {
-                        let source = val.get("source").and_then(Value::as_str).unwrap_or("Knowledge");
+                        let source = val
+                            .get("source")
+                            .and_then(Value::as_str)
+                            .unwrap_or("Knowledge");
                         let book = val.get("book").and_then(Value::as_str).unwrap_or("");
-                        let chapter = val.get("chapter").and_then(|c| c.as_u64()).map(|c| format!(" Chapter {c}")).unwrap_or_default();
+                        let chapter = val
+                            .get("chapter")
+                            .and_then(|c| c.as_u64())
+                            .map(|c| format!(" Chapter {c}"))
+                            .unwrap_or_default();
                         let header = if !book.is_empty() {
                             format!("{source}: {book}{chapter}")
                         } else {
                             source.to_string()
                         };
-                        Some(format!("<|im_start|>user\n{header}\n<|im_end|>\n<|im_start|>assistant\n"))
+                        Some(format!(
+                            "<|im_start|>user\n{header}\n<|im_end|>\n<|im_start|>assistant\n"
+                        ))
                     } else {
                         None
                     }
@@ -463,26 +494,42 @@ impl NativeSelfTrainer {
         max_tensor_len: usize,
         batch_size: usize,
         seq_len: usize,
+        hidden_size: usize,
     ) -> (f64, String) {
+        // Use the actual model hidden_size from config to compute activation buffer sizes.
+        // Callers must pass config.hidden_size; using a stale assumption here would produce
+        // incorrect estimates as model architectures change.
+        let hs = hidden_size.max(1);
+
         // 1. Host RAM Breakdown:
         // Canonical FP32 model weights on host: 4 bytes / param
         let host_model_mb = (total_params * 4) as f64 / (1024.0 * 1024.0);
         // Host optimizer states:
-        // Models with >= 200M parameters run in Streamed Optimizer Mode where moments m (FP16, 2B) and v (FP16, 2B)
-        // are resident in Host RAM to prevent GPU VRAM exhaustion (4 bytes/param total).
-        // Models < 200M on GPU keep moments in VRAM (0.0 MB on host).
-        // On CPU, gradients (4B) + momentum m (4B) + variance v (4B) = 12 bytes/param reside on host.
-        let is_streamed_gpu = is_gpu && total_params >= 200_000_000;
-        let host_opt_mb = if is_streamed_gpu {
-            (total_params * 4) as f64 / (1024.0 * 1024.0)
-        } else if is_gpu {
-            0.0
+        // DynamicAdamW always stores fp32 first and second moments (m and v) on host RAM
+        // regardless of compute precision — this is required for numerical stability during
+        // AdamW bias-correction. Cost: 4 bytes (m) + 4 bytes (v) = 8 bytes per parameter.
+        //
+        // For GPU training, the full weight tensor (fp32 master copy) + both moment tensors
+        // are resident on host at the same time during the optimizer step.
+        // For CPU training, gradients (4B) + m (4B) + v (4B) = 12 bytes/param resident.
+        //
+        // The 200M threshold marks large models where GPU VRAM chunk-streaming is used;
+        // it does NOT reduce host-side moment memory — moments are always on host for GPU.
+        let streamed_optimizer_threshold: usize = 200_000_000;
+        let is_streamed_gpu = is_gpu && total_params >= streamed_optimizer_threshold;
+        let host_opt_mb = if is_gpu {
+            // fp32 m (4B) + fp32 v (4B) = 8 bytes per param on host for all GPU models.
+            // This is the actual DynamicAdamW allocation — previously underestimated as 4B.
+            (total_params * 8) as f64 / (1024.0 * 1024.0)
         } else {
+            // CPU: gradients (4B) + m (4B) + v (4B) = 12 bytes/param
             (total_params * 12) as f64 / (1024.0 * 1024.0)
         };
-        // Activations & cache buffers on host: micro-batch activations across transformer layers
-        let host_act_mb = (batch_size * seq_len * 2048 * 4 * 14) as f64 / (1024.0 * 1024.0);
-        let host_overhead_mb = 350.0; // Tokenizer, runtime, OS process baseline
+        // Activations & cache buffers on host: micro-batch activations across transformer layers.
+        // Layer count factor of 14 covers: q,k,v,o projections + gate,up,down MLP + 2x norms +
+        // residual stream input/output + RoPE buffer + LM head partial row.
+        let host_act_mb = (batch_size * seq_len * hs * 4 * 14) as f64 / (1024.0 * 1024.0);
+        let host_overhead_mb = 500.0; // Tokenizer, runtime, OS, Colab kernel, dataset buffers
         let host_subtotal = host_model_mb + host_opt_mb + host_act_mb + host_overhead_mb;
         let host_total_with_margin = host_subtotal * 1.15; // 15% safety headroom
 
@@ -498,10 +545,11 @@ impl NativeSelfTrainer {
                 // 3 chunk buffers (dw, dm, dv) of max_tensor_len in FP32 = 12 bytes / max element
                 (max_tensor_len * 12) as f64 / (1024.0 * 1024.0)
             } else {
-                // Resident moments m (4B) + v (4B) = 8 bytes / param
+                // Resident moments m (4B) + v (4B) = 8 bytes / param in VRAM for small models
                 (total_params * 8) as f64 / (1024.0 * 1024.0)
             };
-            let act_mb = (batch_size * seq_len * 2048 * 8) as f64 / (1024.0 * 1024.0) + 150.0;
+            // GPU activation buffer: hidden_size * 8 bytes per token (FP16 acts + gradient buffer)
+            let act_mb = (batch_size * seq_len * hs * 8) as f64 / (1024.0 * 1024.0) + 150.0;
             let cuda_overhead_mb = 450.0;
             let subtotal = w_mb + g_mb + chunk_mb + act_mb + cuda_overhead_mb;
             (w_mb, g_mb, chunk_mb, act_mb, subtotal * 1.10) // 10% safety headroom
@@ -509,7 +557,11 @@ impl NativeSelfTrainer {
             (0.0, 0.0, 0.0, 0.0, 0.0)
         };
 
-        // Governing peak memory is the maximum of Host RAM and GPU VRAM requirements
+        // Governing peak: both host RAM AND GPU VRAM must be within limits.
+        // We report the maximum (worst case) so callers can check against a single ceiling.
+        // Critical: host RAM must be checked separately — the OOM killer operates on host
+        // cgroup limits independently of GPU VRAM. A model that fits GPU VRAM can still
+        // trigger host OOM when optimizer moments are allocated during the first step.
         let governing_peak = if is_gpu {
             host_total_with_margin.max(gpu_total_with_margin)
         } else {
@@ -518,11 +570,11 @@ impl NativeSelfTrainer {
 
         let breakdown = if is_gpu {
             format!(
-                "Host RAM: Model={host_model_mb:.1}MB, Opt(m+v)={host_opt_mb:.1}MB, Act={host_act_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB | GPU VRAM: Weights={gpu_w_mb:.1}MB, Grads={gpu_g_mb:.1}MB, Chunks/States={gpu_chunk_mb:.1}MB, Act={gpu_act_mb:.1}MB, Total(+10% Margin)={gpu_total_with_margin:.1}MB (Governing Peak: {governing_peak:.1}MB)",
+                "Host RAM: Model={host_model_mb:.1}MB, Opt(m+v fp32)={host_opt_mb:.1}MB, Act={host_act_mb:.1}MB, Overhead={host_overhead_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB | GPU VRAM: Weights={gpu_w_mb:.1}MB, Grads={gpu_g_mb:.1}MB, Chunks/States={gpu_chunk_mb:.1}MB, Act={gpu_act_mb:.1}MB, Total(+10% Margin)={gpu_total_with_margin:.1}MB | Governing Peak: {governing_peak:.1}MB",
             )
         } else {
             format!(
-                "Host RAM: Model={host_model_mb:.1}MB, Grads+Moments={host_opt_mb:.1}MB, Act={host_act_mb:.1}MB, Overhead={host_overhead_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB",
+                "Host RAM: Model={host_model_mb:.1}MB, Grads+Moments(fp32)={host_opt_mb:.1}MB, Act={host_act_mb:.1}MB, Overhead={host_overhead_mb:.1}MB, Total(+15% Margin)={host_total_with_margin:.1}MB",
             )
         };
 
@@ -530,8 +582,10 @@ impl NativeSelfTrainer {
     }
 
     /// Calculate projected training memory footprint in MB given total parameter count.
+    /// Uses a representative hidden_size of 2048 as a conservative estimate when config is unavailable.
+    /// For accurate estimates, use `estimate_memory_footprint_mb_detailed` with the actual config.hidden_size.
     pub fn estimate_memory_footprint_mb(total_params: usize) -> f64 {
-        Self::estimate_memory_footprint_mb_detailed(total_params, false, false, 0, 1, 512).0
+        Self::estimate_memory_footprint_mb_detailed(total_params, false, false, 0, 1, 512, 2048).0
     }
 
     /// Return the current trainer status (last cycle time, epoch count, etc.).
@@ -706,7 +760,8 @@ impl NativeSelfTrainer {
         let _ = std::fs::remove_dir_all(&staging_cp);
         Self::sync_to_gdrive_if_present(cp_path);
 
-        let val_loss_str = bundle.current_eval_loss
+        let val_loss_str = bundle
+            .current_eval_loss
             .map(|l| format!("{:.4}", l))
             .unwrap_or_else(|| "N/A".to_string());
         let best_loss_str = if bundle.val_tokens_empty {
@@ -737,9 +792,9 @@ impl NativeSelfTrainer {
         force_now: bool,
         candidate_dir_override: Option<&str>,
     ) -> Result<Value, TrainerError> {
-        if max_epochs == 0 || max_epochs > 100 {
+        if max_epochs == 0 {
             return Err(TrainerError::Dataset(
-                "max_epochs must be between 1 and 100".into(),
+                "max_epochs must be at least 1 — zero epochs produce no training progress".into(),
             ));
         }
 
@@ -816,10 +871,7 @@ impl NativeSelfTrainer {
                 .unwrap_or(true);
         if need_more {
             let dataset_candidate = self.dataset_dir.clone().unwrap_or_else(|| {
-                let main_v1_dir = format!(
-                    "{}/storage/datasets/main_dataset_v1",
-                    self.repo_root
-                );
+                let main_v1_dir = format!("{}/storage/datasets/main_dataset_v1", self.repo_root);
                 if Path::new(&main_v1_dir).exists() {
                     main_v1_dir
                 } else {
@@ -939,31 +991,110 @@ impl NativeSelfTrainer {
                 crate::cuda::TrainingPrecision::Fp32 => tara_hd::PrecisionMode::Fp32,
                 crate::cuda::TrainingPrecision::Auto => tara_hd::PrecisionMode::Auto,
             },
-        ).map_err(|e| TrainerError::Model(format!("TARA-HD hardware channel selection failed: {e}")))?;
+        )
+        .map_err(|e| {
+            TrainerError::Model(format!("TARA-HD hardware channel selection failed: {e}"))
+        })?;
 
+        // ── Automatic memory-aware hyperparameter configuration ──────────────────
+        // Derive optimal batch_size, seq_len, grad_accum_steps, learning_rate, and
+        // warmup_steps from actual device memory reported by the TARA-HD channel.
+        // User-supplied values take priority; auto-derived values fill only None slots.
+        let mut auto_cfg = tara_hd::AutoTrainingConfig::compute(
+            &hd_channel,
+            total_params,
+            config.hidden_size,
+            config.num_hidden_layers,
+            samples.len(),
+        );
+        println!("{}", auto_cfg.telemetry);
+
+        // Resolve effective precision from auto-config when it wasn't explicitly set.
         let is_gpu = hd_channel.is_gpu();
         let is_f16 = match self.precision {
             crate::cuda::TrainingPrecision::Fp16 => true,
             crate::cuda::TrainingPrecision::Fp32 => false,
-            crate::cuda::TrainingPrecision::Auto => is_gpu,
+            crate::cuda::TrainingPrecision::Auto => {
+                matches!(
+                    auto_cfg.precision,
+                    tara_hd::PrecisionMode::Fp16 | tara_hd::PrecisionMode::Bf16
+                )
+            }
         };
+
+        // Use auto-derived batch_size and seq_len for memory preflight estimation so
+        // the preflight correctly reflects the training configuration that will actually run.
+        let effective_batch_for_preflight = self.batch_size.unwrap_or(auto_cfg.batch_size);
+        let effective_seq_for_preflight = auto_cfg.seq_len;
+
         let (projected_mb, memory_breakdown) = Self::estimate_memory_footprint_mb_detailed(
             total_params,
             is_gpu,
             is_f16,
             max_tensor_len,
-            1,
-            512,
+            effective_batch_for_preflight,
+            effective_seq_for_preflight,
+            config.hidden_size,
         );
-        println!(
-            "[Memory Preflight] Estimated training memory: {projected_mb:.1} MB (Safety ceiling: {:.1} MB)",
+        // Effective memory safety ceiling:
+        // When the user has explicitly set --max-memory-mb, respect it unconditionally.
+        // When at default (65536 MB), use the auto-derived ceiling from actual host RAM
+        // so that preflight catches host OOM conditions before the optimizer step.
+        let default_max_memory_mb: f64 = 65536.0;
+        let effective_max_memory_mb = if (self.max_memory_mb - default_max_memory_mb).abs() < 1.0 {
+            // User did not explicitly override — use host-RAM-aware auto ceiling.
+            auto_cfg.max_memory_mb
+        } else {
             self.max_memory_mb
+        };
+
+        let host_summary_str = if auto_cfg.cgroup_limit_mb > 0.0 {
+            format!(
+                "Host RAM: {:.1} MB avail / {:.1} MB total | Cgroup: {:.1} MB avail / {:.1} MB limit",
+                auto_cfg.host_ram_available_mb,
+                auto_cfg.host_ram_total_mb,
+                auto_cfg.cgroup_available_mb,
+                auto_cfg.cgroup_limit_mb
+            )
+        } else {
+            format!(
+                "Host RAM: {:.1} MB avail / {:.1} MB total",
+                auto_cfg.host_ram_available_mb, auto_cfg.host_ram_total_mb
+            )
+        };
+
+        println!(
+            "[Memory Preflight] Estimated training memory: {projected_mb:.1} MB (Safety ceiling: {:.1} MB | {host_summary_str})",
+            effective_max_memory_mb,
         );
         println!("[Memory Preflight] Detailed breakdown: {memory_breakdown}");
-        if projected_mb > self.max_memory_mb {
+        if projected_mb > effective_max_memory_mb {
+            let host_ram_str = if auto_cfg.host_ram_total_mb > 0.0 {
+                format!(
+                    "{:.0} MB (avail: {:.0} MB)",
+                    auto_cfg.host_ram_total_mb, auto_cfg.host_ram_available_mb
+                )
+            } else {
+                "unknown".to_string()
+            };
+            let cgroup_detail = if auto_cfg.cgroup_limit_mb > 0.0 {
+                format!(
+                    ", cgroup limit: {:.0} MB, cgroup avail: {:.0} MB",
+                    auto_cfg.cgroup_limit_mb, auto_cfg.cgroup_available_mb
+                )
+            } else {
+                String::new()
+            };
             return Err(TrainerError::Model(format!(
-                "Projected training memory {projected_mb:.1} MB exceeds {:.1} MB safety ceiling. Breakdown: {memory_breakdown}",
-                self.max_memory_mb
+                "Projected training memory {projected_mb:.1} MB exceeds safety ceiling \
+                {effective_max_memory_mb:.1} MB (detected host RAM: {host_ram_str}{cgroup_detail}). \
+                This model requires more memory than available — AdamW moments alone need \
+                {:.0} MB for {} params. \
+                Options: (1) use a smaller model, (2) set TARA_HOST_RAM_MB env var to your actual \
+                available RAM, (3) set TARA_HOST_RAM_SAFETY_PCT to a higher value (risky). \
+                Breakdown: {memory_breakdown}",
+                (total_params as f64 * 8.0) / (1024.0 * 1024.0),
+                total_params,
             )));
         }
 
@@ -1062,6 +1193,19 @@ impl NativeSelfTrainer {
                         free as f64 / (1024.0 * 1024.0),
                         total as f64 / (1024.0 * 1024.0)
                     );
+                    // Refine auto-config using the live VRAM reading from the initialized
+                    // CUDA context, which is more accurate than the pre-init device probe.
+                    if let Some(refined) = auto_cfg.refine_with_live_vram(
+                        free as u64,
+                        total as u64,
+                        total_params,
+                        config.hidden_size,
+                        config.num_hidden_layers,
+                        train_tokens.len() + val_tokens.len(),
+                    ) {
+                        println!("{}", refined.telemetry);
+                        auto_cfg = refined;
+                    }
                     match t.register_weights(&weights) {
                         Ok(()) => Some(t),
                         Err(e) => {
@@ -1077,7 +1221,9 @@ impl NativeSelfTrainer {
                                      Explicitly specify --device cpu if CPU execution is genuinely intended."
                                 )));
                             }
-                            println!("[Device] GPU buffer allocation failed ({e}); falling back to CPU.");
+                            println!(
+                                "[Device] GPU buffer allocation failed ({e}); falling back to CPU."
+                            );
                             None
                         }
                     }
@@ -1095,9 +1241,7 @@ impl NativeSelfTrainer {
                              Explicitly specify --device cpu if CPU execution is genuinely intended."
                         )));
                     }
-                    println!(
-                        "[Device] CUDA GPU not available ({e}); safely falling back to CPU."
-                    );
+                    println!("[Device] CUDA GPU not available ({e}); safely falling back to CPU.");
                     None
                 }
             }
@@ -1116,26 +1260,23 @@ impl NativeSelfTrainer {
         };
 
         // Construct canonical in-memory model without duplicate weights map allocation
-        let mut model = TaraForCausalLM::from_weights_ref(
-            &weights,
-            &config,
-            &self.model_dir,
-        )
-        .map_err(|e| TrainerError::Model(e.to_string()))?;
+        let mut model = TaraForCausalLM::from_weights_ref(&weights, &config, &self.model_dir)
+            .map_err(|e| TrainerError::Model(e.to_string()))?;
 
         // Connect CudaComputeDevice into TARA-HD ComputeChannel as Single Source of Truth
-        let cuda_compute_dev_opt: Option<Arc<crate::cuda::CudaComputeDevice>> = if let Some(t) = gpu_trainer_opt {
-            let slice_map = model.parameter_slice_map();
-            let cuda_dev = Arc::new(crate::cuda::CudaComputeDevice::new(
-                hd_channel.device().info().clone(),
-                Arc::new(Mutex::new(t)),
-                slice_map,
-            ));
-            hd_channel.set_device(cuda_dev.clone());
-            Some(cuda_dev)
-        } else {
-            None
-        };
+        let cuda_compute_dev_opt: Option<Arc<crate::cuda::CudaComputeDevice>> =
+            if let Some(t) = gpu_trainer_opt {
+                let slice_map = model.parameter_slice_map();
+                let cuda_dev = Arc::new(crate::cuda::CudaComputeDevice::new(
+                    hd_channel.device().info().clone(),
+                    Arc::new(Mutex::new(t)),
+                    slice_map,
+                ));
+                hd_channel.set_device(cuda_dev.clone());
+                Some(cuda_dev)
+            } else {
+                None
+            };
 
         // Compute baseline loss strictly across held-out validation sequences
         let initial_loss: Option<f64> = if val_tokens.is_empty() {
@@ -1145,18 +1286,17 @@ impl NativeSelfTrainer {
             None
         } else {
             // Optional debugging smoke test (allows 1-2 sample verification when requested)
-            if std::env::var("TARA_VALIDATION_SMOKE_TEST").map(|v| v == "1" || v == "true").unwrap_or(false)
-                || std::env::var("TARA_SMOKE_VAL").map(|v| v == "1" || v == "true").unwrap_or(false)
+            if std::env::var("TARA_VALIDATION_SMOKE_TEST")
+                .map(|v| v == "1" || v == "true")
+                .unwrap_or(false)
+                || std::env::var("TARA_SMOKE_VAL")
+                    .map(|v| v == "1" || v == "true")
+                    .unwrap_or(false)
             {
                 let smoke_count = 2.min(val_tokens.len());
                 let smoke_val = &val_tokens[..smoke_count];
                 println!("[Preflight Smoke Test] Running {smoke_count}-sample baseline validation smoke test...");
-                let _ = compute_model_loss(
-                    &model,
-                    &hd_channel,
-                    smoke_val,
-                    "Preflight Smoke",
-                )?;
+                let _ = compute_model_loss(&model, &hd_channel, smoke_val, "Preflight Smoke")?;
                 println!("[Preflight Smoke Test] Smoke test passed!");
             }
 
@@ -1172,12 +1312,7 @@ impl NativeSelfTrainer {
                 &val_tokens[..]
             };
 
-            let loss = compute_model_loss(
-                &model,
-                &hd_channel,
-                active_val_tokens,
-                "Preflight",
-            )?;
+            let loss = compute_model_loss(&model, &hd_channel, active_val_tokens, "Preflight")?;
             println!("[Preflight] Held-out validation baseline loss: {:.4}", loss);
             Some(loss)
         };
@@ -1194,18 +1329,30 @@ impl NativeSelfTrainer {
             .stream_helper()
             .cloned()
             .unwrap_or_default();
-        let is_gpu = hd_channel.is_gpu();
+        // is_gpu was resolved earlier alongside auto_cfg computation.
         let precision_label = format!("{:?}", hd_channel.precision());
 
-        let mut optimizer = DynamicAdamW::new();
-        let learning_rate = self.learning_rate.unwrap_or(1e-3f32);
+        // Eagerly pre-allocate moments if running on CPU to prevent unbudgeted memory spikes
+        // at the first optimizer step. If running on GPU with CUDA, moments are managed
+        // by CudaTrainer (either resident in VRAM or pre-allocated in streamed FP16 buffers).
+        let mut optimizer = if cuda_compute_dev_opt.is_none() {
+            DynamicAdamW::with_preallocated_moments(&weights)
+        } else {
+            DynamicAdamW::new()
+        };
+        // Hyperparameter resolution: user-supplied values are authoritative.
+        // When the user has not explicitly set a value (None), the auto-derived value
+        // from AutoTrainingConfig — computed from actual device memory via TARA-HD —
+        // is used instead of a static fallback, enabling full zero-config training.
+        let learning_rate = self.learning_rate.unwrap_or(auto_cfg.learning_rate);
         let beta1 = 0.9f32;
         let beta2 = 0.999f32;
         let eps = 1e-8f32;
-        let weight_decay = self.weight_decay.unwrap_or(0.01f32);
-        let max_grad_norm = self.grad_clip_norm.unwrap_or(1.0f32);
-        let warmup_steps = self.warmup_steps.unwrap_or(0usize);
-        let accumulation_steps = self.batch_size.unwrap_or(4usize);
+        let weight_decay = self.weight_decay.unwrap_or(auto_cfg.weight_decay);
+        let max_grad_norm = self.grad_clip_norm.unwrap_or(auto_cfg.grad_clip_norm);
+        let warmup_steps = self.warmup_steps.unwrap_or(auto_cfg.warmup_steps);
+        // accumulation_steps doubles as the gradient accumulation micro-batch count.
+        let accumulation_steps = self.batch_size.unwrap_or(auto_cfg.batch_size);
 
         let mut samples_seen = 0usize;
         let mut optimizer_steps = 0usize;
@@ -1305,10 +1452,14 @@ impl NativeSelfTrainer {
                     let (resumed_weights, _) =
                         crate::safetensors::load_model_weights_with_purpose(resume_dir, "RESUME")?;
                     weights = resumed_weights;
-                    model.update_weights(&weights)
+                    model
+                        .update_weights(&weights)
                         .map_err(|e| TrainerError::Model(e.to_string()))?;
                     if let Some(ref dev) = cuda_compute_dev_opt {
-                        let mut t = dev.trainer().lock().map_err(|e| TrainerError::Model(e.to_string()))?;
+                        let mut t = dev
+                            .trainer()
+                            .lock()
+                            .map_err(|e| TrainerError::Model(e.to_string()))?;
                         let _ = t.register_weights(&weights);
                         dev.update_slice_map(model.parameter_slice_map());
                     }
@@ -1360,14 +1511,16 @@ impl NativeSelfTrainer {
                             }
                         }
                         if let Some(ref dev) = cuda_compute_dev_opt {
-                            let mut t = dev.trainer().lock().map_err(|e| TrainerError::Model(e.to_string()))?;
-                            t.load_optimizer_state(&loaded_moments)
-                                .map_err(|e| {
-                                    TrainerError::Model(format!(
-                                        "Failed to load GPU optimizer state from '{}': {e}",
-                                        resume_dir
-                                    ))
-                                })?;
+                            let mut t = dev
+                                .trainer()
+                                .lock()
+                                .map_err(|e| TrainerError::Model(e.to_string()))?;
+                            t.load_optimizer_state(&loaded_moments).map_err(|e| {
+                                TrainerError::Model(format!(
+                                    "Failed to load GPU optimizer state from '{}': {e}",
+                                    resume_dir
+                                ))
+                            })?;
                             t.set_step_count(optimizer_steps as u64);
                         }
                         optimizer.load_state(loaded_moments);
@@ -1422,7 +1575,9 @@ impl NativeSelfTrainer {
             );
             let _ = std::io::stdout().flush();
 
-            for (sample_offset, (tokens, target_start)) in train_tokens.iter().skip(skip_count).enumerate() {
+            for (sample_offset, (tokens, target_start)) in
+                train_tokens.iter().skip(skip_count).enumerate()
+            {
                 if let Some(max_s) = self.max_steps {
                     if optimizer_steps >= max_s {
                         break;
@@ -1431,7 +1586,8 @@ impl NativeSelfTrainer {
                 let sample_idx_in_epoch = skip_count + sample_offset;
                 let sample_in_epoch = sample_idx_in_epoch + 1;
                 let sample_start = std::time::Instant::now();
-                let stream_chunk_size = cpu_stream_helper.recommend_chunk_size(tokens.len(), config.hidden_size);
+                let stream_chunk_size =
+                    cpu_stream_helper.recommend_chunk_size(tokens.len(), config.hidden_size);
                 let active_seq_limit = std::env::var("TARA_MAX_SEQ_LEN")
                     .ok()
                     .and_then(|s| s.parse::<usize>().ok())
@@ -1458,12 +1614,16 @@ impl NativeSelfTrainer {
                         "[{stage_label} | Bounded Stream] Bound sequence ({} tokens) to {} tokens to preserve compute latency & RAM",
                         tokens.len(), active_seq_limit
                     );
-                    (&tokens[..active_seq_limit], (*target_start).min(active_seq_limit))
+                    (
+                        &tokens[..active_seq_limit],
+                        (*target_start).min(active_seq_limit),
+                    )
                 } else {
                     (&tokens[..], *target_start)
                 };
                 let seq_len = active_tokens.len();
-                let sample_pct = (sample_in_epoch as f64 / train_tokens.len() as f64 * 100.0).min(100.0);
+                let sample_pct =
+                    (sample_in_epoch as f64 / train_tokens.len() as f64 * 100.0).min(100.0);
                 println!(
                     "[{stage_label} | Epoch {}/{} | Sample {}/{} ({:.1}%)] Starting forward/backward (seq_len: {}, micro-step {}/{})...",
                     epoch_idx + 1,
@@ -1495,7 +1655,10 @@ impl NativeSelfTrainer {
                             if target < vs {
                                 let logit_start = predictor * vs;
                                 let logits_slice = &logits[logit_start..logit_start + vs];
-                                let max_logit = logits_slice.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                                let max_logit = logits_slice
+                                    .iter()
+                                    .copied()
+                                    .fold(f32::NEG_INFINITY, f32::max);
                                 let mut sum_exp = 0.0f32;
                                 for (v, &l) in logits_slice.iter().enumerate() {
                                     let exp_val = (l - max_logit).exp();
@@ -1591,32 +1754,95 @@ impl NativeSelfTrainer {
 
                             let prefix = format!("model.layers.{}", l);
                             hd_channel
-                                .accumulate_gradient(&format!("{}.input_layernorm.weight", prefix), &l_grads.d_input_layernorm)
-                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                                .accumulate_gradient(
+                                    &format!("{}.input_layernorm.weight", prefix),
+                                    &l_grads.d_input_layernorm,
+                                )
+                                .map_err(|e| {
+                                    TrainerError::Model(format!(
+                                        "Gradient accumulation failed: {e}"
+                                    ))
+                                })?;
                             hd_channel
-                                .accumulate_gradient(&format!("{}.self_attn.q_proj.weight", prefix), &l_grads.d_q_proj)
-                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                                .accumulate_gradient(
+                                    &format!("{}.self_attn.q_proj.weight", prefix),
+                                    &l_grads.d_q_proj,
+                                )
+                                .map_err(|e| {
+                                    TrainerError::Model(format!(
+                                        "Gradient accumulation failed: {e}"
+                                    ))
+                                })?;
                             hd_channel
-                                .accumulate_gradient(&format!("{}.self_attn.k_proj.weight", prefix), &l_grads.d_k_proj)
-                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                                .accumulate_gradient(
+                                    &format!("{}.self_attn.k_proj.weight", prefix),
+                                    &l_grads.d_k_proj,
+                                )
+                                .map_err(|e| {
+                                    TrainerError::Model(format!(
+                                        "Gradient accumulation failed: {e}"
+                                    ))
+                                })?;
                             hd_channel
-                                .accumulate_gradient(&format!("{}.self_attn.v_proj.weight", prefix), &l_grads.d_v_proj)
-                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                                .accumulate_gradient(
+                                    &format!("{}.self_attn.v_proj.weight", prefix),
+                                    &l_grads.d_v_proj,
+                                )
+                                .map_err(|e| {
+                                    TrainerError::Model(format!(
+                                        "Gradient accumulation failed: {e}"
+                                    ))
+                                })?;
                             hd_channel
-                                .accumulate_gradient(&format!("{}.self_attn.o_proj.weight", prefix), &l_grads.d_o_proj)
-                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                                .accumulate_gradient(
+                                    &format!("{}.self_attn.o_proj.weight", prefix),
+                                    &l_grads.d_o_proj,
+                                )
+                                .map_err(|e| {
+                                    TrainerError::Model(format!(
+                                        "Gradient accumulation failed: {e}"
+                                    ))
+                                })?;
                             hd_channel
-                                .accumulate_gradient(&format!("{}.post_attention_layernorm.weight", prefix), &l_grads.d_post_attention_layernorm)
-                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                                .accumulate_gradient(
+                                    &format!("{}.post_attention_layernorm.weight", prefix),
+                                    &l_grads.d_post_attention_layernorm,
+                                )
+                                .map_err(|e| {
+                                    TrainerError::Model(format!(
+                                        "Gradient accumulation failed: {e}"
+                                    ))
+                                })?;
                             hd_channel
-                                .accumulate_gradient(&format!("{}.mlp.gate_proj.weight", prefix), &l_grads.d_gate_proj)
-                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                                .accumulate_gradient(
+                                    &format!("{}.mlp.gate_proj.weight", prefix),
+                                    &l_grads.d_gate_proj,
+                                )
+                                .map_err(|e| {
+                                    TrainerError::Model(format!(
+                                        "Gradient accumulation failed: {e}"
+                                    ))
+                                })?;
                             hd_channel
-                                .accumulate_gradient(&format!("{}.mlp.up_proj.weight", prefix), &l_grads.d_up_proj)
-                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                                .accumulate_gradient(
+                                    &format!("{}.mlp.up_proj.weight", prefix),
+                                    &l_grads.d_up_proj,
+                                )
+                                .map_err(|e| {
+                                    TrainerError::Model(format!(
+                                        "Gradient accumulation failed: {e}"
+                                    ))
+                                })?;
                             hd_channel
-                                .accumulate_gradient(&format!("{}.mlp.down_proj.weight", prefix), &l_grads.d_down_proj)
-                                .map_err(|e| TrainerError::Model(format!("Gradient accumulation failed: {e}")))?;
+                                .accumulate_gradient(
+                                    &format!("{}.mlp.down_proj.weight", prefix),
+                                    &l_grads.d_down_proj,
+                                )
+                                .map_err(|e| {
+                                    TrainerError::Model(format!(
+                                        "Gradient accumulation failed: {e}"
+                                    ))
+                                })?;
                             dx = l_grads.dx;
                         }
                         drop(layer_inputs);
@@ -1670,7 +1896,9 @@ impl NativeSelfTrainer {
                     let sample_throughput = (valid_targets as f32) / sample_time.max(1e-4);
 
                     let snap = crate::cuda::gpu_trainer::capture_memory_snapshot(
-                        cuda_compute_dev_opt.as_ref().and_then(|d| d.trainer().lock().ok()?.get_vram_info().ok()),
+                        cuda_compute_dev_opt
+                            .as_ref()
+                            .and_then(|d| d.trainer().lock().ok()?.get_vram_info().ok()),
                     );
                     let vram_str = match (snap.gpu_used_vram_mb, snap.gpu_total_vram_mb) {
                         (Some(u), Some(t)) => format!(" | GPU VRAM: {:.1}/{:.1} MB", u, t),
@@ -1700,186 +1928,212 @@ impl NativeSelfTrainer {
                     drop(layer_inputs);
                 }
 
-                    if accum_count >= accumulation_steps {
-                        let mut step_taken = false;
-                        let next_step = optimizer_steps + 1;
-                        let effective_lr = if warmup_steps > 0 && next_step <= warmup_steps {
-                            learning_rate * (next_step as f32 / warmup_steps as f32)
-                        } else {
-                            learning_rate
-                        };
+                if accum_count >= accumulation_steps {
+                    let mut step_taken = false;
+                    let next_step = optimizer_steps + 1;
+                    let effective_lr = if warmup_steps > 0 && next_step <= warmup_steps {
+                        learning_rate * (next_step as f32 / warmup_steps as f32)
+                    } else {
+                        learning_rate
+                    };
 
-                        // Calculate Continual Learning (EWC) penalty & gradient
-                        let mut ewc_loss = 0.0f32;
+                    // Calculate Continual Learning (EWC) penalty & gradient
+                    let mut ewc_loss = 0.0f32;
+                    if let (Some(ref anchors), Some(ref importance)) =
+                        (&self.anchor_weights, &self.ewc_importance)
+                    {
+                        for (k, w) in &weights {
+                            if let (Some(a), Some(f)) = (anchors.get(k), importance.get(k)) {
+                                let n = w.len().min(a.len()).min(f.len());
+                                for i in 0..n {
+                                    let diff = w[i] - a[i];
+                                    ewc_loss += 0.5 * self.ewc_lambda * f[i] * diff * diff;
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(ref dev) = cuda_compute_dev_opt {
+                        let mut gpu_trainer = dev
+                            .trainer()
+                            .lock()
+                            .map_err(|e| TrainerError::Model(e.to_string()))?;
+                        // Inject EWC gradient into accumulated GPU buffers
                         if let (Some(ref anchors), Some(ref importance)) =
                             (&self.anchor_weights, &self.ewc_importance)
                         {
                             for (k, w) in &weights {
                                 if let (Some(a), Some(f)) = (anchors.get(k), importance.get(k)) {
                                     let n = w.len().min(a.len()).min(f.len());
+                                    let mut ewc_g = vec![0.0f32; n];
                                     for i in 0..n {
                                         let diff = w[i] - a[i];
-                                        ewc_loss += 0.5 * self.ewc_lambda * f[i] * diff * diff;
+                                        ewc_g[i] =
+                                            (self.ewc_lambda * f[i] * diff) * accum_count as f32;
                                     }
+                                    let _ = gpu_trainer.accumulate_gradient(k, &ewc_g);
                                 }
                             }
                         }
 
-                        if let Some(ref dev) = cuda_compute_dev_opt {
-                            let mut gpu_trainer = dev.trainer().lock().map_err(|e| TrainerError::Model(e.to_string()))?;
-                            // Inject EWC gradient into accumulated GPU buffers
-                            if let (Some(ref anchors), Some(ref importance)) =
-                                (&self.anchor_weights, &self.ewc_importance)
-                            {
-                                for (k, w) in &weights {
-                                    if let (Some(a), Some(f)) = (anchors.get(k), importance.get(k)) {
-                                        let n = w.len().min(a.len()).min(f.len());
-                                        let mut ewc_g = vec![0.0f32; n];
-                                        for i in 0..n {
-                                            let diff = w[i] - a[i];
-                                            ewc_g[i] = (self.ewc_lambda * f[i] * diff) * accum_count as f32;
-                                        }
-                                        let _ = gpu_trainer.accumulate_gradient(k, &ewc_g);
-                                    }
-                                }
-                            }
-
-                            // GPU-accelerated gradient scaling and AdamW step
-                            gpu_trainer
-                                .scale_accumulated_gradients(accum_count)
-                                .map_err(|e| {
-                                    TrainerError::Model(format!("GPU gradient scaling failed: {e}"))
-                                })?;
-                            let stepped = gpu_trainer
-                                .step_adamw_with_weights(
-                                    &mut weights,
-                                    effective_lr,
-                                    beta1,
-                                    beta2,
-                                    eps,
-                                    weight_decay,
-                                    max_grad_norm,
-                                )
-                                .map_err(|e| {
-                                    TrainerError::Model(format!("GPU AdamW step failed: {e}"))
-                                })?;
-                            if stepped {
-                                step_taken = true;
-                                if optimizer_steps == 0 {
-                                    println!(
+                        // GPU-accelerated gradient scaling and AdamW step
+                        gpu_trainer
+                            .scale_accumulated_gradients(accum_count)
+                            .map_err(|e| {
+                                TrainerError::Model(format!("GPU gradient scaling failed: {e}"))
+                            })?;
+                        let stepped = gpu_trainer
+                            .step_adamw_with_weights(
+                                &mut weights,
+                                effective_lr,
+                                beta1,
+                                beta2,
+                                eps,
+                                weight_decay,
+                                max_grad_norm,
+                            )
+                            .map_err(|e| {
+                                TrainerError::Model(format!("GPU AdamW step failed: {e}"))
+                            })?;
+                        if stepped {
+                            step_taken = true;
+                            if optimizer_steps == 0 {
+                                println!(
                                         "[Train] Verified first training optimizer step executed on CUDA GPU (k_adamw_step_f16, step_count={})",
                                         gpu_trainer.get_step_count()
                                     );
-                                }
                             }
+                        }
 
-                            if !gpu_trainer.is_streaming() {
-                                gpu_trainer.download_weights_into(&mut weights).map_err(|e| {
+                        if !gpu_trainer.is_streaming() {
+                            gpu_trainer
+                                .download_weights_into(&mut weights)
+                                .map_err(|e| {
                                     TrainerError::Model(format!("GPU weights download failed: {e}"))
                                 })?;
+                        }
+                    } else {
+                        // CPU AdamW step with EWC gradient penalty
+                        let factor = 1.0 / accum_count as f32;
+                        for g in accum_grads.values_mut() {
+                            for val in g.iter_mut() {
+                                *val *= factor;
                             }
-                        } else {
-                            // CPU AdamW step with EWC gradient penalty
-                            let factor = 1.0 / accum_count as f32;
-                            for g in accum_grads.values_mut() {
-                                for val in g.iter_mut() {
-                                    *val *= factor;
-                                }
-                            }
-                            if let (Some(ref anchors), Some(ref importance)) =
-                                (&self.anchor_weights, &self.ewc_importance)
-                            {
-                                for (k, g) in accum_grads.iter_mut() {
-                                    if let (Some(w), Some(a), Some(f)) =
-                                        (weights.get(k), anchors.get(k), importance.get(k))
-                                    {
-                                        let n = g.len().min(w.len()).min(a.len()).min(f.len());
-                                        for i in 0..n {
-                                            let diff = w[i] - a[i];
-                                            g[i] += self.ewc_lambda * f[i] * diff;
-                                        }
+                        }
+                        if let (Some(ref anchors), Some(ref importance)) =
+                            (&self.anchor_weights, &self.ewc_importance)
+                        {
+                            for (k, g) in accum_grads.iter_mut() {
+                                if let (Some(w), Some(a), Some(f)) =
+                                    (weights.get(k), anchors.get(k), importance.get(k))
+                                {
+                                    let n = g.len().min(w.len()).min(a.len()).min(f.len());
+                                    for i in 0..n {
+                                        let diff = w[i] - a[i];
+                                        g[i] += self.ewc_lambda * f[i] * diff;
                                     }
                                 }
                             }
-                            let stepped = optimizer.step(
-                                &mut weights,
-                                &accum_grads,
-                                &AdamWHyperparams {
-                                    lr: effective_lr,
-                                    beta1,
-                                    beta2,
-                                    eps,
-                                    weight_decay,
-                                    max_grad_norm,
-                                },
-                            );
-                            if stepped {
-                                step_taken = true;
-                            }
-                            accum_grads.clear();
                         }
-
-                        if step_taken {
-                            optimizer_steps += 1;
+                        crate::cuda::gpu_trainer::log_flushed_memory_checkpoint(
+                            "Before CPU Optimizer Step",
+                            None,
+                        );
+                        let stepped = optimizer.step(
+                            &mut weights,
+                            &accum_grads,
+                            &AdamWHyperparams {
+                                lr: effective_lr,
+                                beta1,
+                                beta2,
+                                eps,
+                                weight_decay,
+                                max_grad_norm,
+                            },
+                        );
+                        crate::cuda::gpu_trainer::log_flushed_memory_checkpoint(
+                            "After CPU Optimizer Step",
+                            None,
+                        );
+                        if stepped {
+                            step_taken = true;
                         }
+                        accum_grads.clear();
+                    }
 
-                        let batch_lm_loss = if accum_count > 0 {
-                            batch_loss_sum / accum_count as f32
-                        } else {
-                            0.0f32
-                        };
-                        let total_step_loss = batch_lm_loss + ewc_loss;
-                        let ppl = (batch_lm_loss as f64).min(50.0).exp();
-                        let bpb = if batch_bytes_count > 0 {
-                            ((batch_lm_loss as f64) / std::f64::consts::LN_2) * (batch_tokens_count as f64) / (batch_bytes_count as f64)
-                        } else {
-                            (batch_lm_loss as f64) / std::f64::consts::LN_2
-                        };
-                        let grad_norm = if let Some(ref dev) = cuda_compute_dev_opt {
-                            dev.trainer().lock().map(|t| t.last_grad_norm()).unwrap_or(0.0)
-                        } else {
-                            optimizer.last_grad_norm()
-                        };
-                        let step_duration = step_start_instant.elapsed();
-                        let batch_time_sec = step_duration.as_secs_f32().max(1e-6);
-                        let throughput = batch_tokens_count as f32 / batch_time_sec;
-                        let step_duration_secs = step_duration.as_secs_f64();
+                    if step_taken {
+                        optimizer_steps += 1;
+                    }
 
-                        ema_step_duration = Some(match ema_step_duration {
-                            None => step_duration_secs,
-                            Some(prev) => 0.8 * prev + 0.2 * step_duration_secs,
-                        });
+                    let batch_lm_loss = if accum_count > 0 {
+                        batch_loss_sum / accum_count as f32
+                    } else {
+                        0.0f32
+                    };
+                    let total_step_loss = batch_lm_loss + ewc_loss;
+                    let ppl = (batch_lm_loss as f64).min(50.0).exp();
+                    let bpb = if batch_bytes_count > 0 {
+                        ((batch_lm_loss as f64) / std::f64::consts::LN_2)
+                            * (batch_tokens_count as f64)
+                            / (batch_bytes_count as f64)
+                    } else {
+                        (batch_lm_loss as f64) / std::f64::consts::LN_2
+                    };
+                    let grad_norm = if let Some(ref dev) = cuda_compute_dev_opt {
+                        dev.trainer()
+                            .lock()
+                            .map(|t| t.last_grad_norm())
+                            .unwrap_or(0.0)
+                    } else {
+                        optimizer.last_grad_norm()
+                    };
+                    let step_duration = step_start_instant.elapsed();
+                    let batch_time_sec = step_duration.as_secs_f32().max(1e-6);
+                    let throughput = batch_tokens_count as f32 / batch_time_sec;
+                    let step_duration_secs = step_duration.as_secs_f64();
 
-                        let step_pct_str = if let Some(max_s) = self.max_steps {
-                            format!(" ({:.1}%)", (optimizer_steps as f64 / max_s as f64 * 100.0).min(100.0))
-                        } else {
-                            String::new()
-                        };
+                    ema_step_duration = Some(match ema_step_duration {
+                        None => step_duration_secs,
+                        Some(prev) => 0.8 * prev + 0.2 * step_duration_secs,
+                    });
 
-                        let eta_str = if let (Some(max_s), Some(ema_sec)) = (self.max_steps, ema_step_duration) {
+                    let step_pct_str = if let Some(max_s) = self.max_steps {
+                        format!(
+                            " ({:.1}%)",
+                            (optimizer_steps as f64 / max_s as f64 * 100.0).min(100.0)
+                        )
+                    } else {
+                        String::new()
+                    };
+
+                    let eta_str =
+                        if let (Some(max_s), Some(ema_sec)) = (self.max_steps, ema_step_duration) {
                             let rem_steps = max_s.saturating_sub(optimizer_steps);
                             let eta_sec = rem_steps as f64 * ema_sec;
                             format!(" | ETA: {}", Self::format_duration_hhmmss(eta_sec))
                         } else {
                             String::new()
                         };
-                        let elapsed_str = Self::format_duration_hhmmss(train_start_instant.elapsed().as_secs_f64());
+                    let elapsed_str =
+                        Self::format_duration_hhmmss(train_start_instant.elapsed().as_secs_f64());
 
-                        let snap = crate::cuda::gpu_trainer::capture_memory_snapshot(
-                            cuda_compute_dev_opt.as_ref().and_then(|d| d.trainer().lock().ok()?.get_vram_info().ok()),
-                        );
-                        let vram_str = match (snap.gpu_used_vram_mb, snap.gpu_total_vram_mb) {
-                            (Some(u), Some(t)) => format!(" | GPU VRAM: {:.1}/{:.1} MB", u, t),
-                            _ => String::new(),
-                        };
+                    let snap = crate::cuda::gpu_trainer::capture_memory_snapshot(
+                        cuda_compute_dev_opt
+                            .as_ref()
+                            .and_then(|d| d.trainer().lock().ok()?.get_vram_info().ok()),
+                    );
+                    let vram_str = match (snap.gpu_used_vram_mb, snap.gpu_total_vram_mb) {
+                        (Some(u), Some(t)) => format!(" | GPU VRAM: {:.1}/{:.1} MB", u, t),
+                        _ => String::new(),
+                    };
 
-                        let max_str = self
-                            .max_steps
-                            .map(|m| m.to_string())
-                            .unwrap_or_else(|| "∞".to_string());
-                        let running_loss_display = running_avg_loss.unwrap_or(batch_lm_loss);
+                    let max_str = self
+                        .max_steps
+                        .map(|m| m.to_string())
+                        .unwrap_or_else(|| "∞".to_string());
+                    let running_loss_display = running_avg_loss.unwrap_or(batch_lm_loss);
 
-                        println!(
+                    println!(
                             "[{stage_label} | Step {:>4}/{}{}] Total Loss: {:.4} | LM Loss: {:.4} (Running: {:.4}) | PPL: {:.2} | BPB: {:.4} | Aux/EWC: {:.4} | Grad Norm: {:.4} | LR: {:.6} | Throughput: {:.1} tok/s | Step Time: {:.2}s | Elapsed: {}{}{} | Host RSS: {:.1} MB{}",
                             optimizer_steps,
                             max_str,
@@ -1900,77 +2154,77 @@ impl NativeSelfTrainer {
                             snap.process_rss_mb,
                             vram_str
                         );
-                        let _ = std::io::stdout().flush();
+                    let _ = std::io::stdout().flush();
 
-                        // Reset step accumulator counters
-                        accum_count = 0;
-                        batch_loss_sum = 0.0;
-                        batch_tokens_count = 0;
-                        batch_bytes_count = 0;
-                        step_start_instant = std::time::Instant::now();
+                    // Reset step accumulator counters
+                    accum_count = 0;
+                    batch_loss_sum = 0.0;
+                    batch_tokens_count = 0;
+                    batch_bytes_count = 0;
+                    step_start_instant = std::time::Instant::now();
 
-                        // Update model in-memory with updated weights in-place (zero reallocation!)
-                        model.update_weights(&weights)
-                            .map_err(|e| TrainerError::Model(e.to_string()))?;
-                        if let Some(ref dev) = cuda_compute_dev_opt {
-                            dev.update_slice_map(model.parameter_slice_map());
-                        }
+                    // Update model in-memory with updated weights in-place (zero reallocation!)
+                    model
+                        .update_weights(&weights)
+                        .map_err(|e| TrainerError::Model(e.to_string()))?;
+                    if let Some(ref dev) = cuda_compute_dev_opt {
+                        dev.update_slice_map(model.parameter_slice_map());
+                    }
 
-                        // Dynamic milestone and periodic persistent checkpoint saving
-                        if let Some(ref cp_dir) = self.checkpoint_dir {
-                            let cp_interval = self.checkpoint_interval.unwrap_or(usize::MAX);
-                            let is_interval_step =
-                                optimizer_steps > 0 && optimizer_steps.is_multiple_of(cp_interval);
-                            let should_eval = is_interval_step
-                                || optimizer_steps.is_multiple_of(25)
-                                || (self.checkpoint_interval.is_none() && optimizer_steps.is_multiple_of(10));
-                            let current_eval_loss = if val_tokens.is_empty() || !should_eval {
-                                None
+                    // Dynamic milestone and periodic persistent checkpoint saving
+                    if let Some(ref cp_dir) = self.checkpoint_dir {
+                        let cp_interval = self.checkpoint_interval.unwrap_or(usize::MAX);
+                        let is_interval_step =
+                            optimizer_steps > 0 && optimizer_steps.is_multiple_of(cp_interval);
+                        let should_eval = is_interval_step
+                            || optimizer_steps.is_multiple_of(25)
+                            || (self.checkpoint_interval.is_none()
+                                && optimizer_steps.is_multiple_of(10));
+                        let current_eval_loss = if val_tokens.is_empty() || !should_eval {
+                            None
+                        } else {
+                            compute_model_loss(&model, &hd_channel, &val_tokens, "Step Eval").ok()
+                        };
+                        let is_best = match current_eval_loss {
+                            Some(loss) if loss < best_loss => {
+                                best_loss = loss;
+                                true
+                            }
+                            _ => false,
+                        };
+
+                        if is_interval_step || is_best {
+                            let opt_moments = if let Some(ref dev) = cuda_compute_dev_opt {
+                                dev.trainer()
+                                    .lock()
+                                    .map(|t| t.export_optimizer_state().unwrap_or_default())
+                                    .unwrap_or_default()
                             } else {
-                                compute_model_loss(
-                                    &model,
-                                    &hd_channel,
-                                    &val_tokens,
-                                    "Step Eval",
-                                ).ok()
+                                optimizer.export_state()
                             };
-                            let is_best = match current_eval_loss {
-                                Some(loss) if loss < best_loss => {
-                                    best_loss = loss;
-                                    true
-                                }
-                                _ => false,
+                            Self::save_checkpoint_state_bundle(CheckpointBundleConfig {
+                                cp_dir,
+                                model_dir: &self.model_dir,
+                                weights: &weights,
+                                config: &config,
+                                opt_moments,
+                                optimizer_steps,
+                                samples_seen,
+                                epoch_idx,
+                                current_eval_loss,
+                                best_loss,
+                                is_best,
+                                val_tokens_empty: val_tokens.is_empty(),
+                            })?;
+                            let eval_str = current_eval_loss
+                                .map(|l| format!("{:.4}", l))
+                                .unwrap_or_else(|| "N/A".to_string());
+                            let best_str = if val_tokens.is_empty() {
+                                "N/A".to_string()
+                            } else {
+                                format!("{:.4}", best_loss)
                             };
-
-                            if is_interval_step || is_best {
-                                let opt_moments = if let Some(ref dev) = cuda_compute_dev_opt {
-                                    dev.trainer().lock().map(|t| t.export_optimizer_state().unwrap_or_default()).unwrap_or_default()
-                                } else {
-                                    optimizer.export_state()
-                                };
-                                Self::save_checkpoint_state_bundle(CheckpointBundleConfig {
-                                    cp_dir,
-                                    model_dir: &self.model_dir,
-                                    weights: &weights,
-                                    config: &config,
-                                    opt_moments,
-                                    optimizer_steps,
-                                    samples_seen,
-                                    epoch_idx,
-                                    current_eval_loss,
-                                    best_loss,
-                                    is_best,
-                                    val_tokens_empty: val_tokens.is_empty(),
-                                })?;
-                                let eval_str = current_eval_loss
-                                    .map(|l| format!("{:.4}", l))
-                                    .unwrap_or_else(|| "N/A".to_string());
-                                let best_str = if val_tokens.is_empty() {
-                                    "N/A".to_string()
-                                } else {
-                                    format!("{:.4}", best_loss)
-                                };
-                                println!(
+                            println!(
                                     "[{stage_label} | Checkpoint Saved] Step {} (Epoch {}) | Eval Loss: {} | Best Loss: {} | Path: {} | Sync: GDrive",
                                     optimizer_steps,
                                     epoch_idx + 1,
@@ -1978,11 +2232,11 @@ impl NativeSelfTrainer {
                                     best_str,
                                     cp_dir
                                 );
-                                let _ = std::io::stdout().flush();
-                            }
+                            let _ = std::io::stdout().flush();
                         }
                     }
                 }
+            }
 
             // Flush remaining accumulated gradients at epoch boundary
             if accum_count > 0 {
@@ -2010,7 +2264,10 @@ impl NativeSelfTrainer {
                 }
 
                 if let Some(ref dev) = cuda_compute_dev_opt {
-                    let mut gpu_trainer = dev.trainer().lock().map_err(|e| TrainerError::Model(e.to_string()))?;
+                    let mut gpu_trainer = dev
+                        .trainer()
+                        .lock()
+                        .map_err(|e| TrainerError::Model(e.to_string()))?;
                     if let (Some(ref anchors), Some(ref importance)) =
                         (&self.anchor_weights, &self.ewc_importance)
                     {
@@ -2032,14 +2289,7 @@ impl NativeSelfTrainer {
                             TrainerError::Model(format!("GPU gradient scaling failed: {e}"))
                         })?;
                     let stepped = gpu_trainer
-                        .step_adamw(
-                            effective_lr,
-                            beta1,
-                            beta2,
-                            eps,
-                            weight_decay,
-                            max_grad_norm,
-                        )
+                        .step_adamw(effective_lr, beta1, beta2, eps, weight_decay, max_grad_norm)
                         .map_err(|e| TrainerError::Model(format!("GPU AdamW step failed: {e}")))?;
                     if stepped {
                         step_taken = true;
@@ -2052,9 +2302,11 @@ impl NativeSelfTrainer {
                             }
                         }
                     } else {
-                        gpu_trainer.download_weights_into(&mut weights).map_err(|e| {
-                            TrainerError::Model(format!("GPU weights download failed: {e}"))
-                        })?;
+                        gpu_trainer
+                            .download_weights_into(&mut weights)
+                            .map_err(|e| {
+                                TrainerError::Model(format!("GPU weights download failed: {e}"))
+                            })?;
                     }
                 } else {
                     let factor = 1.0 / accum_count as f32;
@@ -2103,12 +2355,16 @@ impl NativeSelfTrainer {
                 let total_step_loss = batch_lm_loss + ewc_loss;
                 let ppl = (batch_lm_loss as f64).min(50.0).exp();
                 let bpb = if batch_bytes_count > 0 {
-                    ((batch_lm_loss as f64) / std::f64::consts::LN_2) * (batch_tokens_count as f64) / (batch_bytes_count as f64)
+                    ((batch_lm_loss as f64) / std::f64::consts::LN_2) * (batch_tokens_count as f64)
+                        / (batch_bytes_count as f64)
                 } else {
                     (batch_lm_loss as f64) / std::f64::consts::LN_2
                 };
                 let grad_norm = if let Some(ref dev) = cuda_compute_dev_opt {
-                    dev.trainer().lock().map(|t| t.last_grad_norm()).unwrap_or(0.0)
+                    dev.trainer()
+                        .lock()
+                        .map(|t| t.last_grad_norm())
+                        .unwrap_or(0.0)
                 } else {
                     optimizer.last_grad_norm()
                 };
@@ -2123,22 +2379,29 @@ impl NativeSelfTrainer {
                 });
 
                 let step_pct_str = if let Some(max_s) = self.max_steps {
-                    format!(" ({:.1}%)", (optimizer_steps as f64 / max_s as f64 * 100.0).min(100.0))
+                    format!(
+                        " ({:.1}%)",
+                        (optimizer_steps as f64 / max_s as f64 * 100.0).min(100.0)
+                    )
                 } else {
                     String::new()
                 };
 
-                let eta_str = if let (Some(max_s), Some(ema_sec)) = (self.max_steps, ema_step_duration) {
-                    let rem_steps = max_s.saturating_sub(optimizer_steps);
-                    let eta_sec = rem_steps as f64 * ema_sec;
-                    format!(" | ETA: {}", Self::format_duration_hhmmss(eta_sec))
-                } else {
-                    String::new()
-                };
-                let elapsed_str = Self::format_duration_hhmmss(train_start_instant.elapsed().as_secs_f64());
+                let eta_str =
+                    if let (Some(max_s), Some(ema_sec)) = (self.max_steps, ema_step_duration) {
+                        let rem_steps = max_s.saturating_sub(optimizer_steps);
+                        let eta_sec = rem_steps as f64 * ema_sec;
+                        format!(" | ETA: {}", Self::format_duration_hhmmss(eta_sec))
+                    } else {
+                        String::new()
+                    };
+                let elapsed_str =
+                    Self::format_duration_hhmmss(train_start_instant.elapsed().as_secs_f64());
 
                 let snap = crate::cuda::gpu_trainer::capture_memory_snapshot(
-                    cuda_compute_dev_opt.as_ref().and_then(|d| d.trainer().lock().ok()?.get_vram_info().ok()),
+                    cuda_compute_dev_opt
+                        .as_ref()
+                        .and_then(|d| d.trainer().lock().ok()?.get_vram_info().ok()),
                 );
                 let vram_str = match (snap.gpu_used_vram_mb, snap.gpu_total_vram_mb) {
                     (Some(u), Some(t)) => format!(" | GPU VRAM: {:.1}/{:.1} MB", u, t),
@@ -2174,7 +2437,9 @@ impl NativeSelfTrainer {
                 );
                 let _ = std::io::stdout().flush();
 
-                model.update_weights(&weights).map_err(|e| TrainerError::Model(e.to_string()))?;
+                model
+                    .update_weights(&weights)
+                    .map_err(|e| TrainerError::Model(e.to_string()))?;
                 if let Some(ref dev) = cuda_compute_dev_opt {
                     dev.update_slice_map(model.parameter_slice_map());
                 }
@@ -2184,12 +2449,7 @@ impl NativeSelfTrainer {
                     let current_eval_loss = if val_tokens.is_empty() {
                         None
                     } else {
-                        compute_model_loss(
-                            &model,
-                            &hd_channel,
-                            &val_tokens,
-                            "Epoch Eval",
-                        ).ok()
+                        compute_model_loss(&model, &hd_channel, &val_tokens, "Epoch Eval").ok()
                     };
                     let is_best = match current_eval_loss {
                         Some(loss) if loss < best_loss => {
@@ -2200,7 +2460,10 @@ impl NativeSelfTrainer {
                     };
 
                     let opt_moments = if let Some(ref dev) = cuda_compute_dev_opt {
-                        dev.trainer().lock().map(|t| t.export_optimizer_state().unwrap_or_default()).unwrap_or_default()
+                        dev.trainer()
+                            .lock()
+                            .map(|t| t.export_optimizer_state().unwrap_or_default())
+                            .unwrap_or_default()
                     } else {
                         optimizer.export_state()
                     };
@@ -2250,12 +2513,7 @@ impl NativeSelfTrainer {
             println!("[Validation Gate] Held-out validation unavailable (single-sequence boundary). Skipping regression check.");
             None
         } else {
-            let fl = compute_model_loss(
-                &model,
-                &hd_channel,
-                &val_tokens,
-                "Final Validation",
-            )?;
+            let fl = compute_model_loss(&model, &hd_channel, &val_tokens, "Final Validation")?;
             // Validation Gate: reject non-finite loss or severe regression
             if !fl.is_finite() {
                 return Err(TrainerError::Model(format!(
@@ -2319,7 +2577,10 @@ impl NativeSelfTrainer {
 
         // Export optimizer state moments so every candidate checkpoint is continuation-ready
         let opt_moments = if let Some(ref dev) = cuda_compute_dev_opt {
-            dev.trainer().lock().map(|t| t.export_optimizer_state().unwrap_or_default()).unwrap_or_default()
+            dev.trainer()
+                .lock()
+                .map(|t| t.export_optimizer_state().unwrap_or_default())
+                .unwrap_or_default()
         } else {
             optimizer.export_state()
         };
@@ -2686,7 +2947,10 @@ fn compute_model_loss(
             .map(|&(predictor, target)| {
                 let logit_start = predictor * vs;
                 let logits_slice = &logits[logit_start..logit_start + vs];
-                let max_logit = logits_slice.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                let max_logit = logits_slice
+                    .iter()
+                    .copied()
+                    .fold(f32::NEG_INFINITY, f32::max);
                 let sum_exp: f64 = logits_slice
                     .iter()
                     .map(|&l| ((l - max_logit) as f64).exp())
@@ -3044,25 +3308,34 @@ mod tests {
 
     #[test]
     fn test_estimate_memory_footprint_streamed_gpu_accounting() {
-        // 1B model in streamed GPU mode (>= 200M params)
+        // ~1B model on GPU: verify host RAM correctly accounts for fp32 AdamW moments
         let total_params = 995_809_280;
         let (peak_mb, breakdown) = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
             total_params,
-            true,  // is_gpu
-            true,  // is_f16
+            true,        // is_gpu
+            true,        // is_f16
             2048 * 2048, // max_tensor_len
-            1,     // batch_size
-            512,   // seq_len
+            1,           // batch_size
+            512,         // seq_len
+            2048,        // hidden_size — representative for ~1B parameter transformer
         );
 
         assert!(peak_mb > 0.0);
-        // Host optimizer moments m+v must be accounted for (approx 3798.7 MB)
-        assert!(breakdown.contains("Opt(m+v)="));
-        assert!(!breakdown.contains("Opt(m+v)=0.0MB"));
+        // Host optimizer moments are fp32 m+v for ALL GPU models (8 bytes/param).
+        // The breakdown string uses "Opt(m+v fp32)=" to reflect this correction.
+        assert!(
+            breakdown.contains("Opt(m+v fp32)="),
+            "breakdown was: {breakdown}"
+        );
+        // For ~1B params, host moments = 1B × 8 bytes = ~7629 MB — must be non-zero.
+        assert!(
+            !breakdown.contains("Opt(m+v fp32)=0.0MB"),
+            "large model moments must be non-zero"
+        );
         assert!(breakdown.contains("Host RAM:"));
         assert!(breakdown.contains("GPU VRAM:"));
 
-        // Smaller model (< 200M params) on GPU keeps moments in VRAM
+        // Small GPU model (~10M params) also carries fp32 moments on host (corrected behaviour).
         let small_params = 10_000_000;
         let (_, small_breakdown) = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
             small_params,
@@ -3071,8 +3344,17 @@ mod tests {
             512 * 512,
             1,
             512,
+            512, // hidden_size — representative for small model
         );
-        assert!(small_breakdown.contains("Opt(m+v)=0.0MB"));
+        // small model: 10M × 8 bytes = ~76 MB host moments — must be non-zero.
+        assert!(
+            small_breakdown.contains("Opt(m+v fp32)="),
+            "breakdown was: {small_breakdown}"
+        );
+        assert!(
+            !small_breakdown.contains("Opt(m+v fp32)=0.0MB"),
+            "small model moments must be non-zero too"
+        );
 
         // CPU mode accounts for gradients + moments on host
         let (_, cpu_breakdown) = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
@@ -3082,7 +3364,48 @@ mod tests {
             0,
             1,
             512,
+            512, // hidden_size — representative for small model
         );
-        assert!(cpu_breakdown.contains("Grads+Moments="));
+        assert!(
+            cpu_breakdown.contains("Grads+Moments(fp32)="),
+            "CPU breakdown was: {cpu_breakdown}"
+        );
+    }
+
+    #[test]
+    fn test_memory_preflight_cgroup_awareness() {
+        // Test that preflight ceiling logic correctly identifies memory limits
+        // and respects the tighter of host RAM and cgroup limit.
+        let channel = tara_hd::ComputeChannel::with_options(
+            &tara_hd::SelectionPolicy::parse("cpu:0"),
+            tara_hd::PrecisionMode::Fp32,
+        )
+        .expect("CPU channel must resolve");
+
+        // Set an explicit TARA_HOST_RAM_MB to simulate a constrained environment (e.g., 8 GB container)
+        std::env::set_var("TARA_HOST_RAM_MB", "8192");
+        let auto_cfg = tara_hd::AutoTrainingConfig::compute(&channel, 100_000_000, 1024, 24, 500);
+        std::env::remove_var("TARA_HOST_RAM_MB");
+
+        assert_eq!(auto_cfg.host_ram_total_mb, 8192.0);
+        assert_eq!(auto_cfg.host_ram_available_mb, 8192.0);
+        // Default safety pct is 85%: 8192 * 0.85 = 6963.2 MB
+        assert!((auto_cfg.max_memory_mb - 6963.2).abs() < 1.0);
+
+        // Preflight estimate for 950M model: peak ~15 GB > 6963 MB safety ceiling
+        let (projected_mb, _) = NativeSelfTrainer::estimate_memory_footprint_mb_detailed(
+            950_000_000,
+            true,
+            true,
+            2048 * 2048,
+            1,
+            128,
+            2048,
+        );
+        assert!(
+            projected_mb > auto_cfg.max_memory_mb,
+            "950M model ({projected_mb} MB) must exceed 8GB container ceiling ({:.1} MB)",
+            auto_cfg.max_memory_mb
+        );
     }
 }

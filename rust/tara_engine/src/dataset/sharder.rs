@@ -9,7 +9,9 @@ pub fn get_target_shard_bytes() -> u64 {
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .filter(|&mb| mb > 0)
-        .unwrap_or(500) * 1024 * 1024
+        .unwrap_or(500)
+        * 1024
+        * 1024
 }
 
 pub struct ShardWriter {
@@ -87,7 +89,10 @@ impl ShardWriter {
 
     pub fn finish(&mut self) -> std::io::Result<()> {
         self.flush()?;
-        println!(">>> Sharding completed! Total records written: {}", self.total_records);
+        println!(
+            ">>> Sharding completed! Total records written: {}",
+            self.total_records
+        );
         Ok(())
     }
 }

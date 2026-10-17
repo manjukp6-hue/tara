@@ -58,7 +58,9 @@ pub fn check_lexical_traversal<P: AsRef<Path>>(path: P) -> Result<(), PathSecuri
 
     let lower = lossy.to_ascii_lowercase();
     if lower.contains("%2e%2e") || lower.contains("%2f") || lower.contains("%5c") {
-        return Err(PathSecurityError::SuspiciousTraversalSequence(lossy.to_string()));
+        return Err(PathSecurityError::SuspiciousTraversalSequence(
+            lossy.to_string(),
+        ));
     }
 
     if lossy.split(['/', '\\']).any(|seg| seg == "..") {
@@ -92,11 +94,9 @@ pub fn is_symlink_escaping<P: AsRef<Path>, Q: AsRef<Path>>(
     let cand_ref = candidate.as_ref();
 
     let root_canon = if root_ref.exists() {
-        normalize_path(
-            root_ref
-                .canonicalize()
-                .map_err(|e| PathSecurityError::IoError(format!("Canonicalize root '{}': {e}", root_ref.display())))?,
-        )
+        normalize_path(root_ref.canonicalize().map_err(|e| {
+            PathSecurityError::IoError(format!("Canonicalize root '{}': {e}", root_ref.display()))
+        })?)
     } else {
         normalize_path(root_ref)
     };
@@ -114,7 +114,10 @@ pub fn is_symlink_escaping<P: AsRef<Path>, Q: AsRef<Path>>(
         if let Ok(meta) = fs::symlink_metadata(&current) {
             if meta.is_symlink() {
                 let resolved = fs::canonicalize(&current).map_err(|e| {
-                    PathSecurityError::IoError(format!("Resolve symlink '{}': {e}", current.display()))
+                    PathSecurityError::IoError(format!(
+                        "Resolve symlink '{}': {e}",
+                        current.display()
+                    ))
                 })?;
                 let resolved_norm = normalize_path(resolved);
                 if !resolved_norm.starts_with(&root_canon) {
@@ -146,11 +149,9 @@ pub fn canonical_containment<P: AsRef<Path>, Q: AsRef<Path>>(
     };
 
     let root_canon = if root_ref.exists() {
-        normalize_path(
-            root_ref
-                .canonicalize()
-                .map_err(|e| PathSecurityError::IoError(format!("Canonicalize root '{}': {e}", root_ref.display())))?,
-        )
+        normalize_path(root_ref.canonicalize().map_err(|e| {
+            PathSecurityError::IoError(format!("Canonicalize root '{}': {e}", root_ref.display()))
+        })?)
     } else {
         normalize_path(root_ref)
     };
@@ -165,11 +166,12 @@ pub fn canonical_containment<P: AsRef<Path>, Q: AsRef<Path>>(
 
     // 3. Resolve target: if exists, full canonicalize; if pending, canonicalize nearest existing ancestor
     let resolved_norm = if target_path.exists() {
-        normalize_path(
-            target_path
-                .canonicalize()
-                .map_err(|e| PathSecurityError::IoError(format!("Canonicalize path '{}': {e}", target_path.display())))?,
-        )
+        normalize_path(target_path.canonicalize().map_err(|e| {
+            PathSecurityError::IoError(format!(
+                "Canonicalize path '{}': {e}",
+                target_path.display()
+            ))
+        })?)
     } else {
         let mut existing_ancestor = target_path.clone();
         let mut missing_segments = Vec::new();

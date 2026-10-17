@@ -248,9 +248,7 @@ fn http_get_sync(base_url: &str, query: &str) -> Result<String, String> {
                 || (v4.octets()[0] == 169 && v4.octets()[1] == 254)
         }
         std::net::IpAddr::V6(v6) => {
-            v6.is_unspecified()
-                || v6.is_multicast()
-                || (v6.segments()[0] & 0xffc0) == 0xfe80
+            v6.is_unspecified() || v6.is_multicast() || (v6.segments()[0] & 0xffc0) == 0xfe80
         }
     };
     if is_forbidden {
@@ -351,7 +349,10 @@ mod tests {
         std::env::set_var("TARA_SEARCH_ENDPOINT", "http://api.openai.com/v1/search");
         let ai_res = learner.search_and_learn("sample query", "user_1");
         assert_eq!(ai_res["status"], "FORBIDDEN");
-        assert!(ai_res["error"].as_str().unwrap().contains("External AI provider"));
+        assert!(ai_res["error"]
+            .as_str()
+            .unwrap()
+            .contains("External AI provider"));
         std::env::remove_var("TARA_SEARCH_ENDPOINT");
     }
 }

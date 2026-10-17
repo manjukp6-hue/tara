@@ -254,7 +254,8 @@ impl ProgrammingEngine {
                 let name = algo.replace('_', " ");
                 if q.contains(algo)
                     || q.contains(&name)
-                    || (algo == &"matrix_multiplication_naive" && q.contains("matrix multiplication"))
+                    || (algo == &"matrix_multiplication_naive"
+                        && q.contains("matrix multiplication"))
                 {
                     return self
                         .evaluate("complexity_lookup", &json!({ "algorithm": algo }))
@@ -278,20 +279,29 @@ mod tests {
         // Clean code -> success is true
         let clean = "fn main() { let x = 42; println!(\"{}\", x); }";
         let res_clean = engine
-            .evaluate("analyze_code", &json!({ "code": clean, "language": "rust" }))
+            .evaluate(
+                "analyze_code",
+                &json!({ "code": clean, "language": "rust" }),
+            )
             .unwrap();
         assert!(res_clean.success);
 
         // Unbalanced code -> success is false
         let unbal = "fn main() { let x = (1 + 2; }";
         let res_unbal = engine
-            .evaluate("analyze_code", &json!({ "code": unbal, "language": "rust" }))
+            .evaluate(
+                "analyze_code",
+                &json!({ "code": unbal, "language": "rust" }),
+            )
             .unwrap();
         assert!(!res_unbal.success);
 
         // Oversized payload (> 512 KiB) rejected
         let oversized = "a".repeat(512 * 1024 + 1);
-        let res_err = engine.evaluate("analyze_code", &json!({ "code": oversized, "language": "rust" }));
+        let res_err = engine.evaluate(
+            "analyze_code",
+            &json!({ "code": oversized, "language": "rust" }),
+        );
         assert!(res_err.is_err());
     }
 

@@ -15,11 +15,10 @@ pub mod session;
 
 pub use capabilities::{CapabilityCaveat, CapabilityToken};
 pub use identity::{
-    DeviceEnrollmentRecord, DeviceEnrollmentRegistry, DeviceSignatureVerifier,
-    GoogleAuthService, GoogleOAuthVerifier, IdentityProof, IdentityVerifier,
-    IdentityVerifierRegistry, GOOGLE_ISSUERS, GOOGLE_JWKS_URL,
+    DeviceEnrollmentRecord, DeviceEnrollmentRegistry, DeviceSignatureVerifier, GoogleAuthService,
+    GoogleOAuthVerifier, IdentityProof, IdentityVerifier, IdentityVerifierRegistry, GOOGLE_ISSUERS,
+    GOOGLE_JWKS_URL,
 };
 pub use policy::{PolicyEngine, PolicyRule, SecurityDenial};
 pub use risk::{ContinuousRiskEngine, RiskVerdict};
 pub use session::{ChallengeRecord, SessionManager, SessionRecord};
-

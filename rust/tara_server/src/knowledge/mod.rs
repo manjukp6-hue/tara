@@ -165,7 +165,6 @@ pub fn is_safe_knowledge_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
 }
 
-
 /// Global knowledge base persisted to disk with scalable inverted index and foundational relationship graph.
 pub struct GlobalKnowledgeBase {
     pub base_dir: String,
@@ -229,13 +228,19 @@ impl GlobalKnowledgeBase {
 
     /// Persist relationship graph to disk.
     pub fn sync_relationship_graph(&self) -> Result<(), KnowledgeError> {
-        let graph = self.relationship_graph.lock().unwrap_or_else(|p| p.into_inner());
+        let graph = self
+            .relationship_graph
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         graph.save_to_disk(Path::new(&self.base_dir))
     }
 
     /// Retrieve relationship chain for a node up to `max_depth`.
     pub fn get_relationship_chain(&self, node_id: &str, max_depth: usize) -> Vec<RelationshipStep> {
-        let graph = self.relationship_graph.lock().unwrap_or_else(|p| p.into_inner());
+        let graph = self
+            .relationship_graph
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         graph.get_relationship_chain(node_id, max_depth)
     }
 
@@ -1087,9 +1092,9 @@ impl GlobalKnowledgeBase {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::dedup::KnowledgeDuplicateEngine;
     use super::license::{LicenseVerificationEngine, ReusePermissionStatus};
+    use super::*;
 
     #[test]
     fn test_is_safe_knowledge_id_validation() {
@@ -1187,15 +1192,22 @@ mod tests {
             None,
             "Author",
         );
-        assert_eq!(permitted_report.reuse_status, ReusePermissionStatus::Permitted);
+        assert_eq!(
+            permitted_report.reuse_status,
+            ReusePermissionStatus::Permitted
+        );
     }
 
     #[test]
     fn test_formula_mathrm_canonicalization_and_depth_stability() {
-        let canonical = KnowledgeDuplicateEngine::canonicalize_formula("\\mathrm{E} = \\mathrm{m}\\cdot\\mathrm{c}^2");
+        let canonical = KnowledgeDuplicateEngine::canonicalize_formula(
+            "\\mathrm{E} = \\mathrm{m}\\cdot\\mathrm{c}^2",
+        );
         assert_eq!(canonical, "E=m*c^2");
 
-        let text_and_mathrm = KnowledgeDuplicateEngine::canonicalize_formula("\\text{Speed} = \\mathrm{distance} / \\mathrm{time}");
+        let text_and_mathrm = KnowledgeDuplicateEngine::canonicalize_formula(
+            "\\text{Speed} = \\mathrm{distance} / \\mathrm{time}",
+        );
         assert_eq!(text_and_mathrm, "Speed=distance/time");
 
         // Unmatched closing brackets must not panic or cause negative depth

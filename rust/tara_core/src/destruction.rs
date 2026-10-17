@@ -337,7 +337,10 @@ mod tests {
         assert!(secret_file.exists());
         let bytes_shredded = SecureDestructionEngine::shred_file(&secret_file).unwrap();
         assert_eq!(bytes_shredded, payload.len() as u64);
-        assert!(!secret_file.exists(), "Read-only file must be shredded and unlinked");
+        assert!(
+            !secret_file.exists(),
+            "Read-only file must be shredded and unlinked"
+        );
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -348,13 +351,19 @@ mod tests {
         assert!(ts.ends_with('Z'));
         let parts: Vec<&str> = ts.trim_end_matches('Z').split('.').collect();
         assert_eq!(parts.len(), 2);
-        assert_eq!(parts[1].len(), 3, "Milliseconds must be zero-padded to 3 digits");
+        assert_eq!(
+            parts[1].len(),
+            3,
+            "Milliseconds must be zero-padded to 3 digits"
+        );
     }
 
     #[test]
     fn test_resolve_shred_chunk_size_bytes_lower_bound() {
         let chunk_size = resolve_shred_chunk_size_bytes();
-        assert!(chunk_size >= 1, "Shred chunk size must be strictly positive");
+        assert!(
+            chunk_size >= 1,
+            "Shred chunk size must be strictly positive"
+        );
     }
 }
-

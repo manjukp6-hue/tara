@@ -43,7 +43,11 @@ impl WorldStateTracker {
     }
 
     pub fn snapshot(&self) -> Value {
-        json!(self.entities.lock().unwrap_or_else(|p| p.into_inner()).clone())
+        json!(self
+            .entities
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone())
     }
 
     /// Save a versioned candidate snapshot to an isolated staging directory (Candidate before Promotion)
@@ -108,12 +112,17 @@ mod tests {
         tracker.update_entity("user_location", json!({"lat": 12.9716, "lon": 77.5946}));
         tracker.update_entity("device_mode", json!({"mode": "online", "battery": 95}));
 
-        let temp_dir = std::env::temp_dir().join(format!("tara_test_world_state_{}", std::process::id()));
-        let saved_path = tracker.save_candidate_snapshot(&temp_dir).expect("snapshot save failed");
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_test_world_state_{}", std::process::id()));
+        let saved_path = tracker
+            .save_candidate_snapshot(&temp_dir)
+            .expect("snapshot save failed");
         assert!(saved_path.exists());
 
         let reader_tracker = WorldStateTracker::new();
-        let loaded_count = reader_tracker.load_snapshot_from(&saved_path).expect("snapshot load failed");
+        let loaded_count = reader_tracker
+            .load_snapshot_from(&saved_path)
+            .expect("snapshot load failed");
         assert_eq!(loaded_count, 2);
         assert_eq!(
             reader_tracker.get_entity("device_mode").unwrap()["battery"],

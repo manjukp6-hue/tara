@@ -55,7 +55,10 @@ impl RuleParser {
         let specific_targets = ["model_expansion", "system_reconfigure"];
         let generic_actions = ["modify", "edit", "update", "delete", "execute", "read"];
 
-        if let Some(target) = words.iter().find(|w| specific_targets.contains(&w.as_str())) {
+        if let Some(target) = words
+            .iter()
+            .find(|w| specific_targets.contains(&w.as_str()))
+        {
             action_type = target.clone();
         } else if let Some(target) = words.iter().find(|w| generic_actions.contains(&w.as_str())) {
             action_type = target.clone();

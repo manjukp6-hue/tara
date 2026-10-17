@@ -44,11 +44,19 @@ pub fn harden_file_permissions(path: &Path) -> Result<(), String> {
 
     #[cfg(windows)]
     {
-        let user_opt = std::env::var("USERNAME").ok().or_else(|| std::env::var("USER").ok());
+        let user_opt = std::env::var("USERNAME")
+            .ok()
+            .or_else(|| std::env::var("USER").ok());
         if let Some(username) = user_opt {
-            if username.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == ' ') {
-                let sys_root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
-                let icacls_bin = std::path::PathBuf::from(sys_root).join("System32").join("icacls.exe");
+            if username
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == ' ')
+            {
+                let sys_root =
+                    std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+                let icacls_bin = std::path::PathBuf::from(sys_root)
+                    .join("System32")
+                    .join("icacls.exe");
                 let output = std::process::Command::new(icacls_bin)
                     .arg(path)
                     .arg("/inheritance:r")
@@ -58,10 +66,15 @@ pub fn harden_file_permissions(path: &Path) -> Result<(), String> {
                 if let Ok(out) = output {
                     if !out.status.success() {
                         let err_msg = String::from_utf8_lossy(&out.stderr);
-                        if std::env::var("TARA_STRICT_PERMISSIONS").map(|v| v == "1").unwrap_or(false)
+                        if std::env::var("TARA_STRICT_PERMISSIONS")
+                            .map(|v| v == "1")
+                            .unwrap_or(false)
                             && !err_msg.trim().is_empty()
                         {
-                            return Err(format!("icacls permission hardening failed: {}", err_msg.trim()));
+                            return Err(format!(
+                                "icacls permission hardening failed: {}",
+                                err_msg.trim()
+                            ));
                         }
                     }
                 }
@@ -79,7 +92,8 @@ mod tests {
 
     #[test]
     fn test_harden_file_permissions_and_sync_metadata() {
-        let temp_dir = std::env::temp_dir().join(format!("tara_platform_test_{}", rand::random::<u64>()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_platform_test_{}", rand::random::<u64>()));
         fs::create_dir_all(&temp_dir).expect("create temp dir");
 
         let test_file = temp_dir.join("test_sec_witness.bin");

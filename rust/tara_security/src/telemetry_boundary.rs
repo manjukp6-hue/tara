@@ -46,7 +46,9 @@ impl AuthenticatedAuthority {
     /// Constructs an `AuthenticatedAuthority` from a verified non-anonymous principal.
     /// Rejects anonymous principals (`AssuranceLevel::ANONYMOUS`).
     pub fn from_verified(principal: VerifiedPrincipal) -> Result<Self, String> {
-        if principal.assurance_level().score() < crate::primitives::AssuranceLevel::STANDARD_TOKEN.score() {
+        if principal.assurance_level().score()
+            < crate::primitives::AssuranceLevel::STANDARD_TOKEN.score()
+        {
             return Err(
                 "Cannot construct AuthenticatedAuthority: Minimum STANDARD_TOKEN assurance level required (anonymous principals rejected)".into(),
             );
@@ -105,7 +107,9 @@ impl SecurityDecision {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::primitives::{AssuranceLevel, AuthorityGeneration, PrincipalId, PrincipalRole, VerifiedPrincipal};
+    use crate::primitives::{
+        AssuranceLevel, AuthorityGeneration, PrincipalId, PrincipalRole, VerifiedPrincipal,
+    };
     use std::collections::HashMap;
 
     #[test]
@@ -119,12 +123,18 @@ mod tests {
             AuthorityGeneration::INITIAL,
             crate::cryptography::CryptoUtils::now_secs(),
             HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
 
         // 1. Anonymous principal must be rejected by from_verified
         let anon_res = AuthenticatedAuthority::from_verified(anon_principal);
-        assert!(anon_res.is_err(), "Anonymous principal must not construct AuthenticatedAuthority");
-        assert!(anon_res.unwrap_err().contains("Minimum STANDARD_TOKEN assurance level required"));
+        assert!(
+            anon_res.is_err(),
+            "Anonymous principal must not construct AuthenticatedAuthority"
+        );
+        assert!(anon_res
+            .unwrap_err()
+            .contains("Minimum STANDARD_TOKEN assurance level required"));
 
         // 2. Standard token principal is allowed by from_verified
         let token_pid = PrincipalId::new("operator_user").unwrap();
@@ -136,15 +146,22 @@ mod tests {
             AuthorityGeneration::INITIAL,
             crate::cryptography::CryptoUtils::now_secs(),
             HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let token_res = AuthenticatedAuthority::from_verified(token_principal.clone());
-        assert!(token_res.is_ok(), "STANDARD_TOKEN principal must construct AuthenticatedAuthority");
+        assert!(
+            token_res.is_ok(),
+            "STANDARD_TOKEN principal must construct AuthenticatedAuthority"
+        );
         let auth = token_res.unwrap();
         assert!(!auth.is_creator());
 
         // 3. AuthenticatedAuthority::new requires creator root
         let new_res = AuthenticatedAuthority::new(token_principal);
-        assert!(new_res.is_err(), "Non-creator principal cannot use AuthenticatedAuthority::new");
+        assert!(
+            new_res.is_err(),
+            "Non-creator principal cannot use AuthenticatedAuthority::new"
+        );
     }
 }

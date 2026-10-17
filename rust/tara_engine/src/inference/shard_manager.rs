@@ -87,7 +87,9 @@ impl ShardedSafeTensorsManager {
                         let rel_path = Path::new(s_str);
                         if s_str.trim().is_empty()
                             || rel_path.is_absolute()
-                            || rel_path.components().any(|c| matches!(c, Component::ParentDir))
+                            || rel_path
+                                .components()
+                                .any(|c| matches!(c, Component::ParentDir))
                         {
                             return Err(SafeTensorsError::InvalidHeader(format!(
                                 "Unsafe shard filename '{}' in model.safetensors.index.json",

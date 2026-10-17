@@ -79,7 +79,10 @@ pub fn sample_next_token(
         .collect();
 
     // 1. Repetition penalty (only when finite and > 0.0)
-    if repetition_penalty.is_finite() && repetition_penalty > 0.0 && (repetition_penalty - 1.0).abs() > f32::EPSILON {
+    if repetition_penalty.is_finite()
+        && repetition_penalty > 0.0
+        && (repetition_penalty - 1.0).abs() > f32::EPSILON
+    {
         for &id in generated_ids {
             let id = id as usize;
             if id < vocab_size {
@@ -366,7 +369,8 @@ mod tests {
         assert_eq!(token_inf_temp, 1);
 
         // 5. Repetition penalty near 1.0 within EPSILON is ignored as no-op
-        let token_eps = sample_next_token(&[1.0, 5.0], &[1], 0.0, 50, 0.9, 1.0 + f32::EPSILON / 2.0);
+        let token_eps =
+            sample_next_token(&[1.0, 5.0], &[1], 0.0, 50, 0.9, 1.0 + f32::EPSILON / 2.0);
         assert_eq!(token_eps, 1);
     }
 }

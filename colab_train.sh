@@ -121,20 +121,29 @@ mkdir -p storage/models/tara_world_model
 
 HF_MODEL_SOURCE="${HF_MODEL_REPO:-${HF_REPO:-manjukp6/tara}}"
 
+# In case any candidate model files were previously downloaded directly into storage/models:
+shopt -s nullglob
+LOOSE_SHARDS=(storage/models/*.safetensors)
+if [ -e "${LOOSE_SHARDS[0]:-}" ]; then
+    mv storage/models/*.safetensors storage/models/tara_candidate_v1/ 2>/dev/null || true
+    mv storage/models/*.json storage/models/tara_candidate_v1/ 2>/dev/null || true
+fi
+shopt -u nullglob
+
 # Verify Neural Model Candidate weights exist on disk
 NEURAL_SHARDS=(storage/models/tara_candidate_v1/*.safetensors)
-if [ ! -e "${NEURAL_SHARDS[0]}" ]; then
+if [ ! -e "${NEURAL_SHARDS[0]:-}" ]; then
     echo "=== [MODEL INGESTION: STREAMING NEURAL MODEL V1 FROM HUGGING FACE] ==="
     echo "[HF DOWNLOAD] Downloading neural_model_v1/* from https://huggingface.co/$HF_MODEL_SOURCE..."
-    if download_hf "$HF_MODEL_SOURCE" "model" "neural_model_v1/*" "storage/models"; then
-        if [ -d "storage/models/neural_model_v1" ]; then
+    if download_hf "$HF_MODEL_SOURCE" "model" "neural_model_v1/*" "storage/models/tara_candidate_v1"; then
+        if [ -d "storage/models/tara_candidate_v1/neural_model_v1" ]; then
             shopt -s nullglob
-            mv storage/models/neural_model_v1/* storage/models/tara_candidate_v1/
+            mv storage/models/tara_candidate_v1/neural_model_v1/* storage/models/tara_candidate_v1/
             shopt -u nullglob
-            rmdir storage/models/neural_model_v1
+            rmdir storage/models/tara_candidate_v1/neural_model_v1
         fi
         CHECK_SHARDS=(storage/models/tara_candidate_v1/*.safetensors)
-        if [ -e "${CHECK_SHARDS[0]}" ]; then
+        if [ -e "${CHECK_SHARDS[0]:-}" ]; then
             echo "Neural Model V1 Ingestion from Hugging Face Verified!"
         else
             echo "=== [ERROR: NO SAFETENSORS SHARDS FOUND IN DOWNLOADED REPO] ==="
@@ -149,18 +158,18 @@ fi
 
 # Verify World Model weights exist on disk
 WORLD_SHARDS=(storage/models/tara_world_model/*.safetensors)
-if [ ! -e "${WORLD_SHARDS[0]}" ]; then
+if [ ! -e "${WORLD_SHARDS[0]:-}" ]; then
     echo "=== [MODEL INGESTION: STREAMING WORLD MODEL V1 FROM HUGGING FACE] ==="
     echo "[HF DOWNLOAD] Downloading world_model_v1/* from https://huggingface.co/$HF_MODEL_SOURCE..."
-    if download_hf "$HF_MODEL_SOURCE" "model" "world_model_v1/*" "storage/models"; then
-        if [ -d "storage/models/world_model_v1" ]; then
+    if download_hf "$HF_MODEL_SOURCE" "model" "world_model_v1/*" "storage/models/tara_world_model"; then
+        if [ -d "storage/models/tara_world_model/world_model_v1" ]; then
             shopt -s nullglob
-            mv storage/models/world_model_v1/* storage/models/tara_world_model/
+            mv storage/models/tara_world_model/world_model_v1/* storage/models/tara_world_model/
             shopt -u nullglob
-            rmdir storage/models/world_model_v1
+            rmdir storage/models/tara_world_model/world_model_v1
         fi
         CHECK_WORLD=(storage/models/tara_world_model/*.safetensors)
-        if [ -e "${CHECK_WORLD[0]}" ]; then
+        if [ -e "${CHECK_WORLD[0]:-}" ]; then
             echo "World Model V1 Ingestion from Hugging Face Verified!"
         else
             echo "=== [ERROR: NO WORLD MODEL SAFETENSORS SHARDS FOUND IN DOWNLOADED REPO] ==="

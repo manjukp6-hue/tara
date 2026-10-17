@@ -27,6 +27,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -454,60 +465,61 @@ def check_stage_already_completed(output_dir: str) -> bool:
     return False
 
 
-def evaluate_frontier_benchmark(loss: float, bytes_per_token: float = 3.8) -> Tuple[float, str, str]:
-    """Calculates bits-per-byte (BPB), frontier tier ranking, and distance to LLaMA-3.2-1B."""
-    bpb = (loss / math.log(2)) / bytes_per_token
-    # Frontier reference baselines for 1B class models:
-    # LLaMA-3.2-1B: loss ~2.45, PPL ~11.58, BPB ~0.93
-    # SmolLM-1B:    loss ~3.15, PPL ~23.33, BPB ~1.20
-    # Pythia-1B:    loss ~3.65, PPL ~38.47, BPB ~1.39
-    llama3_delta = loss - 2.45
-    if loss < 2.45:
-        tier = "SOTA FRONTIER 1B"
-        comp = f"EXCEEDS LLaMA-3.2-1B (-{-llama3_delta:.2f})"
-    elif loss < 3.15:
-        tier = "FRONTIER PARITY"
-        comp = f"Near LLaMA-3.2-1B (+{llama3_delta:.2f})"
-    elif loss < 3.65:
-        tier = "COMPETENT BASE"
-        comp = f"SmolLM-1B Range (+{llama3_delta:.2f})"
-    elif loss < 5.00:
-        tier = "EMERGENT SYNTAX"
-        comp = f"Approaching 1B (+{llama3_delta:.2f})"
-    elif loss < 8.00:
-        tier = "EARLY PRETRAIN"
-        comp = f"Learning Grammar (+{llama3_delta:.2f})"
+# =============================================================================
+# 4. Real-Time Frontier Benchmark Evaluation & Color Matrix
+# =============================================================================
+
+# ANSI Color Codes for Terminal & Colab
+CLR_RED = "\033[91m"
+CLR_YELLOW = "\033[93m"
+CLR_GREEN = "\033[92m"
+CLR_CYAN = "\033[96m"
+CLR_BOLD = "\033[1m"
+CLR_RESET = "\033[0m"
+
+
+def get_metric_status_and_color(val: float, green_range: Tuple[float, float], yellow_range: Tuple[float, float]) -> Tuple[str, str, str]:
+    """
+    Evaluates value against Frontier/SOTA (Green), Average (Yellow), or Untrained (Red):
+    - RED   : Not match / Early / Untrained
+    - YELLOW: Matched Average
+    - GREEN : Best against Frontier Model (SOTA)
+    """
+    if val <= green_range[1]:
+        return CLR_GREEN, "BEST (Frontier/SOTA)", "[GREEN]"
+    elif val <= yellow_range[1]:
+        return CLR_YELLOW, "MATCHED (Average)", "[YELLOW]"
     else:
-        tier = "RAW INITIALIZATION"
-        comp = f"Random Baseline (+{llama3_delta:.2f})"
-
-    return bpb, tier, comp
+        return CLR_RED, "NOT MATCH (Untrained)", "[RED]"
 
 
-def print_frontier_matrix(step: int, cur_loss: float, best_loss: float):
-    bpb_cur, tier_cur, comp_cur = evaluate_frontier_benchmark(cur_loss)
-    ppl_cur = math.exp(min(cur_loss, 20.0))
-    bpb_best, tier_best, comp_best = evaluate_frontier_benchmark(best_loss) if best_loss < float("inf") else (0.0, "N/A", "N/A")
-    ppl_best = math.exp(min(best_loss, 20.0)) if best_loss < float("inf") else 0.0
+def print_frontier_comparison_matrix_colored(step: int, cur_loss: float, best_loss: float):
+    ppl = math.exp(min(cur_loss, 20.0))
+    bpb = (cur_loss / math.log(2)) / 3.8
 
-    print("-" * 92, flush=True)
-    print(f"  GLOBAL 1B FRONTIER MODEL BENCHMARK COMPARISON MATRIX (Step {step:04d})", flush=True)
-    print("-" * 92, flush=True)
-    print(f"  {'Model':<26} {'Loss':<9} {'PPL':<11} {'Bits/Byte (BPB)':<17} {'Standing / Tier':<22}", flush=True)
-    print("-" * 92, flush=True)
-    print(f"  {'LLaMA-3.2-1B (Target)':<26} {'~2.45':<9} {'~11.58':<11} {'~0.93 b/B':<17} {'Frontier SOTA Gold':<22}", flush=True)
-    print(f"  {'SmolLM-1B (High-Quality)':<26} {'~3.15':<9} {'~23.33':<11} {'~1.20 b/B':<17} {'Frontier Baseline':<22}", flush=True)
-    print(f"  {'Pythia-1B (Standard)':<26} {'~3.65':<9} {'~38.47':<11} {'~1.39 b/B':<17} {'Competent Base':<22}", flush=True)
-    print(f"  {'Random Init (100K Vocab)':<26} {'~11.51':<9} {'~100000':<11} {'~4.37 b/B':<17} {'Untrained Baseline':<22}", flush=True)
-    print("." * 92, flush=True)
-    print(f"  {'TARA 1B (Current)':<26} {cur_loss:<9.4f} {ppl_cur:<11.2f} {f'{bpb_cur:.2f} b/B':<17} {f'[{tier_cur}] {comp_cur}':<22}", flush=True)
-    if best_loss < float("inf"):
-        print(f"  {'TARA 1B (Historical Best)':<26} {best_loss:<9.4f} {ppl_best:<11.2f} {f'{bpb_best:.2f} b/B':<17} {f'[{tier_best}] {comp_best}':<22}", flush=True)
-    print("-" * 92, flush=True)
+    loss_clr, loss_status, loss_tag = get_metric_status_and_color(cur_loss, (1.4, 1.9), (2.0, 3.0))
+    ppl_clr, ppl_status, ppl_tag = get_metric_status_and_color(ppl, (4.0, 7.0), (7.1, 20.0))
+    bpb_clr, bpb_status, bpb_tag = get_metric_status_and_color(bpb, (0.55, 0.75), (0.76, 1.20))
+
+    print(f"\n{CLR_BOLD}{'=' * 115}{CLR_RESET}", flush=True)
+    print(f"  {CLR_CYAN}{CLR_BOLD}TARA vs FRONTIER MODEL REAL-TIME BENCHMARK MATRIX (Step {step:04d}){CLR_RESET}", flush=True)
+    print(f"{CLR_BOLD}{'-' * 115}{CLR_RESET}", flush=True)
+    print(f"  {'ಮೆಟ್ರಿಕ್ (Metric)':<24} {'ಆರಂಭಿಕ (Untrained)':<22} {'ಸಾಧಾರಣ (Average)':<22} {'ಟಾಪ್ ಲೆವೆಲ್ (Frontier/SOTA)':<28} {'TARA (Current)':<18}", flush=True)
+    print(f"{'-' * 115}", flush=True)
+    print(f"  {'Cross-Entropy Loss':<24} {'10.0 – 12.0+':<22} {'2.2 – 3.0':<22} {'1.4 – 1.9':<28} {loss_clr}{cur_loss:<7.4f} {loss_status} {loss_tag}{CLR_RESET}", flush=True)
+    print(f"  {'Perplexity (PPL)':<24} {'20,000+':<22} {'9.0 – 20.0':<22} {'4.0 – 7.0':<28} {ppl_clr}{ppl:<7.2f} {ppl_status} {ppl_tag}{CLR_RESET}", flush=True)
+    print(f"  {'Bits-Per-Byte (BPB)':<24} {'3.5+':<22} {'0.9 – 1.2':<22} {'0.55 – 0.75':<28} {bpb_clr}{f'{bpb:.2f} b/B':<7} {bpb_status} {bpb_tag}{CLR_RESET}", flush=True)
+    print(f"{'-' * 115}", flush=True)
+    if best_loss < float('inf'):
+        b_ppl = math.exp(min(best_loss, 20.0))
+        b_bpb = (best_loss / math.log(2)) / 3.8
+        b_clr, b_status, b_tag = get_metric_status_and_color(best_loss, (1.4, 1.9), (2.0, 3.0))
+        print(f"  {CLR_BOLD}Historical Best Checkpoint:{CLR_RESET} Loss = {b_clr}{best_loss:.4f}{CLR_RESET} | PPL = {b_clr}{b_ppl:.2f}{CLR_RESET} | BPB = {b_clr}{b_bpb:.2f} b/B{CLR_RESET} ({b_clr}{b_status} {b_tag}{CLR_RESET})", flush=True)
+    print(f"{'=' * 115}\n", flush=True)
 
 
 # =============================================================================
-# 4. Main Autonomous Multi-Stage Training Runner
+# 5. Main Autonomous Multi-Stage Training Runner
 # =============================================================================
 
 def main():
@@ -673,14 +685,17 @@ def main():
                 vram_used = torch.cuda.memory_allocated() / (1024 * 1024) if torch.cuda.is_available() else 0
                 vram_total = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024) if torch.cuda.is_available() else 0
 
-                bpb, tier, comp = evaluate_frontier_benchmark(cur_step_loss)
+                bpb = (cur_step_loss / math.log(2)) / 3.8
+                loss_clr, loss_status, loss_tag = get_metric_status_and_color(cur_step_loss, (1.4, 1.9), (2.0, 3.0))
+                ppl_clr, ppl_status, ppl_tag = get_metric_status_and_color(ppl, (4.0, 7.0), (7.1, 20.0))
+                bpb_clr, bpb_status, bpb_tag = get_metric_status_and_color(bpb, (0.55, 0.75), (0.76, 1.20))
 
                 print(
                     f"[{args.stage_id} | Step {step:04d}/{args.max_steps}] "
-                    f"Loss: {cur_step_loss:.4f} (EMA: {ema_loss:.4f}) | "
-                    f"PPL: {ppl:.2f} | "
-                    f"BPB: {bpb:.2f} b/B | "
-                    f"Standing: [{tier}] {comp} | "
+                    f"Loss: {loss_clr}{cur_step_loss:.4f}{CLR_RESET} (EMA: {ema_loss:.4f}) | "
+                    f"PPL: {ppl_clr}{ppl:.2f}{CLR_RESET} | "
+                    f"BPB: {bpb_clr}{bpb:.2f} b/B{CLR_RESET} | "
+                    f"Standing: {loss_clr}{loss_status} {loss_tag}{CLR_RESET} | "
                     f"LR: {cur_lr:.2e} | "
                     f"GradNorm: {grad_norm:.2f} | "
                     f"Speed: {step_speed:.0f} tok/s ({step_duration:.2f}s) | "
@@ -690,13 +705,13 @@ def main():
 
                 # Periodic Benchmark Matrix Display
                 if step % 25 == 0 or step == start_step + 1:
-                    print_frontier_matrix(step, cur_step_loss, best_loss)
+                    print_frontier_comparison_matrix_colored(step, cur_step_loss, best_loss)
 
                 # Dynamic Best-Checkpointing Gate
                 if cur_step_loss < best_loss and step >= 10:
                     best_loss = cur_step_loss
-                    print(f"[{args.stage_id}] >>> NEW HISTORICAL BEST LOSS ACHIEVED: {best_loss:.4f} <<<", flush=True)
-                    print_frontier_matrix(step, cur_step_loss, best_loss)
+                    print(f"[{args.stage_id}] >>> {CLR_GREEN}{CLR_BOLD}NEW HISTORICAL BEST LOSS ACHIEVED: {best_loss:.4f}{CLR_RESET} <<<", flush=True)
+                    print_frontier_comparison_matrix_colored(step, cur_step_loss, best_loss)
                     save_checkpoint(
                         model, optimizer, scaler, config, tok_path, best_cp_dir,
                         step, epoch, cur_step_loss, best_loss, args.stage_id,

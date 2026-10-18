@@ -583,6 +583,20 @@
       * **Do Not Remove Public Exports**: Always keep `ComputeChannel`, `ComputeDevice`, `CpuDevice`, `CudaDevice`, `CustomDevice`, `TpuDevice`, `DiscoveredInventory`, `CpuStreamHelper`, `SequenceChunkIterator`, `StreamBufferPool`, `StreamConfig`, `StreamWindow`, `DeviceCapability`, `DeviceKind`, `PrecisionMode`, `SelectionPolicy`, and `TaraError` re-exported at the crate root (`lib.rs`).
       * **Mandatory Tests**: Any modification by an AI agent must keep all unit tests in `lib.rs` and `tests/` passing (`cargo test -p tara_hd`).
 
+27. **MANDATORY ANTI-FORGETTING TRAINING PROGRESSION, DATA REPLAY & 100% BULLETPROOF NATIVE LORA ISOLATION (ಕ್ಯಾಟಾಸ್ಟ್ರೋಫಿಕ್ ಫರ್ಗೆಟ್ಟಿಂಗ್ ತಡೆಗಟ್ಟುವಿಕೆ, ಡೇಟಾ ರೀಪ್ಲೇ ಬಫರ್ ಮತ್ತು ನೇಟಿವ್ LoRA ರಕ್ಷಾಕವಚ)**:
+    - **Strict Pedagogical & Memory Preservation Training Order**:
+      * Large-scale, high-volume foundational pretraining datasets (e.g. `main_dataset_v2` 25.2 GB, `main_dataset_v1` 1.75 GB STEM papers, raw corpora, encyclopedias) MUST ALWAYS be scheduled and completed FIRST in initial pretraining stages.
+      * High-level abilities, curriculum pedagogy, function calling, tool executions (`<|tara_exec|>`), and conversational alignment MUST NEVER be placed before massive raw pretraining stages where huge gradient shifts could overwrite, erase, or dilute previously acquired specialized capabilities.
+    - **100% Mathematically Bulletproof Safety via Native Rust LoRA (ಶೂನ್ಯ ವಿಸ್ಮೃತಿ ಗ್ಯಾರಂಟಿ)**:
+      * For all post-foundational domain addition (Stage 5, 6, 7... $N$), skill specialization, ability acquisition, and self-evolution, the base model weights ($W_0$) must remain FROZEN (read-only).
+      * Domain adaptations must be trained exclusively into lightweight Low-Rank Adaptation (LoRA: $\Delta W = B \times A$) adapter matrices implemented directly in `tara_hd` / `tara_engine`.
+      * Because base weights $W_0$ remain completely untouched and immutable, catastrophic forgetting of foundational capabilities is mathematically guaranteed to be 0% (Zero Forgetting).
+    - **Mandatory Replay Buffer for Continued Pretraining on Large Datasets**:
+      * If a future stage ($N$ stages) requires continued pretraining on a new massive raw dataset (e.g. 50 GB+), training batches must NEVER consist of 100% new data.
+      * Training batches MUST strictly mix 10%–20% historical replay data from core foundation datasets ($\text{Batch} = 80\text{--}85\% \text{ New Data} + 15\text{--}20\% \text{ Replay Data}$) to continuously reinforce baseline language, mathematics, and alignment tokens.
+    - **Mandatory Post-Stage Final Alignment Pass**:
+      * Following any large-scale continued pretraining stage, an immediate, lightweight alignment pass using `ability_acquisition.jsonl` and `experiential_lessons.jsonl` must be executed to refresh assistant persona, tool syntax, and dialogue sharpness.
+
 ---
 
 ## RULE — EXISTING CODE FIRST

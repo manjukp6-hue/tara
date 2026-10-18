@@ -1555,83 +1555,17 @@ pub fn build_default_stages(
         },
         StageDefinition {
             stage_index: 1,
-            stage_id: "stage1_curriculum".to_string(),
-            stage_name: "Stage 1: Foundational Academic Curriculum Pretraining".to_string(),
-            description: "Foundational academic training on structured pedagogical records across Domains 1-8 (Math, Science, Programming, AI/ML, Research, Culture, Creativity, Search)."
+            stage_id: "stage1_main_dataset_v1".to_string(),
+            stage_name: "Stage 1: Main Dataset V1 Pretraining".to_string(),
+            description: "Full-scale pretraining on verified multi-domain shards (main dataset v1, formerly canonical)."
                 .to_string(),
-            dataset_path: foundational_curriculum_path.to_string_lossy().to_string(),
+            dataset_path: scale_dataset_dir.to_string_lossy().to_string(),
             input_checkpoint: checkpoints_dir
                 .join("stage0_pretraining")
                 .to_string_lossy()
                 .to_string(),
             output_checkpoint: checkpoints_dir
-                .join("stage1_curriculum")
-                .to_string_lossy()
-                .to_string(),
-            epochs: 1,
-            max_steps: None,
-            learning_rate: 5e-4,
-            batch_size: 4,
-            checkpoint_interval: default_checkpoint_interval(100),
-            depends_on: vec!["stage0_pretraining".to_string()],
-        },
-        StageDefinition {
-            stage_index: 2,
-            stage_id: "stage2_ability_training".to_string(),
-            stage_name: "Stage 2: Ability Training & Self-Evolution".to_string(),
-            description: "Specialized training on Autonomous Ability Acquisition, Skill Evolution, and protocol-compliant self-training/self-update."
-                .to_string(),
-            dataset_path: ability_curriculum_path.to_string_lossy().to_string(),
-            input_checkpoint: checkpoints_dir
-                .join("stage1_curriculum")
-                .to_string_lossy()
-                .to_string(),
-            output_checkpoint: checkpoints_dir
-                .join("stage2_ability_training")
-                .to_string_lossy()
-                .to_string(),
-            epochs: 1,
-            max_steps: None,
-            learning_rate: 3e-4,
-            batch_size: 4,
-            checkpoint_interval: default_checkpoint_interval(100),
-            depends_on: vec!["stage1_curriculum".to_string()],
-        },
-        StageDefinition {
-            stage_index: 3,
-            stage_id: "stage3_continual_adaptation".to_string(),
-            stage_name: "Stage 3: Continual Adaptation & Experiential Specialization".to_string(),
-            description: "Continual adaptation and specialization trained on genuine post-execution experiential lessons and validated strategies."
-                .to_string(),
-            dataset_path: adaptation_path.to_string_lossy().to_string(),
-            input_checkpoint: checkpoints_dir
-                .join("stage2_ability_training")
-                .to_string_lossy()
-                .to_string(),
-            output_checkpoint: checkpoints_dir
-                .join("stage3_continual_adaptation")
-                .to_string_lossy()
-                .to_string(),
-            epochs: 1,
-            max_steps: None,
-            learning_rate: 5e-5,
-            batch_size: 4,
-            checkpoint_interval: default_checkpoint_interval(200),
-            depends_on: vec!["stage2_ability_training".to_string()],
-        },
-        StageDefinition {
-            stage_index: 4,
-            stage_id: "stage4_main_dataset_v1".to_string(),
-            stage_name: "Stage 4: Main Dataset V1 Pretraining".to_string(),
-            description: "Full-scale pretraining on verified multi-domain shards (main dataset v1, formerly canonical)."
-                .to_string(),
-            dataset_path: scale_dataset_dir.to_string_lossy().to_string(),
-            input_checkpoint: checkpoints_dir
-                .join("stage3_continual_adaptation")
-                .to_string_lossy()
-                .to_string(),
-            output_checkpoint: checkpoints_dir
-                .join("stage4_main_dataset_v1")
+                .join("stage1_main_dataset_v1")
                 .to_string_lossy()
                 .to_string(),
             epochs: 1,
@@ -1639,7 +1573,73 @@ pub fn build_default_stages(
             learning_rate: 2e-4,
             batch_size: 4,
             checkpoint_interval: default_checkpoint_interval(500),
-            depends_on: vec!["stage3_continual_adaptation".to_string()],
+            depends_on: vec!["stage0_pretraining".to_string()],
+        },
+        StageDefinition {
+            stage_index: 2,
+            stage_id: "stage2_curriculum".to_string(),
+            stage_name: "Stage 2: Foundational Academic Curriculum Pretraining".to_string(),
+            description: "Foundational academic training on structured pedagogical records across Domains 1-8 (Math, Science, Programming, AI/ML, Research, Culture, Creativity, Search)."
+                .to_string(),
+            dataset_path: foundational_curriculum_path.to_string_lossy().to_string(),
+            input_checkpoint: checkpoints_dir
+                .join("stage1_main_dataset_v1")
+                .to_string_lossy()
+                .to_string(),
+            output_checkpoint: checkpoints_dir
+                .join("stage2_curriculum")
+                .to_string_lossy()
+                .to_string(),
+            epochs: 1,
+            max_steps: None,
+            learning_rate: 5e-4,
+            batch_size: 4,
+            checkpoint_interval: default_checkpoint_interval(100),
+            depends_on: vec!["stage1_main_dataset_v1".to_string()],
+        },
+        StageDefinition {
+            stage_index: 3,
+            stage_id: "stage3_ability_training".to_string(),
+            stage_name: "Stage 3: Ability Training & Self-Evolution".to_string(),
+            description: "Specialized training on Autonomous Ability Acquisition, Skill Evolution, and protocol-compliant self-training/self-update."
+                .to_string(),
+            dataset_path: ability_curriculum_path.to_string_lossy().to_string(),
+            input_checkpoint: checkpoints_dir
+                .join("stage2_curriculum")
+                .to_string_lossy()
+                .to_string(),
+            output_checkpoint: checkpoints_dir
+                .join("stage3_ability_training")
+                .to_string_lossy()
+                .to_string(),
+            epochs: 1,
+            max_steps: None,
+            learning_rate: 3e-4,
+            batch_size: 4,
+            checkpoint_interval: default_checkpoint_interval(100),
+            depends_on: vec!["stage2_curriculum".to_string()],
+        },
+        StageDefinition {
+            stage_index: 4,
+            stage_id: "stage4_continual_adaptation".to_string(),
+            stage_name: "Stage 4: Continual Adaptation & Experiential Specialization".to_string(),
+            description: "Continual adaptation and specialization trained on genuine post-execution experiential lessons and validated strategies."
+                .to_string(),
+            dataset_path: adaptation_path.to_string_lossy().to_string(),
+            input_checkpoint: checkpoints_dir
+                .join("stage3_ability_training")
+                .to_string_lossy()
+                .to_string(),
+            output_checkpoint: checkpoints_dir
+                .join("stage4_continual_adaptation")
+                .to_string_lossy()
+                .to_string(),
+            epochs: 1,
+            max_steps: None,
+            learning_rate: 5e-5,
+            batch_size: 4,
+            checkpoint_interval: default_checkpoint_interval(200),
+            depends_on: vec!["stage3_ability_training".to_string()],
         },
         StageDefinition {
             stage_index: 5,
@@ -1649,7 +1649,7 @@ pub fn build_default_stages(
                 .to_string(),
             dataset_path: scale_dataset_dir.to_string_lossy().to_string(),
             input_checkpoint: checkpoints_dir
-                .join("stage4_main_dataset_v1")
+                .join("stage4_continual_adaptation")
                 .to_string_lossy()
                 .to_string(),
             output_checkpoint: checkpoints_dir
@@ -1661,7 +1661,7 @@ pub fn build_default_stages(
             learning_rate: 1e-4,
             batch_size: 4,
             checkpoint_interval: default_checkpoint_interval(500),
-            depends_on: vec!["stage4_main_dataset_v1".to_string()],
+            depends_on: vec!["stage4_continual_adaptation".to_string()],
         },
     ]
 }

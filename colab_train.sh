@@ -60,20 +60,54 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # Ensure NVIDIA driver and CUDA libraries are discoverable in Colab / Linux containers
 export LD_LIBRARY_PATH="/usr/lib64-nvidia:/usr/local/cuda/compat:/usr/local/cuda-12.8/compat:${LD_LIBRARY_PATH:-}"
 
-# Helper function for robust streaming downloads from Hugging Face using 100% native Rust
+# Helper function for high-speed streaming downloads from Hugging Face via Python (huggingface_hub)
 download_hf() {
     local repo_id="$1"
     local repo_type="$2"
     local prefix="$3"
     local local_dir="$4"
-    ./target/release/tara_hf_downloader \
-        --repo "$repo_id" \
-        --repo-type "$repo_type" \
-        --prefix "$prefix" \
-        --dest "$local_dir"
+
+    mkdir -p "$local_dir"
+    echo "[HF DOWNLOAD] Streaming $repo_type '$repo_id' (prefix: '$prefix') -> '$local_dir' via Python..."
+    if python3 -c "
+import os, sys
+from huggingface_hub import snapshot_download
+
+repo_id = sys.argv[1]
+repo_type = sys.argv[2]
+prefix = sys.argv[3]
+local_dir = sys.argv[4]
+token = os.environ.get('HF_TOKEN') or None
+allow = [prefix] if prefix else None
+
+snapshot_download(
+    repo_id=repo_id,
+    repo_type=repo_type,
+    local_dir=local_dir,
+    allow_patterns=allow,
+    token=token,
+    max_workers=8,
+)
+" "$repo_id" "$repo_type" "$prefix" "$local_dir"; then
+        echo "[HF DOWNLOAD] Python download verified successfully into '$local_dir'."
+        return 0
+    fi
+
+    # Fallback to compiled Rust downloader if available
+    if [ -f "./target/release/tara_hf_downloader" ]; then
+        echo "[HF DOWNLOAD NOTICE] Falling back to native Rust downloader..."
+        ./target/release/tara_hf_downloader \
+            --repo "$repo_id" \
+            --repo-type "$repo_type" \
+            --prefix "$prefix" \
+            --dest "$local_dir"
+    else
+        echo "[HF DOWNLOAD ERROR] Python download failed and Rust downloader binary not found."
+        return 1
+    fi
 }
 
-# 2. Hardware Inspection & Upfront Binary Compilation
+# 2. Hardware Inspection & Dynamic Parameter Configuration
 echo "------------------------------------------------------------------------------"
 echo "[HARDWARE] Inspecting Cloud GPU Acceleration..."
 if command -v nvidia-smi >/dev/null 2>&1; then
@@ -82,14 +116,6 @@ else
     echo "[HARDWARE] No GPU detected. Defaulting to High-Performance Cloud CPU."
 fi
 echo "------------------------------------------------------------------------------"
-
-echo "[BUILD] Compiling TARA Native Rust Binaries (Release Mode)..."
-cargo build --release \
-    --bin tara_pretraining_gate \
-    --bin tara_training_stages \
-    --bin manual_trainer \
-    --bin tara_hf_downloader \
-    --bin tara_hf_model_uploader
 
 # Dynamic Parameter Configuration
 TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-1}"
@@ -214,6 +240,11 @@ fi
 mkdir -p "$ACTIVE_CP_DIR"
 
 # 5. Mandatory Pre-Training Verification, Deep De-duplication & Tokenizer Gate
+if [ ! -f "./target/release/tara_pretraining_gate" ]; then
+    echo "[BUILD] Compiling TARA Pre-Training Gate..."
+    cargo build --release --bin tara_pretraining_gate
+fi
+
 # Audits curriculum if present, otherwise audits ingested main_dataset_v2
 GATE_TARGET_DS="storage/datasets/curriculum"
 if [ ! -d "$GATE_TARGET_DS" ] || [ -z "$(ls -A "$GATE_TARGET_DS" 2>/dev/null)" ]; then
@@ -326,6 +357,10 @@ if [ "$TRAINER_MODE" = "python" ]; then
 
     PIPELINE_EXIT=$?
 else
+    if [ ! -f "./target/release/tara_training_stages" ]; then
+        echo "[BUILD] Compiling TARA Training Stages Orchestrator..."
+        cargo build --release --bin tara_training_stages
+    fi
     set +e
     ./target/release/tara_training_stages \
         --all-stages \
@@ -354,6 +389,10 @@ fi
 echo "Autonomous Multi-Stage Training Pipeline Completed Successfully!"
 
 # 7. Execute Neural & World Model Joint Co-Training
+if [ ! -f "./target/release/manual_trainer" ]; then
+    echo "[BUILD] Compiling TARA Manual Trainer..."
+    cargo build --release --bin manual_trainer
+fi
 echo "=== [WORLD MODEL & NEURAL JOINT CO-TRAINING ($JOINT_STEPS STEPS, BATCH $TRAIN_BATCH_SIZE)] ==="
 ./target/release/manual_trainer \
     --mode both \
@@ -398,17 +437,53 @@ if [ -n "${HF_TOKEN:-}" ] && [ -n "${HF_REPO:-}" ]; then
         done
     fi
 
+    upload_folder_to_hf() {
+        local repo_id="$1"
+        local local_dir="$2"
+        local path_in_repo="$3"
+        python3 -c "
+import os, sys
+from huggingface_hub import HfApi
+
+repo_id = sys.argv[1]
+local_dir = sys.argv[2]
+path_in_repo = sys.argv[3]
+token = os.environ.get('HF_TOKEN')
+if token and os.path.exists(local_dir):
+    api = HfApi()
+    print(f'[HF UPLOAD] Uploading {local_dir} -> {repo_id}/{path_in_repo}...')
+    api.upload_folder(
+        folder_path=local_dir,
+        repo_id=repo_id,
+        path_in_repo=path_in_repo,
+        token=token,
+    )
+    print(f'[HF UPLOAD] Successfully uploaded {local_dir} to https://huggingface.co/{repo_id}/{path_in_repo}')
+" "$repo_id" "$local_dir" "$path_in_repo" 2>/dev/null || true
+    }
+
     if [ -n "$FINAL_STAGE_DIR" ] && [ -d "$FINAL_STAGE_DIR" ]; then
         echo "[HUGGING FACE SYNC] Pushing Final Neural Model ($FINAL_STAGE_DIR) to $HF_REPO/neural_model_v1..."
-        if [ -d "$WORLD_DIR" ] && [ -n "$(ls -A "$WORLD_DIR" 2>/dev/null)" ]; then
-            echo "[HUGGING FACE SYNC] Including World Model & Joint Checkpoints ($WORLD_DIR)..."
-            ./target/release/tara_hf_model_uploader --repo "$HF_REPO" --neural-dir "$FINAL_STAGE_DIR" --world-dir "$WORLD_DIR"
+        if [ -f "./target/release/tara_hf_model_uploader" ]; then
+            if [ -d "$WORLD_DIR" ] && [ -n "$(ls -A "$WORLD_DIR" 2>/dev/null)" ]; then
+                echo "[HUGGING FACE SYNC] Including World Model & Joint Checkpoints ($WORLD_DIR)..."
+                ./target/release/tara_hf_model_uploader --repo "$HF_REPO" --neural-dir "$FINAL_STAGE_DIR" --world-dir "$WORLD_DIR"
+            else
+                ./target/release/tara_hf_model_uploader --repo "$HF_REPO" --neural-dir "$FINAL_STAGE_DIR"
+            fi
         else
-            ./target/release/tara_hf_model_uploader --repo "$HF_REPO" --neural-dir "$FINAL_STAGE_DIR"
+            upload_folder_to_hf "$HF_REPO" "$FINAL_STAGE_DIR" "neural_model_v1"
+            if [ -d "$WORLD_DIR" ] && [ -n "$(ls -A "$WORLD_DIR" 2>/dev/null)" ]; then
+                upload_folder_to_hf "$HF_REPO" "$WORLD_DIR" "world_model_v1"
+            fi
         fi
     elif [ -d "$WORLD_DIR" ] && [ -n "$(ls -A "$WORLD_DIR" 2>/dev/null)" ]; then
         echo "[HUGGING FACE SYNC] Pushing World Model & Joint Checkpoints to $HF_REPO/world_model_v1..."
-        ./target/release/tara_hf_model_uploader --repo "$HF_REPO" --world-dir "$WORLD_DIR"
+        if [ -f "./target/release/tara_hf_model_uploader" ]; then
+            ./target/release/tara_hf_model_uploader --repo "$HF_REPO" --world-dir "$WORLD_DIR"
+        else
+            upload_folder_to_hf "$HF_REPO" "$WORLD_DIR" "world_model_v1"
+        fi
     fi
     echo "[HUGGING FACE SYNC] All artifacts successfully deployed to https://huggingface.co/$HF_REPO"
 else

@@ -265,9 +265,9 @@ if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
         GDRIVE_STAGE="$GDRIVE_CHECKPOINT_DIR/$STAGE_SUBDIR"
         LOCAL_STAGE="$ACTIVE_CP_DIR/$STAGE_SUBDIR"
         if [ -d "$GDRIVE_STAGE" ]; then
-            echo "[RESUME SYNC] Checking Google Drive checkpoint mirror: $GDRIVE_STAGE -> $LOCAL_STAGE"
+            echo "[RESUME SYNC] Restoring Google Drive checkpoint mirror: $GDRIVE_STAGE -> $LOCAL_STAGE"
             mkdir -p "$LOCAL_STAGE"
-            cp -u -r "$GDRIVE_STAGE"/* "$LOCAL_STAGE"/ 2>/dev/null || true
+            cp -r "$GDRIVE_STAGE"/* "$LOCAL_STAGE"/ 2>/dev/null || true
         fi
     done
 fi

@@ -483,52 +483,66 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
     os.replace(dst_tmp, dst)
 
 
+_pending_gdrive_sync: Optional[Tuple[str, str, str, List[str]]] = None
+
+
 def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: List[str]):
-    try:
-        os.makedirs(target_dir, exist_ok=True)
-        synced = 0
-        t_start = time.time()
-        for fname in file_list:
-            src = os.path.join(src_dir, fname)
-            dst = os.path.join(target_dir, fname)
-            if os.path.exists(src):
-                if os.path.abspath(src) == os.path.abspath(dst):
-                    continue
-                _stream_copy_file(src, dst)
-                synced += 1
+    global _pending_gdrive_sync
+    while True:
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+            synced = 0
+            t_start = time.time()
+            for fname in file_list:
+                src = os.path.join(src_dir, fname)
+                dst = os.path.join(target_dir, fname)
+                if os.path.exists(src):
+                    if os.path.abspath(src) == os.path.abspath(dst):
+                        continue
+                    _stream_copy_file(src, dst)
+                    synced += 1
 
-        # Post-sync verification and obsolete file cleanup in Google Drive target directory:
-        if os.path.exists(target_dir):
-            for f in os.listdir(target_dir):
-                if f.endswith(".tmp") or ".tmp_" in f:
-                    try:
-                        os.remove(os.path.join(target_dir, f))
-                    except Exception:
-                        pass
+            # Post-sync verification and obsolete file cleanup in Google Drive target directory:
+            if os.path.exists(target_dir):
+                for f in os.listdir(target_dir):
+                    if f.endswith(".tmp") or ".tmp_" in f:
+                        try:
+                            os.remove(os.path.join(target_dir, f))
+                        except Exception:
+                            pass
 
-            # If optimizer_state.pt is not in src_dir (e.g. best_checkpoint), delete it from target_dir
-            for fname in ["optimizer_state.pt", "pytorch_model.bin"]:
-                src_f = os.path.join(src_dir, fname)
-                dst_f = os.path.join(target_dir, fname)
-                if not os.path.exists(src_f) and os.path.exists(dst_f):
-                    try:
-                        os.remove(dst_f)
-                        print(f"[GDrive Hygiene] Deleted obsolete old checkpoint file from GDrive: {dst_f}", flush=True)
-                    except Exception as e:
-                        print(f"[GDrive Hygiene Notice] Could not delete obsolete {dst_f}: {e}", flush=True)
+                # If optimizer_state.pt is not in src_dir (e.g. best_checkpoint), delete it from target_dir
+                for fname in ["optimizer_state.pt", "pytorch_model.bin"]:
+                    src_f = os.path.join(src_dir, fname)
+                    dst_f = os.path.join(target_dir, fname)
+                    if not os.path.exists(src_f) and os.path.exists(dst_f):
+                        try:
+                            os.remove(dst_f)
+                            print(f"[GDrive Hygiene] Deleted obsolete old checkpoint file from GDrive: {dst_f}", flush=True)
+                        except Exception as e:
+                            print(f"[GDrive Hygiene Notice] Could not delete obsolete {dst_f}: {e}", flush=True)
 
-        elapsed = time.time() - t_start
-        print(f"[GDrive Mirror] Successfully backed up [{tag}] ({synced} files, {elapsed:.1f}s) -> {target_dir}", flush=True)
-    except Exception as e:
-        print(f"[GDrive Mirror Notice] Non-fatal background backup notice: {e}", flush=True)
+            elapsed = time.time() - t_start
+            print(f"[GDrive Mirror] Successfully backed up [{tag}] ({synced} files, {elapsed:.1f}s) -> {target_dir}", flush=True)
+        except Exception as e:
+            print(f"[GDrive Mirror Notice] Non-fatal background backup notice: {e}", flush=True)
+
+        with _gdrive_sync_lock:
+            if _pending_gdrive_sync is not None:
+                src_dir, target_dir, tag, file_list = _pending_gdrive_sync
+                _pending_gdrive_sync = None
+                print(f"[GDrive Mirror] Processing queued latest checkpoint sync: [{tag}] -> {target_dir}", flush=True)
+                continue
+            else:
+                break
 
 
 def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
     """
     Mirrors local checkpoint files to Google Drive.
-    Single-worker lock ensures never more than one active sync job at any time.
+    Single-worker lock with pending queue ensures the latest checkpoint is ALWAYS uploaded.
     """
-    global _gdrive_sync_thread
+    global _gdrive_sync_thread, _pending_gdrive_sync
     gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
     if not os.path.exists("/content/drive/MyDrive"):
         return
@@ -563,9 +577,12 @@ def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
                 print(f"[GDrive Mirror] Waiting for previous sync to complete...", flush=True)
                 _gdrive_sync_thread.join()
             else:
-                # Previous sync is actively writing to GDrive; skip redundant queueing to preserve I/O and RAM
+                # Queue the latest checkpoint so the worker syncs it immediately upon finishing current job
+                _pending_gdrive_sync = (output_dir, target_dir, tag, file_list)
+                print(f"[GDrive Mirror] Active sync in progress; queued [{tag}] as next GDrive update.", flush=True)
                 return
 
+        _pending_gdrive_sync = None
         _gdrive_sync_thread = threading.Thread(
             target=_sync_to_gdrive_worker,
             args=(output_dir, target_dir, tag, file_list),
@@ -620,10 +637,14 @@ def verify_checkpoint_integrity(
             print(f"[Verification Fail] STAGE_METADATA status is not COMPLETED: {meta.get('status')}")
             return False
 
-        # Deserialization test: ensure safetensors is not corrupted or truncated
+        # Deserialization test: ensure safetensors is not corrupted or truncated using memory-mapped header validation
         if HAS_SAFETENSORS:
-            test_weights = load_file(os.path.join(checkpoint_dir, "model.safetensors"), device="cpu")
-            del test_weights
+            import safetensors
+            with safetensors.safe_open(os.path.join(checkpoint_dir, "model.safetensors"), framework="pt", device="cpu") as sf:
+                keys = sf.keys()
+                if len(keys) == 0:
+                    print(f"[Verification Fail] Safetensors file has 0 keys: {checkpoint_dir}")
+                    return False
         if require_optimizer and os.path.exists(os.path.join(checkpoint_dir, "optimizer_state.pt")):
             test_opt = torch.load(os.path.join(checkpoint_dir, "optimizer_state.pt"), map_location="cpu")
             del test_opt
@@ -944,6 +965,7 @@ def try_resume_from_checkpoint(
     best_cand_epoch = 0
     best_cand_loss = float("inf")
 
+    print("[Resume Discovery] Scanning candidate checkpoint directories:")
     for cand in candidate_dirs:
         cand_state = os.path.join(cand, "checkpoint_state.json")
         cand_model = os.path.join(cand, "model.safetensors")
@@ -952,15 +974,20 @@ def try_resume_from_checkpoint(
                 with open(cand_state, "r", encoding="utf-8") as f:
                     s_data = json.load(f)
                 c_step = int(s_data.get("step", 0))
+                c_loss = float(s_data.get("best_loss", s_data.get("loss", float("inf"))))
+                print(f"  -> Found candidate at {cand} (Step: {c_step}, Best Loss: {c_loss:.4f})")
                 if c_step > best_cand_step:
                     best_cand_step = c_step
                     best_cand_epoch = int(s_data.get("epoch", 0))
-                    best_cand_loss = float(s_data.get("best_loss", float("inf")))
+                    best_cand_loss = c_loss
                     best_cand_dir = cand
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"  -> Notice: Could not parse candidate {cand}: {e}")
+        elif os.path.exists(cand):
+            print(f"  -> Notice: Candidate exists but missing state or model file: {cand}")
 
     if best_cand_dir is None or best_cand_step < 0:
+        print("[Resume Discovery] No valid previous checkpoints found. Starting from Step 0.")
         return 0, 0, float("inf"), False
 
     print("=" * 78)
@@ -1677,9 +1704,9 @@ def main():
     # Setup Best Checkpoint Directory
     best_cp_dir = os.path.join(args.output_dir, "best_checkpoint")
 
-    last_saved_checkpoint_loss = best_loss if best_loss < float("inf") else float("inf")
-    last_saved_checkpoint_step = start_step
-    last_saved_checkpoint_time = time.time()
+    last_regular_checkpoint_step = start_step
+    last_best_checkpoint_step = start_step
+    last_best_checkpoint_loss = best_loss if best_loss < float("inf") else float("inf")
 
     print(f"[Training] Launching Training: Epochs={args.epochs}, Batch={args.batch_size}, Accum={args.grad_accum}, Precision={precision_str}, Steps={start_step}..{args.max_steps}")
     model.train()
@@ -1780,20 +1807,29 @@ def main():
                     best_loss = cur_step_loss
                     is_new_best = True
 
-                # Dynamic Best-Checkpointing Gate:
-                # Requires a minimum step stride (>= 25 steps) between milestone saves to allow high-throughput training,
-                # UNLESS there is a major loss breakthrough (drop >= 0.50) with at least 20 steps since the last save.
-                step_stride = step - last_saved_checkpoint_step
-                major_breakthrough = (last_saved_checkpoint_loss - cur_step_loss >= 0.50) and (step_stride >= 20)
+                # Periodic Resumable Step Checkpointing:
+                # Unconditionally saves full model weights + optimizer + scaler to args.output_dir every 25 steps.
+                # Guarantees that progress is NEVER lost by more than 25 steps, completely preventing regression to step 87!
+                if (step - last_regular_checkpoint_step >= 25) or (step >= args.max_steps):
+                    last_regular_checkpoint_step = step
+                    save_checkpoint(
+                        model, optimizer, scaler, config, tok_path, args.output_dir,
+                        step, epoch, cur_step_loss, best_loss, args.stage_id,
+                        is_best=False, is_completed=(step >= args.max_steps)
+                    )
+
+                # Dynamic Best Milestone Checkpointing:
+                # Tracks historical minimum loss and updates best_checkpoint for clean deployment/inference.
+                step_stride = step - last_best_checkpoint_step
+                major_breakthrough = (last_best_checkpoint_loss - cur_step_loss >= 0.50) and (step_stride >= 15)
                 stride_milestone = (step_stride >= 25) and is_new_best
-                first_save = (last_saved_checkpoint_loss == float("inf")) and (step >= 10)
+                first_save = (last_best_checkpoint_loss == float("inf")) and (step >= 10)
 
                 should_save_best_milestone = is_new_best and (stride_milestone or major_breakthrough or first_save)
 
                 if should_save_best_milestone:
-                    last_saved_checkpoint_loss = cur_step_loss
-                    last_saved_checkpoint_step = step
-                    last_saved_checkpoint_time = time.time()
+                    last_best_checkpoint_loss = cur_step_loss
+                    last_best_checkpoint_step = step
 
                     print(f"[{args.stage_id}] >>> {CLR_GREEN}{CLR_BOLD}NEW HISTORICAL BEST LOSS ACHIEVED: {best_loss:.4f}{CLR_RESET} <<<", flush=True)
                     print_frontier_comparison_matrix_colored(step, cur_step_loss, best_loss)
@@ -1801,16 +1837,6 @@ def main():
                         model, optimizer, scaler, config, tok_path, best_cp_dir,
                         step, epoch, cur_step_loss, best_loss, args.stage_id,
                         is_best=True, is_completed=False
-                    )
-
-                # Periodic Step Checkpointing for Mid-Way Resilience (if no best checkpoint saved in 50 steps)
-                elif (step - last_saved_checkpoint_step >= 50):
-                    last_saved_checkpoint_step = step
-                    last_saved_checkpoint_time = time.time()
-                    save_checkpoint(
-                        model, optimizer, scaler, config, tok_path, args.output_dir,
-                        step, epoch, cur_step_loss, best_loss, args.stage_id,
-                        is_best=False, is_completed=False
                     )
 
                 if step >= args.max_steps:

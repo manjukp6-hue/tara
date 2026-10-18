@@ -482,6 +482,16 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
                     except Exception:
                         pass
 
+        if not os.path.exists(src):
+            return
+        src_sz = os.path.getsize(src)
+        if src_sz == 0:
+            print(f"[GDrive Safety Block] Refusing to mirror empty 0-byte file to Google Drive: {src} -> {dst}", flush=True)
+            return
+        if src.endswith(".safetensors") and src_sz < 100 * 1024 * 1024:
+            print(f"[GDrive Safety Block] Refusing to mirror small/corrupt weights ({src_sz} bytes < 100MB) to Google Drive: {src}", flush=True)
+            return
+
         # Direct in-place streaming copy
         with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
             while True:
@@ -931,6 +941,85 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
         print(f"[DISK HYGIENE Notice] Disk check notice: {e}", flush=True)
 
 
+def save_best_milestone(
+    model: nn.Module,
+    config: dict,
+    tokenizer_path: str,
+    best_dir: str,
+    step: int,
+    epoch: int,
+    loss: float,
+    best_loss: float,
+    stage_id: str,
+):
+    """
+    Saves a clean, compact BEST MILESTONE checkpoint to local SSD:
+    - Only model weights (model.safetensors) + essential metadata.
+    - Strictly ZERO optimizer state (saves 4GB of disk space and avoids OOM).
+    - Verifies integrity immediately.
+    """
+    with _checkpoint_write_lock:
+        os.makedirs(best_dir, exist_ok=True)
+        # config.json
+        with open(os.path.join(best_dir, "config.json"), "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+
+        # tokenizer.json
+        if tokenizer_path and os.path.exists(tokenizer_path):
+            tok_dst = os.path.join(best_dir, "tokenizer.json")
+            if os.path.abspath(tokenizer_path) != os.path.abspath(tok_dst):
+                shutil.copy2(tokenizer_path, tok_dst)
+
+        # model.safetensors
+        state_dict = {k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}
+        if HAS_SAFETENSORS:
+            save_file(state_dict, os.path.join(best_dir, "model.safetensors"))
+        else:
+            torch.save(state_dict, os.path.join(best_dir, "pytorch_model.bin"))
+        del state_dict
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        # checkpoint_state.json
+        state = {
+            "step": step,
+            "epoch": epoch,
+            "loss": loss,
+            "best_loss": best_loss,
+            "stage_id": stage_id,
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "is_best": True,
+            "is_completed": False,
+        }
+        with open(os.path.join(best_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+
+        # STAGE_METADATA.json
+        meta = {
+            "stage_id": stage_id,
+            "status": "IN_PROGRESS",
+            "step": step,
+            "loss": loss,
+            "best_loss": best_loss,
+            "perplexity": math.exp(min(loss, 20.0)),
+            "is_best": True,
+        }
+        with open(os.path.join(best_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+
+        # Ensure no optimizer file ever sneaks into best_checkpoint
+        opt_f = os.path.join(best_dir, "optimizer_state.pt")
+        if os.path.exists(opt_f):
+            try:
+                os.remove(opt_f)
+            except Exception:
+                pass
+
+        # Strict integrity verification
+        verify_checkpoint_integrity(best_dir, require_optimizer=False, require_completed=False)
+
+
 def save_checkpoint(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -945,6 +1034,7 @@ def save_checkpoint(
     stage_id: str,
     is_best: bool = False,
     is_completed: bool = False,
+    sync_to_gdrive: bool = True,
 ):
     """
     Enforces strict 3-step safety protocol: Save First -> Verify Next -> Delete Old Last:
@@ -1066,7 +1156,10 @@ def save_checkpoint(
         clean_stale_checkpoint_artifacts(output_dir, is_best=is_best)
 
     # STEP 4: Mirror verified checkpoint to Google Drive in background
-    sync_checkpoint_to_gdrive(output_dir, tag, wait=is_completed)
+    if sync_to_gdrive:
+        sync_checkpoint_to_gdrive(output_dir, tag, wait=is_completed)
+    else:
+        print(f"[GDrive Mirror] Skipped cloud sync for [{tag}] (Google Drive preserves best model only).", flush=True)
 
 
 def promote_checkpoint(
@@ -2033,69 +2126,57 @@ def main():
                 )
 
                 # Periodic Benchmark Matrix Display
-                if step % args.checkpoint_interval == 0 or step % 25 == 0 or step == start_step + 1:
-                    print_frontier_comparison_matrix_colored(step, cur_step_loss, best_loss)
+                is_new_best = (cur_step_loss < best_loss)
+                if step % 25 == 0 or step == start_step + 1 or is_new_best:
+                    print_frontier_comparison_matrix_colored(step, cur_step_loss, min(best_loss, cur_step_loss))
 
-                # Dynamic In-Memory Best Loss Tracking:
-                # Instantly caches best loss in memory on every single step (e.g. 5.2 -> 5.1) without disk thrashing
-                is_new_best = False
-                if cur_step_loss < best_loss:
+                # Exclusive Best Milestone Save & Cloud Sync:
+                # Strictly saves ONLY when a step achieves a new historical best loss.
+                # Zero 50-step periodic commits, zero wasting time on worse loss weights, zero optimizer bloat.
+                if is_new_best:
                     best_loss = cur_step_loss
-                    is_new_best = True
+                    last_best_checkpoint_step = step
+                    last_best_checkpoint_loss = cur_step_loss
 
-                # Unified Best Checkpoint & Resumable Step Commit:
-                # Commits once every checkpoint_interval (default: 50 steps) or on final completion.
-                # Saves 100% of GPU compute time, prevents disk bloat, and mirrors the single best milestone to Google Drive.
-                is_interval_step = (step - last_regular_checkpoint_step >= args.checkpoint_interval) or (step >= args.max_steps)
-
-                if is_interval_step:
-                    last_regular_checkpoint_step = step
-
-                    if is_new_best:
-                        print(f"[{args.stage_id}] >>> {CLR_GREEN}{CLR_BOLD}NEW HISTORICAL BEST LOSS ACHIEVED: {best_loss:.4f}{CLR_RESET} <<<", flush=True)
-                        print_frontier_comparison_matrix_colored(step, cur_step_loss, best_loss)
-
-                    # 1. Save unified resumable checkpoint (model + optimizer + state)
-                    save_checkpoint(
-                        model, optimizer, scaler, config, tok_path, args.output_dir,
-                        step, epoch, cur_step_loss, best_loss, args.stage_id,
-                        is_best=False, is_completed=(step >= args.max_steps)
+                    print(
+                        f"[{args.stage_id}] >>> {CLR_GREEN}{CLR_BOLD}NEW HISTORICAL BEST LOSS ACHIEVED: "
+                        f"{best_loss:.4f} (Step {step:04d}){CLR_RESET} <<<",
+                        flush=True,
                     )
 
-                    # 2. Maintain clean best milestone using hardlink on local SSD (0 extra bytes overhead)
-                    if is_new_best or not os.path.exists(os.path.join(best_cp_dir, "model.safetensors")):
-                        last_best_checkpoint_loss = cur_step_loss
-                        last_best_checkpoint_step = step
-                        os.makedirs(best_cp_dir, exist_ok=True)
-                        for fname in ["config.json", "tokenizer.json", "STAGE_METADATA.json", "checkpoint_state.json"]:
-                            src_f = os.path.join(args.output_dir, fname)
-                            dst_f = os.path.join(best_cp_dir, fname)
-                            if os.path.exists(src_f):
-                                shutil.copy2(src_f, dst_f)
+                    # 1. Save genuine best model weights to best milestone directory (local SSD)
+                    save_best_milestone(
+                        model, config, tok_path, best_cp_dir,
+                        step, epoch, cur_step_loss, best_loss, args.stage_id
+                    )
 
-                        src_model = os.path.join(args.output_dir, "model.safetensors")
-                        dst_model = os.path.join(best_cp_dir, "model.safetensors")
-                        if os.path.exists(src_model):
-                            if os.path.exists(dst_model):
-                                try:
-                                    os.remove(dst_model)
-                                except Exception:
-                                    pass
-                            try:
-                                os.link(src_model, dst_model)
-                            except Exception:
-                                shutil.copy2(src_model, dst_model)
+                    # 2. Hardlink to local stage directory for seamless local resume (0 extra bytes)
+                    os.makedirs(args.output_dir, exist_ok=True)
+                    for fname in ["config.json", "tokenizer.json", "STAGE_METADATA.json", "checkpoint_state.json"]:
+                        src_f = os.path.join(best_cp_dir, fname)
+                        dst_f = os.path.join(args.output_dir, fname)
+                        if os.path.exists(src_f):
+                            shutil.copy2(src_f, dst_f)
 
-                        # Strictly exclude optimizer states from best milestone to save 3.7GB
-                        opt_in_best = os.path.join(best_cp_dir, "optimizer_state.pt")
-                        if os.path.exists(opt_in_best):
+                    src_model = os.path.join(best_cp_dir, "model.safetensors")
+                    dst_model = os.path.join(args.output_dir, "model.safetensors")
+                    if os.path.exists(src_model):
+                        if os.path.exists(dst_model):
                             try:
-                                os.remove(opt_in_best)
+                                os.remove(dst_model)
                             except Exception:
                                 pass
+                        try:
+                            os.link(src_model, dst_model)
+                        except Exception:
+                            shutil.copy2(src_model, dst_model)
 
-                        # Mirror clean best milestone to Google Drive
-                        sync_checkpoint_to_gdrive(best_cp_dir, "BEST-MILESTONE", wait=False)
+                    # 3. Mirror the single genuine BEST model to Google Drive in background
+                    sync_checkpoint_to_gdrive(
+                        best_cp_dir,
+                        f"BEST-MILESTONE (Step {step:04d}, Loss: {best_loss:.4f})",
+                        wait=False,
+                    )
 
                 if step >= args.max_steps:
                     break

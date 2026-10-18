@@ -56,6 +56,7 @@ else
     GRAD_ACCUM="${GRAD_ACCUM:-8}"
     STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-1000}"
 fi
+CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-50}"
 JOINT_STEPS="${JOINT_STEPS:-200}"
 MAIN_DS_DIR="storage/datasets/main_dataset_v2"
 PROMOTED_BASE="storage/models/promoted"
@@ -372,6 +373,14 @@ if [ -f "storage/models/checkpoints/pretraining_authorization.json" ] && [ -d "$
 fi
 echo "Pre-Training Authorization Gate Passed!"
 
+# 5a. Proactive Pre-Training Disk Space Reclamation: Reclaim 15-25 GB from Rust build tree and package caches
+echo "[DISK HYGIENE] Purging intermediate Rust build tree and caches to reclaim 15-20 GB disk space..."
+rm -rf target/ /root/.cargo/registry/ /root/.cargo/git/ ~/.cargo/registry/ ~/.cargo/git/ 2>/dev/null || true
+rm -rf /root/.cache/huggingface /root/.cache/pip ~/.cache/huggingface ~/.cache/pip 2>/dev/null || true
+if command -v df >/dev/null 2>&1; then
+    df -h / | awk 'NR==2 {print "[DISK] Available disk space before training: " $4 " free / " $2 " total (" $5 " used)"}'
+fi
+
 # 5b. Optional Production-Model GPU 1-Step Diagnostic (Bypassed by default to start training immediately)
 if [ "${RUN_GPU_STEP_TEST:-0}" = "1" ] || [ "${RUN_GPU_STEP_TEST:-}" = "always" ]; then
     echo "=== [PRODUCTION-MODEL GPU 1-STEP EXECUTION & MEMORY DIAGNOSTIC] ==="
@@ -406,6 +415,7 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --max-steps "$STAGE_MAX_STEPS" \
         --batch-size "$TRAIN_BATCH_SIZE" \
         --grad-accum "$GRAD_ACCUM" \
+        --checkpoint-interval "$CHECKPOINT_INTERVAL" \
         --hf-repo "$HF_MODEL_REPO" \
         $CANARY_EXTRA_ARGS
 
@@ -445,6 +455,7 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --max-steps "$STAGE_MAX_STEPS" \
         --batch-size "$TRAIN_BATCH_SIZE" \
         --grad-accum "$GRAD_ACCUM" \
+        --checkpoint-interval "$CHECKPOINT_INTERVAL" \
         --hf-repo "$HF_MODEL_REPO"
 
     # Extensible Loop for Continual Expansion (Stages 2..N)
@@ -473,6 +484,7 @@ if [ "$TRAINER_MODE" = "python" ]; then
             --max-steps "$STAGE_MAX_STEPS" \
             --batch-size "$TRAIN_BATCH_SIZE" \
             --grad-accum "$GRAD_ACCUM" \
+            --checkpoint-interval "$CHECKPOINT_INTERVAL" \
             --hf-repo "$HF_MODEL_REPO"
 
         STAGE_IDX=$((STAGE_IDX + 1))

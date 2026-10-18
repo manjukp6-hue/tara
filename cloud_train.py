@@ -536,6 +536,71 @@ def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
             _gdrive_sync_thread.join()
 
 
+_checkpoint_write_thread: Optional[threading.Thread] = None
+_checkpoint_write_lock = threading.Lock()
+
+
+def _write_checkpoint_worker(
+    state_dict: dict,
+    continuation_state: dict,
+    metadata: dict,
+    config: dict,
+    tokenizer_path: str,
+    output_dir: str,
+    cpu_opt_state: Optional[dict],
+    scaler_state: Optional[dict],
+    tag: str,
+    loss: float,
+    is_completed: bool,
+):
+    try:
+        t0 = time.time()
+        os.makedirs(output_dir, exist_ok=True)
+        # 1. config.json
+        with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+
+        # 2. tokenizer.json
+        if tokenizer_path and os.path.exists(tokenizer_path):
+            tok_dst = os.path.join(output_dir, "tokenizer.json")
+            if os.path.abspath(tokenizer_path) != os.path.abspath(tok_dst):
+                shutil.copy2(tokenizer_path, tok_dst)
+
+        # 3. model.safetensors
+        if HAS_SAFETENSORS:
+            save_file(state_dict, os.path.join(output_dir, "model.safetensors"))
+        else:
+            torch.save(state_dict, os.path.join(output_dir, "pytorch_model.bin"))
+
+        # 4. Continuation state
+        with open(os.path.join(output_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
+            json.dump(continuation_state, f, indent=2)
+
+        # 5. Optimizer state if present
+        if cpu_opt_state is not None:
+            torch.save(
+                {
+                    "optimizer": cpu_opt_state,
+                    "scaler": scaler_state,
+                    "step": continuation_state["step"],
+                    "best_loss": continuation_state["best_loss"],
+                },
+                os.path.join(output_dir, "optimizer_state.pt"),
+            )
+
+        # 6. STAGE_METADATA.json
+        with open(os.path.join(output_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+
+        elapsed = time.time() - t0
+        print(f"[Checkpoint] Committed [{tag}] checkpoint to disk ({elapsed:.1f}s) -> {output_dir} (Loss: {loss:.4f})", flush=True)
+
+        # Sync to Google Drive in background
+        sync_checkpoint_to_gdrive(output_dir, tag, wait=is_completed)
+    except Exception as e:
+        print(f"[Checkpoint Error] Non-fatal background checkpoint notice in {output_dir}: {e}", flush=True)
+
+
 def save_checkpoint(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -551,30 +616,20 @@ def save_checkpoint(
     is_best: bool = False,
     is_completed: bool = False,
 ):
-    """Exports model weights, optimizer continuation state, and stage metadata."""
-    t_save_start = time.time()
+    """
+    Non-blocking checkpoint saving:
+    Snapshots model weights to CPU in ~0.3s so GPU training continues immediately at full throughput.
+    Disk serialization and Google Drive mirroring execute in a dedicated background worker thread.
+    """
+    global _checkpoint_write_thread
     tag = "BEST MILESTONE" if is_best else ("COMPLETED" if is_completed else f"STEP {step}")
-    print(f"[Checkpoint] Writing [{tag}] checkpoint to {output_dir}...", flush=True)
-    os.makedirs(output_dir, exist_ok=True)
+    print(f"[Checkpoint] Snapshotting [{tag}] checkpoint at Step {step}...", flush=True)
 
-    # 1. config.json
-    with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
+    # 1. Immediate snapshot on CPU (detached clone eliminates tied-weight view conflicts and frees GPU)
+    torch.cuda.synchronize()
+    state_dict = {k: v.detach().clone().cpu() for k, v in model.state_dict().items()}
+    torch.cuda.empty_cache()
 
-    # 2. tokenizer.json
-    if os.path.exists(tokenizer_path):
-        tok_dst = os.path.join(output_dir, "tokenizer.json")
-        if os.path.abspath(tokenizer_path) != os.path.abspath(tok_dst):
-            shutil.copy2(tokenizer_path, tok_dst)
-
-    # 3. model.safetensors
-    state_dict = {k: v.contiguous().cpu() for k, v in model.state_dict().items()}
-    if HAS_SAFETENSORS:
-        save_file(state_dict, os.path.join(output_dir, "model.safetensors"))
-    else:
-        torch.save(state_dict, os.path.join(output_dir, "pytorch_model.bin"))
-
-    # 4. Continuation state for mid-way resume
     continuation_state = {
         "step": step,
         "epoch": epoch,
@@ -584,15 +639,21 @@ def save_checkpoint(
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "is_completed": is_completed,
     }
-    with open(os.path.join(output_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
-        json.dump(continuation_state, f, indent=2)
 
-    # 5. Optimizer state for mid-way continuation:
-    # Lightweight best milestone models (best_checkpoint) exclude bulky optimizer states for speed.
-    # Continuation checkpoints (in-progress resilience or stage completion) save CPU-offloaded optimizer states.
+    metadata = {
+        "stage_id": stage_id,
+        "status": "COMPLETED" if is_completed else "IN_PROGRESS",
+        "step": step,
+        "loss": loss,
+        "best_loss": best_loss,
+        "perplexity": math.exp(min(loss, 20.0)),
+        "is_best": is_best,
+        "completed_at_utc": datetime.now(timezone.utc).isoformat() if is_completed else None,
+    }
+
+    cpu_opt_state = None
+    scaler_state = None
     if not is_best or is_completed:
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
         opt_sd = optimizer.state_dict()
         cpu_opt_state = {}
         for k, v in opt_sd.items():
@@ -605,36 +666,28 @@ def save_checkpoint(
                     }
             else:
                 cpu_opt_state[k] = v
+        scaler_state = scaler.state_dict() if scaler else None
 
-        torch.save(
-            {
-                "optimizer": cpu_opt_state,
-                "scaler": scaler.state_dict() if scaler else None,
-                "step": step,
-                "best_loss": best_loss,
-            },
-            os.path.join(output_dir, "optimizer_state.pt"),
+    with _checkpoint_write_lock:
+        if _checkpoint_write_thread and _checkpoint_write_thread.is_alive():
+            if is_completed:
+                _checkpoint_write_thread.join()
+            else:
+                _checkpoint_write_thread.join(timeout=30.0)
+
+        _checkpoint_write_thread = threading.Thread(
+            target=_write_checkpoint_worker,
+            args=(
+                state_dict, continuation_state, metadata, config,
+                tokenizer_path, output_dir, cpu_opt_state, scaler_state,
+                tag, loss, is_completed
+            ),
+            daemon=True
         )
+        _checkpoint_write_thread.start()
 
-    # 6. STAGE_METADATA.json (Idempotence & DAG verification)
-    metadata = {
-        "stage_id": stage_id,
-        "status": "COMPLETED" if is_completed else "IN_PROGRESS",
-        "step": step,
-        "loss": loss,
-        "best_loss": best_loss,
-        "perplexity": math.exp(min(loss, 20.0)),
-        "is_best": is_best,
-        "completed_at_utc": datetime.now(timezone.utc).isoformat() if is_completed else None,
-    }
-    with open(os.path.join(output_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2)
-
-    save_duration = time.time() - t_save_start
-    print(f"[Checkpoint] Saved [{tag}] checkpoint ({save_duration:.1f}s) -> {output_dir} (Loss: {loss:.4f})", flush=True)
-
-    # Mirror to Google Drive asynchronously (or synchronously on stage completion)
-    sync_checkpoint_to_gdrive(output_dir, tag, wait=is_completed)
+        if is_completed:
+            _checkpoint_write_thread.join()
 
 
 def promote_checkpoint(
@@ -761,77 +814,88 @@ def try_resume_from_checkpoint(
     optimizer: torch.optim.Optimizer,
     scaler: torch.cuda.amp.GradScaler,
 ) -> Tuple[int, int, float, bool]:
-    """Attempts to resume from an existing in-progress checkpoint."""
-    state_file = os.path.join(checkpoint_dir, "checkpoint_state.json")
-    opt_file = os.path.join(checkpoint_dir, "optimizer_state.pt")
-    model_file = os.path.join(checkpoint_dir, "model.safetensors")
+    """
+    Attempts to resume from the latest available checkpoint.
+    Discovers all candidate locations (checkpoint_dir, best_checkpoint, and Google Drive mirrors),
+    inspects recorded step numbers, and automatically restores from the candidate with the highest step!
+    """
+    candidate_dirs = [
+        checkpoint_dir,
+        os.path.join(checkpoint_dir, "best_checkpoint"),
+    ]
+    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
+    if os.path.exists("/content/drive/MyDrive"):
+        stage_name = os.path.basename(checkpoint_dir)
+        candidate_dirs.extend([
+            os.path.join(gdrive_root, stage_name),
+            os.path.join(gdrive_root, stage_name, "best_checkpoint"),
+            os.path.join(gdrive_root, "best_checkpoint"),
+        ])
 
-    # If local checkpoint_dir lacks required files, check best_checkpoint subfolder and Google Drive mirror
-    if not (os.path.exists(state_file) and os.path.exists(opt_file) and os.path.exists(model_file)):
-        candidate_sources = [
-            os.path.join(checkpoint_dir, "best_checkpoint"),
-        ]
-        gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
-        if os.path.exists("/content/drive/MyDrive"):
-            stage_name = os.path.basename(checkpoint_dir)
-            candidate_sources.extend([
-                os.path.join(gdrive_root, stage_name),
-                os.path.join(gdrive_root, stage_name, "best_checkpoint"),
-                os.path.join(gdrive_root, "best_checkpoint"),
-            ])
+    best_cand_dir = None
+    best_cand_step = -1
+    best_cand_epoch = 0
+    best_cand_loss = float("inf")
 
-        for candidate in candidate_sources:
-            cand_state = os.path.join(candidate, "checkpoint_state.json")
-            cand_opt = os.path.join(candidate, "optimizer_state.pt")
-            cand_model = os.path.join(candidate, "model.safetensors")
-            if os.path.exists(cand_state) and os.path.exists(cand_opt) and os.path.exists(cand_model):
-                print(f"[Resume Sync] Restoring checkpoint files from {candidate} -> {checkpoint_dir}...", flush=True)
-                os.makedirs(checkpoint_dir, exist_ok=True)
-                for fname in ["config.json", "tokenizer.json", "model.safetensors", "checkpoint_state.json", "optimizer_state.pt", "STAGE_METADATA.json"]:
-                    s = os.path.join(candidate, fname)
-                    d = os.path.join(checkpoint_dir, fname)
-                    if os.path.exists(s) and os.path.abspath(s) != os.path.abspath(d):
-                        try:
-                            shutil.copy2(s, d)
-                        except Exception:
-                            pass
-                break
+    for cand in candidate_dirs:
+        cand_state = os.path.join(cand, "checkpoint_state.json")
+        cand_model = os.path.join(cand, "model.safetensors")
+        if os.path.exists(cand_state) and os.path.exists(cand_model):
+            try:
+                with open(cand_state, "r", encoding="utf-8") as f:
+                    s_data = json.load(f)
+                c_step = int(s_data.get("step", 0))
+                if c_step > best_cand_step:
+                    best_cand_step = c_step
+                    best_cand_epoch = int(s_data.get("epoch", 0))
+                    best_cand_loss = float(s_data.get("best_loss", float("inf")))
+                    best_cand_dir = cand
+            except Exception:
+                pass
 
-    if not (os.path.exists(state_file) and os.path.exists(model_file)):
+    if best_cand_dir is None or best_cand_step < 0:
         return 0, 0, float("inf"), False
 
-    try:
-        with open(state_file, "r", encoding="utf-8") as f:
-            state = json.load(f)
+    print("=" * 78)
+    print(f"  [RESUME] Discovered latest checkpoint milestone at Step {best_cand_step} in: {best_cand_dir}")
+    print(f"  Resumed Step       : {best_cand_step}")
+    print(f"  Resumed Epoch      : {best_cand_epoch}")
+    print(f"  Historical Best Loss: {best_cand_loss:.4f}")
+    print("=" * 78)
 
-        step = state.get("step", 0)
-        epoch = state.get("epoch", 0)
-        best_loss = state.get("best_loss", float("inf"))
+    # If the latest checkpoint is in a subfolder or Google Drive, sync files to checkpoint_dir
+    if os.path.abspath(best_cand_dir) != os.path.abspath(checkpoint_dir):
+        print(f"[Resume Sync] Syncing latest checkpoint files {best_cand_dir} -> {checkpoint_dir}...", flush=True)
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        for fname in ["config.json", "tokenizer.json", "model.safetensors", "checkpoint_state.json", "optimizer_state.pt", "STAGE_METADATA.json"]:
+            s = os.path.join(best_cand_dir, fname)
+            d = os.path.join(checkpoint_dir, fname)
+            if os.path.exists(s) and os.path.abspath(s) != os.path.abspath(d):
+                try:
+                    shutil.copy2(s, d)
+                except Exception:
+                    pass
 
-        # Load weights
-        if HAS_SAFETENSORS:
-            weights = load_file(model_file, device="cpu")
-            model.load_state_dict(weights, strict=False)
+    # Load weights
+    model_file = os.path.join(checkpoint_dir, "model.safetensors")
+    if HAS_SAFETENSORS and os.path.exists(model_file):
+        weights = load_file(model_file, device="cpu")
+        model.load_state_dict(weights, strict=False)
 
-        # Load optimizer state if present
-        if os.path.exists(opt_file):
+    # Load optimizer state if available
+    opt_file = os.path.join(checkpoint_dir, "optimizer_state.pt")
+    if os.path.exists(opt_file):
+        try:
             opt_data = torch.load(opt_file, map_location="cpu")
             optimizer.load_state_dict(opt_data["optimizer"])
             if scaler and opt_data.get("scaler"):
                 scaler.load_state_dict(opt_data["scaler"])
-        else:
-            print("[Resume Notice] optimizer_state.pt not present; starting with clean optimizer state for restored weights.")
+        except Exception as e:
+            print(f"[Resume Notice] Optimizer state load notice: {e}; using clean optimizer.")
+    else:
+        print("[Resume Notice] optimizer_state.pt not present; starting with clean optimizer state for restored weights.")
 
-        print("=" * 78)
-        print(f"  [RESUME] Successfully restored in-progress state from {checkpoint_dir}!")
-        print(f"  Resumed Step       : {step}")
-        print(f"  Resumed Epoch      : {epoch}")
-        print(f"  Historical Best Loss: {best_loss:.4f}")
-        print("=" * 78)
-        return step, epoch, best_loss, True
-    except Exception as e:
-        print(f"[Resume Notice] Could not resume from {checkpoint_dir} ({e}). Starting fresh.")
-        return 0, 0, float("inf"), False
+    return best_cand_step, best_cand_epoch, best_cand_loss, True
 
 
 def check_stage_already_completed(output_dir: str) -> bool:

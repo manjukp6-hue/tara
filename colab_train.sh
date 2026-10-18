@@ -254,15 +254,15 @@ fi
 ACTIVE_CP_DIR="storage/models/checkpoints"
 mkdir -p "$ACTIVE_CP_DIR"
 
-# If restarting in a fresh Colab session, restore any existing checkpoints from Google Drive mirror
+# If restarting in a fresh Colab session, restore or update checkpoints from Google Drive mirror
 if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
     for STAGE_SUBDIR in stage0_pretraining stage1_curriculum; do
         GDRIVE_STAGE="$GDRIVE_CHECKPOINT_DIR/$STAGE_SUBDIR"
         LOCAL_STAGE="$ACTIVE_CP_DIR/$STAGE_SUBDIR"
-        if [ -d "$GDRIVE_STAGE" ] && [ ! -f "$LOCAL_STAGE/checkpoint_state.json" ]; then
-            echo "[RESUME SYNC] Restoring in-progress checkpoint from Google Drive: $GDRIVE_STAGE -> $LOCAL_STAGE"
+        if [ -d "$GDRIVE_STAGE" ]; then
+            echo "[RESUME SYNC] Checking Google Drive checkpoint mirror: $GDRIVE_STAGE -> $LOCAL_STAGE"
             mkdir -p "$LOCAL_STAGE"
-            cp -r "$GDRIVE_STAGE"/* "$LOCAL_STAGE"/ 2>/dev/null || true
+            cp -u -r "$GDRIVE_STAGE"/* "$LOCAL_STAGE"/ 2>/dev/null || true
         fi
     done
 fi

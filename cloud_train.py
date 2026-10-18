@@ -466,43 +466,38 @@ _gdrive_sync_lock = threading.Lock()
 
 
 def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
-    """Robust streaming copy with fallback for Google Drive FUSE filesystem."""
+    """
+    Direct in-place streaming copy for Google Drive FUSE.
+    Avoids temp file rename/move which causes Google Drive to create duplicate numbered files: (1), (2), etc.
+    """
     try:
-        dst_tmp = dst + ".tmp"
-        with open(src, "rb") as fsrc, open(dst_tmp, "wb") as fdst:
+        # Pre-clean any accidental duplicate files in target folder before copy
+        dst_dir = os.path.dirname(dst)
+        base, ext = os.path.splitext(os.path.basename(dst))
+        if os.path.exists(dst_dir):
+            for f in os.listdir(dst_dir):
+                if f.startswith(base) and f.endswith(ext) and f != os.path.basename(dst) and "(" in f:
+                    try:
+                        os.remove(os.path.join(dst_dir, f))
+                    except Exception:
+                        pass
+
+        # Direct in-place streaming copy
+        with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
             while True:
                 chunk = fsrc.read(chunk_size)
                 if not chunk:
                     break
                 fdst.write(chunk)
                 del chunk
-        if os.path.exists(dst):
-            try:
-                os.remove(dst)
-            except Exception:
-                pass
-        try:
-            os.replace(dst_tmp, dst)
-        except OSError:
-            # Google Drive FUSE virtual filesystem fallback
-            if os.path.exists(dst_tmp):
-                try:
-                    shutil.move(dst_tmp, dst)
-                except Exception:
-                    # Final fallback: direct byte copy
-                    with open(dst_tmp, "rb") as ft, open(dst, "wb") as fd:
-                        shutil.copyfileobj(ft, fd, length=chunk_size)
-                    try:
-                        os.remove(dst_tmp)
-                    except Exception:
-                        pass
     except Exception:
-        # Direct stream copy fallback if temp creation fails on FUSE
+        # Fallback to direct byte copy if needed
         try:
             with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
                 shutil.copyfileobj(fsrc, fdst, length=chunk_size)
         except Exception:
             pass
+
 
 
 _pending_gdrive_sync: Optional[Tuple[str, str, str, List[str]]] = None
@@ -611,6 +606,14 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                             os.remove(os.path.join(target_dir, f))
                         except Exception:
                             pass
+                    # Delete duplicate numbered files created by DriveFS: (1), (2), (5), etc.
+                    if " (" in f and ")" in f:
+                        try:
+                            os.remove(os.path.join(target_dir, f))
+                            print(f"[GDrive Hygiene] Deleted duplicate numbered file from GDrive: {f}", flush=True)
+                        except Exception:
+                            pass
+
 
                 # If optimizer_state.pt is not in src_dir (e.g. best_checkpoint), delete it from target_dir
                 for fname in ["optimizer_state.pt", "pytorch_model.bin"]:

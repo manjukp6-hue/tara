@@ -299,9 +299,11 @@ fi
 
 # If restarting in a fresh Colab session, clean stale temporary files and restore checkpoints from Google Drive mirror
 if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
-    echo "[GDRIVE CLEANUP] Purging stale temporary (.tmp) files and obsolete artifacts from Google Drive..."
+    echo "[GDRIVE CLEANUP] Purging stale temporary (.tmp) and duplicate (1), (2) files from Google Drive..."
     find "$GDRIVE_CHECKPOINT_DIR" -name "*.tmp*" -type f -delete 2>/dev/null || true
+    find "$GDRIVE_CHECKPOINT_DIR" -name "* (*)*" -type f -delete 2>/dev/null || true
     find "$GDRIVE_CHECKPOINT_DIR" -path "*/best_checkpoint/optimizer_state.pt" -type f -delete 2>/dev/null || true
+    find "$ACTIVE_CP_DIR" -name "* (*)*" -type f -delete 2>/dev/null || true
 
     for STAGE_SUBDIR in stage0_pretraining stage1_curriculum; do
         GDRIVE_STAGE="$GDRIVE_CHECKPOINT_DIR/$STAGE_SUBDIR"
@@ -316,6 +318,7 @@ if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
 import os, shutil
 src = '$GDRIVE_STAGE'
 dst = '$LOCAL_STAGE'
+canonical = {'config.json', 'tokenizer.json', 'model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt'}
 if os.path.exists(src):
     for root, dirs, files in os.walk(src):
         rel = os.path.relpath(root, src)
@@ -324,10 +327,18 @@ if os.path.exists(src):
         for f in files:
             if f.endswith('.tmp') or '.tmp_' in f:
                 continue
+            if ' (' in f and ')' in f:
+                try:
+                    os.remove(os.path.join(root, f))
+                except Exception:
+                    pass
+                continue
+            if f not in canonical:
+                continue
             sf = os.path.join(root, f)
             df = os.path.join(trot, f)
             if not os.path.exists(df):
-                print(f'  -> Copying {f}...', flush=True)
+                print(f'  -> Copying canonical {f}...', flush=True)
                 shutil.copy2(sf, df)
 " 2>/dev/null || true
                 echo "[RESUME SYNC] Checkpoint mirror restore complete."

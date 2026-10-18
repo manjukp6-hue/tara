@@ -255,8 +255,12 @@ fi
 ACTIVE_CP_DIR="storage/models/checkpoints"
 mkdir -p "$ACTIVE_CP_DIR"
 
-# If restarting in a fresh Colab session, restore or update checkpoints from Google Drive mirror
+# If restarting in a fresh Colab session, clean stale temporary files and restore checkpoints from Google Drive mirror
 if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
+    echo "[GDRIVE CLEANUP] Purging stale temporary (.tmp) files and obsolete artifacts from Google Drive..."
+    find "$GDRIVE_CHECKPOINT_DIR" -name "*.tmp*" -type f -delete 2>/dev/null || true
+    find "$GDRIVE_CHECKPOINT_DIR" -path "*/best_checkpoint/optimizer_state.pt" -type f -delete 2>/dev/null || true
+
     for STAGE_SUBDIR in stage0_pretraining stage1_curriculum; do
         GDRIVE_STAGE="$GDRIVE_CHECKPOINT_DIR/$STAGE_SUBDIR"
         LOCAL_STAGE="$ACTIVE_CP_DIR/$STAGE_SUBDIR"

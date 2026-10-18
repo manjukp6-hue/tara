@@ -495,6 +495,27 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                     continue
                 _stream_copy_file(src, dst)
                 synced += 1
+
+        # Post-sync verification and obsolete file cleanup in Google Drive target directory:
+        if os.path.exists(target_dir):
+            for f in os.listdir(target_dir):
+                if f.endswith(".tmp") or ".tmp_" in f:
+                    try:
+                        os.remove(os.path.join(target_dir, f))
+                    except Exception:
+                        pass
+
+            # If optimizer_state.pt is not in src_dir (e.g. best_checkpoint), delete it from target_dir
+            for fname in ["optimizer_state.pt", "pytorch_model.bin"]:
+                src_f = os.path.join(src_dir, fname)
+                dst_f = os.path.join(target_dir, fname)
+                if not os.path.exists(src_f) and os.path.exists(dst_f):
+                    try:
+                        os.remove(dst_f)
+                        print(f"[GDrive Hygiene] Deleted obsolete old checkpoint file from GDrive: {dst_f}", flush=True)
+                    except Exception as e:
+                        print(f"[GDrive Hygiene Notice] Could not delete obsolete {dst_f}: {e}", flush=True)
+
         elapsed = time.time() - t_start
         print(f"[GDrive Mirror] Successfully backed up [{tag}] ({synced} files, {elapsed:.1f}s) -> {target_dir}", flush=True)
     except Exception as e:
@@ -555,6 +576,165 @@ def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
             _gdrive_sync_thread.join()
 
 
+def verify_checkpoint_integrity(
+    checkpoint_dir: str,
+    require_optimizer: bool = False,
+    require_completed: bool = False,
+) -> bool:
+    """
+    Verifies that a newly saved training checkpoint is complete, uncorrupted, and valid:
+    - Verifies model.safetensors exists and is non-empty (>1MB).
+    - Verifies config.json is valid JSON.
+    - Verifies checkpoint_state.json is valid JSON.
+    - Verifies STAGE_METADATA.json is valid (and status COMPLETED if require_completed=True).
+    - Verifies optimizer_state.pt exists and is non-empty (>1MB) if require_optimizer=True.
+    - Deserialization test: ensure safetensors is not corrupted/truncated.
+    """
+    if not os.path.exists(checkpoint_dir):
+        print(f"[Verification Fail] Checkpoint directory does not exist: {checkpoint_dir}")
+        return False
+
+    req_files = ["model.safetensors", "config.json", "checkpoint_state.json", "STAGE_METADATA.json"]
+    if require_optimizer:
+        req_files.append("optimizer_state.pt")
+
+    for rf in req_files:
+        p = os.path.join(checkpoint_dir, rf)
+        if not (os.path.exists(p) and os.path.getsize(p) > 0):
+            print(f"[Verification Fail] Checkpoint file missing or empty: {p}")
+            return False
+
+    try:
+        with open(os.path.join(checkpoint_dir, "config.json"), "r", encoding="utf-8") as f:
+            json.load(f)
+        with open(os.path.join(checkpoint_dir, "checkpoint_state.json"), "r", encoding="utf-8") as f:
+            s_data = json.load(f)
+            if not isinstance(s_data, dict) or "step" not in s_data:
+                print(f"[Verification Fail] Invalid checkpoint_state.json in {checkpoint_dir}")
+                return False
+
+        with open(os.path.join(checkpoint_dir, "STAGE_METADATA.json"), "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        if require_completed and meta.get("status") != "COMPLETED":
+            print(f"[Verification Fail] STAGE_METADATA status is not COMPLETED: {meta.get('status')}")
+            return False
+
+        # Deserialization test: ensure safetensors is not corrupted or truncated
+        if HAS_SAFETENSORS:
+            test_weights = load_file(os.path.join(checkpoint_dir, "model.safetensors"), device="cpu")
+            del test_weights
+        if require_optimizer and os.path.exists(os.path.join(checkpoint_dir, "optimizer_state.pt")):
+            test_opt = torch.load(os.path.join(checkpoint_dir, "optimizer_state.pt"), map_location="cpu")
+            del test_opt
+        gc.collect()
+    except Exception as e:
+        print(f"[Verification Fail] Corruption or load error in {checkpoint_dir}: {e}")
+        return False
+
+    print(f"[Verification Passed] Checkpoint {checkpoint_dir} verified 100% integral and valid.")
+    return True
+
+
+def clean_stale_checkpoint_artifacts(checkpoint_dir: str, is_best: bool = False):
+    """
+    Cleans obsolete, temporary, or unneeded files from a verified checkpoint directory:
+    - Removes stale .tmp files
+    - If is_best=True, strictly removes any optimizer_state.pt to prevent 2GB waste
+    - Enforces cleanup in both local directory and Google Drive mirror
+    """
+    if not os.path.exists(checkpoint_dir):
+        return
+
+    # 1. Clean local directory
+    for f in os.listdir(checkpoint_dir):
+        if f.endswith(".tmp") or ".tmp_" in f:
+            try:
+                os.remove(os.path.join(checkpoint_dir, f))
+            except Exception:
+                pass
+        if is_best and f == "optimizer_state.pt":
+            try:
+                os.remove(os.path.join(checkpoint_dir, f))
+                print(f"[Hygiene] Removed unneeded optimizer state from best milestone: {checkpoint_dir}/{f}", flush=True)
+            except Exception:
+                pass
+
+    # 2. Clean Google Drive mirror
+    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
+    if os.path.exists(gdrive_root):
+        try:
+            if "checkpoints" in checkpoint_dir:
+                rel = checkpoint_dir.split("checkpoints", 1)[1].lstrip(r"\/")
+                gdrive_target = os.path.join(gdrive_root, rel)
+            else:
+                gdrive_target = os.path.join(gdrive_root, os.path.basename(checkpoint_dir))
+
+            if os.path.exists(gdrive_target):
+                for f in os.listdir(gdrive_target):
+                    if f.endswith(".tmp") or ".tmp_" in f:
+                        try:
+                            os.remove(os.path.join(gdrive_target, f))
+                        except Exception:
+                            pass
+                    if is_best and f == "optimizer_state.pt":
+                        try:
+                            os.remove(os.path.join(gdrive_target, f))
+                            print(f"[GDrive Hygiene] Removed unneeded optimizer state from GDrive best milestone: {gdrive_target}/{f}", flush=True)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+
+def clean_previous_training_checkpoints(previous_stage_dir: str, current_checkpoint_dir: str):
+    """
+    Enforces safety policy: Save first, verify next, delete last.
+    Deletes heavy training checkpoint files (optimizer_state.pt, checkpoint_state.json)
+    from previous stage ONLY IF the current checkpoint is verified 100% integral and complete.
+    Cleans both local storage and Google Drive mirror.
+    NEVER deletes promoted inference models.
+    """
+    if not os.path.exists(previous_stage_dir):
+        return
+
+    # Strict Safety Gate: Verify current checkpoint integrity first!
+    if not verify_checkpoint_integrity(current_checkpoint_dir, require_completed=False):
+        print(f"[Safety Protection] Current stage {current_checkpoint_dir} verification did NOT pass.")
+        print(f"[Safety Protection] ABORTING cleanup of previous stage {previous_stage_dir} to prevent data loss!")
+        return
+
+    print(f"[Hygiene] Cleaning bulky training artifacts from previous stage: {previous_stage_dir}...")
+    removable_patterns = ["optimizer_state.pt", "checkpoint_state.json", "pytorch_model.bin"]
+
+    # Clean local disk
+    for root, _, files in os.walk(previous_stage_dir):
+        for f in files:
+            if f in removable_patterns:
+                p = os.path.join(root, f)
+                try:
+                    os.remove(p)
+                    print(f"[Hygiene] Removed previous training state: {p}")
+                except Exception as e:
+                    print(f"[Hygiene Notice] Could not remove {p}: {e}")
+
+    # Clean Google Drive mirror of previous stage
+    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
+    if os.path.exists(gdrive_root):
+        prev_basename = os.path.basename(previous_stage_dir)
+        gdrive_prev = os.path.join(gdrive_root, prev_basename)
+        if os.path.exists(gdrive_prev):
+            print(f"[Hygiene GDrive] Cleaning bulky training artifacts from previous stage in GDrive: {gdrive_prev}...")
+            for root, _, files in os.walk(gdrive_prev):
+                for f in files:
+                    if f in removable_patterns:
+                        p = os.path.join(root, f)
+                        try:
+                            os.remove(p)
+                            print(f"[Hygiene GDrive] Removed previous GDrive training state: {p}")
+                        except Exception as e:
+                            print(f"[Hygiene GDrive Notice] Could not remove {p}: {e}")
+
+
 _checkpoint_write_lock = threading.Lock()
 
 
@@ -574,10 +754,10 @@ def save_checkpoint(
     is_completed: bool = False,
 ):
     """
-    Synchronous local SSD checkpoint saving with immediate zero-footprint memory deallocation:
-    - Serializes model weights directly to NVMe SSD in ~1.5s
-    - Immediately releases all CPU state_dict memory to prevent Linux OOM kills
-    - Mirrored to Google Drive in the background
+    Enforces strict 3-step safety protocol: Save First -> Verify Next -> Delete Old Last:
+    1. Save New Checkpoint to local NVMe SSD
+    2. Verify Newly Saved Checkpoint (100% verification proof before touching backups)
+    3. Delete Old/Stale Checkpoint Artifacts (both locally and in Google Drive)
     """
     tag = "BEST MILESTONE" if is_best else ("COMPLETED" if is_completed else f"STEP {step}")
     print(f"[Checkpoint] Snapshotting [{tag}] checkpoint at Step {step}...", flush=True)
@@ -675,7 +855,22 @@ def save_checkpoint(
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    # Sync to Google Drive in background
+        # STEP 2: STRICT VERIFICATION GATE
+        # Verify the newly created checkpoint BEFORE deleting or touching any old files
+        is_valid = verify_checkpoint_integrity(
+            output_dir,
+            require_optimizer=(not is_best and not is_completed),
+            require_completed=is_completed,
+        )
+        if not is_valid:
+            print(f"[Safety Protection] Newly created checkpoint at {output_dir} failed verification! Preserving all old files.", flush=True)
+            return
+
+        # STEP 3: DELETE OLD / STALE ARTIFACTS
+        # Now that the new checkpoint is 100% verified, clean obsolete and stale artifacts
+        clean_stale_checkpoint_artifacts(output_dir, is_best=is_best)
+
+    # STEP 4: Mirror verified checkpoint to Google Drive in background
     sync_checkpoint_to_gdrive(output_dir, tag, wait=is_completed)
 
 
@@ -717,88 +912,6 @@ def promote_checkpoint(
         print(f"[GDrive Promotion Mirror] Promoted model synced to: {gdrive_promoted}", flush=True)
 
 
-def verify_checkpoint_integrity(checkpoint_dir: str) -> bool:
-    """
-    Verifies that a newly saved training checkpoint is complete, uncorrupted, and valid:
-    - Verifies model.safetensors exists and is non-empty (>1MB).
-    - Verifies config.json is valid JSON.
-    - Verifies optimizer_state.pt exists and is non-empty (>1MB).
-    - Verifies STAGE_METADATA.json is valid and marks status COMPLETED.
-    """
-    if not os.path.exists(checkpoint_dir):
-        return False
-
-    req_files = ["model.safetensors", "config.json", "optimizer_state.pt", "STAGE_METADATA.json"]
-    for rf in req_files:
-        p = os.path.join(checkpoint_dir, rf)
-        if not (os.path.exists(p) and os.path.getsize(p) > 0):
-            print(f"[Verification Fail] Checkpoint file missing or empty: {p}")
-            return False
-
-    # Check JSON validity and tensor deserialization
-    try:
-        with open(os.path.join(checkpoint_dir, "config.json"), "r", encoding="utf-8") as f:
-            json.load(f)
-        with open(os.path.join(checkpoint_dir, "STAGE_METADATA.json"), "r", encoding="utf-8") as f:
-            meta = json.load(f)
-        if meta.get("status") != "COMPLETED":
-            print(f"[Verification Fail] STAGE_METADATA status is not COMPLETED: {meta.get('status')}")
-            return False
-
-        # Deserialization test: ensure safetensors and optimizer state are not corrupted/truncated
-        if HAS_SAFETENSORS:
-            test_weights = load_file(os.path.join(checkpoint_dir, "model.safetensors"), device="cpu")
-            del test_weights
-        if os.path.exists(os.path.join(checkpoint_dir, "optimizer_state.pt")):
-            test_opt = torch.load(os.path.join(checkpoint_dir, "optimizer_state.pt"), map_location="cpu")
-            del test_opt
-        gc.collect()
-    except Exception as e:
-        print(f"[Verification Fail] Corruption or load error in {checkpoint_dir}: {e}")
-        return False
-
-    print(f"[Verification Passed] Checkpoint {checkpoint_dir} verified 100% integral and valid.")
-    return True
-
-
-def clean_previous_training_checkpoints(previous_stage_dir: str, current_checkpoint_dir: str):
-    """
-    Enforces safety policy: Save first, verify next, delete last.
-    Deletes heavy training checkpoint files (optimizer_state.pt, checkpoint_state.json)
-    from previous stage ONLY IF the current checkpoint is verified 100% integral and complete.
-    NEVER deletes promoted inference models.
-    """
-    if not os.path.exists(previous_stage_dir):
-        return
-
-    # Strict Safety Gate: Verify current checkpoint integrity first!
-    if not verify_checkpoint_integrity(current_checkpoint_dir):
-        print(f"[Safety Protection] Current stage {current_checkpoint_dir} verification did NOT pass.")
-        print(f"[Safety Protection] ABORTING cleanup of previous stage {previous_stage_dir} to prevent data loss!")
-        return
-
-    print(f"[Hygiene] Cleaning bulky training artifacts from previous stage: {previous_stage_dir}...")
-    removable_patterns = ["optimizer_state.pt", "checkpoint_state.json", "pytorch_model.bin"]
-    for root, _, files in os.walk(previous_stage_dir):
-        for f in files:
-            if f in removable_patterns:
-                p = os.path.join(root, f)
-                try:
-                    os.remove(p)
-                    print(f"[Hygiene] Removed previous training state: {p}")
-                except Exception as e:
-                    print(f"[Hygiene Notice] Could not remove {p}: {e}")
-
-    # If previous stage directory has bulky duplicate non-promoted weights, clean them
-    # while leaving best_checkpoint or promoted folder intact
-    best_sub = os.path.join(previous_stage_dir, "best_checkpoint")
-    if os.path.exists(best_sub):
-        opt_in_best = os.path.join(best_sub, "optimizer_state.pt")
-        if os.path.exists(opt_in_best):
-            try:
-                os.remove(opt_in_best)
-            except Exception:
-                pass
 
 
 def try_resume_from_checkpoint(

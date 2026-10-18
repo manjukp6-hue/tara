@@ -1033,8 +1033,14 @@ def promote_checkpoint(
         src = os.path.join(source_checkpoint_dir, art)
         dst = os.path.join(promoted_dir, art)
         if os.path.exists(src) and os.path.abspath(src) != os.path.abspath(dst):
-            shutil.copy2(src, dst)
+            try:
+                if os.path.exists(dst):
+                    os.remove(dst)
+                os.link(src, dst)
+            except Exception:
+                shutil.copy2(src, dst)
             copied += 1
+
 
     print(f"[Promotion] Successfully promoted clean inference model ({copied} files) -> {promoted_dir}", flush=True)
 

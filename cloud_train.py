@@ -437,30 +437,49 @@ def collate_fn(batch):
 # =============================================================================
 
 def load_candidate_weights(model: nn.Module, model_dir: str) -> bool:
-    """Loads existing candidate safetensors weights if present, ensuring continuous progression."""
+    """Loads existing candidate safetensors weights if present shard-by-shard to minimize CPU memory footprint."""
     safetensors_files = sorted(glob.glob(os.path.join(model_dir, "*.safetensors")))
     if not safetensors_files or not HAS_SAFETENSORS:
         return False
 
     print(f"[Weights] Ingesting {len(safetensors_files)} existing SafeTensors shard(s) from {model_dir}...")
-    state_dict = {}
-    for sf in safetensors_files:
-        shard_tensors = load_file(sf, device="cpu")
-        state_dict.update(shard_tensors)
-
     model_sd = model.state_dict()
     matched = 0
-    for k, v in state_dict.items():
-        if k in model_sd and model_sd[k].shape == v.shape:
-            model_sd[k].copy_(v.to(dtype=model_sd[k].dtype))
-            matched += 1
+    for sf in safetensors_files:
+        shard_tensors = load_file(sf, device="cpu")
+        for k, v in shard_tensors.items():
+            if k in model_sd and model_sd[k].shape == v.shape:
+                model_sd[k].copy_(v.to(dtype=model_sd[k].dtype))
+                matched += 1
+        del shard_tensors
+        gc.collect()
 
-    print(f"[Weights] Successfully restored {matched}/{len(model_sd)} parameter tensors.")
+    del model_sd
+    gc.collect()
+    print(f"[Weights] Successfully restored {matched} parameter tensors.")
     return matched > 0
 
 
 _gdrive_sync_thread: Optional[threading.Thread] = None
 _gdrive_sync_lock = threading.Lock()
+
+
+def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
+    """Chunked streaming copy to prevent filling Linux dirty page cache on Google Drive FUSE."""
+    dst_tmp = dst + ".tmp"
+    with open(src, "rb") as fsrc, open(dst_tmp, "wb") as fdst:
+        while True:
+            chunk = fsrc.read(chunk_size)
+            if not chunk:
+                break
+            fdst.write(chunk)
+            del chunk
+    if os.path.exists(dst):
+        try:
+            os.remove(dst)
+        except Exception:
+            pass
+    os.replace(dst_tmp, dst)
 
 
 def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: List[str]):
@@ -474,7 +493,7 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
             if os.path.exists(src):
                 if os.path.abspath(src) == os.path.abspath(dst):
                     continue
-                shutil.copy2(src, dst)
+                _stream_copy_file(src, dst)
                 synced += 1
         elapsed = time.time() - t_start
         print(f"[GDrive Mirror] Successfully backed up [{tag}] ({synced} files, {elapsed:.1f}s) -> {target_dir}", flush=True)
@@ -484,8 +503,8 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
 
 def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
     """
-    Asynchronously or synchronously mirrors local checkpoint files to Google Drive.
-    Non-blocking background thread prevents Google Drive FUSE latency from stalling GPU training.
+    Mirrors local checkpoint files to Google Drive.
+    Single-worker lock ensures never more than one active sync job at any time.
     """
     global _gdrive_sync_thread
     gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
@@ -522,7 +541,7 @@ def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
                 print(f"[GDrive Mirror] Waiting for previous sync to complete...", flush=True)
                 _gdrive_sync_thread.join()
             else:
-                # Previous sync is actively writing to GDrive; continue GPU training without delay
+                # Previous sync is actively writing to GDrive; skip redundant queueing to preserve I/O and RAM
                 return
 
         _gdrive_sync_thread = threading.Thread(
@@ -536,69 +555,7 @@ def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
             _gdrive_sync_thread.join()
 
 
-_checkpoint_write_thread: Optional[threading.Thread] = None
 _checkpoint_write_lock = threading.Lock()
-
-
-def _write_checkpoint_worker(
-    state_dict: dict,
-    continuation_state: dict,
-    metadata: dict,
-    config: dict,
-    tokenizer_path: str,
-    output_dir: str,
-    cpu_opt_state: Optional[dict],
-    scaler_state: Optional[dict],
-    tag: str,
-    loss: float,
-    is_completed: bool,
-):
-    try:
-        t0 = time.time()
-        os.makedirs(output_dir, exist_ok=True)
-        # 1. config.json
-        with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-
-        # 2. tokenizer.json
-        if tokenizer_path and os.path.exists(tokenizer_path):
-            tok_dst = os.path.join(output_dir, "tokenizer.json")
-            if os.path.abspath(tokenizer_path) != os.path.abspath(tok_dst):
-                shutil.copy2(tokenizer_path, tok_dst)
-
-        # 3. model.safetensors
-        if HAS_SAFETENSORS:
-            save_file(state_dict, os.path.join(output_dir, "model.safetensors"))
-        else:
-            torch.save(state_dict, os.path.join(output_dir, "pytorch_model.bin"))
-
-        # 4. Continuation state
-        with open(os.path.join(output_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
-            json.dump(continuation_state, f, indent=2)
-
-        # 5. Optimizer state if present
-        if cpu_opt_state is not None:
-            torch.save(
-                {
-                    "optimizer": cpu_opt_state,
-                    "scaler": scaler_state,
-                    "step": continuation_state["step"],
-                    "best_loss": continuation_state["best_loss"],
-                },
-                os.path.join(output_dir, "optimizer_state.pt"),
-            )
-
-        # 6. STAGE_METADATA.json
-        with open(os.path.join(output_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2)
-
-        elapsed = time.time() - t0
-        print(f"[Checkpoint] Committed [{tag}] checkpoint to disk ({elapsed:.1f}s) -> {output_dir} (Loss: {loss:.4f})", flush=True)
-
-        # Sync to Google Drive in background
-        sync_checkpoint_to_gdrive(output_dir, tag, wait=is_completed)
-    except Exception as e:
-        print(f"[Checkpoint Error] Non-fatal background checkpoint notice in {output_dir}: {e}", flush=True)
 
 
 def save_checkpoint(
@@ -617,77 +574,109 @@ def save_checkpoint(
     is_completed: bool = False,
 ):
     """
-    Non-blocking checkpoint saving:
-    Snapshots model weights to CPU in ~0.3s so GPU training continues immediately at full throughput.
-    Disk serialization and Google Drive mirroring execute in a dedicated background worker thread.
+    Synchronous local SSD checkpoint saving with immediate zero-footprint memory deallocation:
+    - Serializes model weights directly to NVMe SSD in ~1.5s
+    - Immediately releases all CPU state_dict memory to prevent Linux OOM kills
+    - Mirrored to Google Drive in the background
     """
-    global _checkpoint_write_thread
     tag = "BEST MILESTONE" if is_best else ("COMPLETED" if is_completed else f"STEP {step}")
     print(f"[Checkpoint] Snapshotting [{tag}] checkpoint at Step {step}...", flush=True)
 
-    # 1. Immediate snapshot on CPU (detached clone eliminates tied-weight view conflicts and frees GPU)
-    torch.cuda.synchronize()
-    state_dict = {k: v.detach().clone().cpu() for k, v in model.state_dict().items()}
-    torch.cuda.empty_cache()
-
-    continuation_state = {
-        "step": step,
-        "epoch": epoch,
-        "loss": loss,
-        "best_loss": best_loss,
-        "stage_id": stage_id,
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-        "is_completed": is_completed,
-    }
-
-    metadata = {
-        "stage_id": stage_id,
-        "status": "COMPLETED" if is_completed else "IN_PROGRESS",
-        "step": step,
-        "loss": loss,
-        "best_loss": best_loss,
-        "perplexity": math.exp(min(loss, 20.0)),
-        "is_best": is_best,
-        "completed_at_utc": datetime.now(timezone.utc).isoformat() if is_completed else None,
-    }
-
-    cpu_opt_state = None
-    scaler_state = None
-    if not is_best or is_completed:
-        opt_sd = optimizer.state_dict()
-        cpu_opt_state = {}
-        for k, v in opt_sd.items():
-            if k == "state":
-                cpu_opt_state[k] = {}
-                for pid, pdata in v.items():
-                    cpu_opt_state[k][pid] = {
-                        sk: sv.cpu() if isinstance(sv, torch.Tensor) else sv
-                        for sk, sv in pdata.items()
-                    }
-            else:
-                cpu_opt_state[k] = v
-        scaler_state = scaler.state_dict() if scaler else None
-
     with _checkpoint_write_lock:
-        if _checkpoint_write_thread and _checkpoint_write_thread.is_alive():
-            if is_completed:
-                _checkpoint_write_thread.join()
-            else:
-                _checkpoint_write_thread.join(timeout=30.0)
+        # Pre-save cleanup
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
 
-        _checkpoint_write_thread = threading.Thread(
-            target=_write_checkpoint_worker,
-            args=(
-                state_dict, continuation_state, metadata, config,
-                tokenizer_path, output_dir, cpu_opt_state, scaler_state,
-                tag, loss, is_completed
-            ),
-            daemon=True
-        )
-        _checkpoint_write_thread.start()
+        t0 = time.time()
+        os.makedirs(output_dir, exist_ok=True)
 
-        if is_completed:
-            _checkpoint_write_thread.join()
+        # 1. config.json
+        with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+
+        # 2. tokenizer.json
+        if tokenizer_path and os.path.exists(tokenizer_path):
+            tok_dst = os.path.join(output_dir, "tokenizer.json")
+            if os.path.abspath(tokenizer_path) != os.path.abspath(tok_dst):
+                shutil.copy2(tokenizer_path, tok_dst)
+
+        # 3. model.safetensors
+        # Transfer state_dict to CPU, save directly, and immediately delete and collect
+        state_dict = {k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}
+        if HAS_SAFETENSORS:
+            save_file(state_dict, os.path.join(output_dir, "model.safetensors"))
+        else:
+            torch.save(state_dict, os.path.join(output_dir, "pytorch_model.bin"))
+        del state_dict
+        gc.collect()
+
+        # 4. Continuation state
+        continuation_state = {
+            "step": step,
+            "epoch": epoch,
+            "loss": loss,
+            "best_loss": best_loss,
+            "stage_id": stage_id,
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "is_completed": is_completed,
+        }
+        with open(os.path.join(output_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
+            json.dump(continuation_state, f, indent=2)
+
+        # 5. Optimizer state if present (only for step checkpoints and completions, not needed for pure milestone)
+        if not is_best or is_completed:
+            opt_sd = optimizer.state_dict()
+            cpu_opt_state = {}
+            for k, v in opt_sd.items():
+                if k == "state":
+                    cpu_opt_state[k] = {}
+                    for pid, pdata in v.items():
+                        cpu_opt_state[k][pid] = {
+                            sk: sv.cpu() if isinstance(sv, torch.Tensor) else sv
+                            for sk, sv in pdata.items()
+                        }
+                else:
+                    cpu_opt_state[k] = v
+            del opt_sd
+            scaler_state = scaler.state_dict() if scaler else None
+
+            torch.save(
+                {
+                    "optimizer": cpu_opt_state,
+                    "scaler": scaler_state,
+                    "step": step,
+                    "best_loss": best_loss,
+                },
+                os.path.join(output_dir, "optimizer_state.pt"),
+            )
+            del cpu_opt_state, scaler_state
+            gc.collect()
+
+        # 6. STAGE_METADATA.json
+        metadata = {
+            "stage_id": stage_id,
+            "status": "COMPLETED" if is_completed else "IN_PROGRESS",
+            "step": step,
+            "loss": loss,
+            "best_loss": best_loss,
+            "perplexity": math.exp(min(loss, 20.0)),
+            "is_best": is_best,
+            "completed_at_utc": datetime.now(timezone.utc).isoformat() if is_completed else None,
+        }
+        with open(os.path.join(output_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+
+        elapsed = time.time() - t0
+        print(f"[Checkpoint] Committed [{tag}] checkpoint to disk ({elapsed:.1f}s) -> {output_dir} (Loss: {loss:.4f})", flush=True)
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    # Sync to Google Drive in background
+    sync_checkpoint_to_gdrive(output_dir, tag, wait=is_completed)
 
 
 def promote_checkpoint(
@@ -758,8 +747,12 @@ def verify_checkpoint_integrity(checkpoint_dir: str) -> bool:
 
         # Deserialization test: ensure safetensors and optimizer state are not corrupted/truncated
         if HAS_SAFETENSORS:
-            load_file(os.path.join(checkpoint_dir, "model.safetensors"), device="cpu")
-        torch.load(os.path.join(checkpoint_dir, "optimizer_state.pt"), map_location="cpu")
+            test_weights = load_file(os.path.join(checkpoint_dir, "model.safetensors"), device="cpu")
+            del test_weights
+        if os.path.exists(os.path.join(checkpoint_dir, "optimizer_state.pt")):
+            test_opt = torch.load(os.path.join(checkpoint_dir, "optimizer_state.pt"), map_location="cpu")
+            del test_opt
+        gc.collect()
     except Exception as e:
         print(f"[Verification Fail] Corruption or load error in {checkpoint_dir}: {e}")
         return False
@@ -872,6 +865,8 @@ def try_resume_from_checkpoint(
         print(f"[Resume] Ingesting model weights directly from {model_file}...", flush=True)
         weights = load_file(model_file, device="cpu")
         model.load_state_dict(weights, strict=False)
+        del weights
+        gc.collect()
 
     # Sync tiny metadata and continuation states to checkpoint_dir (instant <0.01s)
     if os.path.abspath(best_cand_dir) != os.path.abspath(checkpoint_dir):
@@ -1673,11 +1668,11 @@ def main():
 
                 # Dynamic Best-Checkpointing Gate:
                 # Requires a minimum step stride (>= 25 steps) between milestone saves to allow high-throughput training,
-                # UNLESS there is a major loss breakthrough (drop >= 0.50) with at least 5 steps since the last save.
+                # UNLESS there is a major loss breakthrough (drop >= 0.50) with at least 20 steps since the last save.
                 step_stride = step - last_saved_checkpoint_step
-                major_breakthrough = (last_saved_checkpoint_loss - cur_step_loss >= 0.50) and (step_stride >= 5)
+                major_breakthrough = (last_saved_checkpoint_loss - cur_step_loss >= 0.50) and (step_stride >= 20)
                 stride_milestone = (step_stride >= 25) and is_new_best
-                first_save = (last_saved_checkpoint_loss == float("inf")) and (step >= 5)
+                first_save = (last_saved_checkpoint_loss == float("inf")) and (step >= 10)
 
                 should_save_best_milestone = is_new_best and (stride_milestone or major_breakthrough or first_save)
 

@@ -27,6 +27,7 @@ fi
 
 # 1. Enforce Cloud Training Environment Variables for PyTorch & Rust Orchestrator
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+export MALLOC_TRIM_THRESHOLD_=65536
 export TARA_MAX_MEMORY_MB="${TARA_MAX_MEMORY_MB:-}"
 export TARA_MAX_SEQ_LEN="${TARA_MAX_SEQ_LEN:-128}"
 export TARA_MAX_VAL_SAMPLES="${TARA_MAX_VAL_SAMPLES:-5}"

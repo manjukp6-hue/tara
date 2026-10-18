@@ -553,6 +553,8 @@ def save_checkpoint(
 ):
     """Exports model weights, optimizer continuation state, and stage metadata."""
     t_save_start = time.time()
+    tag = "BEST MILESTONE" if is_best else ("COMPLETED" if is_completed else f"STEP {step}")
+    print(f"[Checkpoint] Writing [{tag}] checkpoint to {output_dir}...", flush=True)
     os.makedirs(output_dir, exist_ok=True)
 
     # 1. config.json
@@ -585,16 +587,34 @@ def save_checkpoint(
     with open(os.path.join(output_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
         json.dump(continuation_state, f, indent=2)
 
-    # 5. Optimizer state for seamless continuation
-    torch.save(
-        {
-            "optimizer": optimizer.state_dict(),
-            "scaler": scaler.state_dict() if scaler else None,
-            "step": step,
-            "best_loss": best_loss,
-        },
-        os.path.join(output_dir, "optimizer_state.pt"),
-    )
+    # 5. Optimizer state for mid-way continuation:
+    # Lightweight best milestone models (best_checkpoint) exclude bulky optimizer states for speed.
+    # Continuation checkpoints (in-progress resilience or stage completion) save CPU-offloaded optimizer states.
+    if not is_best or is_completed:
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        opt_sd = optimizer.state_dict()
+        cpu_opt_state = {}
+        for k, v in opt_sd.items():
+            if k == "state":
+                cpu_opt_state[k] = {}
+                for pid, pdata in v.items():
+                    cpu_opt_state[k][pid] = {
+                        sk: sv.cpu() if isinstance(sv, torch.Tensor) else sv
+                        for sk, sv in pdata.items()
+                    }
+            else:
+                cpu_opt_state[k] = v
+
+        torch.save(
+            {
+                "optimizer": cpu_opt_state,
+                "scaler": scaler.state_dict() if scaler else None,
+                "step": step,
+                "best_loss": best_loss,
+            },
+            os.path.join(output_dir, "optimizer_state.pt"),
+        )
 
     # 6. STAGE_METADATA.json (Idempotence & DAG verification)
     metadata = {
@@ -611,7 +631,6 @@ def save_checkpoint(
         json.dump(metadata, f, indent=2)
 
     save_duration = time.time() - t_save_start
-    tag = "BEST MILESTONE" if is_best else ("COMPLETED" if is_completed else f"STEP {step}")
     print(f"[Checkpoint] Saved [{tag}] checkpoint ({save_duration:.1f}s) -> {output_dir} (Loss: {loss:.4f})", flush=True)
 
     # Mirror to Google Drive asynchronously (or synchronously on stage completion)
@@ -778,7 +797,7 @@ def try_resume_from_checkpoint(
                             pass
                 break
 
-    if not (os.path.exists(state_file) and os.path.exists(opt_file) and os.path.exists(model_file)):
+    if not (os.path.exists(state_file) and os.path.exists(model_file)):
         return 0, 0, float("inf"), False
 
     try:
@@ -794,11 +813,14 @@ def try_resume_from_checkpoint(
             weights = load_file(model_file, device="cpu")
             model.load_state_dict(weights, strict=False)
 
-        # Load optimizer
-        opt_data = torch.load(opt_file, map_location="cpu")
-        optimizer.load_state_dict(opt_data["optimizer"])
-        if scaler and opt_data.get("scaler"):
-            scaler.load_state_dict(opt_data["scaler"])
+        # Load optimizer state if present
+        if os.path.exists(opt_file):
+            opt_data = torch.load(opt_file, map_location="cpu")
+            optimizer.load_state_dict(opt_data["optimizer"])
+            if scaler and opt_data.get("scaler"):
+                scaler.load_state_dict(opt_data["scaler"])
+        else:
+            print("[Resume Notice] optimizer_state.pt not present; starting with clean optimizer state for restored weights.")
 
         print("=" * 78)
         print(f"  [RESUME] Successfully restored in-progress state from {checkpoint_dir}!")
@@ -1583,21 +1605,14 @@ def main():
                     is_new_best = True
 
                 # Dynamic Best-Checkpointing Gate:
-                # Triggers on authentic milestone improvements (significant loss drop >= 0.20 or >= 2% relative),
-                # OR throttled by step cooldown (>= 25 steps since last save with improved loss),
-                # OR throttled by elapsed time (>= 120s since last save with improved loss).
-                # This guarantees authentic milestones are archived without thrashing disk I/O on consecutive steps.
-                significant_loss_drop = (
-                    (last_saved_checkpoint_loss - cur_step_loss) >= 0.20
-                    or (last_saved_checkpoint_loss < float("inf") and (last_saved_checkpoint_loss - cur_step_loss) / max(last_saved_checkpoint_loss, 1e-4) >= 0.02)
-                )
-                cooldown_elapsed = (
-                    (step - last_saved_checkpoint_step >= 25)
-                    or (time.time() - last_saved_checkpoint_time >= 120.0)
-                )
-                should_save_best_milestone = is_new_best and (
-                    significant_loss_drop or cooldown_elapsed or last_saved_checkpoint_loss == float("inf")
-                ) and step >= 5
+                # Requires a minimum step stride (>= 25 steps) between milestone saves to allow high-throughput training,
+                # UNLESS there is a major loss breakthrough (drop >= 0.50) with at least 5 steps since the last save.
+                step_stride = step - last_saved_checkpoint_step
+                major_breakthrough = (last_saved_checkpoint_loss - cur_step_loss >= 0.50) and (step_stride >= 5)
+                stride_milestone = (step_stride >= 25) and is_new_best
+                first_save = (last_saved_checkpoint_loss == float("inf")) and (step >= 5)
+
+                should_save_best_milestone = is_new_best and (stride_milestone or major_breakthrough or first_save)
 
                 if should_save_best_milestone:
                     last_saved_checkpoint_loss = cur_step_loss

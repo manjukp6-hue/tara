@@ -1149,19 +1149,37 @@ def try_resume_from_checkpoint(
         cand_state = os.path.join(cand, "checkpoint_state.json")
         cand_model = os.path.join(cand, "model.safetensors")
         if os.path.exists(cand_state) and os.path.exists(cand_model):
+            # Verify file integrity and header size before accepting candidate
+            if os.path.getsize(cand_model) < 10 * 1024 * 1024:
+                print(f"  -> Notice: Skipping candidate at {cand} (model file size too small: {os.path.getsize(cand_model)} bytes)")
+                continue
+            try:
+                from safetensors import safe_open
+                with safe_open(cand_model, framework="pt", device="cpu") as test_f:
+                    if not test_f.keys():
+                        raise ValueError("No tensor keys in safetensors file")
+            except Exception as test_err:
+                print(f"  -> Notice: Candidate at {cand} has corrupt safetensors file ({test_err}). Skipping and purging.")
+                if "drive" not in cand.lower():
+                    try:
+                        os.remove(cand_model)
+                    except Exception:
+                        pass
+                continue
+
             try:
                 with open(cand_state, "r", encoding="utf-8") as f:
                     s_data = json.load(f)
                 c_step = int(s_data.get("step", 0))
                 c_loss = float(s_data.get("best_loss", s_data.get("loss", float("inf"))))
-                print(f"  -> Found candidate at {cand} (Step: {c_step}, Best Loss: {c_loss:.4f})")
+                print(f"  -> Found candidate at {cand} (Step: {c_step}, Best Loss: {c_loss:.4f}) [VERIFIED HEALTHY]")
                 if c_step > best_cand_step:
                     best_cand_step = c_step
                     best_cand_epoch = int(s_data.get("epoch", 0))
                     best_cand_loss = c_loss
                     best_cand_dir = cand
             except Exception as e:
-                print(f"  -> Notice: Could not parse candidate {cand}: {e}")
+                print(f"  -> Notice: Could not parse candidate state {cand}: {e}")
         elif os.path.exists(cand):
             print(f"  -> Notice: Candidate exists but missing state or model file: {cand}")
 
@@ -1176,17 +1194,46 @@ def try_resume_from_checkpoint(
     print(f"  Historical Best Loss: {best_cand_loss:.4f}")
     print("=" * 78)
 
-    # Load weights directly from best_cand_dir to eliminate 4 GB file copying delay
-    model_file = os.path.join(best_cand_dir, "model.safetensors")
-    if not os.path.exists(model_file):
-        model_file = os.path.join(checkpoint_dir, "model.safetensors")
+    # Ingest model weights with multi-candidate fallback protection
+    loaded_successfully = False
+    candidates_to_try = [best_cand_dir]
+    if gdrive_root:
+        gdrive_fallback = os.path.join(gdrive_root, os.path.basename(checkpoint_dir))
+        if gdrive_fallback not in candidates_to_try:
+            candidates_to_try.append(gdrive_fallback)
+        best_fb = os.path.join(gdrive_fallback, "best_checkpoint")
+        if best_fb not in candidates_to_try:
+            candidates_to_try.append(best_fb)
 
-    if HAS_SAFETENSORS and os.path.exists(model_file):
-        print(f"[Resume] Ingesting model weights directly from {model_file}...", flush=True)
-        weights = load_file(model_file, device="cpu")
-        model.load_state_dict(weights, strict=False)
-        del weights
-        gc.collect()
+    for cand_try in candidates_to_try:
+        if not cand_try or not os.path.exists(cand_try):
+            continue
+        model_file = os.path.join(cand_try, "model.safetensors")
+        if HAS_SAFETENSORS and os.path.exists(model_file) and os.path.getsize(model_file) > 10 * 1024 * 1024:
+            try:
+                print(f"[Resume] Ingesting model weights directly from {model_file}...", flush=True)
+                weights = load_file(model_file, device="cpu")
+                model.load_state_dict(weights, strict=False)
+                del weights
+                gc.collect()
+                loaded_successfully = True
+                best_cand_dir = cand_try
+                # If we loaded healthy weights from Google Drive, restore to local checkpoint_dir
+                local_model = os.path.join(checkpoint_dir, "model.safetensors")
+                if os.path.abspath(model_file) != os.path.abspath(local_model):
+                    try:
+                        print(f"[Resume] Restoring healthy model weights to local disk: {local_model}...", flush=True)
+                        shutil.copy2(model_file, local_model)
+                    except Exception:
+                        pass
+                break
+            except Exception as load_err:
+                print(f"[Resume Warning] Could not load weights from {model_file}: {load_err}; trying next candidate...")
+                if "drive" not in cand_try.lower():
+                    try:
+                        os.remove(model_file)
+                    except Exception:
+                        pass
 
     # Sync tiny metadata and continuation states to checkpoint_dir (instant <0.01s)
     if os.path.abspath(best_cand_dir) != os.path.abspath(checkpoint_dir):

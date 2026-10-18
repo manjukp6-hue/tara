@@ -309,9 +309,18 @@ if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
     for STAGE_SUBDIR in stage0_pretraining stage1_curriculum; do
         GDRIVE_STAGE="$GDRIVE_CHECKPOINT_DIR/$STAGE_SUBDIR"
         LOCAL_STAGE="$ACTIVE_CP_DIR/$STAGE_SUBDIR"
+        LOCAL_MODEL="$LOCAL_STAGE/model.safetensors"
+        LOCAL_VALID=0
+        if [ -f "$LOCAL_STAGE/checkpoint_state.json" ] && [ -f "$LOCAL_MODEL" ]; then
+            LOCAL_SIZE=$(wc -c < "$LOCAL_MODEL" 2>/dev/null || echo 0)
+            if [ "$LOCAL_SIZE" -gt 100000000 ]; then
+                LOCAL_VALID=1
+            fi
+        fi
+
         if [ -d "$GDRIVE_STAGE" ]; then
-            if [ -f "$LOCAL_STAGE/checkpoint_state.json" ] || [ -f "$LOCAL_STAGE/best_checkpoint/checkpoint_state.json" ]; then
-                echo "[RESUME SYNC] Local checkpoint already present in $LOCAL_STAGE; skipping Google Drive copy."
+            if [ "$LOCAL_VALID" -eq 1 ]; then
+                echo "[RESUME SYNC] Local verified checkpoint already present in $LOCAL_STAGE; skipping Google Drive copy."
             else
                 echo "[RESUME SYNC] Restoring Google Drive checkpoint mirror: $GDRIVE_STAGE -> $LOCAL_STAGE..."
                 mkdir -p "$LOCAL_STAGE"
@@ -338,7 +347,7 @@ if os.path.exists(src):
                 continue
             sf = os.path.join(root, f)
             df = os.path.join(trot, f)
-            if not os.path.exists(df):
+            if not os.path.exists(df) or os.path.getsize(df) < 1000000:
                 print(f'  -> Copying canonical {f}...', flush=True)
                 shutil.copy2(sf, df)
 " 2>/dev/null || true

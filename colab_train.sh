@@ -22,8 +22,8 @@ if command -v df >/dev/null 2>&1; then
     df -h / | awk 'NR==2 {print "[DISK] Available disk space: " $4 " free / " $2 " total (" $5 " used)"}'
 fi
 
-# 1. Enforce Cloud Training Environment Variables for Rust Orchestrator
-# Let AutoMemory determine the safe host memory limit based on cgroup and available RAM
+# 1. Enforce Cloud Training Environment Variables for PyTorch & Rust Orchestrator
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export TARA_MAX_MEMORY_MB="${TARA_MAX_MEMORY_MB:-}"
 export TARA_MAX_SEQ_LEN="${TARA_MAX_SEQ_LEN:-128}"
 export TARA_MAX_VAL_SAMPLES="${TARA_MAX_VAL_SAMPLES:-5}"
@@ -33,15 +33,30 @@ export HF_DATASET_REPO="${HF_DATASET_REPO:-${HF_MODEL_REPO:-${HF_REPO:-manjukp6/
 export HF_MODEL_REPO="${HF_MODEL_REPO:-${HF_DATASET_REPO}}"
 
 TRAINER_MODE="${TRAINER_MODE:-python}"
-TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-4}"
-STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-1000}"
+CANARY_MODE="${CANARY_MODE:-0}"
+CANARY_EXTRA_ARGS=""
+if [ "$CANARY_MODE" = "1" ] || [ "${1:-}" = "--canary" ]; then
+    echo "=============================================================================="
+    echo "  [CANARY VALIDATION RUNNER ACTIVE (15 Steps, Tesla T4 Safe Settings)]"
+    echo "=============================================================================="
+    CANARY_EXTRA_ARGS="--canary"
+    TRAIN_BATCH_SIZE=1
+    GRAD_ACCUM=4
+    STAGE_MAX_STEPS=15
+else
+    TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-2}"
+    GRAD_ACCUM="${GRAD_ACCUM:-8}"
+    STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-1000}"
+fi
 JOINT_STEPS="${JOINT_STEPS:-200}"
 MAIN_DS_DIR="storage/datasets/main_dataset_v2"
 PROMOTED_BASE="storage/models/promoted"
 mkdir -p "$PROMOTED_BASE"
 
+
 if command -v pip >/dev/null 2>&1; then
-    pip install -q tokenizers safetensors huggingface_hub 2>/dev/null || true
+    echo "[SETUP] Installing Python dependencies (tokenizers, safetensors, huggingface_hub, bitsandbytes)..."
+    pip install -q tokenizers safetensors huggingface_hub bitsandbytes 2>/dev/null || true
 fi
 
 # 2. Native Rust Orchestrator Mode (When TRAINER_MODE=rust)
@@ -295,7 +310,18 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --promoted-dir "$PROMOTED_BASE/stage0_pretraining" \
         --max-steps "$STAGE_MAX_STEPS" \
         --batch-size "$TRAIN_BATCH_SIZE" \
-        --hf-repo "$HF_MODEL_REPO"
+        --grad-accum "$GRAD_ACCUM" \
+        --hf-repo "$HF_MODEL_REPO" \
+        $CANARY_EXTRA_ARGS
+
+    # In canary validation mode, stop after stage 0 verification to report telemetry
+    if [ -n "$CANARY_EXTRA_ARGS" ]; then
+        echo "=============================================================================="
+        echo "  [CANARY VALIDATION RUN FINISHED & TELEMETRY RECORDED]"
+        echo "=============================================================================="
+        exit 0
+    fi
+
 
     STAGE0_OUT="$ACTIVE_CP_DIR/stage0_pretraining"
     if [ -d "$ACTIVE_CP_DIR/stage0_pretraining/best_checkpoint" ]; then
@@ -323,6 +349,7 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --previous-stage-dir "$ACTIVE_CP_DIR/stage0_pretraining" \
         --max-steps "$STAGE_MAX_STEPS" \
         --batch-size "$TRAIN_BATCH_SIZE" \
+        --grad-accum "$GRAD_ACCUM" \
         --hf-repo "$HF_MODEL_REPO"
 
     # Extensible Loop for Continual Expansion (Stages 2..N)
@@ -350,6 +377,7 @@ if [ "$TRAINER_MODE" = "python" ]; then
             --previous-stage-dir "$ACTIVE_CP_DIR/stage${PREV_STAGE_IDX}" \
             --max-steps "$STAGE_MAX_STEPS" \
             --batch-size "$TRAIN_BATCH_SIZE" \
+            --grad-accum "$GRAD_ACCUM" \
             --hf-repo "$HF_MODEL_REPO"
 
         STAGE_IDX=$((STAGE_IDX + 1))

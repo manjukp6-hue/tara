@@ -1120,24 +1120,24 @@ def check_stage_already_completed(output_dir: str) -> bool:
 
 # ANSI Color Codes for Terminal & Colab
 CLR_RED = "\033[91m"
-CLR_YELLOW = "\033[93m"
+CLR_PURPLE = "\033[95;1m"  # High-contrast vibrant bold purple for white/dark themes
 CLR_GREEN = "\033[92m"
 CLR_CYAN = "\033[96m"
 CLR_BOLD = "\033[1m"
 CLR_RESET = "\033[0m"
 
 
-def get_metric_status_and_color(val: float, green_range: Tuple[float, float], yellow_range: Tuple[float, float]) -> Tuple[str, str, str]:
+def get_metric_status_and_color(val: float, green_range: Tuple[float, float], purple_range: Tuple[float, float]) -> Tuple[str, str, str]:
     """
-    Evaluates value against Frontier/SOTA (Green), Average (Yellow), or Untrained (Red):
+    Evaluates value against Frontier/SOTA (Green), Average (Purple), or Untrained (Red):
     - RED   : Not match / Early / Untrained
-    - YELLOW: Matched Average
+    - PURPLE: Matched Average (High contrast on white/dark themes)
     - GREEN : Best against Frontier Model (SOTA)
     """
     if val <= green_range[1]:
         return CLR_GREEN, "BEST (Frontier/SOTA)", "[GREEN]"
-    elif val <= yellow_range[1]:
-        return CLR_YELLOW, "MATCHED (Average)", "[YELLOW]"
+    elif val <= purple_range[1]:
+        return CLR_PURPLE, "MATCHED (Average)", "[PURPLE]"
     else:
         return CLR_RED, "NOT MATCH (Untrained)", "[RED]"
 

@@ -14,10 +14,13 @@ echo "==========================================================================
 # 0. Proactive Disk Hygiene: Reclaim disk space from stale scratch files, caches, and unused debug builds
 echo "[DISK CLEANUP] Reclaiming disk space and stopping any stale processes..."
 killall -9 tara_training_stages tara_gpu_step_test manual_trainer 2>/dev/null || true
-rm -rf /tmp/tara_moments_* /tmp/tara_* /tmp/tmp* 2>/dev/null || true
-rm -rf target/debug 2>/dev/null || true
+rm -rf /tmp/tara_moments_* /tmp/tara_* /tmp/tmp* /tmp/* 2>/dev/null || true
+rm -rf target/debug target/release/deps target/release/build target/release/incremental 2>/dev/null || true
 rm -rf storage/checkpoints/gpu_step_test_parity 2>/dev/null || true
-rm -rf /root/.cache/huggingface /root/.cache/pip /root/.cache/torch 2>/dev/null || true
+rm -rf /root/.cache/huggingface /root/.cache/pip /root/.cache/torch /root/.cargo/registry/cache 2>/dev/null || true
+if command -v apt-get >/dev/null 2>&1; then
+    apt-get clean 2>/dev/null || true
+fi
 if command -v df >/dev/null 2>&1; then
     df -h / | awk 'NR==2 {print "[DISK] Available disk space: " $4 " free / " $2 " total (" $5 " used)"}'
 fi
@@ -105,6 +108,7 @@ snapshot_download(
 )
 " "$repo_id" "$repo_type" "$prefix" "$local_dir"; then
         echo "[HF DOWNLOAD] Python download verified successfully into '$local_dir'."
+        rm -rf /root/.cache/huggingface/hub 2>/dev/null || true
         return 0
     fi
 
@@ -156,23 +160,25 @@ if [ ! -f "$MAIN_DS_DIR/tara_shard_001.jsonl" ]; then
     fi
 fi
 
-# 3b. Ingest Main Dataset V1 for Stage 4 (Scale Expansion)
+# 3b. Ingest Main Dataset V1 for Stage 4 (Scale Expansion - on-demand only)
 SCALE_DS_DIR="storage/datasets/main_dataset_v1"
-mkdir -p "$SCALE_DS_DIR"
-if [ ! -f "$SCALE_DS_DIR/tara_canonical_shard_000.jsonl" ]; then
-    echo "=== [DATASET INGESTION: STREAMING MAIN DATASET V1 (STAGE 4) SHARDS] ==="
-    HF_DATASET_SOURCE="${HF_DATASET_REPO:-${HF_REPO:-manjukp6/tara}}"
-    if [ -n "$HF_DATASET_SOURCE" ]; then
-        if download_hf "$HF_DATASET_SOURCE" "dataset" "v1/*" "$SCALE_DS_DIR"; then
-            if [ -d "$SCALE_DS_DIR/v1" ]; then
-                shopt -s nullglob
-                mv "$SCALE_DS_DIR/v1"/* "$SCALE_DS_DIR/"
-                shopt -u nullglob
-                rmdir "$SCALE_DS_DIR/v1"
+if [ "${DOWNLOAD_V1_NOW:-0}" = "1" ]; then
+    mkdir -p "$SCALE_DS_DIR"
+    if [ ! -f "$SCALE_DS_DIR/tara_canonical_shard_000.jsonl" ]; then
+        echo "=== [DATASET INGESTION: STREAMING MAIN DATASET V1 (STAGE 4) SHARDS] ==="
+        HF_DATASET_SOURCE="${HF_DATASET_REPO:-${HF_REPO:-manjukp6/tara}}"
+        if [ -n "$HF_DATASET_SOURCE" ]; then
+            if download_hf "$HF_DATASET_SOURCE" "dataset" "v1/*" "$SCALE_DS_DIR"; then
+                if [ -d "$SCALE_DS_DIR/v1" ]; then
+                    shopt -s nullglob
+                    mv "$SCALE_DS_DIR/v1"/* "$SCALE_DS_DIR/"
+                    shopt -u nullglob
+                    rmdir "$SCALE_DS_DIR/v1"
+                fi
+                echo "Main Dataset V1 (Stage 4) Ingestion Verified!"
+            else
+                echo "[DATASET NOTICE] Remote v1 dataset download failed or not found. Checking local datasets."
             fi
-            echo "Main Dataset V1 (Stage 4) Ingestion Verified!"
-        else
-            echo "[DATASET NOTICE] Remote v1 dataset download failed or not found. Checking local datasets."
         fi
     fi
 fi
@@ -265,6 +271,8 @@ fi
 if [ ! -f "./target/release/tara_pretraining_gate" ]; then
     echo "[BUILD] Compiling TARA Pre-Training Gate..."
     cargo build --release --bin tara_pretraining_gate
+    # Reclaim intermediate Cargo build artifacts to preserve 10-15 GB disk space
+    rm -rf target/release/deps target/release/build target/release/incremental target/debug ~/.cargo/registry/cache 2>/dev/null || true
 fi
 
 # Audits curriculum if present, otherwise audits ingested main_dataset_v2

@@ -597,6 +597,25 @@
     - **Mandatory Post-Stage Final Alignment Pass**:
       * Following any large-scale continued pretraining stage, an immediate, lightweight alignment pass using `ability_acquisition.jsonl` and `experiential_lessons.jsonl` must be executed to refresh assistant persona, tool syntax, and dialogue sharpness.
 
+28. **MANDATORY POST-FOUNDATION ANCIENT UNDECIPHERED SCRIPTS & ARCHAEOLOGICAL DECIPHERMENT PIPELINE (INDUS VALLEY SCRIPT, LINEAR A, PROTO-ELAMITE & HISTORICAL EPIGRAPHY VIA ZERO-FORGETTING NATIVE LORA)**:
+    - **Strict Post-Foundational Scheduling (Only After Stage 0 Completion)**:
+      * Ancient script decipherment and archaeological epigraphy training must NEVER run during initial foundational pretraining (Stage 0).
+      * It MUST be scheduled and executed strictly AFTER Stage 0 Foundational Pretraining completes, passes 100% verification proofs, and is promoted to Hugging Face.
+    - **Frozen Base Weights ($W_0$) & Zero-Forgetting Native LoRA Isolation**:
+      * The foundational base neural model weights ($W_0$) must remain strictly frozen (read-only).
+      * Archaeological decipherment capabilities, sign transition models, and phonetic hypothesis alignment must be trained exclusively into lightweight Low-Rank Adaptation (LoRA: $\Delta W = B \times A$) adapter heads or specialized native Rust epigraphy tools in `tara_engine`, ensuring zero catastrophic forgetting of core language, math, and coding capabilities.
+    - **Authoritative Archaeological Corpus & Signary Concordance Standards**:
+      * Sign ingestion must follow authentic, open academic epigraphical standards:
+        1. **Indus Valley Script (IVC)**: Mahadevan Indus Concordance (signs `IVC_001` through `IVC_417`) and Parpola CISI corpus across authentic seal inscriptions.
+        2. **Linear A**: GORILA corpus (Godart & Olivier) standard signs (`LA_01` through `LA_180`).
+        3. **Proto-Elamite & Classical Epigraphy**: Authoritative open-access academic signaries.
+      * All ingested sign corpora must record authentic provenance, archaeological catalogue IDs, and dynamically computed runtime SHA-256 integrity digests in the provenance ledger.
+    - **Mathematical Decipherment & Unsupervised Alignment Engine**:
+      * The native decipherment subsystem in `tara_engine` must implement:
+        1. Positional entropy and conditional transition probability calculations (sign prefix/suffix distributions, terminal marker identification).
+        2. Unsupervised phylogenetic vector space alignment comparing sign co-occurrence matrices against known ancient language roots (Proto-Dravidian, Archaic Vedic Sanskrit, Sumerian, Hurrian, Minoan).
+        3. Multi-modal epigraphical OCR integration for stone seal and tablet glyph extraction.
+
 ---
 
 ## RULE — EXISTING CODE FIRST

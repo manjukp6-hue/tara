@@ -466,21 +466,43 @@ _gdrive_sync_lock = threading.Lock()
 
 
 def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
-    """Chunked streaming copy to prevent filling Linux dirty page cache on Google Drive FUSE."""
-    dst_tmp = dst + ".tmp"
-    with open(src, "rb") as fsrc, open(dst_tmp, "wb") as fdst:
-        while True:
-            chunk = fsrc.read(chunk_size)
-            if not chunk:
-                break
-            fdst.write(chunk)
-            del chunk
-    if os.path.exists(dst):
+    """Robust streaming copy with fallback for Google Drive FUSE filesystem."""
+    try:
+        dst_tmp = dst + ".tmp"
+        with open(src, "rb") as fsrc, open(dst_tmp, "wb") as fdst:
+            while True:
+                chunk = fsrc.read(chunk_size)
+                if not chunk:
+                    break
+                fdst.write(chunk)
+                del chunk
+        if os.path.exists(dst):
+            try:
+                os.remove(dst)
+            except Exception:
+                pass
         try:
-            os.remove(dst)
+            os.replace(dst_tmp, dst)
+        except OSError:
+            # Google Drive FUSE virtual filesystem fallback
+            if os.path.exists(dst_tmp):
+                try:
+                    shutil.move(dst_tmp, dst)
+                except Exception:
+                    # Final fallback: direct byte copy
+                    with open(dst_tmp, "rb") as ft, open(dst, "wb") as fd:
+                        shutil.copyfileobj(ft, fd, length=chunk_size)
+                    try:
+                        os.remove(dst_tmp)
+                    except Exception:
+                        pass
+    except Exception:
+        # Direct stream copy fallback if temp creation fails on FUSE
+        try:
+            with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
+                shutil.copyfileobj(fsrc, fdst, length=chunk_size)
         except Exception:
             pass
-    os.replace(dst_tmp, dst)
 
 
 _pending_gdrive_sync: Optional[Tuple[str, str, str, List[str]]] = None
@@ -706,6 +728,38 @@ def clean_stale_checkpoint_artifacts(checkpoint_dir: str, is_best: bool = False)
                             pass
         except Exception:
             pass
+
+    # 3. Proactively clean Google DriveFS local content_cache to eliminate local disk accumulation
+    drivefs_root = "/root/.config/Google/DriveFS"
+    if os.path.exists(drivefs_root):
+        try:
+            import glob
+            for cp in glob.glob(f"{drivefs_root}/*/content_cache/*"):
+                try:
+                    if os.path.isfile(cp) or os.path.islink(cp):
+                        os.remove(cp)
+                    elif os.path.isdir(cp):
+                        shutil.rmtree(cp, ignore_errors=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    # 4. Clean system temp & transient pip/huggingface scratch files
+    for tmp_target in ["/tmp", "/var/tmp", "/root/.cache/pip"]:
+        if os.path.exists(tmp_target):
+            try:
+                for item in os.listdir(tmp_target):
+                    ipath = os.path.join(tmp_target, item)
+                    try:
+                        if os.path.isfile(ipath) or os.path.islink(ipath):
+                            os.remove(ipath)
+                        elif os.path.isdir(ipath):
+                            shutil.rmtree(ipath, ignore_errors=True)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
 
 def clean_previous_training_checkpoints(previous_stage_dir: str, current_checkpoint_dir: str):

@@ -15,6 +15,7 @@ echo "==========================================================================
 echo "[DISK CLEANUP] Reclaiming disk space and stopping any stale processes..."
 killall -9 tara_training_stages tara_gpu_step_test manual_trainer 2>/dev/null || true
 rm -rf /tmp/tara_moments_* /tmp/tara_* /tmp/tmp* /tmp/* 2>/dev/null || true
+rm -rf /root/.julia /content/sample_data /root/.config/Google/DriveFS/*/content_cache/* 2>/dev/null || true
 rm -rf target/debug target/release/deps target/release/build target/release/incremental 2>/dev/null || true
 rm -rf storage/checkpoints/gpu_step_test_parity 2>/dev/null || true
 rm -rf /root/.cache/huggingface /root/.cache/pip /root/.cache/torch /root/.cargo/registry/cache 2>/dev/null || true

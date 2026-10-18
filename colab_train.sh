@@ -244,13 +244,22 @@ if [ ! -e "${WORLD_SHARDS[0]:-}" ]; then
     fi
 fi
 
-# Determine active checkpoint root (matches Rust GDRIVE_CHECKPOINT_DIR fallback)
-if [ -d "/content/drive/MyDrive" ]; then
-    ACTIVE_CP_DIR="$GDRIVE_CHECKPOINT_DIR"
-else
-    ACTIVE_CP_DIR="storage/models/checkpoints"
-fi
+# Determine active checkpoint root: Use fast local SSD storage during training to eliminate Google Drive FUSE write latency & locks
+ACTIVE_CP_DIR="storage/models/checkpoints"
 mkdir -p "$ACTIVE_CP_DIR"
+
+# If restarting in a fresh Colab session, restore any existing checkpoints from Google Drive mirror
+if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
+    for STAGE_SUBDIR in stage0_pretraining stage1_curriculum; do
+        GDRIVE_STAGE="$GDRIVE_CHECKPOINT_DIR/$STAGE_SUBDIR"
+        LOCAL_STAGE="$ACTIVE_CP_DIR/$STAGE_SUBDIR"
+        if [ -d "$GDRIVE_STAGE" ] && [ ! -f "$LOCAL_STAGE/checkpoint_state.json" ]; then
+            echo "[RESUME SYNC] Restoring in-progress checkpoint from Google Drive: $GDRIVE_STAGE -> $LOCAL_STAGE"
+            mkdir -p "$LOCAL_STAGE"
+            cp -r "$GDRIVE_STAGE"/* "$LOCAL_STAGE"/ 2>/dev/null || true
+        fi
+    done
+fi
 
 # 5. Mandatory Pre-Training Verification, Deep De-duplication & Tokenizer Gate
 if [ ! -f "./target/release/tara_pretraining_gate" ]; then
@@ -269,9 +278,9 @@ echo "=== [PRE-TRAINING GATE: DEDUPLICATION, TOKENIZER AUDIT & AUTHORIZATION] ==
     --model storage/models/tara_candidate_v1 \
     --dataset "$GATE_TARGET_DS"
 
-# Ensure pretraining_authorization.json is also mirrored in ACTIVE_CP_DIR if GDrive is active
-if [ -f "storage/models/checkpoints/pretraining_authorization.json" ] && [ "$ACTIVE_CP_DIR" != "storage/models/checkpoints" ]; then
-    cp "storage/models/checkpoints/pretraining_authorization.json" "$ACTIVE_CP_DIR/pretraining_authorization.json"
+# Ensure pretraining_authorization.json is preserved locally and backed up to Google Drive
+if [ -f "storage/models/checkpoints/pretraining_authorization.json" ] && [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
+    cp "storage/models/checkpoints/pretraining_authorization.json" "$GDRIVE_CHECKPOINT_DIR/pretraining_authorization.json" 2>/dev/null || true
 fi
 echo "Pre-Training Authorization Gate Passed!"
 

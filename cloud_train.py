@@ -22,6 +22,7 @@ import math
 import os
 import shutil
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -458,6 +459,83 @@ def load_candidate_weights(model: nn.Module, model_dir: str) -> bool:
     return matched > 0
 
 
+_gdrive_sync_thread: Optional[threading.Thread] = None
+_gdrive_sync_lock = threading.Lock()
+
+
+def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: List[str]):
+    try:
+        os.makedirs(target_dir, exist_ok=True)
+        synced = 0
+        t_start = time.time()
+        for fname in file_list:
+            src = os.path.join(src_dir, fname)
+            dst = os.path.join(target_dir, fname)
+            if os.path.exists(src):
+                if os.path.abspath(src) == os.path.abspath(dst):
+                    continue
+                shutil.copy2(src, dst)
+                synced += 1
+        elapsed = time.time() - t_start
+        print(f"[GDrive Mirror] Successfully backed up [{tag}] ({synced} files, {elapsed:.1f}s) -> {target_dir}", flush=True)
+    except Exception as e:
+        print(f"[GDrive Mirror Notice] Non-fatal background backup notice: {e}", flush=True)
+
+
+def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
+    """
+    Asynchronously or synchronously mirrors local checkpoint files to Google Drive.
+    Non-blocking background thread prevents Google Drive FUSE latency from stalling GPU training.
+    """
+    global _gdrive_sync_thread
+    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
+    if not os.path.exists("/content/drive/MyDrive"):
+        return
+
+    # If output_dir is already inside gdrive_root, do not copy to itself
+    try:
+        abs_output = os.path.abspath(output_dir)
+        abs_gdrive = os.path.abspath(gdrive_root)
+        if abs_output.startswith(abs_gdrive):
+            return
+    except Exception:
+        pass
+
+    # Compute target directory on Google Drive preserving stage/milestone hierarchy
+    try:
+        if "checkpoints" in output_dir:
+            rel = output_dir.split("checkpoints", 1)[1].lstrip(r"\/")
+            target_dir = os.path.join(gdrive_root, rel)
+        else:
+            target_dir = os.path.join(gdrive_root, os.path.basename(output_dir))
+    except Exception:
+        target_dir = os.path.join(gdrive_root, os.path.basename(output_dir))
+
+    file_list = [
+        "config.json", "tokenizer.json", "model.safetensors",
+        "checkpoint_state.json", "STAGE_METADATA.json", "optimizer_state.pt"
+    ]
+
+    with _gdrive_sync_lock:
+        if _gdrive_sync_thread and _gdrive_sync_thread.is_alive():
+            if wait:
+                print(f"[GDrive Mirror] Waiting for previous sync to complete...", flush=True)
+                _gdrive_sync_thread.join()
+            else:
+                # Previous sync is actively writing to GDrive; continue GPU training without delay
+                return
+
+        _gdrive_sync_thread = threading.Thread(
+            target=_sync_to_gdrive_worker,
+            args=(output_dir, target_dir, tag, file_list),
+            daemon=True
+        )
+        _gdrive_sync_thread.start()
+
+        if wait:
+            _gdrive_sync_thread.join()
+
+
 def save_checkpoint(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -474,6 +552,7 @@ def save_checkpoint(
     is_completed: bool = False,
 ):
     """Exports model weights, optimizer continuation state, and stage metadata."""
+    t_save_start = time.time()
     os.makedirs(output_dir, exist_ok=True)
 
     # 1. config.json
@@ -482,7 +561,9 @@ def save_checkpoint(
 
     # 2. tokenizer.json
     if os.path.exists(tokenizer_path):
-        shutil.copy2(tokenizer_path, os.path.join(output_dir, "tokenizer.json"))
+        tok_dst = os.path.join(output_dir, "tokenizer.json")
+        if os.path.abspath(tokenizer_path) != os.path.abspath(tok_dst):
+            shutil.copy2(tokenizer_path, tok_dst)
 
     # 3. model.safetensors
     state_dict = {k: v.contiguous().cpu() for k, v in model.state_dict().items()}
@@ -529,23 +610,12 @@ def save_checkpoint(
     with open(os.path.join(output_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
+    save_duration = time.time() - t_save_start
     tag = "BEST MILESTONE" if is_best else ("COMPLETED" if is_completed else f"STEP {step}")
-    print(f"[Checkpoint] Saved [{tag}] checkpoint -> {output_dir} (Loss: {loss:.4f})")
+    print(f"[Checkpoint] Saved [{tag}] checkpoint ({save_duration:.1f}s) -> {output_dir} (Loss: {loss:.4f})", flush=True)
 
-    # Mirror to Google Drive if active
-    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
-    if os.path.exists("/content/drive/MyDrive"):
-        stage_dir_name = os.path.basename(output_dir)
-        gdrive_target = os.path.join(gdrive_root, stage_dir_name)
-        os.makedirs(gdrive_target, exist_ok=True)
-        try:
-            for fname in ["config.json", "tokenizer.json", "model.safetensors", "checkpoint_state.json", "STAGE_METADATA.json"]:
-                src = os.path.join(output_dir, fname)
-                if os.path.exists(src):
-                    shutil.copy2(src, os.path.join(gdrive_target, fname))
-            print(f"[GDrive Mirror] Successfully backed up [{tag}] to Google Drive: {gdrive_target}")
-        except Exception as e:
-            print(f"[GDrive Mirror Notice] Non-fatal backup warning: {e}")
+    # Mirror to Google Drive asynchronously (or synchronously on stage completion)
+    sync_checkpoint_to_gdrive(output_dir, tag, wait=is_completed)
 
 
 def promote_checkpoint(
@@ -564,11 +634,11 @@ def promote_checkpoint(
     for art in artifacts:
         src = os.path.join(source_checkpoint_dir, art)
         dst = os.path.join(promoted_dir, art)
-        if os.path.exists(src):
+        if os.path.exists(src) and os.path.abspath(src) != os.path.abspath(dst):
             shutil.copy2(src, dst)
             copied += 1
 
-    print(f"[Promotion] Successfully promoted clean inference model ({copied} files) -> {promoted_dir}")
+    print(f"[Promotion] Successfully promoted clean inference model ({copied} files) -> {promoted_dir}", flush=True)
 
     # Mirror promoted model to Google Drive if active
     gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
@@ -577,12 +647,13 @@ def promote_checkpoint(
         os.makedirs(gdrive_promoted, exist_ok=True)
         for art in artifacts:
             src = os.path.join(promoted_dir, art)
-            if os.path.exists(src):
+            dst = os.path.join(gdrive_promoted, art)
+            if os.path.exists(src) and os.path.abspath(src) != os.path.abspath(dst):
                 try:
-                    shutil.copy2(src, os.path.join(gdrive_promoted, art))
+                    shutil.copy2(src, dst)
                 except Exception:
                     pass
-        print(f"[GDrive Promotion Mirror] Promoted model synced to: {gdrive_promoted}")
+        print(f"[GDrive Promotion Mirror] Promoted model synced to: {gdrive_promoted}", flush=True)
 
 
 def verify_checkpoint_integrity(checkpoint_dir: str) -> bool:
@@ -675,6 +746,37 @@ def try_resume_from_checkpoint(
     state_file = os.path.join(checkpoint_dir, "checkpoint_state.json")
     opt_file = os.path.join(checkpoint_dir, "optimizer_state.pt")
     model_file = os.path.join(checkpoint_dir, "model.safetensors")
+
+    # If local checkpoint_dir lacks required files, check best_checkpoint subfolder and Google Drive mirror
+    if not (os.path.exists(state_file) and os.path.exists(opt_file) and os.path.exists(model_file)):
+        candidate_sources = [
+            os.path.join(checkpoint_dir, "best_checkpoint"),
+        ]
+        gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
+        if os.path.exists("/content/drive/MyDrive"):
+            stage_name = os.path.basename(checkpoint_dir)
+            candidate_sources.extend([
+                os.path.join(gdrive_root, stage_name),
+                os.path.join(gdrive_root, stage_name, "best_checkpoint"),
+                os.path.join(gdrive_root, "best_checkpoint"),
+            ])
+
+        for candidate in candidate_sources:
+            cand_state = os.path.join(candidate, "checkpoint_state.json")
+            cand_opt = os.path.join(candidate, "optimizer_state.pt")
+            cand_model = os.path.join(candidate, "model.safetensors")
+            if os.path.exists(cand_state) and os.path.exists(cand_opt) and os.path.exists(cand_model):
+                print(f"[Resume Sync] Restoring checkpoint files from {candidate} -> {checkpoint_dir}...", flush=True)
+                os.makedirs(checkpoint_dir, exist_ok=True)
+                for fname in ["config.json", "tokenizer.json", "model.safetensors", "checkpoint_state.json", "optimizer_state.pt", "STAGE_METADATA.json"]:
+                    s = os.path.join(candidate, fname)
+                    d = os.path.join(checkpoint_dir, fname)
+                    if os.path.exists(s) and os.path.abspath(s) != os.path.abspath(d):
+                        try:
+                            shutil.copy2(s, d)
+                        except Exception:
+                            pass
+                break
 
     if not (os.path.exists(state_file) and os.path.exists(opt_file) and os.path.exists(model_file)):
         return 0, 0, float("inf"), False
@@ -1377,6 +1479,10 @@ def main():
     # Setup Best Checkpoint Directory
     best_cp_dir = os.path.join(args.output_dir, "best_checkpoint")
 
+    last_saved_checkpoint_loss = best_loss if best_loss < float("inf") else float("inf")
+    last_saved_checkpoint_step = start_step
+    last_saved_checkpoint_time = time.time()
+
     print(f"[Training] Launching Training: Epochs={args.epochs}, Batch={args.batch_size}, Accum={args.grad_accum}, Precision={precision_str}, Steps={start_step}..{args.max_steps}")
     model.train()
     step = start_step
@@ -1470,9 +1576,34 @@ def main():
                 if step % 25 == 0 or step == start_step + 1:
                     print_frontier_comparison_matrix_colored(step, cur_step_loss, best_loss)
 
-                # Dynamic Best-Checkpointing Gate
-                if cur_step_loss < best_loss and step >= 10:
+                # Dynamic Best Loss Tracking
+                is_new_best = False
+                if cur_step_loss < best_loss:
                     best_loss = cur_step_loss
+                    is_new_best = True
+
+                # Dynamic Best-Checkpointing Gate:
+                # Triggers on authentic milestone improvements (significant loss drop >= 0.20 or >= 2% relative),
+                # OR throttled by step cooldown (>= 25 steps since last save with improved loss),
+                # OR throttled by elapsed time (>= 120s since last save with improved loss).
+                # This guarantees authentic milestones are archived without thrashing disk I/O on consecutive steps.
+                significant_loss_drop = (
+                    (last_saved_checkpoint_loss - cur_step_loss) >= 0.20
+                    or (last_saved_checkpoint_loss < float("inf") and (last_saved_checkpoint_loss - cur_step_loss) / max(last_saved_checkpoint_loss, 1e-4) >= 0.02)
+                )
+                cooldown_elapsed = (
+                    (step - last_saved_checkpoint_step >= 25)
+                    or (time.time() - last_saved_checkpoint_time >= 120.0)
+                )
+                should_save_best_milestone = is_new_best and (
+                    significant_loss_drop or cooldown_elapsed or last_saved_checkpoint_loss == float("inf")
+                ) and step >= 5
+
+                if should_save_best_milestone:
+                    last_saved_checkpoint_loss = cur_step_loss
+                    last_saved_checkpoint_step = step
+                    last_saved_checkpoint_time = time.time()
+
                     print(f"[{args.stage_id}] >>> {CLR_GREEN}{CLR_BOLD}NEW HISTORICAL BEST LOSS ACHIEVED: {best_loss:.4f}{CLR_RESET} <<<", flush=True)
                     print_frontier_comparison_matrix_colored(step, cur_step_loss, best_loss)
                     save_checkpoint(
@@ -1481,8 +1612,10 @@ def main():
                         is_best=True, is_completed=False
                     )
 
-                # Periodic Step Checkpointing for Mid-Way Resilience
-                if step % 50 == 0:
+                # Periodic Step Checkpointing for Mid-Way Resilience (if no best checkpoint saved in 50 steps)
+                elif (step - last_saved_checkpoint_step >= 50):
+                    last_saved_checkpoint_step = step
+                    last_saved_checkpoint_time = time.time()
                     save_checkpoint(
                         model, optimizer, scaler, config, tok_path, args.output_dir,
                         step, epoch, cur_step_loss, best_loss, args.stage_id,
@@ -1506,6 +1639,11 @@ def main():
         model, optimizer, scaler, config, tok_path, args.output_dir,
         step, epoch, final_loss, best_loss, args.stage_id,
         is_best=False, is_completed=True
+    )
+    save_checkpoint(
+        model, optimizer, scaler, config, tok_path, best_cp_dir,
+        step, epoch, best_loss, best_loss, args.stage_id,
+        is_best=True, is_completed=True
     )
 
     print(f"[Stage Complete] Training checkpoint preserved in: {args.output_dir}")

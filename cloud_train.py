@@ -1109,6 +1109,12 @@ def try_resume_from_checkpoint(
                 best_cand_epoch = c_epoch
                 best_cand_loss = c_loss
                 best_cand_dir = cand
+        elif os.path.exists(cand_model) and os.path.getsize(cand_model) > 500 * 1024 * 1024:
+            # Model weights are valid (>500 MB); do not discard trained parameters
+            print(f"  -> Found verified model weights at {cand} ({os.path.getsize(cand_model) / (1024 * 1024):.1f} MB); restoring parameters.")
+            if best_cand_dir is None or best_cand_step < 1:
+                best_cand_step = 1
+                best_cand_dir = cand
         else:
             print(f"  -> Notice: Candidate {cand} has model weights but state/metadata could not be decoded.")
 

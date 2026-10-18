@@ -112,9 +112,10 @@ pub struct DeviceCapability {
 }
 
 /// User device selection policy.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum SelectionPolicy {
     /// Automatically discover and select highest priority accelerator (GPU > TPU > Custom > CPU).
+    #[default]
     Auto,
     /// Explicit device selection without fallback.
     Explicit(DeviceKind, Option<usize>),
@@ -180,10 +181,16 @@ impl SelectionPolicy {
     }
 }
 
-impl Default for SelectionPolicy {
-    fn default() -> Self {
-        Self::Auto
-    }
+/// Parameters for backward linear projection dispatch.
+#[derive(Debug, Clone, Copy)]
+pub struct LinearBackwardArgs<'a> {
+    pub weight_name: &'a str,
+    pub weight_slice: &'a [f32],
+    pub d_out: &'a [f32],
+    pub x: &'a [f32],
+    pub seq_len: usize,
+    pub in_dim: usize,
+    pub out_dim: usize,
 }
 
 impl std::str::FromStr for SelectionPolicy {

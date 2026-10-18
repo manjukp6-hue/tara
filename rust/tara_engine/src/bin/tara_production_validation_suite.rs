@@ -19,7 +19,7 @@ use std::time::Instant;
 
 use tara_engine::config::TaraConfig;
 use tara_engine::cuda::{
-    is_cuda_available, CudaTrainer, TrainingPrecision,
+    is_cuda_available, AdamWHyperparams, CudaTrainer, TrainingPrecision,
 };
 use tara_engine::internal_diagnostics::{
     promote_directory_atomically, write_safetensors_sharded_with_callback,
@@ -71,9 +71,9 @@ fn execute_forward_backward_step(
     let mut total_loss = 0.0f64;
     let mut target_count = 0usize;
 
-    for pos in 1..seq_len {
+    for (pos, &token) in tokens.iter().enumerate().take(seq_len).skip(1) {
         let predictor = pos - 1;
-        let target = tokens[pos] as usize;
+        let target = token as usize;
         if target >= vs {
             continue;
         }
@@ -215,9 +215,9 @@ fn evaluate_validation_loss(
     let mut total_loss = 0.0f64;
     let mut target_count = 0usize;
 
-    for pos in 1..seq_len {
+    for (pos, &token) in tokens.iter().enumerate().take(seq_len).skip(1) {
         let predictor = pos - 1;
-        let target = tokens[pos] as usize;
+        let target = token as usize;
         if target >= vs {
             continue;
         }
@@ -246,17 +246,28 @@ fn evaluate_validation_loss(
     }
 }
 
-/// Atomically saves model weights, AdamW optimizer moments, metadata, and dynamic SHA-256 manifest.
-fn save_atomic_checkpoint(
-    gpu_trainer: &CudaTrainer,
-    weights: &HashMap<String, Vec<f32>>,
-    shapes: &HashMap<String, Vec<usize>>,
-    config_path: &Path,
+struct AtomicCheckpointArgs<'a> {
+    gpu_trainer: &'a CudaTrainer,
+    weights: &'a HashMap<String, Vec<f32>>,
+    shapes: &'a HashMap<String, Vec<usize>>,
+    config_path: &'a Path,
     global_step: u64,
     loss: f64,
-    staging_dir: &Path,
-    committed_dir: &Path,
-) -> Result<(), String> {
+    staging_dir: &'a Path,
+    committed_dir: &'a Path,
+}
+
+/// Atomically saves model weights, AdamW optimizer moments, metadata, and dynamic SHA-256 manifest.
+fn save_atomic_checkpoint(args: AtomicCheckpointArgs<'_>) -> Result<(), String> {
+    let gpu_trainer = args.gpu_trainer;
+    let weights = args.weights;
+    let shapes = args.shapes;
+    let config_path = args.config_path;
+    let global_step = args.global_step;
+    let loss = args.loss;
+    let staging_dir = args.staging_dir;
+    let committed_dir = args.committed_dir;
+
     if staging_dir.exists() {
         let _ = fs::remove_dir_all(staging_dir);
     }
@@ -500,26 +511,28 @@ fn main() {
     setup_trainer
         .step_adamw_with_weights(
             &mut weights_after_step1,
-            1e-3,
-            0.9,
-            0.999,
-            1e-8,
-            0.01,
-            1.0,
+            AdamWHyperparams {
+                lr: 1e-3,
+                beta1: 0.9,
+                beta2: 0.999,
+                eps: 1e-8,
+                weight_decay: 0.01,
+                max_grad_norm: 1.0,
+            },
         )
         .expect("Step 1 AdamW update");
     setup_trainer.set_step_count(1);
 
-    save_atomic_checkpoint(
-        &setup_trainer,
-        &weights_after_step1,
-        &shapes,
-        &config_path,
-        1,
-        loss_step1,
-        &staging_t1,
-        &committed_t1,
-    )
+    save_atomic_checkpoint(AtomicCheckpointArgs {
+        gpu_trainer: &setup_trainer,
+        weights: &weights_after_step1,
+        shapes: &shapes,
+        config_path: &config_path,
+        global_step: 1,
+        loss: loss_step1,
+        staging_dir: &staging_t1,
+        committed_dir: &committed_t1,
+    })
     .expect("Save checkpoint T1");
     println!(
         "[Setup] Committed Checkpoint T1 established at: {}",
@@ -547,12 +560,14 @@ fn main() {
     setup_trainer
         .step_adamw_with_weights(
             &mut weights_ref_step2,
-            1e-3,
-            0.9,
-            0.999,
-            1e-8,
-            0.01,
-            1.0,
+            AdamWHyperparams {
+                lr: 1e-3,
+                beta1: 0.9,
+                beta2: 0.999,
+                eps: 1e-8,
+                weight_decay: 0.01,
+                max_grad_norm: 1.0,
+            },
         )
         .expect("Continuous Step 2 AdamW");
     setup_trainer.set_step_count(2);
@@ -653,12 +668,14 @@ fn main() {
         fresh_trainer
             .step_adamw_with_weights(
                 &mut weights_resumed,
-                1e-3,
-                0.9,
-                0.999,
-                1e-8,
-                0.01,
-                1.0,
+                AdamWHyperparams {
+                    lr: 1e-3,
+                    beta1: 0.9,
+                    beta2: 0.999,
+                    eps: 1e-8,
+                    weight_decay: 0.01,
+                    max_grad_norm: 1.0,
+                },
             )
             .expect("Resumed AdamW step");
         fresh_trainer.set_step_count(2);
@@ -913,12 +930,14 @@ fn main() {
         quality_trainer
             .step_adamw_with_weights(
                 &mut current_weights,
-                learning_rate,
-                beta1,
-                beta2,
-                eps,
-                weight_decay,
-                max_grad_norm,
+                AdamWHyperparams {
+                    lr: learning_rate,
+                    beta1,
+                    beta2,
+                    eps,
+                    weight_decay,
+                    max_grad_norm,
+                },
             )
             .expect("Quality step AdamW");
         quality_trainer.set_step_count(step as u64 + 1);

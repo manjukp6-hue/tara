@@ -12,7 +12,7 @@ pub use driver::{CudaDeviceInfo, CudaError};
 pub use gpu_device::CudaComputeDevice;
 pub use gpu_trainer::{
     capture_memory_snapshot, is_cuda_available, is_cuda_required, is_cuda_required_value,
-    log_flushed_memory_checkpoint, AdamWMemoryAudit, CudaTrainer, MemorySnapshot,
-    TrainingPrecision,
+    log_flushed_memory_checkpoint, AdamWHyperparams, AdamWMemoryAudit, BackwardLinearSliceArgs,
+    CudaTrainer, MemorySnapshot, TrainingPrecision,
 };
 pub use kernels::validate_ptx_registers;

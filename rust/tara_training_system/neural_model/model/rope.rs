@@ -313,4 +313,61 @@ mod tests {
             dot_backward_k
         );
     }
+
+    #[test]
+    fn test_rope_python_parity_exact() {
+        let head_dim = 4;
+        let seq_len = 3;
+        let num_heads_q = 2;
+        let num_heads_k = 1;
+        let rope = RotaryEmbedding::new(head_dim, 16, 10000.0);
+        let (cos, sin) = rope.get_cos_sin(seq_len);
+
+        let q = vec![
+            0.5, -0.3, 0.8, -0.2, 1.1, 0.4, -0.9, 0.7, -0.1, 0.6, 0.3, -0.5, 0.8, -0.4, 0.2, 0.9,
+            0.4, -0.2, 0.7, 0.1, -0.6, 0.5, -0.3, 0.8,
+        ];
+        let k = vec![
+            0.2, 0.9, -0.4, 0.6, -0.7, 0.3, 0.5, -0.1, 0.6, -0.8, 0.1, 0.4,
+        ];
+
+        let dims = RotaryDimensions {
+            seq_len,
+            num_heads_q,
+            num_heads_k,
+            head_dim,
+        };
+
+        let (rot_q, rot_k) = RotaryEmbedding::apply_rotary_emb(&q, &k, &cos, &sin, dims);
+
+        let expected_rot_q = vec![
+            0.5, -0.3, 0.8, -0.2, 1.1, 0.4, -0.9, 0.7, -0.306472, 0.60497, 0.077944, -0.493975,
+            0.263948, -0.40898, 0.781237, 0.895955, -0.802967, -0.20196, 0.072416, 0.09598,
+            0.522477, 0.483901, -0.420734, 0.809839,
+        ];
+        let expected_rot_k = vec![
+            0.2, 0.9, -0.4, 0.6, -0.798947, 0.300985, -0.318879, -0.096995, -0.340618, -0.80784,
+            0.503964, 0.383921,
+        ];
+
+        for (idx, (&actual, &expected)) in rot_q.iter().zip(expected_rot_q.iter()).enumerate() {
+            assert!(
+                (actual - expected).abs() < 1e-4,
+                "rot_q mismatch at index {}: actual={}, expected={}",
+                idx,
+                actual,
+                expected
+            );
+        }
+
+        for (idx, (&actual, &expected)) in rot_k.iter().zip(expected_rot_k.iter()).enumerate() {
+            assert!(
+                (actual - expected).abs() < 1e-4,
+                "rot_k mismatch at index {}: actual={}, expected={}",
+                idx,
+                actual,
+                expected
+            );
+        }
+    }
 }

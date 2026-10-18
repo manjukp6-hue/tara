@@ -1695,8 +1695,8 @@ mod tests {
         // Line 775 (1-indexed -> index 774)
         if lines.len() >= 780 {
             println!("--- Lines 770 to 780 of target/tara_kernels.ptx ---");
-            for i in 769..780 {
-                println!("{:4}: {}", i + 1, lines[i]);
+            for (i, line) in lines.iter().enumerate().take(780).skip(769) {
+                println!("{:4}: {}", i + 1, line);
             }
         }
 

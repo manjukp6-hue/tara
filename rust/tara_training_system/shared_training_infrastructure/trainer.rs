@@ -2074,12 +2074,14 @@ impl NativeSelfTrainer {
                         let stepped = gpu_trainer
                             .step_adamw_with_weights(
                                 &mut weights,
-                                effective_lr,
-                                beta1,
-                                beta2,
-                                eps,
-                                weight_decay,
-                                max_grad_norm,
+                                crate::cuda::AdamWHyperparams {
+                                    lr: effective_lr,
+                                    beta1,
+                                    beta2,
+                                    eps,
+                                    weight_decay,
+                                    max_grad_norm,
+                                },
                             )
                             .map_err(|e| {
                                 TrainerError::Model(format!("GPU AdamW step failed: {e}"))
@@ -2421,12 +2423,14 @@ impl NativeSelfTrainer {
                     let stepped = gpu_trainer
                         .step_adamw_with_weights(
                             &mut weights,
-                            effective_lr,
-                            beta1,
-                            beta2,
-                            eps,
-                            weight_decay,
-                            max_grad_norm,
+                            crate::cuda::AdamWHyperparams {
+                                lr: effective_lr,
+                                beta1,
+                                beta2,
+                                eps,
+                                weight_decay,
+                                max_grad_norm,
+                            },
                         )
                         .map_err(|e| TrainerError::Model(format!("GPU AdamW step failed: {e}")))?;
                     if stepped {

@@ -16,7 +16,8 @@ use std::process::exit;
 
 use tara_engine::config::TaraConfig;
 use tara_engine::cuda::{
-    is_cuda_available, log_flushed_memory_checkpoint, CudaTrainer, TrainingPrecision,
+    is_cuda_available, log_flushed_memory_checkpoint, AdamWHyperparams, CudaTrainer,
+    TrainingPrecision,
 };
 use tara_engine::internal_diagnostics::write_safetensors_sharded_with_callback;
 use tara_engine::{
@@ -98,7 +99,7 @@ fn compute_model_config_fingerprint(model_dir: &Path) -> Result<String, String> 
         let file_name = sf.file_name().unwrap_or_default().to_string_lossy();
         hasher.update(file_name.as_bytes());
         if let Ok(meta) = sf.metadata() {
-            hasher.update(&meta.len().to_le_bytes());
+            hasher.update(meta.len().to_le_bytes());
         }
         if let Ok(mut f) = fs::File::open(&sf) {
             use std::io::Read;
@@ -532,8 +533,7 @@ fn main() {
     }
 
     // Trace and verify every decoder layer
-    for l in 0..model.layers.len() {
-        let l_in = &layer_inputs[l];
+    for (l, l_in) in layer_inputs.iter().enumerate().take(model.layers.len()) {
         let l_in_norm: f64 = l_in
             .iter()
             .map(|&x| (x as f64) * (x as f64))
@@ -591,9 +591,9 @@ fn main() {
     let mut total_loss = 0.0f64;
     let mut target_count = 0usize;
 
-    for pos in 1..seq_len {
+    for (pos, &token) in micro_batch_tokens.iter().enumerate().take(seq_len).skip(1) {
         let predictor = pos - 1;
-        let target = micro_batch_tokens[pos] as usize;
+        let target = token as usize;
         if target >= vs {
             continue;
         }
@@ -949,12 +949,14 @@ fn main() {
     println!("[GPU Step Test] Executing GPU AdamW Step across all parameters...");
     let step_result = match gpu_trainer.step_adamw_with_weights(
         &mut weights,
-        1e-3,  // lr
-        0.9,   // beta1
-        0.999, // beta2
-        1e-8,  // eps
-        0.01,  // weight_decay
-        1.0,   // max_grad_norm
+        AdamWHyperparams {
+            lr: 1e-3,
+            beta1: 0.9,
+            beta2: 0.999,
+            eps: 1e-8,
+            weight_decay: 0.01,
+            max_grad_norm: 1.0,
+        },
     ) {
         Ok(stepped) => stepped,
         Err(e) => {

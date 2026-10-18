@@ -8,18 +8,13 @@ use serde::{Deserialize, Serialize};
 use crate::telemetry::RuntimeTelemetrySnapshot;
 
 /// Operating policy for memory vs. performance trade-offs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum MemoryExecutionMode {
     /// Maximize throughput by pinning hot weights and KV-cache in fastest accelerator memory.
+    #[default]
     HighPerformance,
     /// Minimize RAM/VRAM footprint by streaming layers/experts dynamically on demand.
     ConstrainedMemorySaving,
-}
-
-impl Default for MemoryExecutionMode {
-    fn default() -> Self {
-        Self::HighPerformance
-    }
 }
 
 /// Dynamic memory budget breakdown for a model workload.

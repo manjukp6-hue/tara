@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::device::{ComputeDevice, CpuDevice, CudaDevice, CustomDevice, TpuDevice};
 use crate::discovery::DiscoveredInventory;
 use crate::streaming::CpuStreamHelper;
-use crate::types::{DeviceKind, PrecisionMode, SelectionPolicy};
+use crate::types::{DeviceKind, LinearBackwardArgs, PrecisionMode, SelectionPolicy};
 
 /// Central hardware compute channel coordinating device execution across the system.
 #[derive(Debug, Clone)]
@@ -289,23 +289,9 @@ impl ComputeChannel {
     /// Dispatch named linear backward projection through the active compute device.
     pub fn backward_linear_named(
         &self,
-        weight_name: &str,
-        weight_slice: &[f32],
-        d_out: &[f32],
-        x: &[f32],
-        seq_len: usize,
-        in_dim: usize,
-        out_dim: usize,
+        args: LinearBackwardArgs<'_>,
     ) -> Result<(Vec<f32>, Vec<f32>), String> {
-        self.active_device.backward_linear_named(
-            weight_name,
-            weight_slice,
-            d_out,
-            x,
-            seq_len,
-            in_dim,
-            out_dim,
-        )
+        self.active_device.backward_linear_named(args)
     }
 
     /// Dispatch embedding forward lookup through the active compute device.

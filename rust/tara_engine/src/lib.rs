@@ -88,8 +88,9 @@ pub use config::TaraConfig;
 pub use control_tokens::{ControlTokenAction, ControlTokenActionParser};
 pub use cuda::{
     capture_memory_snapshot, is_cuda_available, is_cuda_required, is_cuda_required_value,
-    log_flushed_memory_checkpoint, validate_ptx_registers, AdamWMemoryAudit, CudaDeviceInfo,
-    CudaError, CudaTrainer, MemorySnapshot, TrainingPrecision,
+    log_flushed_memory_checkpoint, validate_ptx_registers, AdamWHyperparams, AdamWMemoryAudit,
+    BackwardLinearSliceArgs, CudaDeviceInfo, CudaError, CudaTrainer, MemorySnapshot,
+    TrainingPrecision,
 };
 pub use curriculum_engine::{
     CurriculumBatch, CurriculumConfig, CurriculumEngine, CurriculumReport, CurriculumStage,
@@ -110,6 +111,7 @@ pub use loading_policy::{
     InsufficientMemoryError, LoadingPlan, LoadingPolicyEngine, ModelLoadingStrategy,
     QuantizationPrecision,
 };
+pub use tara_hd::{LoraAdapterSet, LoraConfig, LoraLayer};
 pub use model::{ModelGradients, TaraForCausalLM};
 pub use model_expansion::{
     ArchitectureConstraints, ArchitectureScaler, GrowthMetadata, GrowthType, ModelExpansionEngine,

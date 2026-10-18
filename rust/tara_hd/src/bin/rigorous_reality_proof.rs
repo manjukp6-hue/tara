@@ -37,8 +37,8 @@ fn main() {
     println!("   -> Device Category:         {:?}", channel.device_kind());
 
     let gpu_cap = channel.inventory().gpus.first();
-    let has_native_bf16 = gpu_cap.map_or(false, |g| g.supported_precisions.contains(&PrecisionMode::Bf16));
-    let has_native_fp16 = gpu_cap.map_or(false, |g| g.supported_precisions.contains(&PrecisionMode::Fp16));
+    let has_native_bf16 = gpu_cap.is_some_and(|g| g.supported_precisions.contains(&PrecisionMode::Bf16));
+    let has_native_fp16 = gpu_cap.is_some_and(|g| g.supported_precisions.contains(&PrecisionMode::Fp16));
 
     println!("   -> Stored Weight Precision:  FP16 (2 bytes/param in VRAM/Disk storage)");
     println!("   -> Effective Compute Target: {:?}", channel.precision());
@@ -237,8 +237,8 @@ fn main() {
                 exp_sum += exp_val;
             }
             let inv_sum = if exp_sum > 0.0 { 1.0 / exp_sum } else { 0.0 };
-            for j in 0..=i {
-                probs[j] *= inv_sum;
+            for p in probs.iter_mut().take(i + 1) {
+                *p *= inv_sum;
             }
 
             // Context aggregation: O[i] += probs[j] * V[j]

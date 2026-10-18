@@ -4,7 +4,7 @@ use std::any::Any;
 use std::fmt::Debug;
 
 use crate::streaming::{CpuStreamHelper, StreamConfig};
-use crate::types::{DeviceCapability, DeviceKind};
+use crate::types::{DeviceCapability, DeviceKind, LinearBackwardArgs};
 
 /// Unified interface representing an abstract compute device.
 pub trait ComputeDevice: Send + Sync + Debug {
@@ -225,15 +225,16 @@ pub trait ComputeDevice: Send + Sync + Debug {
     /// Linear backward projection by parameter name or slice fallback.
     fn backward_linear_named(
         &self,
-        _weight_name: &str,
-        weight_slice: &[f32],
-        d_out: &[f32],
-        x: &[f32],
-        seq_len: usize,
-        in_dim: usize,
-        out_dim: usize,
+        args: LinearBackwardArgs<'_>,
     ) -> Result<(Vec<f32>, Vec<f32>), String> {
-        self.backward_linear(weight_slice, d_out, x, seq_len, in_dim, out_dim)
+        self.backward_linear(
+            args.weight_slice,
+            args.d_out,
+            args.x,
+            args.seq_len,
+            args.in_dim,
+            args.out_dim,
+        )
     }
 
     /// Embedding forward lookup: token_id -> embedding vector.

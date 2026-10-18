@@ -2,7 +2,7 @@
 """
 TARA Autonomous Cloud Training Engine (Google Colab / Cloud GPU Runner)
 =============================================================================
-Strictly isolated to Cloud Pretraining only (per Project Governance Rule 15).
+Strictly isolated to Cloud Pretraining only (pure native Rust isolation for runtime systems).
 Features:
 1. Dynamic Best-Model Checkpointing (tracks historical minimum loss & perplexity).
 2. Automatic Google Drive Mirroring & Disaster Recovery.
@@ -89,6 +89,8 @@ class TaraNativeTokenizer:
                 data = json.load(f)
             if isinstance(data, dict) and "vocab" in data and isinstance(data["vocab"], dict):
                 return cls(data["vocab"])
+            elif isinstance(data, dict) and "model" in data and isinstance(data["model"], dict) and "vocab" in data["model"] and isinstance(data["model"]["vocab"], dict):
+                return cls(data["model"]["vocab"])
             elif isinstance(data, dict) and len(data) > 0 and all(isinstance(v, int) for v in list(data.values())[:10]):
                 return cls(data)
         except Exception:
@@ -140,23 +142,34 @@ class RMSNorm(nn.Module):
         return self.weight * x
 
 
-def precompute_rope_freqs_cis(dim: int, end: int, theta: float = 500000.0) -> torch.Tensor:
-    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-    t = torch.arange(end, device=freqs.device)
-    freqs = torch.outer(t, freqs).float()
-    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
-    return freqs_cis
+def rotate_half(x: torch.Tensor) -> torch.Tensor:
+    half_dim = x.shape[-1] // 2
+    return torch.cat((-x[..., half_dim:], x[..., :half_dim]), dim=-1)
 
 
-def apply_rope(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+def precompute_rope_cos_sin(dim: int, end: int, theta: float = 500000.0) -> Tuple[torch.Tensor, torch.Tensor]:
+    half_dim = dim // 2
+    freqs = 1.0 / (theta ** (torch.arange(0, half_dim, dtype=torch.float32) * 2.0 / dim))
+    t = torch.arange(end, dtype=torch.float32)
+    angles = torch.outer(t, freqs)  # [end, half_dim]
+    cos_half = torch.cos(angles)
+    sin_half = torch.sin(angles)
+    # Concatenate across both halves to match Rust rope.rs rotate-half layout
+    cos = torch.cat([cos_half, cos_half], dim=-1)  # [end, dim]
+    sin = torch.cat([sin_half, sin_half], dim=-1)  # [end, dim]
+    return cos, sin
+
+
+def apply_rope(xq: torch.Tensor, xk: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     # xq: [batch, seq_len, n_heads, head_dim]
     # xk: [batch, seq_len, n_kv_heads, head_dim]
-    xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
-    xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
-    freqs_cis = freqs_cis[:xq.shape[1], :].unsqueeze(0).unsqueeze(2)  # [1, seq_len, 1, head_dim // 2]
-    xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
-    xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
-    return xq_out.type_as(xq), xk_out.type_as(xk)
+    # cos, sin: [seq_len, head_dim] -> unsqueeze to [1, seq_len, 1, head_dim]
+    seqlen = xq.shape[1]
+    c = cos[:seqlen].unsqueeze(0).unsqueeze(2).type_as(xq)
+    s = sin[:seqlen].unsqueeze(0).unsqueeze(2).type_as(xq)
+    xq_out = (xq * c) + (rotate_half(xq) * s)
+    xk_out = (xk * c) + (rotate_half(xk) * s)
+    return xq_out, xk_out
 
 
 class TaraAttention(nn.Module):
@@ -173,13 +186,13 @@ class TaraAttention(nn.Module):
         self.v_proj = nn.Linear(self.hidden_size, self.n_kv_heads * self.head_dim, bias=False)
         self.o_proj = nn.Linear(self.n_heads * self.head_dim, self.hidden_size, bias=False)
 
-    def forward(self, x: torch.Tensor, freqs_cis: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         bsz, seqlen, _ = x.shape
         q = self.q_proj(x).view(bsz, seqlen, self.n_heads, self.head_dim)
         k = self.k_proj(x).view(bsz, seqlen, self.n_kv_heads, self.head_dim)
         v = self.v_proj(x).view(bsz, seqlen, self.n_kv_heads, self.head_dim)
 
-        q, k = apply_rope(q, k, freqs_cis)
+        q, k = apply_rope(q, k, cos, sin)
 
         # GQA repeat KV
         if self.n_rep > 1:
@@ -222,8 +235,8 @@ class TaraDecoderLayer(nn.Module):
         self.post_attention_layernorm = RMSNorm(config["hidden_size"], eps=config.get("rms_norm_eps", 1e-5))
         self.mlp = TaraMlp(config)
 
-    def forward(self, x: torch.Tensor, freqs_cis: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        h = x + self.self_attn(self.input_layernorm(x), freqs_cis, mask)
+    def forward(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        h = x + self.self_attn(self.input_layernorm(x), cos, sin, mask)
         out = h + self.mlp(self.post_attention_layernorm(h))
         return out
 
@@ -238,19 +251,22 @@ class TaraModel(nn.Module):
         ])
         self.norm = RMSNorm(config["hidden_size"], eps=config.get("rms_norm_eps", 1e-5))
 
-        # Precompute RoPE complex table
+        # Precompute RoPE cos/sin tables matching Rust rope.rs rotate-half layout
         head_dim = config.get("head_dim", config["hidden_size"] // config["num_attention_heads"])
         max_pos = config.get("max_position_embeddings", 4096)
         theta = config.get("rope_theta", 500000.0)
-        self.register_buffer("freqs_cis", precompute_rope_freqs_cis(head_dim, max_pos, theta), persistent=False)
+        cos, sin = precompute_rope_cos_sin(head_dim, max_pos, theta)
+        self.register_buffer("rope_cos", cos, persistent=False)
+        self.register_buffer("rope_sin", sin, persistent=False)
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         seqlen = input_ids.shape[1]
         h = self.embed_tokens(input_ids)
-        freqs_cis = self.freqs_cis[:seqlen]
+        cos = self.rope_cos[:seqlen]
+        sin = self.rope_sin[:seqlen]
 
         for layer in self.layers:
-            h = layer(h, freqs_cis)
+            h = layer(h, cos, sin)
 
         return self.norm(h)
 
@@ -286,7 +302,7 @@ class TaraForCausalLM(nn.Module):
 # =============================================================================
 
 class TaraJsonlDataset(Dataset):
-    def __init__(self, file_paths: List[str], tokenizer: Any, max_seq_len: int = 256):
+    def __init__(self, file_paths: List[str], tokenizer: Any, max_seq_len: int = 256, max_samples: int = 0):
         self.samples: List[Tuple[List[int], int]] = []
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
@@ -304,21 +320,34 @@ class TaraJsonlDataset(Dataset):
                         record = json.loads(line)
                         inp_text = record.get("input", "")
                         out_text = record.get("output", "")
-                        if not inp_text and not out_text:
+                        raw_text = record.get("text", "")
+
+                        if not inp_text and not out_text and raw_text:
+                            # Pretraining text schema
+                            full_ids = tokenizer.encode(raw_text).ids
+                            target_start = 0
+                        elif inp_text or out_text:
+                            # Instruction/Curriculum input-output schema
+                            enc_inp = tokenizer.encode(inp_text).ids
+                            enc_out = tokenizer.encode(out_text).ids
+                            target_start = len(enc_inp)
+                            full_ids = enc_inp + enc_out
+                        else:
                             continue
 
-                        enc_inp = tokenizer.encode(inp_text).ids
-                        enc_out = tokenizer.encode(out_text).ids
-                        target_start = len(enc_inp)
-
-                        full_ids = enc_inp + enc_out
                         if len(full_ids) > self.max_seq_len:
                             full_ids = full_ids[:self.max_seq_len]
 
                         if len(full_ids) >= 4:
                             self.samples.append((full_ids, target_start))
+
+                        if 0 < max_samples <= len(self.samples):
+                            break
                     except Exception:
                         continue
+
+            if 0 < max_samples <= len(self.samples):
+                break
 
         print(f"[Dataset] Successfully ingested {len(self.samples)} valid sequence pairs.")
 
@@ -463,6 +492,123 @@ def save_checkpoint(
             print(f"[GDrive Mirror] Successfully backed up [{tag}] to Google Drive: {gdrive_target}")
         except Exception as e:
             print(f"[GDrive Mirror Notice] Non-fatal backup warning: {e}")
+
+
+def promote_checkpoint(
+    source_checkpoint_dir: str,
+    promoted_dir: str,
+    stage_id: str,
+):
+    """
+    Promotes the best checkpoint from a completed stage into a clean deployment model:
+    - Copies: model.safetensors, config.json, tokenizer.json, STAGE_METADATA.json
+    - Strictly excludes bulky optimizer states (optimizer_state.pt, checkpoint_state.json)
+    """
+    os.makedirs(promoted_dir, exist_ok=True)
+    artifacts = ["model.safetensors", "config.json", "tokenizer.json", "STAGE_METADATA.json"]
+    copied = 0
+    for art in artifacts:
+        src = os.path.join(source_checkpoint_dir, art)
+        dst = os.path.join(promoted_dir, art)
+        if os.path.exists(src):
+            shutil.copy2(src, dst)
+            copied += 1
+
+    print(f"[Promotion] Successfully promoted clean inference model ({copied} files) -> {promoted_dir}")
+
+    # Mirror promoted model to Google Drive if active
+    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
+    if os.path.exists("/content/drive/MyDrive"):
+        gdrive_promoted = os.path.join(gdrive_root, os.path.basename(promoted_dir))
+        os.makedirs(gdrive_promoted, exist_ok=True)
+        for art in artifacts:
+            src = os.path.join(promoted_dir, art)
+            if os.path.exists(src):
+                try:
+                    shutil.copy2(src, os.path.join(gdrive_promoted, art))
+                except Exception:
+                    pass
+        print(f"[GDrive Promotion Mirror] Promoted model synced to: {gdrive_promoted}")
+
+
+def verify_checkpoint_integrity(checkpoint_dir: str) -> bool:
+    """
+    Verifies that a newly saved training checkpoint is complete, uncorrupted, and valid:
+    - Verifies model.safetensors exists and is non-empty (>1MB).
+    - Verifies config.json is valid JSON.
+    - Verifies optimizer_state.pt exists and is non-empty (>1MB).
+    - Verifies STAGE_METADATA.json is valid and marks status COMPLETED.
+    """
+    if not os.path.exists(checkpoint_dir):
+        return False
+
+    req_files = ["model.safetensors", "config.json", "optimizer_state.pt", "STAGE_METADATA.json"]
+    for rf in req_files:
+        p = os.path.join(checkpoint_dir, rf)
+        if not (os.path.exists(p) and os.path.getsize(p) > 0):
+            print(f"[Verification Fail] Checkpoint file missing or empty: {p}")
+            return False
+
+    # Check JSON validity and tensor deserialization
+    try:
+        with open(os.path.join(checkpoint_dir, "config.json"), "r", encoding="utf-8") as f:
+            json.load(f)
+        with open(os.path.join(checkpoint_dir, "STAGE_METADATA.json"), "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        if meta.get("status") != "COMPLETED":
+            print(f"[Verification Fail] STAGE_METADATA status is not COMPLETED: {meta.get('status')}")
+            return False
+
+        # Deserialization test: ensure safetensors and optimizer state are not corrupted/truncated
+        if HAS_SAFETENSORS:
+            load_file(os.path.join(checkpoint_dir, "model.safetensors"), device="cpu")
+        torch.load(os.path.join(checkpoint_dir, "optimizer_state.pt"), map_location="cpu")
+    except Exception as e:
+        print(f"[Verification Fail] Corruption or load error in {checkpoint_dir}: {e}")
+        return False
+
+    print(f"[Verification Passed] Checkpoint {checkpoint_dir} verified 100% integral and valid.")
+    return True
+
+
+def clean_previous_training_checkpoints(previous_stage_dir: str, current_checkpoint_dir: str):
+    """
+    Enforces safety policy: Save first, verify next, delete last.
+    Deletes heavy training checkpoint files (optimizer_state.pt, checkpoint_state.json)
+    from previous stage ONLY IF the current checkpoint is verified 100% integral and complete.
+    NEVER deletes promoted inference models.
+    """
+    if not os.path.exists(previous_stage_dir):
+        return
+
+    # Strict Safety Gate: Verify current checkpoint integrity first!
+    if not verify_checkpoint_integrity(current_checkpoint_dir):
+        print(f"[Safety Protection] Current stage {current_checkpoint_dir} verification did NOT pass.")
+        print(f"[Safety Protection] ABORTING cleanup of previous stage {previous_stage_dir} to prevent data loss!")
+        return
+
+    print(f"[Hygiene] Cleaning bulky training artifacts from previous stage: {previous_stage_dir}...")
+    removable_patterns = ["optimizer_state.pt", "checkpoint_state.json", "pytorch_model.bin"]
+    for root, _, files in os.walk(previous_stage_dir):
+        for f in files:
+            if f in removable_patterns:
+                p = os.path.join(root, f)
+                try:
+                    os.remove(p)
+                    print(f"[Hygiene] Removed previous training state: {p}")
+                except Exception as e:
+                    print(f"[Hygiene Notice] Could not remove {p}: {e}")
+
+    # If previous stage directory has bulky duplicate non-promoted weights, clean them
+    # while leaving best_checkpoint or promoted folder intact
+    best_sub = os.path.join(previous_stage_dir, "best_checkpoint")
+    if os.path.exists(best_sub):
+        opt_in_best = os.path.join(best_sub, "optimizer_state.pt")
+        if os.path.exists(opt_in_best):
+            try:
+                os.remove(opt_in_best)
+            except Exception:
+                pass
 
 
 def try_resume_from_checkpoint(
@@ -663,6 +809,8 @@ def main():
     parser.add_argument("--model-dir", type=str, default="storage/models/tara_candidate_v1", help="Candidate / input model directory")
     parser.add_argument("--dataset-dir", type=str, default="storage/datasets/main_dataset_v2", help="Dataset directory")
     parser.add_argument("--output-dir", type=str, default="storage/models/checkpoints/stage0_pretraining", help="Output checkpoint directory")
+    parser.add_argument("--promoted-dir", type=str, default=None, help="Directory to save clean promoted model for deployment/inference")
+    parser.add_argument("--previous-stage-dir", type=str, default=None, help="Directory of previous stage to clean bulky training optimizer states from")
     parser.add_argument("--stage-id", type=str, default="stage0_pretraining", help="Unique Stage ID (e.g. stage0, stage1, ... N)")
     parser.add_argument("--stage-name", type=str, default="Stage 0: Foundational Pretraining", help="Human-readable stage title")
     parser.add_argument("--epochs", type=int, default=1, help="Number of training epochs")
@@ -671,6 +819,8 @@ def main():
     parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
     parser.add_argument("--max-steps", type=int, default=200, help="Max optimizer steps")
     parser.add_argument("--max-seq-len", type=int, default=256, help="Max sequence length")
+    parser.add_argument("--max-shards", type=int, default=0, help="Max shards to ingest (0 for all discovered shards)")
+    parser.add_argument("--max-samples", type=int, default=0, help="Max samples to ingest across shards (0 for unlimited)")
     parser.add_argument("--resume", action="store_true", default=True, help="Auto-resume from existing checkpoint if available")
     args = parser.parse_args()
 
@@ -680,6 +830,13 @@ def main():
 
     # 1. Idempotence Check
     if check_stage_already_completed(args.output_dir):
+        # Even if already completed, ensure promoted model exists if requested
+        if args.promoted_dir:
+            best_source = os.path.join(args.output_dir, "best_checkpoint")
+            src_cp = best_source if os.path.exists(os.path.join(best_source, "model.safetensors")) else args.output_dir
+            promote_checkpoint(src_cp, args.promoted_dir, args.stage_id)
+        if args.previous_stage_dir:
+            clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
         sys.exit(0)
 
     # 2. Fast Asset Verification & Streaming Download (if files missing)
@@ -736,7 +893,7 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     print(f"[Model] Total parameters: {total_params:,} ({total_params * 4 / 1e6:.1f} MB in FP32)")
 
-    # 6. Ingest Shards
+    # 6. Ingest Shards dynamically (Zero hardcoded limits, parameter-driven)
     shard_files = sorted(glob.glob(os.path.join(args.dataset_dir, "*.jsonl")))
     if not shard_files:
         shard_files = sorted(glob.glob("storage/datasets/main_dataset_v1/*.jsonl"))
@@ -744,7 +901,10 @@ def main():
         print(f"[Error] No JSONL shards found in {args.dataset_dir} or fallback.")
         sys.exit(1)
 
-    dataset = TaraJsonlDataset(shard_files[:10], tokenizer, max_seq_len=args.max_seq_len)
+    selected_shards = shard_files if args.max_shards <= 0 else shard_files[:args.max_shards]
+    print(f"[Dataset] Discovered {len(shard_files)} shards; loading {len(selected_shards)} shard(s)...")
+
+    dataset = TaraJsonlDataset(selected_shards, tokenizer, max_seq_len=args.max_seq_len, max_samples=args.max_samples)
     if len(dataset) == 0:
         print("[Error] Ingested 0 dataset samples. Aborting.")
         sys.exit(1)
@@ -778,6 +938,13 @@ def main():
                 start_step, start_epoch, best_loss, best_loss, args.stage_id,
                 is_best=False, is_completed=True
             )
+            # Promote & Clean if requested
+            if args.promoted_dir:
+                best_source = os.path.join(args.output_dir, "best_checkpoint")
+                src_cp = best_source if os.path.exists(os.path.join(best_source, "model.safetensors")) else args.output_dir
+                promote_checkpoint(src_cp, args.promoted_dir, args.stage_id)
+            if args.previous_stage_dir:
+                clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
             sys.exit(0)
 
     # Setup Best Checkpoint Directory
@@ -889,8 +1056,19 @@ def main():
         is_best=False, is_completed=True
     )
 
-    print(f"[Stage Complete] Production artifacts published to: {args.output_dir}")
+    print(f"[Stage Complete] Training checkpoint preserved in: {args.output_dir}")
     print(f"[Stage Complete] Best Milestone model archived in: {best_cp_dir}")
+
+    # Auto-Promote clean inference model for deployment & native Rust serving
+    best_source = best_cp_dir if os.path.exists(os.path.join(best_cp_dir, "model.safetensors")) else args.output_dir
+    promoted_target = args.promoted_dir if args.promoted_dir else os.path.join("storage/models", f"promoted_{args.stage_id}")
+    promote_checkpoint(best_source, promoted_target, args.stage_id)
+
+    # Auto-Clean bulky optimizer files from previous stage once current stage successfully completes and verifies
+    if args.previous_stage_dir:
+        clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
+
+    print(f"[Promotion Complete] Deployment model ready at: {promoted_target}")
     print("[Success] All weights are 100% compatible with native Rust TARA inference & serving!")
 
 

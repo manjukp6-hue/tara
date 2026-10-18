@@ -76,8 +76,8 @@ __MACOSX/
 scratch/
 
 
-# Standalone downloader (Rule 3 isolated boundary)
-downloader/
+# Standalone downloader output (isolated boundary)
+downloader/downloaded/
 
 # Weak and unverified raw datasets (User directive)
 **/weak/

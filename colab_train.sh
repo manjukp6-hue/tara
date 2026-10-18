@@ -37,7 +37,7 @@ TRAINER_MODE="${TRAINER_MODE:-python}"
 # 1. High-Speed Python Cloud Training Mode (Fast-path: zero compile delay, multi-threaded downloads)
 if [ "$TRAINER_MODE" = "python" ]; then
     echo "------------------------------------------------------------------------------"
-    echo "[FAST-PATH] High-Speed Python Cloud Pretraining Mode Active (Rule 15 Isolated)"
+    echo "[FAST-PATH] High-Speed Python Cloud Pretraining Mode Active (Cloud Pretraining Isolated)"
     echo "------------------------------------------------------------------------------"
     if command -v nvidia-smi >/dev/null 2>&1; then
         nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader
@@ -54,17 +54,21 @@ if [ "$TRAINER_MODE" = "python" ]; then
     fi
     mkdir -p "$ACTIVE_CP_DIR"
 
-    TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-4}"
     STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-1000}"
     MAIN_DS_DIR="storage/datasets/main_dataset_v2"
+    PROMOTED_BASE="storage/models/promoted"
+    mkdir -p "$PROMOTED_BASE"
 
-    echo "=== [AUTONOMOUS CLOUD TRAINING PIPELINE: LAUNCHING GPU PRETRAINER] ==="
+    echo "=== [AUTONOMOUS CLOUD TRAINING PIPELINE: LAUNCHING EXTENSIBLE GPU STAGES] ==="
+
+    # Stage 0: Foundational Pretraining
     python3 cloud_train.py \
         --stage-id "stage0_pretraining" \
         --stage-name "Stage 0: Foundational Pretraining" \
         --model-dir storage/models/tara_candidate_v1 \
         --dataset-dir "$MAIN_DS_DIR" \
         --output-dir "$ACTIVE_CP_DIR/stage0_pretraining" \
+        --promoted-dir "$PROMOTED_BASE/stage0_pretraining" \
         --max-steps "$STAGE_MAX_STEPS" \
         --batch-size "$TRAIN_BATCH_SIZE"
 
@@ -73,21 +77,68 @@ if [ "$TRAINER_MODE" = "python" ]; then
         STAGE0_OUT="$ACTIVE_CP_DIR/stage0_pretraining/best_checkpoint"
     fi
 
+    # Stage 1: Academic & Skills Curriculum (Chains from Stage 0 training checkpoint, promotes clean model, and cleans Stage 0 training optimizer state)
     CURRICULUM_DS="storage/datasets/curriculum"
-    if [ -d "$CURRICULUM_DS" ] && [ -n "$(ls -A "$CURRICULUM_DS" 2>/dev/null)" ]; then
+    if [ ! -d "$CURRICULUM_DS" ] || [ -z "$(ls -A "$CURRICULUM_DS" 2>/dev/null)" ]; then
+        CURRICULUM_DS="$MAIN_DS_DIR"
+    fi
+
+    # Prefer starting from verified promoted model of previous stage (No fabrication, genuine models only)
+    STAGE0_MODEL_INPUT="$STAGE0_OUT"
+    if [ -d "$PROMOTED_BASE/stage0_pretraining" ] && [ -f "$PROMOTED_BASE/stage0_pretraining/model.safetensors" ]; then
+        STAGE0_MODEL_INPUT="$PROMOTED_BASE/stage0_pretraining"
+    fi
+
+    python3 cloud_train.py \
+        --stage-id "stage1_curriculum" \
+        --stage-name "Stage 1: Academic & Skills Curriculum" \
+        --model-dir "$STAGE0_MODEL_INPUT" \
+        --dataset-dir "$CURRICULUM_DS" \
+        --output-dir "$ACTIVE_CP_DIR/stage1_curriculum" \
+        --promoted-dir "$PROMOTED_BASE/stage1_curriculum" \
+        --previous-stage-dir "$ACTIVE_CP_DIR/stage0_pretraining" \
+        --max-steps "$STAGE_MAX_STEPS" \
+        --batch-size "$TRAIN_BATCH_SIZE"
+
+    STAGE1_OUT="$ACTIVE_CP_DIR/stage1_curriculum"
+    if [ -d "$ACTIVE_CP_DIR/stage1_curriculum/best_checkpoint" ]; then
+        STAGE1_OUT="$ACTIVE_CP_DIR/stage1_curriculum/best_checkpoint"
+    fi
+
+    # Extensible Loop for Future Datasets (Stage 2..N)
+    # Checks for any additional stage directories in storage/datasets or environment
+    STAGE_IDX=2
+    while true; do
+        NEXT_DS="storage/datasets/stage${STAGE_IDX}"
+        if [ ! -d "$NEXT_DS" ] || [ -z "$(ls -A "$NEXT_DS" 2>/dev/null)" ]; then
+            break
+        fi
+
+        PREV_STAGE_IDX=$((STAGE_IDX - 1))
+        PREV_MODEL_INPUT="$ACTIVE_CP_DIR/stage${PREV_STAGE_IDX}"
+        if [ -d "$PROMOTED_BASE/stage${PREV_STAGE_IDX}" ] && [ -f "$PROMOTED_BASE/stage${PREV_STAGE_IDX}/model.safetensors" ]; then
+            PREV_MODEL_INPUT="$PROMOTED_BASE/stage${PREV_STAGE_IDX}"
+        fi
+
+        echo "=== [AUTONOMOUS CLOUD TRAINING PIPELINE: LAUNCHING STAGE $STAGE_IDX] ==="
         python3 cloud_train.py \
-            --stage-id "stage1_curriculum" \
-            --stage-name "Stage 1: Academic & Skills Curriculum" \
-            --model-dir "$STAGE0_OUT" \
-            --dataset-dir "$CURRICULUM_DS" \
-            --output-dir "$ACTIVE_CP_DIR/stage1_curriculum" \
+            --stage-id "stage${STAGE_IDX}" \
+            --stage-name "Stage ${STAGE_IDX}: Continual Knowledge Expansion" \
+            --model-dir "$PREV_MODEL_INPUT" \
+            --dataset-dir "$NEXT_DS" \
+            --output-dir "$ACTIVE_CP_DIR/stage${STAGE_IDX}" \
+            --promoted-dir "$PROMOTED_BASE/stage${STAGE_IDX}" \
+            --previous-stage-dir "$ACTIVE_CP_DIR/stage${PREV_STAGE_IDX}" \
             --max-steps "$STAGE_MAX_STEPS" \
             --batch-size "$TRAIN_BATCH_SIZE"
-    fi
+
+        STAGE_IDX=$((STAGE_IDX + 1))
+    done
 
     echo "=============================================================================="
     echo "  TARA CLOUD TRAINING PIPELINE COMPLETED SUCCESSFULLY!"
-    echo "  Best checkpoints safely preserved to: $ACTIVE_CP_DIR"
+    echo "  Promoted inference models saved in: $PROMOTED_BASE"
+    echo "  Active training checkpoints preserved in: $ACTIVE_CP_DIR"
     echo "=============================================================================="
     exit 0
 fi

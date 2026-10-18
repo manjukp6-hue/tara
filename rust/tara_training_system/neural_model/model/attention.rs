@@ -287,9 +287,7 @@ impl TaraAttention {
                         let dot: f32 = qi.iter().zip(kj.iter()).map(|(&a, &b)| a * b).sum();
                         row[j] = dot * scale;
                     }
-                    for j in (i + 1)..seq_len {
-                        row[j] = f32::NEG_INFINITY;
-                    }
+                    row[(i + 1)..seq_len].fill(f32::NEG_INFINITY);
                 }
             });
 
@@ -457,9 +455,7 @@ impl TaraAttention {
                         let dot: f32 = qi.iter().zip(kj.iter()).map(|(&a, &b)| a * b).sum();
                         row[j] = dot * scale;
                     }
-                    for j in (i + 1)..seq_len {
-                        row[j] = f32::NEG_INFINITY;
-                    }
+                    row[(i + 1)..seq_len].fill(f32::NEG_INFINITY);
                 }
             });
         softmax_inplace(&mut attn_weights, nh, seq_len);
@@ -566,9 +562,7 @@ impl TaraAttention {
                         let dot: f32 = qi.iter().zip(kj.iter()).map(|(&a, &b)| a * b).sum();
                         row[j] = dot * scale;
                     }
-                    for j in (i + 1)..seq_len {
-                        row[j] = f32::NEG_INFINITY;
-                    }
+                    row[(i + 1)..seq_len].fill(f32::NEG_INFINITY);
                 }
             });
         softmax_inplace(&mut attn_weights, nh, seq_len);

@@ -148,7 +148,7 @@ impl<'a> Iterator for SequenceChunkIterator<'a> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining_tokens = self.tokens.len().saturating_sub(self.current_offset);
-        let chunks = (remaining_tokens + self.chunk_size - 1) / self.chunk_size;
+        let chunks = remaining_tokens.div_ceil(self.chunk_size);
         (chunks, Some(chunks))
     }
 }

@@ -475,6 +475,54 @@ pub struct CudaTrainer {
     session: CudaSession,
 }
 
+/// Parameters for backward linear projection with optional weight slice.
+#[derive(Debug, Clone, Copy)]
+pub struct BackwardLinearSliceArgs<'a> {
+    pub weight_name: &'a str,
+    pub weight_slice_opt: Option<&'a [f32]>,
+    pub d_out: &'a [f32],
+    pub input: &'a [f32],
+    pub seq_len: usize,
+    pub in_dim: usize,
+    pub out_dim: usize,
+}
+
+/// Hyperparameters for AdamW optimizer steps.
+#[derive(Debug, Clone, Copy)]
+pub struct AdamWHyperparams {
+    pub lr: f32,
+    pub beta1: f32,
+    pub beta2: f32,
+    pub eps: f32,
+    pub weight_decay: f32,
+    pub max_grad_norm: f32,
+}
+
+pub type ParamKeyRecord = (
+    String,
+    usize,
+    Option<u64>,
+    Option<u64>,
+    Option<u64>,
+    Option<u64>,
+    Option<u64>,
+);
+
+pub struct MomentsTransferContext<'a> {
+    pub session: &'a CudaSession,
+    pub d_cm: &'a CudaBuffer,
+    pub d_cv: &'a CudaBuffer,
+    pub temp_buf: &'a mut [f32],
+    pub moments_disk_dir: Option<&'a std::path::Path>,
+}
+
+pub struct MomentsChunkRange<'a> {
+    pub name: &'a str,
+    pub offset: usize,
+    pub len: usize,
+    pub total_len: usize,
+}
+
 impl CudaTrainer {
     pub fn new(device_ordinal: i32) -> Result<Self, CudaError> {
         Self::new_with_precision(device_ordinal, TrainingPrecision::Auto)
@@ -1615,21 +1663,31 @@ impl CudaTrainer {
         in_dim: usize,
         out_dim: usize,
     ) -> Result<(Vec<f32>, Vec<f32>), CudaError> {
-        self.backward_linear_with_slice(weight_name, None, d_out, input, seq_len, in_dim, out_dim)
+        self.backward_linear_with_slice(BackwardLinearSliceArgs {
+            weight_name,
+            weight_slice_opt: None,
+            d_out,
+            input,
+            seq_len,
+            in_dim,
+            out_dim,
+        })
     }
 
     /// Backward Linear Projection on GPU: computes d_weight and d_input.
     /// Dynamically tiles across output dimension to scale smoothly across 1B, 7B, 70B+ models without CUDA OOM.
     pub fn backward_linear_with_slice(
         &self,
-        weight_name: &str,
-        weight_slice_opt: Option<&[f32]>,
-        d_out: &[f32],
-        input: &[f32],
-        seq_len: usize,
-        in_dim: usize,
-        out_dim: usize,
+        args: BackwardLinearSliceArgs<'_>,
     ) -> Result<(Vec<f32>, Vec<f32>), CudaError> {
+        let weight_name = args.weight_name;
+        let weight_slice_opt = args.weight_slice_opt;
+        let d_out = args.d_out;
+        let input = args.input;
+        let seq_len = args.seq_len;
+        let in_dim = args.in_dim;
+        let out_dim = args.out_dim;
+
         let weight_param = self.params.get(weight_name).ok_or_else(|| {
             CudaError::KernelError(format!(
                 "Weight '{}' not found in GPU parameters",
@@ -2248,12 +2306,14 @@ impl CudaTrainer {
         let mut h_weights = std::mem::take(&mut self.h_weights);
         let res = self.step_adamw_with_weights(
             &mut h_weights,
-            lr,
-            beta1,
-            beta2,
-            eps,
-            weight_decay,
-            max_grad_norm,
+            AdamWHyperparams {
+                lr,
+                beta1,
+                beta2,
+                eps,
+                weight_decay,
+                max_grad_norm,
+            },
         );
         self.h_weights = h_weights;
         res
@@ -2433,18 +2493,15 @@ impl CudaTrainer {
     }
 
     fn upload_moments_chunk_impl(
-        session: &CudaSession,
-        d_cm: &CudaBuffer,
-        d_cv: &CudaBuffer,
-        temp_buf: &mut [f32],
-        moments_disk_dir: Option<&std::path::Path>,
+        ctx: &mut MomentsTransferContext<'_>,
         h_m: &HashMap<String, Vec<f16>>,
         h_v: &HashMap<String, Vec<f16>>,
-        name: &str,
-        offset: usize,
-        len: usize,
+        chunk: &MomentsChunkRange<'_>,
     ) -> Result<(), CudaError> {
-        if let Some(s_dir) = moments_disk_dir {
+        let name = chunk.name;
+        let offset = chunk.offset;
+        let len = chunk.len;
+        if let Some(s_dir) = ctx.moments_disk_dir {
             let m_path = s_dir.join(format!("{name}.m.bin"));
             if m_path.is_file() {
                 if let Ok(mut file) = std::fs::File::open(&m_path) {
@@ -2452,20 +2509,20 @@ impl CudaTrainer {
                     let _ = file.seek(SeekFrom::Start((offset * std::mem::size_of::<f32>()) as u64));
                     let bytes = unsafe {
                         std::slice::from_raw_parts_mut(
-                            temp_buf.as_mut_ptr() as *mut u8,
+                            ctx.temp_buf.as_mut_ptr() as *mut u8,
                             len * std::mem::size_of::<f32>(),
                         )
                     };
                     if file.read_exact(bytes).is_ok() {
-                        session.upload_f32_slice(d_cm, &temp_buf[..len])?;
+                        ctx.session.upload_f32_slice(ctx.d_cm, &ctx.temp_buf[..len])?;
                     } else {
-                        session.zero_buffer(d_cm)?;
+                        ctx.session.zero_buffer(ctx.d_cm)?;
                     }
                 } else {
-                    session.zero_buffer(d_cm)?;
+                    ctx.session.zero_buffer(ctx.d_cm)?;
                 }
             } else {
-                session.zero_buffer(d_cm)?;
+                ctx.session.zero_buffer(ctx.d_cm)?;
             }
 
             let v_path = s_dir.join(format!("{name}.v.bin"));
@@ -2475,20 +2532,20 @@ impl CudaTrainer {
                     let _ = file.seek(SeekFrom::Start((offset * std::mem::size_of::<f32>()) as u64));
                     let bytes = unsafe {
                         std::slice::from_raw_parts_mut(
-                            temp_buf.as_mut_ptr() as *mut u8,
+                            ctx.temp_buf.as_mut_ptr() as *mut u8,
                             len * std::mem::size_of::<f32>(),
                         )
                     };
                     if file.read_exact(bytes).is_ok() {
-                        session.upload_f32_slice(d_cv, &temp_buf[..len])?;
+                        ctx.session.upload_f32_slice(ctx.d_cv, &ctx.temp_buf[..len])?;
                     } else {
-                        session.zero_buffer(d_cv)?;
+                        ctx.session.zero_buffer(ctx.d_cv)?;
                     }
                 } else {
-                    session.zero_buffer(d_cv)?;
+                    ctx.session.zero_buffer(ctx.d_cv)?;
                 }
             } else {
-                session.zero_buffer(d_cv)?;
+                ctx.session.zero_buffer(ctx.d_cv)?;
             }
         } else {
             if let Some(hm) = h_m.get(name) {
@@ -2499,16 +2556,14 @@ impl CudaTrainer {
                     &[]
                 };
                 for (i, &x) in slice.iter().enumerate().take(len) {
-                    temp_buf[i] = x.to_f32();
+                    ctx.temp_buf[i] = x.to_f32();
                 }
                 if slice.len() < len {
-                    for i in slice.len()..len {
-                        temp_buf[i] = 0.0;
-                    }
+                    ctx.temp_buf[slice.len()..len].fill(0.0);
                 }
-                session.upload_f32_slice(d_cm, &temp_buf[..len])?;
+                ctx.session.upload_f32_slice(ctx.d_cm, &ctx.temp_buf[..len])?;
             } else {
-                session.zero_buffer(d_cm)?;
+                ctx.session.zero_buffer(ctx.d_cm)?;
             }
             if let Some(hv) = h_v.get(name) {
                 let slice = if offset < hv.len() {
@@ -2518,40 +2573,37 @@ impl CudaTrainer {
                     &[]
                 };
                 for (i, &x) in slice.iter().enumerate().take(len) {
-                    temp_buf[i] = x.to_f32();
+                    ctx.temp_buf[i] = x.to_f32();
                 }
                 if slice.len() < len {
-                    for i in slice.len()..len {
-                        temp_buf[i] = 0.0;
-                    }
+                    ctx.temp_buf[slice.len()..len].fill(0.0);
                 }
-                session.upload_f32_slice(d_cv, &temp_buf[..len])?;
+                ctx.session.upload_f32_slice(ctx.d_cv, &ctx.temp_buf[..len])?;
             } else {
-                session.zero_buffer(d_cv)?;
+                ctx.session.zero_buffer(ctx.d_cv)?;
             }
         }
         Ok(())
     }
 
     fn download_moments_chunk_impl(
-        session: &CudaSession,
-        d_cm: &CudaBuffer,
-        d_cv: &CudaBuffer,
-        temp_buf: &mut [f32],
-        moments_disk_dir: Option<&std::path::Path>,
+        ctx: &mut MomentsTransferContext<'_>,
         h_m: &mut HashMap<String, Vec<f16>>,
         h_v: &mut HashMap<String, Vec<f16>>,
-        name: &str,
-        total_len: usize,
-        offset: usize,
-        len: usize,
+        chunk: &MomentsChunkRange<'_>,
     ) -> Result<(), CudaError> {
-        session.download_f32_slice(d_cm, &mut temp_buf[..len])?;
-        if let Some(s_dir) = moments_disk_dir {
+        let name = chunk.name;
+        let total_len = chunk.total_len;
+        let offset = chunk.offset;
+        let len = chunk.len;
+
+        ctx.session.download_f32_slice(ctx.d_cm, &mut ctx.temp_buf[..len])?;
+        if let Some(s_dir) = ctx.moments_disk_dir {
             let m_path = s_dir.join(format!("{name}.m.bin"));
             use std::io::{Seek, SeekFrom, Write};
             let mut file = std::fs::OpenOptions::new()
                 .create(true)
+                .truncate(offset == 0)
                 .read(true)
                 .write(true)
                 .open(&m_path)
@@ -2559,17 +2611,18 @@ impl CudaTrainer {
             let _ = file.seek(SeekFrom::Start((offset * std::mem::size_of::<f32>()) as u64));
             let bytes = unsafe {
                 std::slice::from_raw_parts(
-                    temp_buf.as_ptr() as *const u8,
+                    ctx.temp_buf.as_ptr() as *const u8,
                     len * std::mem::size_of::<f32>(),
                 )
             };
             file.write_all(bytes)
                 .map_err(|e| CudaError::KernelError(e.to_string()))?;
 
-            session.download_f32_slice(d_cv, &mut temp_buf[..len])?;
+            ctx.session.download_f32_slice(ctx.d_cv, &mut ctx.temp_buf[..len])?;
             let v_path = s_dir.join(format!("{name}.v.bin"));
             let mut file = std::fs::OpenOptions::new()
                 .create(true)
+                .truncate(offset == 0)
                 .read(true)
                 .write(true)
                 .open(&v_path)
@@ -2577,7 +2630,7 @@ impl CudaTrainer {
             let _ = file.seek(SeekFrom::Start((offset * std::mem::size_of::<f32>()) as u64));
             let bytes = unsafe {
                 std::slice::from_raw_parts(
-                    temp_buf.as_ptr() as *const u8,
+                    ctx.temp_buf.as_ptr() as *const u8,
                     len * std::mem::size_of::<f32>(),
                 )
             };
@@ -2590,18 +2643,18 @@ impl CudaTrainer {
             if hm.len() < total_len {
                 hm.resize(total_len, f16::from_f32(0.0));
             }
-            for (i, &x) in temp_buf[..len].iter().enumerate() {
+            for (i, &x) in ctx.temp_buf[..len].iter().enumerate() {
                 hm[offset + i] = f16::from_f32(x);
             }
 
-            session.download_f32_slice(d_cv, &mut temp_buf[..len])?;
+            ctx.session.download_f32_slice(ctx.d_cv, &mut ctx.temp_buf[..len])?;
             let hv = h_v
                 .entry(name.to_string())
                 .or_insert_with(|| vec![f16::from_f32(0.0); total_len]);
             if hv.len() < total_len {
                 hv.resize(total_len, f16::from_f32(0.0));
             }
-            for (i, &x) in temp_buf[..len].iter().enumerate() {
+            for (i, &x) in ctx.temp_buf[..len].iter().enumerate() {
                 hv[offset + i] = f16::from_f32(x);
             }
         }
@@ -2614,13 +2667,15 @@ impl CudaTrainer {
     pub fn step_adamw_with_weights(
         &mut self,
         weights: &mut HashMap<String, Vec<f32>>,
-        lr: f32,
-        beta1: f32,
-        beta2: f32,
-        eps: f32,
-        weight_decay: f32,
-        max_grad_norm: f32,
+        hyperparams: AdamWHyperparams,
     ) -> Result<bool, CudaError> {
+        let lr = hyperparams.lr;
+        let beta1 = hyperparams.beta1;
+        let beta2 = hyperparams.beta2;
+        let eps = hyperparams.eps;
+        let weight_decay = hyperparams.weight_decay;
+        let max_grad_norm = hyperparams.max_grad_norm;
+
         log_flushed_memory_checkpoint(
             "Before GPU Optimizer Step",
             self.session.get_memory_info().ok(),
@@ -2660,15 +2715,7 @@ impl CudaTrainer {
         };
 
         let block_dim = 128u32;
-        let mut param_keys: Vec<(
-            String,
-            usize,
-            Option<u64>,
-            Option<u64>,
-            Option<u64>,
-            Option<u64>,
-            Option<u64>,
-        )> = self
+        let mut param_keys: Vec<ParamKeyRecord> = self
             .params
             .iter()
             .map(|(name, param)| {
@@ -2745,17 +2792,24 @@ impl CudaTrainer {
                             d_cwf16.dptr
                         };
 
-                        Self::upload_moments_chunk_impl(
-                            &self.session,
+                        let mut ctx = MomentsTransferContext {
+                            session: &self.session,
                             d_cm,
                             d_cv,
-                            &mut self.temp_buf,
-                            self.moments_disk_dir.as_deref(),
+                            temp_buf: &mut self.temp_buf,
+                            moments_disk_dir: self.moments_disk_dir.as_deref(),
+                        };
+                        let chunk = MomentsChunkRange {
+                            name: &name,
+                            offset,
+                            len: cur_len,
+                            total_len: param_len,
+                        };
+                        Self::upload_moments_chunk_impl(
+                            &mut ctx,
                             &self.h_m,
                             &self.h_v,
-                            &name,
-                            offset,
-                            cur_len,
+                            &chunk,
                         )?;
 
                         let mut arg_w = d_cw.dptr;
@@ -2803,18 +2857,24 @@ impl CudaTrainer {
                         }
                         self.record_kernel_launch();
 
-                        Self::download_moments_chunk_impl(
-                            &self.session,
+                        let mut ctx = MomentsTransferContext {
+                            session: &self.session,
                             d_cm,
                             d_cv,
-                            &mut self.temp_buf,
-                            self.moments_disk_dir.as_deref(),
+                            temp_buf: &mut self.temp_buf,
+                            moments_disk_dir: self.moments_disk_dir.as_deref(),
+                        };
+                        let chunk = MomentsChunkRange {
+                            name: &name,
+                            offset,
+                            len: cur_len,
+                            total_len: param_len,
+                        };
+                        Self::download_moments_chunk_impl(
+                            &mut ctx,
                             &mut self.h_m,
                             &mut self.h_v,
-                            &name,
-                            param_len,
-                            offset,
-                            cur_len,
+                            &chunk,
                         )?;
 
                         if is_in_weights {
@@ -2849,17 +2909,24 @@ impl CudaTrainer {
                             d_cg.dptr
                         };
 
-                        Self::upload_moments_chunk_impl(
-                            &self.session,
+                        let mut ctx = MomentsTransferContext {
+                            session: &self.session,
                             d_cm,
                             d_cv,
-                            &mut self.temp_buf,
-                            self.moments_disk_dir.as_deref(),
+                            temp_buf: &mut self.temp_buf,
+                            moments_disk_dir: self.moments_disk_dir.as_deref(),
+                        };
+                        let chunk = MomentsChunkRange {
+                            name: &name,
+                            offset,
+                            len: cur_len,
+                            total_len: param_len,
+                        };
+                        Self::upload_moments_chunk_impl(
+                            &mut ctx,
                             &self.h_m,
                             &self.h_v,
-                            &name,
-                            offset,
-                            cur_len,
+                            &chunk,
                         )?;
 
                         let mut arg_w = d_cw.dptr;
@@ -2897,18 +2964,24 @@ impl CudaTrainer {
                         }
                         self.record_kernel_launch();
 
-                        Self::download_moments_chunk_impl(
-                            &self.session,
+                        let mut ctx = MomentsTransferContext {
+                            session: &self.session,
                             d_cm,
                             d_cv,
-                            &mut self.temp_buf,
-                            self.moments_disk_dir.as_deref(),
+                            temp_buf: &mut self.temp_buf,
+                            moments_disk_dir: self.moments_disk_dir.as_deref(),
+                        };
+                        let chunk = MomentsChunkRange {
+                            name: &name,
+                            offset,
+                            len: cur_len,
+                            total_len: param_len,
+                        };
+                        Self::download_moments_chunk_impl(
+                            &mut ctx,
                             &mut self.h_m,
                             &mut self.h_v,
-                            &name,
-                            param_len,
-                            offset,
-                            cur_len,
+                            &chunk,
                         )?;
 
                         if is_in_weights {

@@ -274,23 +274,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--repo" | "-r" => {
-                if i + 1 < args.len() {
-                    custom_repo = Some(args[i + 1].clone());
-                    i += 1;
-                }
+            "--repo" | "-r" if i + 1 < args.len() => {
+                custom_repo = Some(args[i + 1].clone());
+                i += 1;
             }
-            "--neural-dir" | "-n" => {
-                if i + 1 < args.len() {
-                    custom_neural = Some(PathBuf::from(&args[i + 1]));
-                    i += 1;
-                }
+            "--neural-dir" | "-n" if i + 1 < args.len() => {
+                custom_neural = Some(PathBuf::from(&args[i + 1]));
+                i += 1;
             }
-            "--world-dir" | "-w" => {
-                if i + 1 < args.len() {
-                    custom_world = Some(PathBuf::from(&args[i + 1]));
-                    i += 1;
-                }
+            "--world-dir" | "-w" if i + 1 < args.len() => {
+                custom_world = Some(PathBuf::from(&args[i + 1]));
+                i += 1;
             }
             _ => {}
         }

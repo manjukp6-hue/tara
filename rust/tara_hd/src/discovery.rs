@@ -115,7 +115,7 @@ impl DiscoveredInventory {
                 .iter()
                 .find(|d| {
                     d.name.eq_ignore_ascii_case(name)
-                        && target_id.map_or(true, |id| d.device_id == id)
+                        && target_id.is_none_or(|id| d.device_id == id)
                 })
                 .cloned(),
         }

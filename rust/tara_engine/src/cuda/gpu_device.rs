@@ -299,21 +299,24 @@ impl ComputeDevice for CudaComputeDevice {
 
     fn backward_linear_named(
         &self,
-        weight_name: &str,
-        weight_slice: &[f32],
-        d_out: &[f32],
-        x: &[f32],
-        seq_len: usize,
-        in_dim: usize,
-        out_dim: usize,
+        args: tara_hd::LinearBackwardArgs<'_>,
     ) -> Result<(Vec<f32>, Vec<f32>), String> {
         let t = self.trainer.lock().map_err(|e| e.to_string())?;
-        match t.backward_linear_with_slice(weight_name, Some(weight_slice), d_out, x, seq_len, in_dim, out_dim) {
+        let slice_args = crate::cuda::gpu_trainer::BackwardLinearSliceArgs {
+            weight_name: args.weight_name,
+            weight_slice_opt: Some(args.weight_slice),
+            d_out: args.d_out,
+            input: args.x,
+            seq_len: args.seq_len,
+            in_dim: args.in_dim,
+            out_dim: args.out_dim,
+        };
+        match t.backward_linear_with_slice(slice_args) {
             Ok(v) => Ok(v),
             Err(e) => {
-                log::debug!("GPU backward_linear for '{weight_name}' falling back to slice: {e}");
+                log::debug!("GPU backward_linear for '{}' falling back to slice: {e}", args.weight_name);
                 drop(t);
-                self.backward_linear(weight_slice, d_out, x, seq_len, in_dim, out_dim)
+                self.backward_linear(args.weight_slice, args.d_out, args.x, args.seq_len, args.in_dim, args.out_dim)
             }
         }
     }

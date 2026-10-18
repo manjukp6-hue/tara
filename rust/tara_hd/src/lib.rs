@@ -5,6 +5,7 @@ pub mod channel;
 pub mod device;
 pub mod discovery;
 pub mod event;
+pub mod lora;
 pub mod memory_governor;
 pub mod streaming;
 pub mod telemetry;
@@ -15,6 +16,7 @@ pub use channel::ComputeChannel;
 pub use device::{ComputeDevice, CpuDevice, CudaDevice, CustomDevice, TpuDevice};
 pub use discovery::DiscoveredInventory;
 pub use event::{CancellationToken, MemoryFlowGovernor, StreamEvent};
+pub use lora::{LoraAdapterSet, LoraConfig, LoraLayer};
 pub use memory_governor::{
     MemoryExecutionMode, MemoryGovernor, ModelMemoryBudget, PlacementDecision,
 };
@@ -23,7 +25,9 @@ pub use streaming::{
     UniversalStreamEngine, UniversalStreamReceiver, UniversalStreamSender,
 };
 pub use telemetry::{LiveTelemetryProvider, RuntimeTelemetrySnapshot};
-pub use types::{DeviceCapability, DeviceKind, PrecisionMode, SelectionPolicy, TaraError};
+pub use types::{
+    DeviceCapability, DeviceKind, LinearBackwardArgs, PrecisionMode, SelectionPolicy, TaraError,
+};
 
 #[cfg(test)]
 mod tests {

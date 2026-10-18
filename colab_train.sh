@@ -304,9 +304,31 @@ if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
         GDRIVE_STAGE="$GDRIVE_CHECKPOINT_DIR/$STAGE_SUBDIR"
         LOCAL_STAGE="$ACTIVE_CP_DIR/$STAGE_SUBDIR"
         if [ -d "$GDRIVE_STAGE" ]; then
-            echo "[RESUME SYNC] Restoring Google Drive checkpoint mirror: $GDRIVE_STAGE -> $LOCAL_STAGE"
-            mkdir -p "$LOCAL_STAGE"
-            cp -r "$GDRIVE_STAGE"/* "$LOCAL_STAGE"/ 2>/dev/null || true
+            if [ -f "$LOCAL_STAGE/checkpoint_state.json" ] || [ -f "$LOCAL_STAGE/best_checkpoint/checkpoint_state.json" ]; then
+                echo "[RESUME SYNC] Local checkpoint already present in $LOCAL_STAGE; skipping Google Drive copy."
+            else
+                echo "[RESUME SYNC] Restoring Google Drive checkpoint mirror: $GDRIVE_STAGE -> $LOCAL_STAGE..."
+                mkdir -p "$LOCAL_STAGE"
+                python3 -c "
+import os, shutil
+src = '$GDRIVE_STAGE'
+dst = '$LOCAL_STAGE'
+if os.path.exists(src):
+    for root, dirs, files in os.walk(src):
+        rel = os.path.relpath(root, src)
+        trot = os.path.join(dst, rel)
+        os.makedirs(trot, exist_ok=True)
+        for f in files:
+            if f.endswith('.tmp') or '.tmp_' in f:
+                continue
+            sf = os.path.join(root, f)
+            df = os.path.join(trot, f)
+            if not os.path.exists(df):
+                print(f'  -> Copying {f}...', flush=True)
+                shutil.copy2(sf, df)
+" 2>/dev/null || true
+                echo "[RESUME SYNC] Checkpoint mirror restore complete."
+            fi
         fi
     done
 fi

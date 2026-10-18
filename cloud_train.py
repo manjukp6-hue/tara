@@ -559,41 +559,14 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                 break
 
 
-def _resolve_gdrive_root() -> Optional[str]:
-    """Resolves Google Drive root path, following shortcuts, symlinks, or .shortcut-targets-by-id."""
-    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
-    if not os.path.exists("/content/drive/MyDrive"):
-        return None
-    # If it is a symlink or shortcut, resolve to realpath
-    if os.path.islink(gdrive_root):
-        try:
-            real = os.path.realpath(gdrive_root)
-            if os.path.exists(real):
-                return real
-        except Exception:
-            pass
-    if os.path.exists(gdrive_root):
-        return gdrive_root
-    # Fallback to .shortcut-targets-by-id if present
-    if os.path.exists("/content/drive/.shortcut-targets-by-id"):
-        try:
-            import glob
-            matches = glob.glob("/content/drive/.shortcut-targets-by-id/*/TARA_CHECKPOINTS")
-            if matches and os.path.isdir(matches[0]):
-                return matches[0]
-        except Exception:
-            pass
-    return gdrive_root
-
-
 def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
     """
     Mirrors local checkpoint files to Google Drive.
     Single-worker lock with pending queue ensures the latest checkpoint is ALWAYS uploaded.
     """
     global _gdrive_sync_thread, _pending_gdrive_sync
-    gdrive_root = _resolve_gdrive_root()
-    if not gdrive_root or not os.path.exists("/content/drive/MyDrive"):
+    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
+    if not os.path.exists("/content/drive/MyDrive"):
         return
 
     # If output_dir is already inside gdrive_root, do not copy to itself
@@ -731,8 +704,8 @@ def clean_stale_checkpoint_artifacts(checkpoint_dir: str, is_best: bool = False)
                 pass
 
     # 2. Clean Google Drive mirror
-    gdrive_root = _resolve_gdrive_root()
-    if gdrive_root and os.path.exists(gdrive_root):
+    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
+    if os.path.exists(gdrive_root):
         try:
             if "checkpoints" in checkpoint_dir:
                 rel = checkpoint_dir.split("checkpoints", 1)[1].lstrip(r"\/")
@@ -1000,8 +973,8 @@ def promote_checkpoint(
     print(f"[Promotion] Successfully promoted clean inference model ({copied} files) -> {promoted_dir}", flush=True)
 
     # Mirror promoted model to Google Drive if active
-    gdrive_root = _resolve_gdrive_root()
-    if gdrive_root and os.path.exists("/content/drive/MyDrive"):
+    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
+    if os.path.exists("/content/drive/MyDrive"):
         gdrive_promoted = os.path.join(gdrive_root, os.path.basename(promoted_dir))
         os.makedirs(gdrive_promoted, exist_ok=True)
         for art in artifacts:
@@ -1032,34 +1005,14 @@ def try_resume_from_checkpoint(
         checkpoint_dir,
         os.path.join(checkpoint_dir, "best_checkpoint"),
     ]
-    stage_name = os.path.basename(checkpoint_dir)
-    gdrive_root = _resolve_gdrive_root()
-    if gdrive_root and os.path.exists(gdrive_root):
+    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
+    if os.path.exists("/content/drive/MyDrive"):
+        stage_name = os.path.basename(checkpoint_dir)
         candidate_dirs.extend([
             os.path.join(gdrive_root, stage_name),
             os.path.join(gdrive_root, stage_name, "best_checkpoint"),
             os.path.join(gdrive_root, "best_checkpoint"),
         ])
-    if os.path.exists("/content/drive/.shortcut-targets-by-id"):
-        try:
-            import glob
-            for sc in glob.glob("/content/drive/.shortcut-targets-by-id/*/TARA_CHECKPOINTS"):
-                candidate_dirs.extend([
-                    os.path.join(sc, stage_name),
-                    os.path.join(sc, stage_name, "best_checkpoint"),
-                    os.path.join(sc, "best_checkpoint"),
-                ])
-        except Exception:
-            pass
-
-    # Deduplicate candidate directories while preserving order
-    seen_dirs = set()
-    deduped_candidates = []
-    for c in candidate_dirs:
-        norm = os.path.normpath(c)
-        if norm not in seen_dirs:
-            seen_dirs.add(norm)
-            deduped_candidates.append(c)
 
     best_cand_dir = None
     best_cand_step = -1
@@ -1067,50 +1020,25 @@ def try_resume_from_checkpoint(
     best_cand_loss = float("inf")
 
     print("[Resume Discovery] Scanning candidate checkpoint directories:")
-    for cand in deduped_candidates:
+    for cand in candidate_dirs:
         cand_state = os.path.join(cand, "checkpoint_state.json")
-        cand_meta = os.path.join(cand, "STAGE_METADATA.json")
         cand_model = os.path.join(cand, "model.safetensors")
-
-        if not (os.path.exists(cand_model) and os.path.getsize(cand_model) > 1024 * 1024):
-            continue
-
-        c_step = None
-        c_epoch = 0
-        c_loss = float("inf")
-
-        # 1. Parse checkpoint_state.json if present and non-empty
-        if os.path.exists(cand_state) and os.path.getsize(cand_state) > 0:
+        if os.path.exists(cand_state) and os.path.exists(cand_model):
             try:
                 with open(cand_state, "r", encoding="utf-8") as f:
                     s_data = json.load(f)
-                if isinstance(s_data, dict) and "step" in s_data:
-                    c_step = int(s_data.get("step", 0))
-                    c_epoch = int(s_data.get("epoch", 0))
-                    c_loss = float(s_data.get("best_loss", s_data.get("loss", float("inf"))))
-            except Exception:
-                c_step = None
-
-        # 2. Fallback to STAGE_METADATA.json if state file was missing, 0-bytes, or unparseable
-        if c_step is None and os.path.exists(cand_meta) and os.path.getsize(cand_meta) > 0:
-            try:
-                with open(cand_meta, "r", encoding="utf-8") as f:
-                    m_data = json.load(f)
-                if isinstance(m_data, dict) and "step" in m_data:
-                    c_step = int(m_data.get("step", 0))
-                    c_loss = float(m_data.get("best_loss", m_data.get("loss", float("inf"))))
-            except Exception:
-                c_step = None
-
-        if c_step is not None:
-            print(f"  -> Found verified candidate at {cand} (Step: {c_step}, Best Loss: {c_loss:.4f})")
-            if c_step > best_cand_step:
-                best_cand_step = c_step
-                best_cand_epoch = c_epoch
-                best_cand_loss = c_loss
-                best_cand_dir = cand
-        else:
-            print(f"  -> Notice: Candidate {cand} has model weights but state/metadata could not be decoded.")
+                c_step = int(s_data.get("step", 0))
+                c_loss = float(s_data.get("best_loss", s_data.get("loss", float("inf"))))
+                print(f"  -> Found candidate at {cand} (Step: {c_step}, Best Loss: {c_loss:.4f})")
+                if c_step > best_cand_step:
+                    best_cand_step = c_step
+                    best_cand_epoch = int(s_data.get("epoch", 0))
+                    best_cand_loss = c_loss
+                    best_cand_dir = cand
+            except Exception as e:
+                print(f"  -> Notice: Could not parse candidate {cand}: {e}")
+        elif os.path.exists(cand):
+            print(f"  -> Notice: Candidate exists but missing state or model file: {cand}")
 
     if best_cand_dir is None or best_cand_step < 0:
         print("[Resume Discovery] No valid previous checkpoints found. Starting from Step 0.")

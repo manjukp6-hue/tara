@@ -256,25 +256,9 @@ fi
 ACTIVE_CP_DIR="storage/models/checkpoints"
 mkdir -p "$ACTIVE_CP_DIR"
 
-# If GDRIVE_CHECKPOINT_DIR is a shortcut or symlink, resolve to its authentic target directory
-if [ -L "$GDRIVE_CHECKPOINT_DIR" ]; then
-    REAL_GDRIVE=$(readlink -f "$GDRIVE_CHECKPOINT_DIR" 2>/dev/null || true)
-    if [ -n "$REAL_GDRIVE" ] && [ -d "$REAL_GDRIVE" ]; then
-        echo "[GDRIVE SHORTCUT] Resolved shortcut to real directory: $REAL_GDRIVE"
-        GDRIVE_CHECKPOINT_DIR="$REAL_GDRIVE"
-    fi
-fi
-if [ ! -d "$GDRIVE_CHECKPOINT_DIR" ] && [ -d "/content/drive/.shortcut-targets-by-id" ]; then
-    SH_TARGET=$(find /content/drive/.shortcut-targets-by-id -maxdepth 2 -name "TARA_CHECKPOINTS" -type d 2>/dev/null | head -n 1 || true)
-    if [ -n "$SH_TARGET" ] && [ -d "$SH_TARGET" ]; then
-        echo "[GDRIVE DISCOVERY] Found TARA_CHECKPOINTS target in shortcuts: $SH_TARGET"
-        GDRIVE_CHECKPOINT_DIR="$SH_TARGET"
-    fi
-fi
-
 # If restarting in a fresh Colab session, clean stale temporary files and restore checkpoints from Google Drive mirror
 if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
-    echo "[GDRIVE CLEANUP] Purging stale temporary (.tmp) files and obsolete artifacts from Google Drive ($GDRIVE_CHECKPOINT_DIR)..."
+    echo "[GDRIVE CLEANUP] Purging stale temporary (.tmp) files and obsolete artifacts from Google Drive..."
     find "$GDRIVE_CHECKPOINT_DIR" -name "*.tmp*" -type f -delete 2>/dev/null || true
     find "$GDRIVE_CHECKPOINT_DIR" -path "*/best_checkpoint/optimizer_state.pt" -type f -delete 2>/dev/null || true
 
@@ -284,14 +268,7 @@ if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
         if [ -d "$GDRIVE_STAGE" ]; then
             echo "[RESUME SYNC] Restoring Google Drive checkpoint mirror: $GDRIVE_STAGE -> $LOCAL_STAGE"
             mkdir -p "$LOCAL_STAGE"
-            # Copy only genuine non-empty files or directories to prevent 0-byte corruptions
-            for src_item in "$GDRIVE_STAGE"/*; do
-                if [ -d "$src_item" ]; then
-                    cp -r "$src_item" "$LOCAL_STAGE/" 2>/dev/null || true
-                elif [ -f "$src_item" ] && [ -s "$src_item" ]; then
-                    cp "$src_item" "$LOCAL_STAGE/" 2>/dev/null || true
-                fi
-            done
+            cp -r "$GDRIVE_STAGE"/* "$LOCAL_STAGE"/ 2>/dev/null || true
         fi
     done
 fi

@@ -863,11 +863,20 @@ def try_resume_from_checkpoint(
     print(f"  Historical Best Loss: {best_cand_loss:.4f}")
     print("=" * 78)
 
-    # If the latest checkpoint is in a subfolder or Google Drive, sync files to checkpoint_dir
+    # Load weights directly from best_cand_dir to eliminate 4 GB file copying delay
+    model_file = os.path.join(best_cand_dir, "model.safetensors")
+    if not os.path.exists(model_file):
+        model_file = os.path.join(checkpoint_dir, "model.safetensors")
+
+    if HAS_SAFETENSORS and os.path.exists(model_file):
+        print(f"[Resume] Ingesting model weights directly from {model_file}...", flush=True)
+        weights = load_file(model_file, device="cpu")
+        model.load_state_dict(weights, strict=False)
+
+    # Sync tiny metadata and continuation states to checkpoint_dir (instant <0.01s)
     if os.path.abspath(best_cand_dir) != os.path.abspath(checkpoint_dir):
-        print(f"[Resume Sync] Syncing latest checkpoint files {best_cand_dir} -> {checkpoint_dir}...", flush=True)
         os.makedirs(checkpoint_dir, exist_ok=True)
-        for fname in ["config.json", "tokenizer.json", "model.safetensors", "checkpoint_state.json", "optimizer_state.pt", "STAGE_METADATA.json"]:
+        for fname in ["config.json", "tokenizer.json", "checkpoint_state.json", "optimizer_state.pt", "STAGE_METADATA.json"]:
             s = os.path.join(best_cand_dir, fname)
             d = os.path.join(checkpoint_dir, fname)
             if os.path.exists(s) and os.path.abspath(s) != os.path.abspath(d):
@@ -875,12 +884,6 @@ def try_resume_from_checkpoint(
                     shutil.copy2(s, d)
                 except Exception:
                     pass
-
-    # Load weights
-    model_file = os.path.join(checkpoint_dir, "model.safetensors")
-    if HAS_SAFETENSORS and os.path.exists(model_file):
-        weights = load_file(model_file, device="cpu")
-        model.load_state_dict(weights, strict=False)
 
     # Load optimizer state if available
     opt_file = os.path.join(checkpoint_dir, "optimizer_state.pt")

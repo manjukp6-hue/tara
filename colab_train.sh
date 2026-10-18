@@ -257,10 +257,31 @@ fi
 ACTIVE_CP_DIR="storage/models/checkpoints"
 mkdir -p "$ACTIVE_CP_DIR"
 
+# Auto-detect or attempt mounting Google Drive if running in Google Colab environment
+if [ ! -d "/content/drive/MyDrive" ] && [ ! -d "/content/drive/My Drive" ]; then
+    python3 -c "
+try:
+    from google.colab import drive
+    import os
+    if not os.path.exists('/content/drive/MyDrive') and not os.path.exists('/content/drive/My Drive'):
+        drive.mount('/content/drive', force_remount=False)
+except Exception:
+    pass
+" 2>/dev/null || true
+fi
+
 # Auto-link Google Drive if mounted under 'My Drive' with space
 if [ -d "/content/drive/My Drive" ] && [ ! -e "/content/drive/MyDrive" ]; then
     ln -s "/content/drive/My Drive" "/content/drive/MyDrive" 2>/dev/null || true
 fi
+
+# Determine resolved GDRIVE_CHECKPOINT_DIR
+if [ -d "/content/drive/MyDrive" ]; then
+    GDRIVE_CHECKPOINT_DIR="/content/drive/MyDrive/TARA_CHECKPOINTS"
+elif [ -d "/content/drive/My Drive" ]; then
+    GDRIVE_CHECKPOINT_DIR="/content/drive/My Drive/TARA_CHECKPOINTS"
+fi
+export GDRIVE_CHECKPOINT_DIR
 
 # Proactive Google Drive healing: if GDRIVE_CHECKPOINT_DIR is a broken shortcut, unlink and recreate real folder
 if [ -L "$GDRIVE_CHECKPOINT_DIR" ] && [ ! -d "$GDRIVE_CHECKPOINT_DIR" ]; then
@@ -270,6 +291,7 @@ fi
 if [ -d "/content/drive/MyDrive" ] || [ -d "/content/drive/My Drive" ]; then
     mkdir -p "$GDRIVE_CHECKPOINT_DIR" 2>/dev/null || true
 fi
+
 
 
 # If restarting in a fresh Colab session, clean stale temporary files and restore checkpoints from Google Drive mirror

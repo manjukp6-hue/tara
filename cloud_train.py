@@ -510,7 +510,7 @@ _pending_gdrive_sync: Optional[Tuple[str, str, str, List[str]]] = None
 
 def _resolve_gdrive_root() -> Optional[str]:
     """
-    Dynamically discovers the Google Drive checkpoint directory.
+    Dynamically discovers or auto-mounts the Google Drive checkpoint directory.
     Supports both /content/drive/MyDrive and /content/drive/My Drive (with space)
     as well as custom GDRIVE_CHECKPOINT_DIR paths.
     """
@@ -519,9 +519,22 @@ def _resolve_gdrive_root() -> Optional[str]:
         parent = os.path.dirname(env_dir)
         if os.path.exists(parent):
             return env_dir
+
     for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
         if os.path.exists(base):
             return os.path.join(base, "TARA_CHECKPOINTS")
+
+    # In Colab environments where drive was not pre-mounted, attempt non-interactive mount
+    if os.path.exists("/content") and not os.path.exists("/content/drive/MyDrive"):
+        try:
+            from google.colab import drive
+            drive.mount("/content/drive", force_remount=False)
+            for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
+                if os.path.exists(base):
+                    return os.path.join(base, "TARA_CHECKPOINTS")
+        except Exception:
+            pass
+
     return None
 
 
@@ -530,8 +543,9 @@ def _ensure_gdrive_target_dir(target_dir: str):
     Ensures target directory exists on Google Drive even if parent paths
     contain broken shortcuts or invalid symlinks. Automatically repairs them.
     """
-    gdrive_root = _resolve_gdrive_root() or os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
-
+    gdrive_root = _resolve_gdrive_root()
+    if not gdrive_root:
+        return
 
     # Check if gdrive_root exists but is not a valid directory (e.g. broken shortcut or stale file)
     if os.path.lexists(gdrive_root) and not os.path.isdir(gdrive_root):
@@ -571,6 +585,11 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
     global _pending_gdrive_sync
     while True:
         try:
+            gdrive_root = _resolve_gdrive_root()
+            if not gdrive_root:
+                print(f"[GDrive Notice] Google Drive not mounted; skipping backup for [{tag}].", flush=True)
+                break
+
             _ensure_gdrive_target_dir(target_dir)
             synced = 0
             t_start = time.time()
@@ -582,6 +601,7 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                         continue
                     _stream_copy_file(src, dst)
                     synced += 1
+
 
             # Post-sync verification and obsolete file cleanup in Google Drive target directory:
             if os.path.exists(target_dir):

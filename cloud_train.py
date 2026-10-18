@@ -508,11 +508,52 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
 _pending_gdrive_sync: Optional[Tuple[str, str, str, List[str]]] = None
 
 
+def _ensure_gdrive_target_dir(target_dir: str):
+    """
+    Ensures target directory exists on Google Drive even if parent paths
+    contain broken shortcuts or invalid symlinks. Automatically repairs them.
+    """
+    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
+
+    # Check if gdrive_root exists but is not a valid directory (e.g. broken shortcut or stale file)
+    if os.path.lexists(gdrive_root) and not os.path.isdir(gdrive_root):
+        try:
+            print(f"[GDrive Auto-Repair] Removing non-directory/broken shortcut at {gdrive_root}", flush=True)
+            if os.path.islink(gdrive_root):
+                os.unlink(gdrive_root)
+            else:
+                os.remove(gdrive_root)
+        except Exception:
+            pass
+
+    dup_shortcut = f"{gdrive_root} (1)"
+    if os.path.lexists(dup_shortcut):
+        try:
+            if os.path.islink(dup_shortcut):
+                os.unlink(dup_shortcut)
+            elif os.path.isfile(dup_shortcut):
+                os.remove(dup_shortcut)
+        except Exception:
+            pass
+
+    try:
+        os.makedirs(gdrive_root, exist_ok=True)
+        os.makedirs(target_dir, exist_ok=True)
+    except OSError:
+        try:
+            import subprocess
+            subprocess.run(["mkdir", "-p", target_dir], check=False, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+        os.makedirs(target_dir, exist_ok=True)
+
+
+
 def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: List[str]):
     global _pending_gdrive_sync
     while True:
         try:
-            os.makedirs(target_dir, exist_ok=True)
+            _ensure_gdrive_target_dir(target_dir)
             synced = 0
             t_start = time.time()
             for fname in file_list:

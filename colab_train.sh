@@ -14,8 +14,9 @@ echo "==========================================================================
 # 0. Proactive Disk Hygiene: Reclaim disk space from stale scratch files, caches, and unused debug builds
 echo "[DISK CLEANUP] Reclaiming disk space and stopping any stale processes..."
 killall -9 tara_training_stages tara_gpu_step_test manual_trainer 2>/dev/null || true
-rm -rf /tmp/tara_moments_* /tmp/tara_* /tmp/tmp* /tmp/* 2>/dev/null || true
-rm -rf /root/.julia /content/sample_data /root/.config/Google/DriveFS/*/content_cache/* 2>/dev/null || true
+rm -rf /tmp/tara_moments_* /tmp/tara_* /tmp/tmp_tara_* 2>/dev/null || true
+rm -rf /root/.julia /content/sample_data 2>/dev/null || true
+
 rm -rf target/debug target/release/deps target/release/build target/release/incremental 2>/dev/null || true
 rm -rf storage/checkpoints/gpu_step_test_parity 2>/dev/null || true
 rm -rf /root/.cache/huggingface /root/.cache/pip /root/.cache/torch /root/.cargo/registry/cache 2>/dev/null || true
@@ -256,14 +257,20 @@ fi
 ACTIVE_CP_DIR="storage/models/checkpoints"
 mkdir -p "$ACTIVE_CP_DIR"
 
+# Auto-link Google Drive if mounted under 'My Drive' with space
+if [ -d "/content/drive/My Drive" ] && [ ! -e "/content/drive/MyDrive" ]; then
+    ln -s "/content/drive/My Drive" "/content/drive/MyDrive" 2>/dev/null || true
+fi
+
 # Proactive Google Drive healing: if GDRIVE_CHECKPOINT_DIR is a broken shortcut, unlink and recreate real folder
 if [ -L "$GDRIVE_CHECKPOINT_DIR" ] && [ ! -d "$GDRIVE_CHECKPOINT_DIR" ]; then
     echo "[GDRIVE AUTO-REPAIR] Removing broken shortcut at $GDRIVE_CHECKPOINT_DIR..."
     rm -f "$GDRIVE_CHECKPOINT_DIR" "${GDRIVE_CHECKPOINT_DIR} (1)" 2>/dev/null || true
 fi
-if [ -d "/content/drive/MyDrive" ]; then
+if [ -d "/content/drive/MyDrive" ] || [ -d "/content/drive/My Drive" ]; then
     mkdir -p "$GDRIVE_CHECKPOINT_DIR" 2>/dev/null || true
 fi
+
 
 # If restarting in a fresh Colab session, clean stale temporary files and restore checkpoints from Google Drive mirror
 if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then

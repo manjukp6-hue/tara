@@ -508,12 +508,30 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
 _pending_gdrive_sync: Optional[Tuple[str, str, str, List[str]]] = None
 
 
+def _resolve_gdrive_root() -> Optional[str]:
+    """
+    Dynamically discovers the Google Drive checkpoint directory.
+    Supports both /content/drive/MyDrive and /content/drive/My Drive (with space)
+    as well as custom GDRIVE_CHECKPOINT_DIR paths.
+    """
+    env_dir = os.environ.get("GDRIVE_CHECKPOINT_DIR")
+    if env_dir:
+        parent = os.path.dirname(env_dir)
+        if os.path.exists(parent):
+            return env_dir
+    for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
+        if os.path.exists(base):
+            return os.path.join(base, "TARA_CHECKPOINTS")
+    return None
+
+
 def _ensure_gdrive_target_dir(target_dir: str):
     """
     Ensures target directory exists on Google Drive even if parent paths
     contain broken shortcuts or invalid symlinks. Automatically repairs them.
     """
-    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
+    gdrive_root = _resolve_gdrive_root() or os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
+
 
     # Check if gdrive_root exists but is not a valid directory (e.g. broken shortcut or stale file)
     if os.path.lexists(gdrive_root) and not os.path.isdir(gdrive_root):
@@ -606,9 +624,10 @@ def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
     Single-worker lock with pending queue ensures the latest checkpoint is ALWAYS uploaded.
     """
     global _gdrive_sync_thread, _pending_gdrive_sync
-    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
-    if not os.path.exists("/content/drive/MyDrive"):
+    gdrive_root = _resolve_gdrive_root()
+    if not gdrive_root:
         return
+
 
     # If output_dir is already inside gdrive_root, do not copy to itself
     try:
@@ -745,8 +764,8 @@ def clean_stale_checkpoint_artifacts(checkpoint_dir: str, is_best: bool = False)
                 pass
 
     # 2. Clean Google Drive mirror
-    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
-    if os.path.exists(gdrive_root):
+    gdrive_root = _resolve_gdrive_root()
+    if gdrive_root and os.path.exists(gdrive_root):
         try:
             if "checkpoints" in checkpoint_dir:
                 rel = checkpoint_dir.split("checkpoints", 1)[1].lstrip(r"\/")
@@ -770,37 +789,23 @@ def clean_stale_checkpoint_artifacts(checkpoint_dir: str, is_best: bool = False)
         except Exception:
             pass
 
-    # 3. Proactively clean Google DriveFS local content_cache to eliminate local disk accumulation
-    drivefs_root = "/root/.config/Google/DriveFS"
-    if os.path.exists(drivefs_root):
-        try:
-            import glob
-            for cp in glob.glob(f"{drivefs_root}/*/content_cache/*"):
-                try:
-                    if os.path.isfile(cp) or os.path.islink(cp):
-                        os.remove(cp)
-                    elif os.path.isdir(cp):
-                        shutil.rmtree(cp, ignore_errors=True)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-    # 4. Clean system temp & transient pip/huggingface scratch files
-    for tmp_target in ["/tmp", "/var/tmp", "/root/.cache/pip"]:
+    # 3. Clean temporary files strictly belonging to TARA in system temp dirs (never touch system sockets or DriveFS state)
+    for tmp_target in ["/tmp", "/var/tmp"]:
         if os.path.exists(tmp_target):
             try:
                 for item in os.listdir(tmp_target):
-                    ipath = os.path.join(tmp_target, item)
-                    try:
-                        if os.path.isfile(ipath) or os.path.islink(ipath):
-                            os.remove(ipath)
-                        elif os.path.isdir(ipath):
-                            shutil.rmtree(ipath, ignore_errors=True)
-                    except Exception:
-                        pass
+                    if item.startswith("tara_") or item.startswith("tmp_tara_") or item.startswith("tara_moments_"):
+                        ipath = os.path.join(tmp_target, item)
+                        try:
+                            if os.path.isfile(ipath) or os.path.islink(ipath):
+                                os.remove(ipath)
+                            elif os.path.isdir(ipath):
+                                shutil.rmtree(ipath, ignore_errors=True)
+                        except Exception:
+                            pass
             except Exception:
                 pass
+
 
 
 def clean_previous_training_checkpoints(previous_stage_dir: str, current_checkpoint_dir: str):
@@ -835,8 +840,8 @@ def clean_previous_training_checkpoints(previous_stage_dir: str, current_checkpo
                     print(f"[Hygiene Notice] Could not remove {p}: {e}")
 
     # Clean Google Drive mirror of previous stage
-    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
-    if os.path.exists(gdrive_root):
+    gdrive_root = _resolve_gdrive_root()
+    if gdrive_root and os.path.exists(gdrive_root):
         prev_basename = os.path.basename(previous_stage_dir)
         gdrive_prev = os.path.join(gdrive_root, prev_basename)
         if os.path.exists(gdrive_prev):
@@ -1014,8 +1019,8 @@ def promote_checkpoint(
     print(f"[Promotion] Successfully promoted clean inference model ({copied} files) -> {promoted_dir}", flush=True)
 
     # Mirror promoted model to Google Drive if active
-    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
-    if os.path.exists("/content/drive/MyDrive"):
+    gdrive_root = _resolve_gdrive_root()
+    if gdrive_root:
         gdrive_promoted = os.path.join(gdrive_root, os.path.basename(promoted_dir))
         os.makedirs(gdrive_promoted, exist_ok=True)
         for art in artifacts:
@@ -1046,8 +1051,8 @@ def try_resume_from_checkpoint(
         checkpoint_dir,
         os.path.join(checkpoint_dir, "best_checkpoint"),
     ]
-    gdrive_root = os.environ.get("GDRIVE_CHECKPOINT_DIR", "/content/drive/MyDrive/TARA_CHECKPOINTS")
-    if os.path.exists("/content/drive/MyDrive"):
+    gdrive_root = _resolve_gdrive_root()
+    if gdrive_root:
         stage_name = os.path.basename(checkpoint_dir)
         candidate_dirs.extend([
             os.path.join(gdrive_root, stage_name),

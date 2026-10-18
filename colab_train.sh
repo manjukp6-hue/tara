@@ -149,7 +149,11 @@ MAIN_DS_DIR="storage/datasets/main_dataset_v2"
 
 # 3. Ingest Datasets for Pretraining
 mkdir -p "$MAIN_DS_DIR"
-if [ ! -f "$MAIN_DS_DIR/tara_shard_001.jsonl" ]; then
+LOCAL_DS_COUNT=$(find "$MAIN_DS_DIR" -maxdepth 1 \( -name "*.jsonl" -o -name "*.parquet" \) 2>/dev/null | wc -l)
+
+if [ "${SKIP_HF_DOWNLOAD:-0}" = "1" ] || [ "$LOCAL_DS_COUNT" -ge 1 ]; then
+    echo "=== [DATASET INGESTION: SKIPPED] Dataset already present locally ($LOCAL_DS_COUNT shard(s) found in $MAIN_DS_DIR). Zero downloads needed! ==="
+else
     echo "=== [DATASET INGESTION: STREAMING PRETRAINING SHARDS] ==="
     HF_DATASET_SOURCE="${HF_DATASET_REPO:-${HF_REPO:-manjukp6/tara}}"
     if [ -n "$HF_DATASET_SOURCE" ]; then
@@ -171,7 +175,10 @@ fi
 SCALE_DS_DIR="storage/datasets/main_dataset_v1"
 if [ "${DOWNLOAD_V1_NOW:-0}" = "1" ]; then
     mkdir -p "$SCALE_DS_DIR"
-    if [ ! -f "$SCALE_DS_DIR/tara_canonical_shard_000.jsonl" ]; then
+    LOCAL_V1_COUNT=$(find "$SCALE_DS_DIR" -maxdepth 1 -name "*.jsonl" 2>/dev/null | wc -l)
+    if [ "$LOCAL_V1_COUNT" -ge 1 ]; then
+        echo "=== [DATASET V1: SKIPPED] Main Dataset V1 already present ($LOCAL_V1_COUNT shard(s)). Skipping download! ==="
+    else
         echo "=== [DATASET INGESTION: STREAMING MAIN DATASET V1 (STAGE 4) SHARDS] ==="
         HF_DATASET_SOURCE="${HF_DATASET_REPO:-${HF_REPO:-manjukp6/tara}}"
         if [ -n "$HF_DATASET_SOURCE" ]; then
@@ -206,8 +213,11 @@ fi
 shopt -u nullglob
 
 # Verify Neural Model Candidate weights exist on disk
-NEURAL_SHARDS=(storage/models/tara_candidate_v1/*.safetensors)
-if [ ! -e "${NEURAL_SHARDS[0]:-}" ]; then
+LOCAL_MODEL_COUNT=$(find storage/models/tara_candidate_v1 -maxdepth 1 -name "*.safetensors" 2>/dev/null | wc -l)
+
+if [ "${SKIP_HF_DOWNLOAD:-0}" = "1" ] || [ "$LOCAL_MODEL_COUNT" -ge 1 ]; then
+    echo "=== [MODEL INGESTION: SKIPPED] Candidate Neural Model already present ($LOCAL_MODEL_COUNT shard(s) in storage/models/tara_candidate_v1). Zero downloads needed! ==="
+else
     echo "=== [MODEL INGESTION: STREAMING NEURAL MODEL V1 FROM HUGGING FACE] ==="
     echo "[HF DOWNLOAD] Downloading neural_model_v1/* from https://huggingface.co/$HF_MODEL_SOURCE..."
     if download_hf "$HF_MODEL_SOURCE" "model" "neural_model_v1/*" "storage/models/tara_candidate_v1"; then
@@ -232,8 +242,11 @@ if [ ! -e "${NEURAL_SHARDS[0]:-}" ]; then
 fi
 
 # Verify World Model weights exist on disk
-WORLD_SHARDS=(storage/models/tara_world_model/*.safetensors)
-if [ ! -e "${WORLD_SHARDS[0]:-}" ]; then
+LOCAL_WORLD_COUNT=$(find storage/models/tara_world_model -maxdepth 1 -name "*.safetensors" 2>/dev/null | wc -l)
+
+if [ "${SKIP_HF_DOWNLOAD:-0}" = "1" ] || [ "$LOCAL_WORLD_COUNT" -ge 1 ]; then
+    echo "=== [WORLD MODEL INGESTION: SKIPPED] World Model already present ($LOCAL_WORLD_COUNT shard(s) in storage/models/tara_world_model). Zero downloads needed! ==="
+else
     echo "=== [MODEL INGESTION: STREAMING WORLD MODEL V1 FROM HUGGING FACE] ==="
     echo "[HF DOWNLOAD] Downloading world_model_v1/* from https://huggingface.co/$HF_MODEL_SOURCE..."
     if download_hf "$HF_MODEL_SOURCE" "model" "world_model_v1/*" "storage/models/tara_world_model"; then

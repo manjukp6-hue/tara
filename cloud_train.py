@@ -40,7 +40,7 @@ if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
 
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, IterableDataset
 
 # Optional imports with friendly fallback
 try:
@@ -81,9 +81,21 @@ class TaraNativeTokenizer:
         self.pad_id = vocab_map.get("<|pad|>", vocab_map.get("<pad>", 0))
         self.eos_id = vocab_map.get("<|eos|>", vocab_map.get("<eos>", 1))
 
+    def get_vocab_size(self) -> int:
+        return self.vocab_size
+
     @classmethod
     def from_file(cls, path: str):
-        # 1. First check if it is TARA's native format {"vocab": {...}} or direct dict
+        # 1. Primary: Use high-speed native Hugging Face C/Rust tokenizer if available
+        if HAS_TOKENIZERS:
+            try:
+                tok = HFTokenizer.from_file(path)
+                print("[Tokenizer] Ultra-fast native Hugging Face C/Rust tokenizer backend activated!")
+                return tok
+            except Exception as e:
+                print(f"[Tokenizer Notice] HFTokenizer.from_file fallback: {e}")
+
+        # 2. Fallback: Parse vocab map for pure Python fallback
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -96,12 +108,6 @@ class TaraNativeTokenizer:
         except Exception:
             pass
 
-        # 2. Fallback to Hugging Face Tokenizer if available
-        if HAS_TOKENIZERS:
-            try:
-                return HFTokenizer.from_file(path)
-            except Exception:
-                pass
         raise ValueError(f"Could not load valid tokenizer from {path}")
 
     def encode(self, text: str) -> TokenizerOutput:
@@ -307,69 +313,96 @@ class TaraForCausalLM(nn.Module):
 
 
 # =============================================================================
-# 2. Dataset Ingestion & Shard Loader
+# 2. High-Throughput Streaming Dataset (Zero Memory & Instant Startup)
 # =============================================================================
 
-class TaraJsonlDataset(Dataset):
-    def __init__(self, file_paths: List[str], tokenizer: Any, max_seq_len: int = 256, max_samples: int = 0):
-        self.samples: List[Tuple[List[int], int]] = []
+class TaraStreamingJsonlDataset(IterableDataset):
+    """
+    High-Throughput Zero-Memory Streaming Dataset for arbitrary N shards.
+    Streams JSONL records on-the-fly directly to the GPU without loading
+    millions of samples into RAM, starting training in 0 seconds.
+    """
+    def __init__(self, file_paths: List[str], tokenizer: Any, max_seq_len: int = 256, max_samples: int = 0, shuffle_shards: bool = True):
+        self.file_paths = list(file_paths)
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
+        self.max_samples = max_samples
+        self.shuffle_shards = shuffle_shards
+        print(f"[Dataset] Initialized streaming pipeline across {len(self.file_paths)} shard(s) (zero RAM footprint, instant start)...")
 
-        print(f"[Dataset] Loading records from {len(file_paths)} shard file(s)...")
-        for fp in file_paths:
+    def __iter__(self):
+        import random
+        fps = list(self.file_paths)
+        if self.shuffle_shards:
+            random.shuffle(fps)
+
+        emitted = 0
+        buffer = []
+        buffer_size = 256
+
+        for fp in fps:
             if not os.path.exists(fp):
                 continue
-            with open(fp, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        record = json.loads(line)
-                        inp_text = record.get("input", "")
-                        out_text = record.get("output", "")
-                        raw_text = record.get("text", "")
+            try:
+                with open(fp, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                            inp_text = record.get("input", "")
+                            out_text = record.get("output", "")
+                            raw_text = record.get("text", "")
 
-                        if not inp_text and not out_text and raw_text:
-                            # Pretraining text schema
-                            full_ids = tokenizer.encode(raw_text).ids
-                            target_start = 0
-                        elif inp_text or out_text:
-                            # Instruction/Curriculum input-output schema
-                            enc_inp = tokenizer.encode(inp_text).ids
-                            enc_out = tokenizer.encode(out_text).ids
-                            target_start = len(enc_inp)
-                            full_ids = enc_inp + enc_out
-                        else:
+                            if not inp_text and not out_text and raw_text:
+                                enc = self.tokenizer.encode(raw_text)
+                                full_ids = enc.ids if hasattr(enc, "ids") else list(enc)
+                                target_start = 0
+                            elif inp_text or out_text:
+                                enc_i = self.tokenizer.encode(inp_text)
+                                enc_o = self.tokenizer.encode(out_text)
+                                enc_inp = enc_i.ids if hasattr(enc_i, "ids") else list(enc_i)
+                                enc_out = enc_o.ids if hasattr(enc_o, "ids") else list(enc_o)
+                                target_start = len(enc_inp)
+                                full_ids = enc_inp + enc_out
+                            else:
+                                continue
+
+                            if len(full_ids) > self.max_seq_len:
+                                full_ids = full_ids[:self.max_seq_len]
+
+                            if len(full_ids) >= 4:
+                                input_ids = torch.tensor(full_ids, dtype=torch.long)
+                                labels = input_ids.clone()
+                                eff_start = min(target_start, len(full_ids))
+                                labels[:eff_start] = -100
+
+                                buffer.append((input_ids, labels))
+                                if len(buffer) >= buffer_size:
+                                    idx = random.randrange(len(buffer))
+                                    yield buffer.pop(idx)
+                                    emitted += 1
+                                    if 0 < self.max_samples <= emitted:
+                                        return
+                        except Exception:
                             continue
 
-                        if len(full_ids) > self.max_seq_len:
-                            full_ids = full_ids[:self.max_seq_len]
+                if 0 < self.max_samples <= emitted:
+                    break
+            except Exception:
+                continue
 
-                        if len(full_ids) >= 4:
-                            self.samples.append((full_ids, target_start))
+        while buffer:
+            idx = random.randrange(len(buffer))
+            yield buffer.pop(idx)
+            emitted += 1
+            if 0 < self.max_samples <= emitted:
+                return
 
-                        if 0 < max_samples <= len(self.samples):
-                            break
-                    except Exception:
-                        continue
 
-            if 0 < max_samples <= len(self.samples):
-                break
-
-        print(f"[Dataset] Successfully ingested {len(self.samples)} valid sequence pairs.")
-
-    def __len__(self) -> int:
-        return len(self.samples)
-
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        ids, target_start = self.samples[idx]
-        input_ids = torch.tensor(ids, dtype=torch.long)
-        labels = input_ids.clone()
-        eff_start = min(target_start, len(ids))
-        labels[:eff_start] = -100
-        return input_ids, labels
+# Backward-compatibility alias
+TaraJsonlDataset = TaraStreamingJsonlDataset
 
 
 def collate_fn(batch):
@@ -957,7 +990,8 @@ def main():
         sys.exit(1)
     try:
         tokenizer = TaraNativeTokenizer.from_file(tok_path)
-        print(f"[Tokenizer] Successfully loaded TARA Tokenizer ({tokenizer.vocab_size:,} vocabulary tokens)")
+        vocab_size = tokenizer.get_vocab_size() if hasattr(tokenizer, "get_vocab_size") else getattr(tokenizer, "vocab_size", config.get("vocab_size", 100000))
+        print(f"[Tokenizer] Successfully loaded TARA Tokenizer ({vocab_size:,} vocabulary tokens)")
     except Exception as e:
         print(f"[Error] Failed to load tokenizer from {tok_path}: {e}")
         sys.exit(1)
@@ -989,14 +1023,10 @@ def main():
             filtered_shards.append(sf)
 
     selected_shards = filtered_shards if args.max_shards <= 0 else filtered_shards[:args.max_shards]
-    print(f"[Dataset] Discovered {len(shard_files)} shards (filtered to {len(filtered_shards)} eligible shards); loading {len(selected_shards)} shard(s)...")
+    print(f"[Dataset] Discovered {len(shard_files)} shards (filtered to {len(filtered_shards)} eligible shards); streaming {len(selected_shards)} shard(s)...")
 
-    dataset = TaraJsonlDataset(selected_shards, tokenizer, max_seq_len=args.max_seq_len, max_samples=args.max_samples)
-    if len(dataset) == 0:
-        print("[Error] Ingested 0 dataset samples. Aborting.")
-        sys.exit(1)
-
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn)
+    dataset = TaraStreamingJsonlDataset(selected_shards, tokenizer, max_seq_len=args.max_seq_len, max_samples=args.max_samples)
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=collate_fn)
 
     # 7. Optimizer Selection (Auto-detects Tesla T4 <=16GB to enable 8-bit AdamW)
     use_8bit = False
@@ -1088,7 +1118,7 @@ def main():
             accum_ce += ce_loss.item() if ce_loss is not None else loss.item()
             accum_aux += aux_loss.item() if aux_loss is not None else 0.0
 
-            if (batch_idx + 1) % args.grad_accum == 0 or (batch_idx + 1) == len(dataloader):
+            if (batch_idx + 1) % args.grad_accum == 0:
                 scaler.unscale_(optimizer)
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 

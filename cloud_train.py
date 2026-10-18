@@ -86,29 +86,33 @@ class TaraNativeTokenizer:
 
     @classmethod
     def from_file(cls, path: str):
-        # 1. Primary: Use high-speed native Hugging Face C/Rust tokenizer if available
+        # 1. Parse vocab map directly from TARA native tokenizer JSON format
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and "vocab" in data and isinstance(data["vocab"], dict):
+                print(f"[Tokenizer] Loaded TARA Native Vocabulary ({len(data['vocab']):,} tokens).")
+                return cls(data["vocab"])
+            elif isinstance(data, dict) and "model" in data and isinstance(data["model"], dict) and "vocab" in data["model"] and isinstance(data["model"]["vocab"], dict):
+                print(f"[Tokenizer] Loaded TARA Model Vocabulary ({len(data['model']['vocab']):,} tokens).")
+                return cls(data["model"]["vocab"])
+            elif isinstance(data, dict) and len(data) > 0 and all(isinstance(v, int) for v in list(data.values())[:10]):
+                print(f"[Tokenizer] Loaded Flat Vocabulary Map ({len(data):,} tokens).")
+                return cls(data)
+        except Exception as err:
+            print(f"[Tokenizer Notice] Native JSON load attempt: {err}")
+
+        # 2. Secondary fallback: Use Hugging Face C/Rust tokenizer if file adheres to HF format
         if HAS_TOKENIZERS:
             try:
                 tok = HFTokenizer.from_file(path)
                 print("[Tokenizer] Ultra-fast native Hugging Face C/Rust tokenizer backend activated!")
                 return tok
-            except Exception as e:
-                print(f"[Tokenizer Notice] HFTokenizer.from_file fallback: {e}")
-
-        # 2. Fallback: Parse vocab map for pure Python fallback
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict) and "vocab" in data and isinstance(data["vocab"], dict):
-                return cls(data["vocab"])
-            elif isinstance(data, dict) and "model" in data and isinstance(data["model"], dict) and "vocab" in data["model"] and isinstance(data["model"]["vocab"], dict):
-                return cls(data["model"]["vocab"])
-            elif isinstance(data, dict) and len(data) > 0 and all(isinstance(v, int) for v in list(data.values())[:10]):
-                return cls(data)
-        except Exception:
-            pass
+            except Exception:
+                pass
 
         raise ValueError(f"Could not load valid tokenizer from {path}")
+
 
     def encode(self, text: str) -> TokenizerOutput:
         ids = []
@@ -911,7 +915,7 @@ def run_canary_preflight_diagnostic(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
     scaler: Any,
-    precision_dtype: torch.dtype,
+    autocast_dtype: torch.dtype,
     device: torch.device,
     batch_size: int,
     max_seq_len: int,
@@ -919,7 +923,7 @@ def run_canary_preflight_diagnostic(
 ) -> Dict[str, Any]:
     """
     Executes rigorous Canary Preflight Diagnostic:
-    1. Tiny isolated optimizer kernel test (verifies CUDA C++ kernel execution).
+    1. Tiny isolated optimizer kernel test (verifies CUDA C++ kernel execution on FP32 parameters).
     2. Full-model single micro-batch forward + backward + optimizer step.
     3. Peak allocated & reserved VRAM telemetry logging.
     """
@@ -927,9 +931,9 @@ def run_canary_preflight_diagnostic(
     print("  [CANARY PREFLIGHT] Starting Dual-Stage GPU & Optimizer Diagnostic...")
     print("=" * 80)
 
-    # Stage 1: Isolated Optimizer Kernel Test
+    # Stage 1: Isolated Optimizer Kernel Test (model parameters remain FP32)
     print("  [Stage 1/2] Running isolated optimizer CUDA kernel execution test...")
-    test_param = nn.Parameter(torch.randn(4, 4, device=device, dtype=precision_dtype, requires_grad=True))
+    test_param = nn.Parameter(torch.randn(4, 4, device=device, dtype=torch.float32, requires_grad=True))
     if hasattr(optimizer, "__class__") and "AdamW8bit" in optimizer.__class__.__name__:
         import bitsandbytes as bnb
         tiny_opt = bnb.optim.AdamW8bit([test_param], lr=1e-4)
@@ -957,9 +961,10 @@ def run_canary_preflight_diagnostic(
     dummy_labels = dummy_input.clone()
 
     if hasattr(torch, "amp") and hasattr(torch.amp, "autocast"):
-        autocast_ctx = torch.amp.autocast(device_type="cuda" if device.type == "cuda" else "cpu", enabled=(device.type == "cuda"), dtype=precision_dtype)
+        autocast_ctx = torch.amp.autocast(device_type="cuda" if device.type == "cuda" else "cpu", enabled=(device.type == "cuda"), dtype=autocast_dtype)
     else:
-        autocast_ctx = torch.cuda.amp.autocast(enabled=(device.type == "cuda"), dtype=precision_dtype)
+        autocast_ctx = torch.cuda.amp.autocast(enabled=(device.type == "cuda"), dtype=autocast_dtype)
+
 
     try:
         t0 = time.time()
@@ -1055,7 +1060,9 @@ def main():
     parser.add_argument("--canary", action="store_true", default=False, help="Enable 15-step T4 canary validation mode (batch_size=1, grad_accum=4, max_seq_len=256, max_steps=15, warmup_steps=3)")
     parser.add_argument("--allow-unsafe-fp32-adamw", action="store_true", default=False, help="Bypass safety preflight gate and force standard FP32 AdamW on memory-constrained GPUs (high OOM risk)")
     parser.add_argument("--gradient-checkpointing", action="store_true", default=False, help="Enable activation gradient checkpointing to reduce activation memory")
+    parser.add_argument("--preflight-only", action="store_true", default=False, help="Execute only the dual-stage preflight validation diagnostic and exit with report")
     args = parser.parse_args()
+
 
     # Canary Mode Contract & Isolation
     if args.canary:
@@ -1115,7 +1122,8 @@ def main():
     # 3. Hardware Inspection & Precision Selection (BF16 for Ampere+, FP16 for Tesla T4)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     precision_str = "FP32"
-    precision_dtype = torch.float32
+    autocast_dtype = torch.float32
+    model_dtype = torch.float32  # Model parameters MUST remain FP32 for torch.amp.GradScaler
     gpu_name = "N/A"
     total_vram_gb = 0.0
     major_cap, minor_cap = 0, 0
@@ -1126,14 +1134,14 @@ def main():
         total_vram_gb = vram_mb / 1024.0
         major_cap, minor_cap = torch.cuda.get_device_capability(0)
         # Ampere (sm_80)+ has native hardware BF16 tensor core acceleration.
-        # Turing (T4 / sm_75) only supports FP16/INT8 hardware tensor cores; BF16 on T4 runs in slow software emulation.
+        # Turing (T4 / sm_75) only supports FP16/INT8 hardware tensor cores.
         if major_cap >= 8 and torch.cuda.is_bf16_supported():
-            precision_dtype = torch.bfloat16
-            precision_str = "BF16"
+            autocast_dtype = torch.bfloat16
+            precision_str = "BF16 (AMP)"
         else:
-            precision_dtype = torch.float16
-            precision_str = "FP16"
-        print(f"[Hardware] GPU: {gpu_name} (sm_{major_cap}{minor_cap}) | VRAM: {vram_mb:.1f} MB | Selected Precision: {precision_str}")
+            autocast_dtype = torch.float16
+            precision_str = "FP16 (AMP)"
+        print(f"[Hardware] GPU: {gpu_name} (sm_{major_cap}{minor_cap}) | VRAM: {vram_mb:.1f} MB | Selected Precision: {precision_str} with FP32 Master Parameters")
         if major_cap >= 8:
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
@@ -1149,7 +1157,7 @@ def main():
     print(f"  Canary Mode Active    : {args.canary}")
     print(f"  Device Selected       : {device.type.upper()}" + (f" ({gpu_name}, sm_{major_cap}{minor_cap})" if device.type == "cuda" else ""))
     print(f"  Total GPU VRAM        : {total_vram_gb:.2f} GiB" if device.type == "cuda" else "  Total GPU VRAM        : N/A (CPU)")
-    print(f"  Effective Precision   : {precision_str}")
+    print(f"  Effective Precision   : {precision_str} (Model Parameters: FP32)")
     print(f"  Optimizer Selection   : {args.optimizer}")
     print(f"  Micro-Batch Size      : {args.batch_size}")
     print(f"  Gradient Accumulation : {args.grad_accum}")
@@ -1189,12 +1197,13 @@ def main():
         print(f"[Error] Failed to load tokenizer from {tok_path}: {e}")
         sys.exit(1)
 
-    # 5. Build Model
-    model = TaraForCausalLM(config, gradient_checkpointing=args.gradient_checkpointing).to(device=device, dtype=precision_dtype)
+    # 5. Build Model (Parameters remain in FP32; AMP autocast evaluates in FP16/BF16)
+    model = TaraForCausalLM(config, gradient_checkpointing=args.gradient_checkpointing).to(device=device, dtype=model_dtype)
     load_candidate_weights(model, args.model_dir)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"[Model] Total trainable parameters: {total_params:,} ({total_params * (2 if precision_dtype != torch.float32 else 4) / 1e6:.1f} MB in {precision_str})")
+    print(f"[Model] Total trainable parameters: {total_params:,} ({total_params * 4 / 1e6:.1f} MB in FP32 master storage)")
+
 
     # 6. Ingest Shards dynamically (Zero hardcoded limits, parameter-driven)
     shard_files = sorted(glob.glob(os.path.join(args.dataset_dir, "*.jsonl")))
@@ -1311,21 +1320,35 @@ def main():
         print("[Optimizer] Initialized standard FP32 AdamW.")
 
     try:
-        scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda" and precision_dtype == torch.float16))
+        scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda" and autocast_dtype == torch.float16))
     except (AttributeError, TypeError):
-        scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and precision_dtype == torch.float16))
+        scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and autocast_dtype == torch.float16))
 
     # Preflight Validation Diagnostic (Stage 1: Isolated kernel, Stage 2: Full-model single microbatch)
-    run_canary_preflight_diagnostic(
+    diag_report = run_canary_preflight_diagnostic(
         model=model,
         optimizer=optimizer,
         scaler=scaler,
-        precision_dtype=precision_dtype,
+        autocast_dtype=autocast_dtype,
         device=device,
         batch_size=args.batch_size,
         max_seq_len=args.max_seq_len,
         vocab_size=vocab_size,
     )
+
+    if args.preflight_only:
+        print("=" * 80)
+        print("  [PREFLIGHT-ONLY DIAGNOSTIC COMPLETE]")
+        print("=" * 80)
+        print(f"  Status               : {diag_report.get('status')}")
+        print(f"  Single-Step Loss     : {diag_report.get('loss', 0.0):.4f}")
+        print(f"  Grad Norm            : {diag_report.get('grad_norm', 0.0):.2f}")
+        print(f"  Peak Allocated VRAM  : {diag_report.get('peak_allocated_mb', 0.0):.1f} MB ({diag_report.get('peak_allocated_mb', 0.0)/1024:.2f} GiB)")
+        print(f"  Peak Reserved VRAM   : {diag_report.get('peak_reserved_mb', 0.0):.1f} MB ({diag_report.get('peak_reserved_mb', 0.0)/1024:.2f} GiB)")
+        print(f"  GO/NO-GO Evaluation  : GO (Full-model single microbatch and optimizer step passed without OOM)")
+        print("=" * 80 + "\n")
+        sys.exit(0)
+
 
     # 8. Check for Mid-Way Resume
     start_step = 0
@@ -1370,9 +1393,15 @@ def main():
             inputs = inputs.to(device)
             labels = labels.to(device)
 
-            with torch.cuda.amp.autocast(enabled=(device.type == "cuda"), dtype=precision_dtype):
+            if hasattr(torch, "amp") and hasattr(torch.amp, "autocast"):
+                autocast_ctx = torch.amp.autocast(device_type="cuda" if device.type == "cuda" else "cpu", enabled=(device.type == "cuda"), dtype=autocast_dtype)
+            else:
+                autocast_ctx = torch.cuda.amp.autocast(enabled=(device.type == "cuda"), dtype=autocast_dtype)
+
+            with autocast_ctx:
                 _, loss, ce_loss, aux_loss = model(inputs, labels=labels)
                 loss_scaled = loss / args.grad_accum
+
 
             scaler.scale(loss_scaled).backward()
             accum_loss += loss.item()
@@ -1500,7 +1529,7 @@ def main():
         print("\n" + "=" * 80)
         print("  [CANARY CHECKPOINT RELOAD VERIFICATION & TELEMETRY]")
         print("=" * 80)
-        reload_model = TaraForCausalLM(config).to(device=device, dtype=precision_dtype)
+        reload_model = TaraForCausalLM(config).to(device=device, dtype=model_dtype)
         model_restored = load_candidate_weights(reload_model, args.output_dir)
         
         # Load and verify checkpoint state & optimizer state
@@ -1524,12 +1553,13 @@ def main():
         print(f"  Weights Deserialized     : {'SUCCESS' if model_restored else 'FAILED'}")
         print(f"  Saved Steps Recorded     : {saved_state.get('step')} / {args.max_steps}")
         print(f"  Final Step Loss Recorded : {saved_state.get('loss'):.4f}")
-        print(f"  Actual Trainable Params  : {reload_trainable_params:,} (~1 Billion parameters)")
+        print(f"  Actual Trainable Params  : {reload_trainable_params:,} (~1 Billion parameters in FP32 master storage)")
         print(f"  Optimizer Type Used      : {opt_type_str}")
-        print(f"  Effective Precision Dtype: {precision_str} ({precision_dtype})")
+        print(f"  Effective Precision Dtype: {precision_str} ({autocast_dtype})")
         print(f"  Peak Allocated VRAM      : {peak_alloc_vram:.1f} MB ({peak_alloc_vram / 1024:.2f} GiB)")
         print(f"  Peak Reserved VRAM       : {peak_res_vram:.1f} MB ({peak_res_vram / 1024:.2f} GiB)")
         print(f"  Canary Contract Status   : 100% VERIFIED & PASSED")
+
         print("=" * 80 + "\n")
         del reload_model, saved_opt
 

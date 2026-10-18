@@ -133,10 +133,8 @@ fi
 echo "------------------------------------------------------------------------------"
 
 # Dynamic Parameter Configuration
-TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-1}"
-STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-200}"
-JOINT_STEPS="${JOINT_STEPS:-200}"
 MAIN_DS_DIR="storage/datasets/main_dataset_v2"
+
 
 # 3. Ingest Datasets for Pretraining
 mkdir -p "$MAIN_DS_DIR"

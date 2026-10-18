@@ -16,16 +16,18 @@ echo "[DISK CLEANUP] Reclaiming disk space and stopping any stale processes..."
 killall -9 tara_training_stages tara_gpu_step_test manual_trainer 2>/dev/null || true
 rm -rf /tmp/tara_moments_* /tmp/tara_* /tmp/tmp_tara_* 2>/dev/null || true
 rm -rf /root/.julia /content/sample_data 2>/dev/null || true
-
+rm -rf storage/datasets/*/.cache storage/models/*/.cache 2>/dev/null || true
 rm -rf target/debug target/release/deps target/release/build target/release/incremental 2>/dev/null || true
 rm -rf storage/checkpoints/gpu_step_test_parity 2>/dev/null || true
-rm -rf /root/.cache/huggingface /root/.cache/pip /root/.cache/torch /root/.cargo/registry/cache 2>/dev/null || true
+rm -rf /root/.cache/huggingface /root/.cache/pip /root/.cache/torch /root/.cargo/registry/cache ~/.cache/* 2>/dev/null || true
 if command -v apt-get >/dev/null 2>&1; then
     apt-get clean 2>/dev/null || true
+    rm -rf /var/lib/apt/lists/* 2>/dev/null || true
 fi
 if command -v df >/dev/null 2>&1; then
     df -h / | awk 'NR==2 {print "[DISK] Available disk space: " $4 " free / " $2 " total (" $5 " used)"}'
 fi
+
 
 # 1. Enforce Cloud Training Environment Variables for PyTorch & Rust Orchestrator
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
@@ -111,8 +113,9 @@ snapshot_download(
 )
 " "$repo_id" "$repo_type" "$prefix" "$local_dir"; then
         echo "[HF DOWNLOAD] Python download verified successfully into '$local_dir'."
-        rm -rf /root/.cache/huggingface/hub 2>/dev/null || true
+        rm -rf /root/.cache/huggingface /root/.cache/pip ~/.cache/huggingface "$local_dir/.cache" 2>/dev/null || true
         return 0
+
     fi
 
     # Fallback to compiled Rust downloader if available

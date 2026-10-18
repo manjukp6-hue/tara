@@ -1296,9 +1296,17 @@ def ensure_remote_assets_available(model_dir: str, dataset_dir: str, repo_id: st
                     if not os.path.exists(d):
                         shutil.move(s, d)
                 shutil.rmtree(sub_v2, ignore_errors=True)
+
+            # Purge hidden .cache directories to eliminate duplicate disk usage
+            for d in [model_dir, dataset_dir]:
+                shutil.rmtree(os.path.join(d, ".cache"), ignore_errors=True)
+            shutil.rmtree(os.path.expanduser("~/.cache/huggingface"), ignore_errors=True)
+            shutil.rmtree(os.path.expanduser("~/.cache/pip"), ignore_errors=True)
+
             print(f"[High-Speed HF] Dataset shards ready in {dataset_dir}")
         except Exception as e:
             print(f"[Warning] Dataset shards download warning: {e}")
+
 
 
 def compute_scheduled_lr(step: int, warmup_steps: int, max_steps: int, base_lr: float, min_lr: float) -> float:

@@ -39,6 +39,7 @@ export TARA_SKIP_PREFLIGHT_VAL="${TARA_SKIP_PREFLIGHT_VAL:-1}"
 export GDRIVE_CHECKPOINT_DIR="${GDRIVE_CHECKPOINT_DIR:-/content/drive/MyDrive/TARA_CHECKPOINTS}"
 export HF_DATASET_REPO="${HF_DATASET_REPO:-${HF_MODEL_REPO:-${HF_REPO:-manjukp6/tara}}}"
 export HF_MODEL_REPO="${HF_MODEL_REPO:-${HF_DATASET_REPO}}"
+export HF_REPO="${HF_REPO:-${HF_MODEL_REPO}}"
 
 TRAINER_MODE="${TRAINER_MODE:-python}"
 CANARY_MODE="${CANARY_MODE:-0}"
@@ -55,6 +56,16 @@ else
     TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-2}"
     GRAD_ACCUM="${GRAD_ACCUM:-8}"
     STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-1000}"
+fi
+
+FULL_DATASET="${FULL_DATASET:-0}"
+FULL_DATASET_EXTRA=""
+if [ "$FULL_DATASET" = "1" ] || [ "${1:-}" = "--full-dataset" ]; then
+    echo "=============================================================================="
+    echo "  [FULL DATASET CONTINUOUS ROLLING TRAINING ACTIVE (RULE 29)]"
+    echo "=============================================================================="
+    FULL_DATASET_EXTRA="--full-dataset"
+    STAGE_MAX_STEPS=0
 fi
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-50}"
 JOINT_STEPS="${JOINT_STEPS:-200}"
@@ -157,13 +168,28 @@ else
     echo "=== [DATASET INGESTION: STREAMING PRETRAINING SHARDS] ==="
     HF_DATASET_SOURCE="${HF_DATASET_REPO:-${HF_REPO:-manjukp6/tara}}"
     if [ -n "$HF_DATASET_SOURCE" ]; then
-        if download_hf "$HF_DATASET_SOURCE" "dataset" "v2/*" "$MAIN_DS_DIR"; then
+        DATASET_SHARDS_PATTERN="${DATASET_SHARDS_PATTERN:-}"
+        if [ -z "$DATASET_SHARDS_PATTERN" ]; then
+            if [ "${DOWNLOAD_ALL_SHARDS:-0}" = "1" ]; then
+                DATASET_SHARDS_PATTERN="v2/*"
+            elif [ "${STAGE_MAX_STEPS:-1000}" -le 2000 ]; then
+                DATASET_SHARDS_PATTERN="v2/*shard_000*"
+                echo "[DATASET] Step count is ${STAGE_MAX_STEPS:-1000} (requires ~$(( ${STAGE_MAX_STEPS:-1000} * ${TRAIN_BATCH_SIZE:-2} * ${GRAD_ACCUM:-8} )) samples). Streaming single shard ('$DATASET_SHARDS_PATTERN' ~700,000 samples) to save 26 GB bandwidth and 10 minutes..."
+            elif [ "${STAGE_MAX_STEPS:-1000}" -le 5000 ]; then
+                DATASET_SHARDS_PATTERN="v2/*shard_00*"
+                echo "[DATASET] Step count is ${STAGE_MAX_STEPS:-1000}. Streaming initial shards ('$DATASET_SHARDS_PATTERN')..."
+            else
+                DATASET_SHARDS_PATTERN="v2/*"
+            fi
+        fi
+        if download_hf "$HF_DATASET_SOURCE" "dataset" "$DATASET_SHARDS_PATTERN" "$MAIN_DS_DIR"; then
             if [ -d "$MAIN_DS_DIR/v2" ]; then
                 shopt -s nullglob
                 mv "$MAIN_DS_DIR/v2"/* "$MAIN_DS_DIR/"
                 shopt -u nullglob
                 rmdir "$MAIN_DS_DIR/v2"
             fi
+            rm -rf /root/.cache/huggingface ~/.cache/huggingface "$MAIN_DS_DIR/.cache" 2>/dev/null || true
             echo "Pretraining Dataset Ingestion Verified!"
         else
             echo "[DATASET NOTICE] Remote dataset download failed or not found. Checking local datasets in $MAIN_DS_DIR."
@@ -227,6 +253,7 @@ else
             shopt -u nullglob
             rmdir storage/models/tara_candidate_v1/neural_model_v1
         fi
+        rm -rf /root/.cache/huggingface ~/.cache/huggingface "storage/models/tara_candidate_v1/.cache" 2>/dev/null || true
         CHECK_SHARDS=(storage/models/tara_candidate_v1/*.safetensors)
         if [ -e "${CHECK_SHARDS[0]:-}" ]; then
             echo "Neural Model V1 Ingestion from Hugging Face Verified!"
@@ -439,7 +466,8 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --grad-accum "$GRAD_ACCUM" \
         --checkpoint-interval "$CHECKPOINT_INTERVAL" \
         --hf-repo "$HF_MODEL_REPO" \
-        $CANARY_EXTRA_ARGS
+        $CANARY_EXTRA_ARGS \
+        $FULL_DATASET_EXTRA
 
     # In canary validation mode, stop after stage 0 verification to report telemetry
     if [ -n "$CANARY_EXTRA_ARGS" ]; then
@@ -478,7 +506,8 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --batch-size "$TRAIN_BATCH_SIZE" \
         --grad-accum "$GRAD_ACCUM" \
         --checkpoint-interval "$CHECKPOINT_INTERVAL" \
-        --hf-repo "$HF_MODEL_REPO"
+        --hf-repo "$HF_MODEL_REPO" \
+        $FULL_DATASET_EXTRA
 
     # Extensible Loop for Continual Expansion (Stages 2..N)
     STAGE_IDX=2
@@ -507,7 +536,8 @@ if [ "$TRAINER_MODE" = "python" ]; then
             --batch-size "$TRAIN_BATCH_SIZE" \
             --grad-accum "$GRAD_ACCUM" \
             --checkpoint-interval "$CHECKPOINT_INTERVAL" \
-            --hf-repo "$HF_MODEL_REPO"
+            --hf-repo "$HF_MODEL_REPO" \
+            $FULL_DATASET_EXTRA
 
         STAGE_IDX=$((STAGE_IDX + 1))
     done
@@ -572,9 +602,10 @@ else
 fi
 
 # 9. Automatic Hugging Face Model Promotion & Upload (Subfolder Isolated)
-if [ -n "${HF_TOKEN:-}" ] && [ -n "${HF_REPO:-}" ]; then
+HF_TARGET_REPO="${HF_REPO:-${HF_MODEL_REPO:-manjukp6/tara}}"
+if [ -n "${HF_TOKEN:-}" ] && [ -n "${HF_TARGET_REPO:-}" ]; then
     echo "------------------------------------------------------------------------------"
-    echo "[HUGGING FACE SYNC] Uploading trained model safetensors to '$HF_REPO'..."
+    echo "[HUGGING FACE SYNC] Uploading trained model safetensors to '$HF_TARGET_REPO'..."
 
     # Locate the highest completed stage directory dynamically (unbounded N stages)
     FINAL_STAGE_DIR=""
@@ -607,45 +638,55 @@ local_dir = sys.argv[2]
 path_in_repo = sys.argv[3]
 token = os.environ.get('HF_TOKEN')
 if token and os.path.exists(local_dir):
-    api = HfApi()
-    print(f'[HF UPLOAD] Uploading {local_dir} -> {repo_id}/{path_in_repo}...')
-    api.upload_folder(
-        folder_path=local_dir,
-        repo_id=repo_id,
-        path_in_repo=path_in_repo,
-        token=token,
-    )
-    print(f'[HF UPLOAD] Successfully uploaded {local_dir} to https://huggingface.co/{repo_id}/{path_in_repo}')
-" "$repo_id" "$local_dir" "$path_in_repo" 2>/dev/null || true
+    try:
+        api = HfApi()
+        # Guarantee repository existence (private by default if new)
+        try:
+            api.create_repo(repo_id=repo_id, repo_type='model', private=True, exist_ok=True, token=token)
+        except Exception as create_err:
+            print(f'[HF NOTICE] Repo create check note: {create_err}')
+        print(f'[HF UPLOAD] Uploading {local_dir} -> {repo_id}/{path_in_repo}...')
+        api.upload_folder(
+            folder_path=local_dir,
+            repo_id=repo_id,
+            repo_type='model',
+            path_in_repo=path_in_repo,
+            token=token,
+            commit_message=f'Deploy verified promoted model artifacts ({path_in_repo})',
+        )
+        print(f'[HF UPLOAD] Successfully uploaded {local_dir} to https://huggingface.co/{repo_id}/{path_in_repo}')
+    except Exception as upload_err:
+        print(f'[HF UPLOAD ERROR] Failed uploading to Hugging Face: {upload_err}')
+" "$repo_id" "$local_dir" "$path_in_repo"
     }
 
     if [ -n "$FINAL_STAGE_DIR" ] && [ -d "$FINAL_STAGE_DIR" ]; then
-        echo "[HUGGING FACE SYNC] Pushing Final Neural Model ($FINAL_STAGE_DIR) to $HF_REPO/neural_model_v1..."
+        echo "[HUGGING FACE SYNC] Pushing Final Neural Model ($FINAL_STAGE_DIR) to $HF_TARGET_REPO/neural_model_v1..."
         if [ -f "./target/release/tara_hf_model_uploader" ]; then
             if [ -d "$WORLD_DIR" ] && [ -n "$(ls -A "$WORLD_DIR" 2>/dev/null)" ]; then
                 echo "[HUGGING FACE SYNC] Including World Model & Joint Checkpoints ($WORLD_DIR)..."
-                ./target/release/tara_hf_model_uploader --repo "$HF_REPO" --neural-dir "$FINAL_STAGE_DIR" --world-dir "$WORLD_DIR"
+                ./target/release/tara_hf_model_uploader --repo "$HF_TARGET_REPO" --neural-dir "$FINAL_STAGE_DIR" --world-dir "$WORLD_DIR"
             else
-                ./target/release/tara_hf_model_uploader --repo "$HF_REPO" --neural-dir "$FINAL_STAGE_DIR"
+                ./target/release/tara_hf_model_uploader --repo "$HF_TARGET_REPO" --neural-dir "$FINAL_STAGE_DIR"
             fi
         else
-            upload_folder_to_hf "$HF_REPO" "$FINAL_STAGE_DIR" "neural_model_v1"
+            upload_folder_to_hf "$HF_TARGET_REPO" "$FINAL_STAGE_DIR" "neural_model_v1"
             if [ -d "$WORLD_DIR" ] && [ -n "$(ls -A "$WORLD_DIR" 2>/dev/null)" ]; then
-                upload_folder_to_hf "$HF_REPO" "$WORLD_DIR" "world_model_v1"
+                upload_folder_to_hf "$HF_TARGET_REPO" "$WORLD_DIR" "world_model_v1"
             fi
         fi
     elif [ -d "$WORLD_DIR" ] && [ -n "$(ls -A "$WORLD_DIR" 2>/dev/null)" ]; then
-        echo "[HUGGING FACE SYNC] Pushing World Model & Joint Checkpoints to $HF_REPO/world_model_v1..."
+        echo "[HUGGING FACE SYNC] Pushing World Model & Joint Checkpoints to $HF_TARGET_REPO/world_model_v1..."
         if [ -f "./target/release/tara_hf_model_uploader" ]; then
-            ./target/release/tara_hf_model_uploader --repo "$HF_REPO" --world-dir "$WORLD_DIR"
+            ./target/release/tara_hf_model_uploader --repo "$HF_TARGET_REPO" --world-dir "$WORLD_DIR"
         else
-            upload_folder_to_hf "$HF_REPO" "$WORLD_DIR" "world_model_v1"
+            upload_folder_to_hf "$HF_TARGET_REPO" "$WORLD_DIR" "world_model_v1"
         fi
     fi
-    echo "[HUGGING FACE SYNC] All artifacts successfully deployed to https://huggingface.co/$HF_REPO"
+    echo "[HUGGING FACE SYNC] All artifacts successfully deployed to https://huggingface.co/$HF_TARGET_REPO"
 else
     echo "------------------------------------------------------------------------------"
-    echo "[HUGGING FACE NOTICE] HF_TOKEN and HF_REPO not set. Skipping auto-push to Hugging Face."
+    echo "[HUGGING FACE NOTICE] HF_TOKEN or HF_REPO not set. Skipping auto-push to Hugging Face."
 fi
 
 echo "=============================================================================="

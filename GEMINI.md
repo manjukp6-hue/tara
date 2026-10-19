@@ -620,6 +620,31 @@
         3. Multi-modal epigraphical OCR integration for stone seal, palm-leaf (Tigalari/Modi), and tablet glyph extraction.
         4. Discrete rhythm and interval modeling for bioacoustic cetacean coda pattern extraction.
 
+29. **MANDATORY JIT ROLLING SHARD BUFFER, PERSISTENT SHARD LEDGER & ZERO-DUPLICATE CONTINUOUS FULL-DATASET TRAINING (ಜಸ್ಟ್-ಇನ್-ಟೈಮ್ ರೋಲಿಂಗ್ ಶಾರ್ಡ್ ಬಫರ್, ಶಾಶ್ವತ ಲೆಡ್ಜರ್, ಮತ್ತು ಶೂನ್ಯ-ಪುನರಾವರ್ತನೆಯ ನಿರಂತರ ತರಬೇತಿ)**:
+    - **1. Just-In-Time (JIT) Single-Shard Rolling Buffer (ಕೇವಲ 1 ಶಾರ್ಡ್ ಡೌನ್‌ಲೋಡ್)**:
+      * In Google Colab / cloud training, NEVER download massive multi-shard datasets (e.g. 27+ GB, 53 shards) in a single monolithic upfront pull.
+      * The cloud training runner must stream and download shards **Just-In-Time (JIT)**, maintaining strictly a single active shard (~500 MB) on local SSD at any given time.
+      * This guarantees bounded disk usage (< 1 GB for data), eliminates disk full errors, and allows instant startup within 10-15 seconds.
+    - **2. Persistent Shard Ledger & Dynamic Runtime SHA-256 Provenance (`shard_ledger.json`)**:
+      * An authoritative, persistent shard ledger (`shard_ledger.json`) must be maintained in the checkpoint directory and mirrored continuously to Google Drive.
+      * For every completed shard, the ledger must dynamically record:
+        1. Exact shard identifier (e.g. `tara_canonical_shard_000.jsonl`).
+        2. Dynamically computed runtime SHA-256 digest of the downloaded file stream.
+        3. Precise record count processed.
+        4. UTC completion timestamp.
+      * Shards marked `COMPLETED` in the ledger must NEVER be re-downloaded and NEVER re-trained in future runs or restarts.
+    - **3. Intra-Shard Line-Level Fast-Forward Resumption (ಆಂತರಿಕ ಸಾಲು-ಮಟ್ಟದ ರೆಸ್ಯೂಮ್)**:
+      * When training is interrupted or disconnected mid-shard, the checkpoint state must record the active shard and the exact trained sample offset ($\text{Line Offset} = \text{Step} \times \text{Batch Size} \times \text{Grad Accum}$).
+      * Upon resumption, the dataset streamer must fast-forward past the exact recorded sample offset in milliseconds without tokenizing or parsing, resuming training strictly on fresh, unseen samples. Zero duplicate records are permitted inside any single shard across repeated session restarts.
+    - **4. Automatic Local Shard Eviction Upon Completion (ಮುಗಿದ ಶಾರ್ಡ್ ಸ್ವಯಂಚಾಲಿತ ನಿರ್ಮೂಲನೆ)**:
+      * Immediately upon exhausting all records in a shard, the runner must:
+        1. Compute the dynamic runtime SHA-256 and commit the completed shard status to `shard_ledger.json` on Google Drive.
+        2. Atomically delete / evict the completed local `.jsonl` file from Colab local SSD to reclaim disk space.
+        3. Fetch the next pending shard from Hugging Face JIT, resetting the intra-shard line offset to 0.
+    - **5. Unbounded Continuous Full-Dataset Training (ಸಂಪೂರ್ಣ ಡೇಟಾಸೆಟ್ ನಿರಂತರ ತರಬೇತಿ)**:
+      * Training pipelines must support unbounded full-dataset progression across all discovered shards ($000 \dots N$) without requiring arbitrary static step ceilings.
+      * Training seamlessly advances shard-by-shard across Colab disconnects until the full dataset is exhausted, with continuous best-milestone checkpointing and dynamic SHA-256 integrity verification.
+
 ---
 
 ## RULE — EXISTING CODE FIRST

@@ -306,6 +306,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let neural_dir = custom_neural.unwrap_or_else(|| PathBuf::from("storage/models/tara_candidate_v1"));
+    let has_custom_world = custom_world.is_some();
     let world_dir = custom_world.unwrap_or_else(|| PathBuf::from("storage/models/tara_world_model"));
 
     const MAX_RECOVERY_CYCLES: usize = 50;
@@ -346,40 +347,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // 2. Upload World Model v1 (6 SafeTensors shards + metadata)
-    let mut world_cycle = 0;
-    loop {
-        world_cycle += 1;
-        if world_cycle > MAX_RECOVERY_CYCLES {
-            return Err(format!("Exceeded maximum recovery cycles ({MAX_RECOVERY_CYCLES})").into());
-        }
-        if world_cycle > 1 {
-            println!(
-                "\n[CYCLE {}/{}] Resuming World Model upload pipeline...\n",
-                world_cycle, MAX_RECOVERY_CYCLES
-            );
-        }
+    // 2. Upload World Model v1 (only if configured or present)
+    let should_upload_world = has_custom_world
+        || (world_dir.exists()
+            && fs::read_dir(&world_dir)
+                .map(|mut d| d.next().is_some())
+                .unwrap_or(false));
 
-        match upload_model_directory(
-            &repo_id,
-            &token,
-            &world_dir,
-            "world_model_v1",
-            "World Model V1",
-        ) {
-            Ok(true) => break,
-            Ok(false) => {
-                println!("World Model upload incomplete, retrying in 10s...");
-                sleep(Duration::from_secs(10));
+    if should_upload_world {
+        let mut world_cycle = 0;
+        loop {
+            world_cycle += 1;
+            if world_cycle > MAX_RECOVERY_CYCLES {
+                return Err(format!("Exceeded maximum recovery cycles ({MAX_RECOVERY_CYCLES})").into());
             }
-            Err(e) => {
-                eprintln!(
-                    "World Model upload encountered error: {}. Auto-recovering in 15s...",
-                    e
+            if world_cycle > 1 {
+                println!(
+                    "\n[CYCLE {}/{}] Resuming World Model upload pipeline...\n",
+                    world_cycle, MAX_RECOVERY_CYCLES
                 );
-                sleep(Duration::from_secs(15));
+            }
+
+            match upload_model_directory(
+                &repo_id,
+                &token,
+                &world_dir,
+                "world_model_v1",
+                "World Model V1",
+            ) {
+                Ok(true) => break,
+                Ok(false) => {
+                    println!("World Model upload incomplete, retrying in 10s...");
+                    sleep(Duration::from_secs(10));
+                }
+                Err(e) => {
+                    eprintln!(
+                        "World Model upload encountered error: {}. Auto-recovering in 15s...",
+                        e
+                    );
+                    sleep(Duration::from_secs(15));
+                }
             }
         }
+    } else {
+        println!("World Model directory not present or empty; skipping World Model sync.");
     }
 
     println!();

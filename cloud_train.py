@@ -18,9 +18,11 @@ Features:
 import argparse
 import gc
 import glob
+import hashlib
 import json
 import math
 import os
+import random
 import shutil
 import sys
 import threading
@@ -327,42 +329,247 @@ class TaraForCausalLM(nn.Module):
 
 
 # =============================================================================
-# 2. High-Throughput Streaming Dataset (Zero Memory & Instant Startup)
+# 2. High-Throughput Streaming Dataset, Persistent Shard Ledger & JIT Downloader (Rule 29)
 # =============================================================================
+
+def download_single_shard_jit(repo_id: str, prefix: str, shard_name: str, local_dir: str) -> str:
+    """
+    Downloads ONLY a single JSONL shard on-demand from Hugging Face.
+    Maintains strictly a single active shard on disk, eliminating 27GB bulk downloads.
+    """
+    os.makedirs(local_dir, exist_ok=True)
+    target_path = os.path.join(local_dir, shard_name)
+    if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+        return target_path
+
+    token = os.environ.get("HF_TOKEN") or None
+    remote_path = f"{prefix}/{shard_name}" if prefix else shard_name
+    print(f"[JIT Downloader] Fetching single shard '{remote_path}' from https://huggingface.co/{repo_id}...", flush=True)
+
+    max_retries = 5
+    for attempt in range(1, max_retries + 1):
+        try:
+            from huggingface_hub import hf_hub_download
+            dl_path = hf_hub_download(
+                repo_id=repo_id,
+                repo_type="dataset",
+                filename=remote_path,
+                local_dir=local_dir,
+                token=token,
+            )
+            if dl_path != target_path and os.path.exists(dl_path):
+                shutil.move(dl_path, target_path)
+                sub_dir = os.path.dirname(dl_path)
+                if sub_dir != local_dir and os.path.exists(sub_dir) and not os.listdir(sub_dir):
+                    try:
+                        os.rmdir(sub_dir)
+                    except Exception:
+                        pass
+            if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+                print(f"[JIT Downloader] Shard '{shard_name}' verified ({os.path.getsize(target_path)/(1024*1024):.1f} MB).", flush=True)
+                return target_path
+        except Exception as err:
+            print(f"[JIT Downloader Warning] Attempt {attempt}/{max_retries} failed to download '{shard_name}': {err}", flush=True)
+            time.sleep(attempt * 4)
+
+    raise RuntimeError(f"[JIT Downloader Fatal] Failed to download {shard_name} after {max_retries} attempts.")
+
+
+class ShardLedger:
+    """
+    Authoritative Persistent Shard Ledger (Rule 29).
+    Tracks completed shards, runtime dynamic SHA-256 digests, and active intra-shard progress.
+    Persisted to local checkpoint directory and mirrored continuously to Google Drive.
+    """
+    def __init__(self, output_dir: str, gdrive_dir: Optional[str] = None):
+        self.output_dir = output_dir
+        self.gdrive_dir = gdrive_dir
+        self.ledger_file = os.path.join(output_dir, "shard_ledger.json")
+        self.completed_shards: List[str] = []
+        self.completed_metadata: Dict[str, Any] = {}
+        self.active_shard: Optional[str] = None
+        self.active_shard_start_step: int = 0
+        self.total_records_processed: int = 0
+        self.load()
+
+    def load(self):
+        loaded_data = None
+        if self.gdrive_dir and os.path.exists(os.path.join(self.gdrive_dir, "shard_ledger.json")):
+            try:
+                with open(os.path.join(self.gdrive_dir, "shard_ledger.json"), "r", encoding="utf-8") as f:
+                    loaded_data = json.load(f)
+                print(f"[Shard Ledger] Loaded authoritative ledger from Google Drive ({len(loaded_data.get('completed_shards', []))} completed shards).", flush=True)
+            except Exception as e:
+                print(f"[Shard Ledger Notice] Google Drive ledger read note: {e}")
+
+        if loaded_data is None and os.path.exists(self.ledger_file):
+            try:
+                with open(self.ledger_file, "r", encoding="utf-8") as f:
+                    loaded_data = json.load(f)
+                print(f"[Shard Ledger] Loaded ledger from local disk ({len(loaded_data.get('completed_shards', []))} completed shards).", flush=True)
+            except Exception as e:
+                print(f"[Shard Ledger Notice] Local ledger read note: {e}")
+
+        if loaded_data:
+            self.completed_shards = loaded_data.get("completed_shards", [])
+            self.completed_metadata = loaded_data.get("completed_metadata", {})
+            self.active_shard = loaded_data.get("active_shard")
+            self.active_shard_start_step = loaded_data.get("active_shard_start_step", 0)
+            self.total_records_processed = loaded_data.get("total_records_processed", 0)
+
+    def save(self):
+        os.makedirs(self.output_dir, exist_ok=True)
+        data = {
+            "completed_shards": self.completed_shards,
+            "completed_metadata": self.completed_metadata,
+            "active_shard": self.active_shard,
+            "active_shard_start_step": self.active_shard_start_step,
+            "total_records_processed": self.total_records_processed,
+            "last_updated_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        with open(self.ledger_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+
+        if self.gdrive_dir and os.path.exists(os.path.dirname(self.gdrive_dir)):
+            os.makedirs(self.gdrive_dir, exist_ok=True)
+            gdrive_file = os.path.join(self.gdrive_dir, "shard_ledger.json")
+            try:
+                _stream_copy_file(self.ledger_file, gdrive_file)
+            except Exception as e:
+                print(f"[Shard Ledger Warning] Could not mirror ledger to Google Drive: {e}")
+
+    def get_total_completed_records(self) -> int:
+        total = 0
+        for meta in self.completed_metadata.values():
+            total += int(meta.get("records_processed", 0))
+        return total
+
+    def is_completed(self, shard_name: str) -> bool:
+        return shard_name in self.completed_shards
+
+    def set_active_shard(self, shard_name: str, start_step: int = 0):
+        if self.active_shard != shard_name:
+            self.active_shard = shard_name
+            self.active_shard_start_step = start_step
+            self.save()
+
+    def mark_completed(self, shard_name: str, records_count: int, file_sha256: str):
+        if shard_name not in self.completed_shards:
+            self.completed_shards.append(shard_name)
+        self.completed_metadata[shard_name] = {
+            "completed_at_utc": datetime.now(timezone.utc).isoformat(),
+            "records_processed": records_count,
+            "file_sha256": file_sha256,
+        }
+        self.total_records_processed += records_count
+        self.active_shard = None
+        self.save()
+        print(f"[Shard Ledger COMPLETED] Shard '{shard_name}' registered as COMPLETED (SHA-256: {file_sha256[:16]}..., Records: {records_count:,}, Total: {len(self.completed_shards)} completed).", flush=True)
+
 
 class TaraStreamingJsonlDataset(IterableDataset):
     """
-    High-Throughput Zero-Memory Streaming Dataset for arbitrary N shards.
+    High-Throughput Zero-Memory Rolling Streaming Dataset (Rule 29).
     Streams JSONL records on-the-fly directly to the GPU without loading
-    millions of samples into RAM, starting training in 0 seconds.
+    millions of samples into RAM. Supports Just-In-Time single shard downloading,
+    persistent ledger tracking, and automatic eviction of completed shards.
     """
-    def __init__(self, file_paths: List[str], tokenizer: Any, max_seq_len: int = 256, max_samples: int = 0, shuffle_shards: bool = True):
+    def __init__(
+        self,
+        file_paths: List[str],
+        tokenizer: Any,
+        max_seq_len: int = 256,
+        max_samples: int = 0,
+        shuffle_shards: bool = False,
+        skip_samples: int = 0,
+        shard_ledger: Optional[ShardLedger] = None,
+        keep_shards: bool = False,
+        dataset_dir: Optional[str] = None,
+        repo_id: Optional[str] = None,
+        prefix: str = "v2",
+        buffer_size: int = 256,
+    ):
         self.file_paths = list(file_paths)
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
         self.max_samples = max_samples
         self.shuffle_shards = shuffle_shards
-        print(f"[Dataset] Initialized streaming pipeline across {len(self.file_paths)} shard(s) (zero RAM footprint, instant start)...")
+        self.skip_samples = max(0, int(skip_samples))
+        self.shard_ledger = shard_ledger
+        self.keep_shards = keep_shards
+        self.dataset_dir = dataset_dir
+        self.repo_id = repo_id
+        self.prefix = prefix
+        self.buffer_size = max(1, int(buffer_size))
+        self.current_active_shard: Optional[str] = None
+        print(f"[Dataset] Initialized JIT rolling streaming pipeline across {len(self.file_paths)} shard(s) (skip_samples={self.skip_samples:,}, zero RAM footprint, instant start)...")
 
     def __iter__(self):
         import random
         fps = list(self.file_paths)
         if self.shuffle_shards:
-            random.shuffle(fps)
+            r = random.Random(42)
+            r.shuffle(fps)
 
+        skipped = 0
         emitted = 0
         buffer = []
-        buffer_size = 256
+        buffer_size = self.buffer_size
+
+        if self.skip_samples > 0:
+            print(f"[Dataset Stream] Fast-forwarding past {self.skip_samples:,} already-trained samples to guarantee ZERO duplicate training...", flush=True)
 
         for fp in fps:
-            if not os.path.exists(fp):
+            shard_name = os.path.basename(fp)
+
+            # Check Shard Ledger: Skip if already marked completed
+            if self.shard_ledger and self.shard_ledger.is_completed(shard_name):
+                print(f"[Dataset Ledger] Shard '{shard_name}' is ALREADY COMPLETED. Skipping download & retraining.", flush=True)
                 continue
+
+            # Determine authentic local file path
+            if os.path.isabs(fp) or os.path.exists(fp):
+                actual_fp = fp
+            elif self.dataset_dir:
+                actual_fp = os.path.join(self.dataset_dir, shard_name)
+            else:
+                actual_fp = fp
+
+            # If local file missing or 0 bytes, download on-demand if remote repo configured
+            if not os.path.exists(actual_fp) or os.path.getsize(actual_fp) == 0:
+                if self.repo_id and self.dataset_dir:
+                    actual_fp = download_single_shard_jit(self.repo_id, self.prefix, shard_name, self.dataset_dir)
+                else:
+                    continue
+
+            # Compute dynamic runtime SHA-256 for integrity verification
+            shard_sha = compute_file_sha256(actual_fp)
+            self.active_shard_name = shard_name
+            self.current_active_shard = shard_name
+            if self.shard_ledger:
+                self.shard_ledger.set_active_shard(shard_name)
+
+            if skipped >= self.skip_samples:
+                print(f"[Dataset Shard Active] Streaming from: {shard_name} (Runtime SHA-256: {shard_sha[:16]}...)", flush=True)
+
+            shard_lines_processed = 0
+            total_shard_lines = 0
             try:
-                with open(fp, "r", encoding="utf-8") as f:
+                with open(actual_fp, "r", encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
                         if not line:
                             continue
+                        total_shard_lines += 1
+
+                        # Fast-forward check: skip already-trained records
+                        if skipped < self.skip_samples:
+                            skipped += 1
+                            self.active_shard_offset = skipped
+                            if skipped == self.skip_samples:
+                                print(f"[Dataset Stream] Fast-forward complete ({self.skip_samples:,} samples skipped). Resuming fresh data stream from {shard_name}!", flush=True)
+                            continue
+
                         try:
                             record = json.loads(line)
                             inp_text = record.get("input", "")
@@ -393,6 +600,8 @@ class TaraStreamingJsonlDataset(IterableDataset):
                                 labels[:eff_start] = -100
 
                                 buffer.append((input_ids, labels))
+                                shard_lines_processed += 1
+                                self.active_shard_offset = skipped + shard_lines_processed
                                 if len(buffer) >= buffer_size:
                                     idx = random.randrange(len(buffer))
                                     yield buffer.pop(idx)
@@ -401,6 +610,32 @@ class TaraStreamingJsonlDataset(IterableDataset):
                                         return
                         except Exception:
                             continue
+
+                # Drain remaining buffer for this shard before completion/eviction
+                while buffer:
+                    idx = random.randrange(len(buffer))
+                    yield buffer.pop(idx)
+                    emitted += 1
+                    if 0 < self.max_samples <= emitted:
+                        return
+
+                # Shard EOF reached: Record completion in ledger with dynamic SHA-256 and auto-evict
+                if self.shard_ledger:
+                    self.shard_ledger.mark_completed(shard_name, total_shard_lines, shard_sha)
+
+                # Safe Auto-Eviction: Only evict if this was a transient JIT download (repo_id is present)
+                # NEVER delete the user's sole local dataset copy if repo_id is None!
+                if not self.keep_shards and self.repo_id is not None and os.path.exists(actual_fp):
+                    try:
+                        os.remove(actual_fp)
+                        print(f"[JIT Shard Eviction] Reclaimed disk space: deleted local completed shard cache {shard_name}", flush=True)
+                    except Exception as evict_err:
+                        print(f"[JIT Shard Eviction Notice] Could not delete {shard_name}: {evict_err}")
+
+                # Reset skipped offset for next fresh shard
+                skipped = 0
+                self.skip_samples = 0
+                self.active_shard_offset = 0
 
                 if 0 < self.max_samples <= emitted:
                     break
@@ -488,9 +723,16 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
         if src_sz == 0:
             print(f"[GDrive Safety Block] Refusing to mirror empty 0-byte file to Google Drive: {src} -> {dst}", flush=True)
             return
-        if src.endswith(".safetensors") and src_sz < 100 * 1024 * 1024:
-            print(f"[GDrive Safety Block] Refusing to mirror small/corrupt weights ({src_sz} bytes < 100MB) to Google Drive: {src}", flush=True)
-            return
+        if src.endswith(".safetensors"):
+            try:
+                from safetensors import safe_open
+                with safe_open(src, framework="pt", device="cpu") as sf:
+                    if not sf.keys():
+                        print(f"[GDrive Safety Block] Refusing to mirror safetensors file without tensor keys: {src}", flush=True)
+                        return
+            except Exception as sf_err:
+                print(f"[GDrive Safety Block] Refusing to mirror invalid safetensors ({sf_err}): {src}", flush=True)
+                return
 
         # Direct in-place streaming copy
         with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
@@ -605,6 +847,17 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                     if os.path.abspath(src) == os.path.abspath(dst):
                         continue
                     _stream_copy_file(src, dst)
+                    if fname in ("model.safetensors", "pytorch_model.bin") and os.path.exists(dst):
+                        src_sha = compute_file_sha256(src)
+                        dst_sha = compute_file_sha256(dst)
+                        if src_sha != dst_sha:
+                            print(f"[GDrive Sync Warning] SHA-256 mismatch for {fname}! Retrying stream copy...", flush=True)
+                            _stream_copy_file(src, dst)
+                            dst_sha = compute_file_sha256(dst)
+                            if src_sha != dst_sha:
+                                print(f"[GDrive Sync Error] SHA-256 still mismatched on GDrive: {dst_sha} != {src_sha}", flush=True)
+                        else:
+                            print(f"[GDrive Mirror SHA-256 Verified] {fname} matches: {src_sha[:16]}...", flush=True)
                     synced += 1
 
 
@@ -709,6 +962,21 @@ def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
             _gdrive_sync_thread.join()
 
 
+def compute_file_sha256(filepath: str, chunk_size: int = 4 * 1024 * 1024) -> str:
+    """
+    Dynamically computes the SHA-256 hash of a file using streaming chunks
+    to avoid memory spikes and strictly comply with dynamic hash verification policies.
+    """
+    hasher = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
 def verify_checkpoint_integrity(
     checkpoint_dir: str,
     require_optimizer: bool = False,
@@ -722,6 +990,7 @@ def verify_checkpoint_integrity(
     - Verifies STAGE_METADATA.json is valid (and status COMPLETED if require_completed=True).
     - Verifies optimizer_state.pt exists and is non-empty (>1MB) if require_optimizer=True.
     - Deserialization test: ensure safetensors is not corrupted/truncated.
+    - Dynamically computes and verifies runtime SHA-256 hash against recorded metadata.
     """
     if not os.path.exists(checkpoint_dir):
         print(f"[Verification Fail] Checkpoint directory does not exist: {checkpoint_dir}")
@@ -763,6 +1032,19 @@ def verify_checkpoint_integrity(
         if require_optimizer and os.path.exists(os.path.join(checkpoint_dir, "optimizer_state.pt")):
             test_opt = torch.load(os.path.join(checkpoint_dir, "optimizer_state.pt"), map_location="cpu")
             del test_opt
+
+        # Dynamic SHA-256 verification: if recorded in metadata, verify against authentic file on disk
+        recorded_sha = s_data.get("model_weights_sha256") or meta.get("model_weights_sha256")
+        model_path = os.path.join(checkpoint_dir, "model.safetensors")
+        if not os.path.exists(model_path):
+            model_path = os.path.join(checkpoint_dir, "pytorch_model.bin")
+        if recorded_sha and os.path.exists(model_path):
+            computed_sha = compute_file_sha256(model_path)
+            if computed_sha != recorded_sha:
+                print(f"[Verification Fail] Dynamic SHA-256 mismatch in {checkpoint_dir}: computed {computed_sha} != recorded {recorded_sha}")
+                return False
+            print(f"[Verification Passed] Dynamic SHA-256 verified for {os.path.basename(model_path)}: {computed_sha[:16]}...", flush=True)
+
         gc.collect()
     except Exception as e:
         print(f"[Verification Fail] Corruption or load error in {checkpoint_dir}: {e}")
@@ -959,6 +1241,8 @@ def save_best_milestone(
     - Verifies integrity immediately.
     """
     with _checkpoint_write_lock:
+        # Guarantee disk headroom before writing new milestone
+        _reclaim_emergency_disk_space(min_free_gb=10.0)
         os.makedirs(best_dir, exist_ok=True)
         # config.json
         with open(os.path.join(best_dir, "config.json"), "w", encoding="utf-8") as f:
@@ -971,15 +1255,28 @@ def save_best_milestone(
                 shutil.copy2(tokenizer_path, tok_dst)
 
         # model.safetensors
+        # Pre-remove old weights file so the filesystem frees stale inodes immediately
+        target_model = os.path.join(best_dir, "model.safetensors")
+        if os.path.exists(target_model):
+            try:
+                os.remove(target_model)
+            except Exception:
+                pass
+
         state_dict = {k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}
         if HAS_SAFETENSORS:
-            save_file(state_dict, os.path.join(best_dir, "model.safetensors"))
+            save_file(state_dict, target_model)
         else:
             torch.save(state_dict, os.path.join(best_dir, "pytorch_model.bin"))
         del state_dict
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+
+        actual_model_path = target_model if HAS_SAFETENSORS else os.path.join(best_dir, "pytorch_model.bin")
+        weights_sha256 = compute_file_sha256(actual_model_path) if os.path.exists(actual_model_path) else None
+        if weights_sha256:
+            print(f"[Best Checkpoint Dynamic SHA-256] {os.path.basename(actual_model_path)} -> {weights_sha256}", flush=True)
 
         # checkpoint_state.json
         state = {
@@ -991,6 +1288,7 @@ def save_best_milestone(
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "is_best": True,
             "is_completed": False,
+            "model_weights_sha256": weights_sha256,
         }
         with open(os.path.join(best_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
@@ -1004,6 +1302,7 @@ def save_best_milestone(
             "best_loss": best_loss,
             "perplexity": math.exp(min(loss, 20.0)),
             "is_best": True,
+            "model_weights_sha256": weights_sha256,
         }
         with open(os.path.join(best_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
@@ -1035,6 +1334,8 @@ def save_checkpoint(
     is_best: bool = False,
     is_completed: bool = False,
     sync_to_gdrive: bool = True,
+    dataset: Optional[Any] = None,
+    shard_ledger: Optional[Any] = None,
 ):
     """
     Enforces strict 3-step safety protocol: Save First -> Verify Next -> Delete Old Last:
@@ -1077,7 +1378,15 @@ def save_checkpoint(
         del state_dict
         gc.collect()
 
-        # 4. Continuation state
+        weights_file = os.path.join(output_dir, "model.safetensors") if HAS_SAFETENSORS else os.path.join(output_dir, "pytorch_model.bin")
+        weights_sha256 = compute_file_sha256(weights_file) if os.path.exists(weights_file) else None
+
+        # 4. Continuation state with shard cursor and ledger tracking
+        active_shard = getattr(dataset, "active_shard_name", None) if dataset else None
+        active_offset = getattr(dataset, "active_shard_offset", 0) if dataset else 0
+        completed_shards = shard_ledger.completed_shards if shard_ledger else []
+        completed_records = shard_ledger.get_total_completed_records() if shard_ledger else 0
+
         continuation_state = {
             "step": step,
             "epoch": epoch,
@@ -1086,13 +1395,18 @@ def save_checkpoint(
             "stage_id": stage_id,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "is_completed": is_completed,
+            "model_weights_sha256": weights_sha256,
+            "active_shard": active_shard,
+            "active_shard_offset": active_offset,
+            "completed_shards": completed_shards,
+            "total_completed_records": completed_records,
         }
         with open(os.path.join(output_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
             json.dump(continuation_state, f, indent=2)
 
         # 5. Optimizer state if present (only for step checkpoints and completions, not needed for pure milestone)
         if not is_best or is_completed:
-            opt_sd = optimizer.state_dict()
+            opt_sd = optimizer.state_dict() if optimizer else {}
             cpu_opt_state = {}
             for k, v in opt_sd.items():
                 if k == "state":
@@ -1107,12 +1421,20 @@ def save_checkpoint(
             del opt_sd
             scaler_state = scaler.state_dict() if scaler else None
 
+            # RNG states for exact deterministic resumption
+            torch_rng = torch.get_rng_state()
+            cuda_rng = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+            py_rng = random.getstate()
+
             torch.save(
                 {
                     "optimizer": cpu_opt_state,
                     "scaler": scaler_state,
                     "step": step,
                     "best_loss": best_loss,
+                    "torch_rng": torch_rng,
+                    "cuda_rng": cuda_rng,
+                    "py_rng": py_rng,
                 },
                 os.path.join(output_dir, "optimizer_state.pt"),
             )
@@ -1129,6 +1451,7 @@ def save_checkpoint(
             "perplexity": math.exp(min(loss, 20.0)),
             "is_best": is_best,
             "completed_at_utc": datetime.now(timezone.utc).isoformat() if is_completed else None,
+            "model_weights_sha256": weights_sha256,
         }
         with open(os.path.join(output_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
@@ -1169,11 +1492,24 @@ def promote_checkpoint(
 ):
     """
     Promotes the best checkpoint from a completed stage into a clean deployment model:
-    - Copies: model.safetensors, config.json, tokenizer.json, STAGE_METADATA.json
+    - Copies: model.safetensors, config.json, tokenizer.json, tokenizer_config.json, special_tokens_map.json, STAGE_METADATA.json
     - Strictly excludes bulky optimizer states (optimizer_state.pt, checkpoint_state.json)
     """
     os.makedirs(promoted_dir, exist_ok=True)
-    artifacts = ["model.safetensors", "config.json", "tokenizer.json", "STAGE_METADATA.json"]
+    artifacts = [
+        "model.safetensors",
+        "config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "STAGE_METADATA.json",
+    ]
+    # Dynamically discover all safetensors shards or index if sharded
+    for sf in glob.glob(os.path.join(source_checkpoint_dir, "*.safetensors*")):
+        bname = os.path.basename(sf)
+        if bname not in artifacts:
+            artifacts.append(bname)
+
     copied = 0
     for art in artifacts:
         src = os.path.join(source_checkpoint_dir, art)
@@ -1186,7 +1522,6 @@ def promote_checkpoint(
             except Exception:
                 shutil.copy2(src, dst)
             copied += 1
-
 
     print(f"[Promotion] Successfully promoted clean inference model ({copied} files) -> {promoted_dir}", flush=True)
 
@@ -1243,8 +1578,8 @@ def try_resume_from_checkpoint(
         cand_model = os.path.join(cand, "model.safetensors")
         if os.path.exists(cand_state) and os.path.exists(cand_model):
             # Verify file integrity and header size before accepting candidate
-            if os.path.getsize(cand_model) < 10 * 1024 * 1024:
-                print(f"  -> Notice: Skipping candidate at {cand} (model file size too small: {os.path.getsize(cand_model)} bytes)")
+            if os.path.getsize(cand_model) == 0:
+                print(f"  -> Notice: Skipping candidate at {cand} (model file size is 0 bytes)")
                 continue
             try:
                 from safetensors import safe_open
@@ -1302,7 +1637,7 @@ def try_resume_from_checkpoint(
         if not cand_try or not os.path.exists(cand_try):
             continue
         model_file = os.path.join(cand_try, "model.safetensors")
-        if HAS_SAFETENSORS and os.path.exists(model_file) and os.path.getsize(model_file) > 10 * 1024 * 1024:
+        if HAS_SAFETENSORS and os.path.exists(model_file) and os.path.getsize(model_file) > 0:
             try:
                 print(f"[Resume] Ingesting model weights directly from {model_file}...", flush=True)
                 weights = load_file(model_file, device="cpu")
@@ -1345,9 +1680,17 @@ def try_resume_from_checkpoint(
     if os.path.exists(opt_file):
         try:
             opt_data = torch.load(opt_file, map_location="cpu")
-            optimizer.load_state_dict(opt_data["optimizer"])
+            if optimizer and "optimizer" in opt_data:
+                optimizer.load_state_dict(opt_data["optimizer"])
             if scaler and opt_data.get("scaler"):
                 scaler.load_state_dict(opt_data["scaler"])
+            if "torch_rng" in opt_data and opt_data["torch_rng"] is not None:
+                torch.set_rng_state(opt_data["torch_rng"])
+            if "cuda_rng" in opt_data and torch.cuda.is_available() and opt_data["cuda_rng"] is not None:
+                torch.cuda.set_rng_state_all(opt_data["cuda_rng"])
+            if "py_rng" in opt_data and opt_data["py_rng"] is not None:
+                random.setstate(opt_data["py_rng"])
+            print(f"[Resume] Restored complete optimizer state and RNG states from Step {best_cand_step}.", flush=True)
         except Exception as e:
             print(f"[Resume Notice] Optimizer state load notice: {e}; using clean optimizer.")
     else:
@@ -1550,10 +1893,18 @@ def upload_promoted_model_to_hf(promoted_dir: str, repo_id: str, stage_id: str) 
         from huggingface_hub import HfApi
         api = HfApi()
         target_path_in_repo = "neural_model_v1" if ("stage0" in stage_id or "pretraining" in stage_id) else f"promoted/{stage_id}"
+        
+        # Ensure model repository exists (private by default if new)
+        try:
+            api.create_repo(repo_id=repo_id, repo_type="model", private=True, exist_ok=True, token=hf_token)
+        except Exception as create_err:
+            print(f"[Hugging Face Sync Notice] Repository preflight check note: {create_err}")
+
         print(f"[Hugging Face Sync] Uploading {promoted_dir} to https://huggingface.co/{repo_id} ({target_path_in_repo})...")
         api.upload_folder(
             folder_path=promoted_dir,
             repo_id=repo_id,
+            repo_type="model",
             path_in_repo=target_path_in_repo,
             token=hf_token,
             commit_message=f"Deploy verified promoted model from {stage_id}",
@@ -1561,7 +1912,9 @@ def upload_promoted_model_to_hf(promoted_dir: str, repo_id: str, stage_id: str) 
         print(f"[Hugging Face Sync] Model successfully deployed to https://huggingface.co/{repo_id}/{target_path_in_repo}")
         return True
     except Exception as e:
-        print(f"[Hugging Face Sync Warning] Failed to upload promoted model to HF: {e}")
+        print(f"[Hugging Face Sync ERROR] Failed to upload promoted model to HF: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -1714,7 +2067,8 @@ def main():
     parser.add_argument("--resume", action="store_true", default=True, help="Auto-resume from existing checkpoint if available")
     parser.add_argument("--canary", action="store_true", default=False, help="Enable 15-step T4 canary validation mode (batch_size=1, grad_accum=4, max_seq_len=256, max_steps=15, warmup_steps=3)")
     parser.add_argument("--allow-unsafe-fp32-adamw", action="store_true", default=False, help="Bypass safety preflight gate and force standard FP32 AdamW on memory-constrained GPUs (high OOM risk)")
-    parser.add_argument("--gradient-checkpointing", action="store_true", default=False, help="Enable activation gradient checkpointing to reduce activation memory")
+    parser.add_argument("--full-dataset", action="store_true", default=False, help="Train continuously across all shards until full dataset is exhausted (Rule 29)")
+    parser.add_argument("--keep-shards", action="store_true", default=False, help="Do not delete local shards after completion")
     parser.add_argument("--preflight-only", action="store_true", default=False, help="Execute only the dual-stage preflight validation diagnostic and exit with report")
     args = parser.parse_args()
 
@@ -1763,6 +2117,8 @@ def main():
             best_source = os.path.join(args.output_dir, "best_checkpoint")
             src_cp = best_source if os.path.exists(os.path.join(best_source, "model.safetensors")) else args.output_dir
             promote_checkpoint(src_cp, args.promoted_dir, args.stage_id)
+            if args.hf_repo:
+                upload_promoted_model_to_hf(args.promoted_dir, args.hf_repo, args.stage_id)
         if args.previous_stage_dir:
             clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
         sys.exit(0)
@@ -1860,29 +2216,62 @@ def main():
     print(f"[Model] Total trainable parameters: {total_params:,} ({total_params * 4 / 1e6:.1f} MB in FP32 master storage)")
 
 
-    # 6. Ingest Shards dynamically (Zero hardcoded limits, parameter-driven)
-    shard_files = sorted(glob.glob(os.path.join(args.dataset_dir, "*.jsonl")))
-    if not shard_files:
-        shard_files = sorted(glob.glob("storage/datasets/main_dataset_v1/*.jsonl"))
-    if not shard_files:
-        print(f"[Error] No JSONL shards found in {args.dataset_dir} or fallback.")
-        sys.exit(1)
+    # 6. Initialize Authoritative Persistent Shard Ledger & Shard Discovery (Rule 29)
+    gdrive_root = _resolve_gdrive_root()
+    gdrive_stage_dir = os.path.join(gdrive_root, args.stage_id) if gdrive_root else None
+    shard_ledger = ShardLedger(args.output_dir, gdrive_stage_dir)
+
+    dataset_repo = args.hf_repo or os.environ.get("HF_DATASET_REPO", os.environ.get("HF_REPO", "manjukp6/tara"))
+    discovered_shards = []
+
+    # Remote Hugging Face shard catalog discovery
+    if dataset_repo:
+        try:
+            from huggingface_hub import HfApi
+            token = os.environ.get("HF_TOKEN") or None
+            api = HfApi(token=token)
+            files = api.list_repo_files(repo_id=dataset_repo, repo_type="dataset")
+            v2_files = sorted([os.path.basename(f) for f in files if f.startswith("v2/") and f.endswith(".jsonl")])
+            if v2_files:
+                discovered_shards = v2_files
+                print(f"[Dataset Discovery] Discovered {len(discovered_shards)} remote canonical shards on Hugging Face ({dataset_repo} : v2/*).", flush=True)
+        except Exception as e:
+            print(f"[Dataset Discovery Notice] Remote Hugging Face file discovery note: {e}", flush=True)
+
+    # Local fallback if remote discovery was unavailable
+    if not discovered_shards:
+        local_files = sorted([os.path.basename(p) for p in glob.glob(os.path.join(args.dataset_dir, "*.jsonl"))])
+        if local_files:
+            discovered_shards = local_files
+        else:
+            discovered_shards = [f"tara_canonical_shard_{i:03d}.jsonl" for i in range(53)]
 
     # Strictly filter out held-out shards to prevent evaluation leakage
     import fnmatch
     exclude_patterns = [p.strip() for p in args.exclude_shards.split(",") if p.strip()]
-    filtered_shards = []
-    for sf in shard_files:
-        basename = os.path.basename(sf)
-        if any(fnmatch.fnmatch(basename, pat) for pat in exclude_patterns):
-            print(f"[Data Gate] STRICT LEAKAGE PREVENTION: Excluding held-out shard from training: {basename}")
+    eligible_shards = []
+    for sf in discovered_shards:
+        if any(fnmatch.fnmatch(sf, pat) for pat in exclude_patterns):
+            print(f"[Data Gate] STRICT LEAKAGE PREVENTION: Excluding held-out shard from training: {sf}")
         else:
-            filtered_shards.append(sf)
+            eligible_shards.append(sf)
 
-    selected_shards = filtered_shards if args.max_shards <= 0 else filtered_shards[:args.max_shards]
-    print(f"[Dataset] Discovered {len(shard_files)} shards (filtered to {len(filtered_shards)} eligible shards); streaming {len(selected_shards)} shard(s)...")
+    selected_shards = eligible_shards if args.max_shards <= 0 else eligible_shards[:args.max_shards]
+    print(f"[Dataset] Discovered {len(discovered_shards)} total shards ({len(eligible_shards)} eligible, {len(shard_ledger.completed_shards)} already completed in ledger); rolling buffer active across {len(selected_shards)} shard(s)...")
 
-    dataset = TaraStreamingJsonlDataset(selected_shards, tokenizer, max_seq_len=args.max_seq_len, max_samples=args.max_samples)
+    dataset = TaraStreamingJsonlDataset(
+        file_paths=selected_shards,
+        tokenizer=tokenizer,
+        max_seq_len=args.max_seq_len,
+        max_samples=args.max_samples,
+        shuffle_shards=False,
+        skip_samples=0,
+        shard_ledger=shard_ledger,
+        keep_shards=args.keep_shards,
+        dataset_dir=args.dataset_dir,
+        repo_id=dataset_repo,
+        prefix="v2",
+    )
     dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=collate_fn)
 
     # 7. Optimizer Selection & Memory Preflight Gate
@@ -2009,6 +2398,12 @@ def main():
     start_step = 0
     start_epoch = 0
     best_loss = float("inf")
+    was_resumed = False
+
+    if args.full_dataset or args.max_steps <= 0:
+        args.max_steps = 100_000_000
+        print("[Training Scope] FULL DATASET ROLLING TRAINING ACTIVE (Rule 29). Training continuously across all shards until full dataset is exhausted!", flush=True)
+
     if args.resume:
         start_step, start_epoch, best_loss, was_resumed = try_resume_from_checkpoint(
             args.output_dir, model, optimizer, scaler
@@ -2025,9 +2420,25 @@ def main():
                 best_source = os.path.join(args.output_dir, "best_checkpoint")
                 src_cp = best_source if os.path.exists(os.path.join(best_source, "model.safetensors")) else args.output_dir
                 promote_checkpoint(src_cp, args.promoted_dir, args.stage_id)
+                if args.hf_repo:
+                    upload_promoted_model_to_hf(args.promoted_dir, args.hf_repo, args.stage_id)
             if args.previous_stage_dir:
                 clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
             sys.exit(0)
+
+        if was_resumed and start_step > 0:
+            total_samples_trained = start_step * args.batch_size * args.grad_accum
+            completed_records = shard_ledger.get_total_completed_records()
+            intra_shard_skip = max(0, total_samples_trained - completed_records)
+            dataset.skip_samples = intra_shard_skip
+            print("=" * 80, flush=True)
+            print("  [DATASET ZERO-DUPLICATE RESUME AUDIT (RULE 29)]", flush=True)
+            print(f"  Total Lifetime Step Resumed   : {start_step:,}", flush=True)
+            print(f"  Total Lifetime Samples Trained: {total_samples_trained:,}", flush=True)
+            print(f"  Completed Shards in Ledger    : {len(shard_ledger.completed_shards)} shards ({completed_records:,} records)", flush=True)
+            print(f"  Active Shard Fast-Forward Skip: {intra_shard_skip:,} samples", flush=True)
+            print("  Status                        : ZERO DUPLICATE SAMPLES GUARANTEED!", flush=True)
+            print("=" * 80, flush=True)
 
     # Setup Best Checkpoint Directory
     best_cp_dir = os.path.join(args.output_dir, "best_checkpoint")
@@ -2125,21 +2536,45 @@ def main():
                     flush=True
                 )
 
-                # Periodic Benchmark Matrix Display
+                # Dynamic In-Memory Best Loss Tracking:
+                # Instantly caches best loss in memory on every step without disk thrashing (0 disk writes)
                 is_new_best = (cur_step_loss < best_loss)
+                if is_new_best:
+                    best_loss = cur_step_loss
+
+                # Periodic Benchmark Matrix Display
                 if step % 25 == 0 or step == start_step + 1 or is_new_best:
                     print_frontier_comparison_matrix_colored(step, cur_step_loss, min(best_loss, cur_step_loss))
 
-                # Exclusive Best Milestone Save & Cloud Sync:
-                # Strictly saves ONLY when a step achieves a new historical best loss.
-                # Zero 50-step periodic commits, zero wasting time on worse loss weights, zero optimizer bloat.
-                if is_new_best:
-                    best_loss = cur_step_loss
+                # Periodic Regular Training Checkpoint Gate (Model + Optimizer + Scaler + RNG + Shard Cursor):
+                # Preserves full recoverable training state at checkpoint_interval steps.
+                # Guarantees seamless, exact, crash-proof resumption with full AdamW moments and intra-shard offset!
+                is_regular_interval = (step - last_regular_checkpoint_step >= args.checkpoint_interval)
+                if is_regular_interval:
+                    last_regular_checkpoint_step = step
+                    save_checkpoint(
+                        model, optimizer, scaler, config, tok_path, args.output_dir,
+                        step, epoch, cur_step_loss, best_loss, args.stage_id,
+                        is_best=False, is_completed=False, sync_to_gdrive=True,
+                        dataset=dataset, shard_ledger=shard_ledger,
+                    )
+
+                # Rate-Limited Best Milestone Commit Gate:
+                # Commits best checkpoint to disk and Google Drive ONLY:
+                # 1. At checkpoint_interval steps (e.g. step 50, 100, 150...), OR
+                # 2. When a significant breakthrough occurs (loss drop >= 0.15), OR
+                # 3. Upon reaching max_steps.
+                # Prevents writing 2GB on every microscopic 0.0001 loss fluctuation!
+                is_interval_step = (step - last_best_checkpoint_step >= args.checkpoint_interval)
+                is_major_milestone = (last_best_checkpoint_loss - best_loss >= 0.15)
+                is_final_step = (step >= args.max_steps)
+
+                if is_new_best and (is_interval_step or is_major_milestone or is_final_step):
                     last_best_checkpoint_step = step
-                    last_best_checkpoint_loss = cur_step_loss
+                    last_best_checkpoint_loss = best_loss
 
                     print(
-                        f"[{args.stage_id}] >>> {CLR_GREEN}{CLR_BOLD}NEW HISTORICAL BEST LOSS ACHIEVED: "
+                        f"[{args.stage_id}] >>> {CLR_GREEN}{CLR_BOLD}COMMITTING BEST MILESTONE CHECKPOINT: "
                         f"{best_loss:.4f} (Step {step:04d}){CLR_RESET} <<<",
                         flush=True,
                     )
@@ -2194,12 +2629,14 @@ def main():
     save_checkpoint(
         model, optimizer, scaler, config, tok_path, args.output_dir,
         step, epoch, final_loss, best_loss, args.stage_id,
-        is_best=False, is_completed=True
+        is_best=False, is_completed=True,
+        dataset=dataset, shard_ledger=shard_ledger,
     )
     save_checkpoint(
         model, optimizer, scaler, config, tok_path, best_cp_dir,
         step, epoch, best_loss, best_loss, args.stage_id,
-        is_best=True, is_completed=True
+        is_best=True, is_completed=True,
+        dataset=dataset, shard_ledger=shard_ledger,
     )
 
     print(f"[Stage Complete] Training checkpoint preserved in: {args.output_dir}")

@@ -385,10 +385,13 @@ class ShardLedger:
         self.output_dir = output_dir
         self.gdrive_dir = gdrive_dir
         self.ledger_file = os.path.join(output_dir, "shard_ledger.json")
+        self.schema_version: str = "2.0"
+        self.dataset_revision: str = "v2"
         self.completed_shards: List[str] = []
         self.completed_metadata: Dict[str, Any] = {}
         self.active_shard: Optional[str] = None
         self.active_shard_line_offset: int = 0
+        self.active_shard_byte_offset: int = 0
         self.active_shard_start_step: int = 0
         self.total_records_processed: int = 0
         self.last_committed_step: int = 0
@@ -413,10 +416,13 @@ class ShardLedger:
                 print(f"[Shard Ledger Notice] Local ledger read note: {e}")
 
         if loaded_data:
+            self.schema_version = loaded_data.get("schema_version", "1.0")
+            self.dataset_revision = loaded_data.get("dataset_revision", "v2")
             self.completed_shards = loaded_data.get("completed_shards", [])
             self.completed_metadata = loaded_data.get("completed_metadata", {})
             self.active_shard = loaded_data.get("active_shard")
             self.active_shard_line_offset = loaded_data.get("active_shard_line_offset", loaded_data.get("active_shard_offset", 0))
+            self.active_shard_byte_offset = loaded_data.get("active_shard_byte_offset", 0)
             self.active_shard_start_step = loaded_data.get("active_shard_start_step", 0)
             self.total_records_processed = loaded_data.get("total_records_processed", 0)
             self.last_committed_step = loaded_data.get("last_committed_step", 0)
@@ -424,10 +430,13 @@ class ShardLedger:
     def save(self):
         os.makedirs(self.output_dir, exist_ok=True)
         data = {
+            "schema_version": self.schema_version,
+            "dataset_revision": self.dataset_revision,
             "completed_shards": self.completed_shards,
             "completed_metadata": self.completed_metadata,
             "active_shard": self.active_shard,
             "active_shard_line_offset": self.active_shard_line_offset,
+            "active_shard_byte_offset": self.active_shard_byte_offset,
             "active_shard_start_step": self.active_shard_start_step,
             "total_records_processed": self.total_records_processed,
             "last_committed_step": self.last_committed_step,
@@ -494,15 +503,43 @@ class ShardLedger:
         """
         Reconciles ShardLedger state with authoritative checkpoint cursor.
         Ensures exact consistency if a crash occurred between checkpoint commit and ledger update.
+        Handles both stale-behind and stale-ahead ledger anomalies.
         """
         c_shard = cursor.get("active_shard")
         c_offset = cursor.get("active_shard_line_offset", cursor.get("active_shard_offset", 0))
+        c_byte_offset = cursor.get("active_shard_byte_offset", 0)
         c_records = cursor.get("total_samples_trained", cursor.get("total_completed_records", 0))
-        c_completed = cursor.get("completed_shards", [])
+        c_completed = cursor.get("completed_shards")
+
+        if c_completed is not None:
+            checkpoint_completed_set = set(c_completed)
+
+            # Evict any stale-ahead shards present in ledger but absent from checkpoint's completed list
+            stale_ahead_shards = [s for s in self.completed_shards if s not in checkpoint_completed_set]
+            if stale_ahead_shards:
+                print(
+                    f"[Shard Ledger Reconciliation] Evicting stale-ahead shards {stale_ahead_shards} from completed: "
+                    f"verified checkpoint at step {step} has not committed these shards. They will be retrained.",
+                    flush=True,
+                )
+                for s in stale_ahead_shards:
+                    self.completed_metadata.pop(s, None)
+
+            # Checkpoint's completed_shards is authoritative verified ground truth
+            self.completed_shards = [s for s in c_completed if s != c_shard]
+            self.completed_metadata = {
+                k: v for k, v in self.completed_metadata.items()
+                if k in checkpoint_completed_set and k != c_shard
+            }
+        else:
+            if c_shard and c_shard in self.completed_shards:
+                self.completed_shards = [s for s in self.completed_shards if s != c_shard]
+                self.completed_metadata.pop(c_shard, None)
 
         if c_shard:
             self.active_shard = c_shard
             self.active_shard_line_offset = c_offset
+            self.active_shard_byte_offset = c_byte_offset
             if c_shard in self.completed_shards:
                 print(
                     f"[Shard Ledger Reconciliation] Unmarking active shard '{c_shard}' from completed: "
@@ -512,24 +549,20 @@ class ShardLedger:
                 self.completed_shards = [s for s in self.completed_shards if s != c_shard]
                 self.completed_metadata.pop(c_shard, None)
 
-        if c_completed:
-            for cs in c_completed:
-                if cs not in self.completed_shards:
-                    self.completed_shards.append(cs)
-
         self.total_records_processed = c_records
         self.last_committed_step = step
         self.save()
         print(
             f"[Shard Ledger Reconciled] Authoritative state restored: "
-            f"Active Shard='{self.active_shard}', Line Offset={self.active_shard_line_offset:,}, "
+            f"Active Shard='{self.active_shard}', Line Offset={self.active_shard_line_offset:,} (Byte Offset: {self.active_shard_byte_offset:,}), "
             f"Completed Shards={len(self.completed_shards)}.",
             flush=True,
         )
 
-    def update_active_cursor(self, shard_name: Optional[str], line_offset: int, total_samples: int, step: int):
+    def update_active_cursor(self, shard_name: Optional[str], line_offset: int, total_samples: int, step: int, byte_offset: int = 0):
         self.active_shard = shard_name
         self.active_shard_line_offset = line_offset
+        self.active_shard_byte_offset = byte_offset
         self.total_records_processed = total_samples
         self.last_committed_step = step
         self.save()
@@ -572,6 +605,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
         shuffle_shards: bool = False,
         resume_shard: Optional[str] = None,
         resume_line_offset: int = -1,
+        resume_byte_offset: int = 0,
         shard_ledger: Optional[ShardLedger] = None,
         keep_shards: bool = False,
         dataset_dir: Optional[str] = None,
@@ -586,16 +620,29 @@ class TaraStreamingJsonlDataset(IterableDataset):
         self.shuffle_shards = shuffle_shards
         self.resume_shard = resume_shard
         self.resume_line_offset = resume_line_offset
+        self.resume_byte_offset = resume_byte_offset
         self.shard_ledger = shard_ledger
         self.keep_shards = keep_shards
         self.dataset_dir = dataset_dir
         self.repo_id = repo_id
+        self.prefix = prefix
+        self.managed_downloaded_shards: Set[str] = set()
         # Strict deterministic line cursor streaming: buffer_size = 1 guarantees zero duplicate and zero lost samples
         self.buffer_size = max(1, int(buffer_size))
         self.current_active_shard: Optional[str] = None
         self.active_shard_name: Optional[str] = None
         self.active_shard_offset: int = 0
-        print(f"[Dataset] Initialized streaming pipeline across {len(self.file_paths)} shard(s) (buffer_size={self.buffer_size}, resume_shard={self.resume_shard}, line_offset={self.resume_line_offset})...")
+
+        # Validate resume target existence if explicitly specified
+        if self.resume_shard:
+            known_shard_names = {os.path.basename(p) for p in self.file_paths}
+            if self.resume_shard not in known_shard_names:
+                raise RuntimeError(
+                    f"[Dataset Resume Error] Specified resume target shard '{self.resume_shard}' "
+                    f"is not present in the discovered dataset shards catalog ({len(known_shard_names)} shards)."
+                )
+
+        print(f"[Dataset] Initialized streaming pipeline across {len(self.file_paths)} shard(s) (buffer_size={self.buffer_size}, resume_shard={self.resume_shard}, line_offset={self.resume_line_offset}, byte_offset={self.resume_byte_offset})...")
 
     def __iter__(self):
         fps = list(self.file_paths)
@@ -608,12 +655,26 @@ class TaraStreamingJsonlDataset(IterableDataset):
         buffer_size = self.buffer_size
         target_resume_shard = self.resume_shard
         target_resume_line = self.resume_line_offset
+        target_resume_byte = getattr(self, "resume_byte_offset", 0)
+
+        # Track whether resume target has been reached in sequential ordering
+        resume_target_reached = (target_resume_shard is None)
 
         if target_resume_shard:
-            print(f"[Dataset Stream] Resuming exact data cursor: shard '{target_resume_shard}', line offset > {target_resume_line:,}...", flush=True)
+            print(f"[Dataset Stream] Resuming exact data cursor: shard '{target_resume_shard}', line offset > {target_resume_line:,} (byte offset: {target_resume_byte:,})...", flush=True)
 
         for fp in fps:
             shard_name = os.path.basename(fp)
+
+            # Skip earlier shards BEFORE invoking the downloader when resuming from a middle shard
+            if not resume_target_reached:
+                if shard_name == target_resume_shard:
+                    resume_target_reached = True
+                else:
+                    # Earlier shard precedes resume target; skip without downloading!
+                    continue
+
+            is_resume_target = (shard_name == target_resume_shard)
 
             # Determine authentic local file path
             if os.path.isabs(fp) or os.path.exists(fp):
@@ -623,9 +684,9 @@ class TaraStreamingJsonlDataset(IterableDataset):
             else:
                 actual_fp = fp
 
-            # Check Shard Ledger: Skip if already marked completed AND content hash matches
+            # Check Shard Ledger: Skip if already marked completed AND not the active resume target
             if self.shard_ledger and self.shard_ledger.is_completed(shard_name, local_path=actual_fp if os.path.exists(actual_fp) else None):
-                if target_resume_shard != shard_name:
+                if not is_resume_target:
                     print(f"[Dataset Ledger] Shard '{shard_name}' is ALREADY COMPLETED and verified. Skipping.", flush=True)
                     continue
 
@@ -633,6 +694,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
             if not os.path.exists(actual_fp) or os.path.getsize(actual_fp) == 0:
                 if self.repo_id and self.dataset_dir:
                     actual_fp = download_single_shard_jit(self.repo_id, self.prefix, shard_name, self.dataset_dir)
+                    self.managed_downloaded_shards.add(os.path.abspath(actual_fp))
                 else:
                     continue
 
@@ -643,26 +705,36 @@ class TaraStreamingJsonlDataset(IterableDataset):
             if self.shard_ledger:
                 self.shard_ledger.set_active_shard(shard_name)
 
-            # Check if this shard is prior to our resume target shard
-            is_resume_target = (target_resume_shard == shard_name)
-            if target_resume_shard and not is_resume_target:
-                if self.shard_ledger and self.shard_ledger.is_completed(shard_name, local_path=actual_fp):
-                    continue
-
             print(f"[Dataset Shard Active] Streaming from: {shard_name} (Runtime SHA-256: {shard_sha[:16]}...)", flush=True)
 
             total_shard_lines = 0
             reached_eof = True
             try:
                 with open(actual_fp, "r", encoding="utf-8") as f:
-                    for line_idx, line in enumerate(f):
-                        total_shard_lines += 1
+                    start_line_idx = 0
+                    if is_resume_target and target_resume_byte > 0:
+                        try:
+                            f.seek(target_resume_byte)
+                            start_line_idx = max(0, target_resume_line + 1)
+                        except Exception:
+                            f.seek(0)
+                            start_line_idx = 0
+
+                    line_offset_in_read = 0
+                    while True:
+                        line = f.readline()
+                        if not line:
+                            break
+                        line_idx = start_line_idx + line_offset_in_read
+                        line_offset_in_read += 1
+                        line_byte_offset = f.tell()
+                        total_shard_lines = max(total_shard_lines, line_idx + 1)
                         line = line.strip()
                         if not line:
                             continue
 
-                        # If this is the resume target shard, fast-forward to line offset
-                        if is_resume_target and line_idx <= target_resume_line:
+                        # Sequential line fast-forward fallback if byte seek was not performed
+                        if is_resume_target and target_resume_byte <= 0 and line_idx <= target_resume_line:
                             continue
 
                         try:
@@ -695,7 +767,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
                                 labels[:eff_start] = -100
 
                                 self.active_shard_offset = line_idx
-                                item = (input_ids, labels, shard_name, line_idx)
+                                item = (input_ids, labels, shard_name, line_idx, line_byte_offset)
                                 if buffer_size <= 1:
                                     yield item
                                     emitted += 1
@@ -728,23 +800,26 @@ class TaraStreamingJsonlDataset(IterableDataset):
                     if self.shard_ledger:
                         self.shard_ledger.mark_completed(shard_name, total_shard_lines, shard_sha)
 
-                    if not self.keep_shards and self.repo_id is not None and os.path.exists(actual_fp):
+                    # Evict only files owned by the managed download cache, NEVER delete user original source dataset files
+                    is_managed_cache = (os.path.abspath(actual_fp) in self.managed_downloaded_shards)
+                    if not self.keep_shards and is_managed_cache and os.path.exists(actual_fp):
                         try:
                             os.remove(actual_fp)
-                            print(f"[JIT Shard Eviction] Reclaimed disk space: deleted local completed shard cache {shard_name}", flush=True)
+                            self.managed_downloaded_shards.discard(os.path.abspath(actual_fp))
+                            print(f"[JIT Shard Eviction] Reclaimed disk space: deleted managed completed shard cache {shard_name}", flush=True)
                         except Exception as evict_err:
-                            print(f"[JIT Shard Eviction Notice] Could not delete {shard_name}: {evict_err}")
-
-                # After resume shard finishes, clear the resume target so subsequent shards start at line 0
-                if is_resume_target:
-                    target_resume_shard = None
-                    target_resume_line = -1
+                            print(f"[JIT Shard Eviction Notice] Could not delete managed cache {shard_name}: {evict_err}")
 
                 if 0 < self.max_samples <= emitted:
                     break
             except Exception as read_err:
                 print(f"[Dataset Shard Error] Error reading {shard_name}: {read_err}", flush=True)
                 continue
+            finally:
+                if is_resume_target:
+                    target_resume_shard = None
+                    target_resume_line = -1
+                    target_resume_byte = 0
 
         while buffer:
             idx = random.randrange(len(buffer)) if buffer_size > 1 else 0
@@ -770,10 +845,12 @@ def collate_fn(batch):
         l = len(inp)
         padded_inputs[i, :l] = inp
         padded_labels[i, :l] = lab
-        if len(item) >= 4:
-            cursors.append((item[2], item[3]))
+        if len(item) >= 5:
+            cursors.append((item[2], item[3], item[4]))
+        elif len(item) >= 4:
+            cursors.append((item[2], item[3], 0))
         else:
-            cursors.append(("", 0))
+            cursors.append(("", 0, 0))
 
     return padded_inputs, padded_labels, cursors
 
@@ -1533,19 +1610,25 @@ def save_checkpoint(
         if data_cursor is None:
             active_shard = getattr(dataset, "current_active_shard", getattr(dataset, "active_shard_name", None)) if dataset else None
             active_offset = getattr(dataset, "active_shard_offset", 0) if dataset else 0
+            active_byte_offset = getattr(dataset, "active_shard_byte_offset", 0) if dataset else 0
             completed_shards = list(shard_ledger.completed_shards) if shard_ledger else []
             completed_records = shard_ledger.get_total_completed_records() if shard_ledger else 0
+            samples_consumed = completed_records
             data_cursor = {
                 "active_shard": active_shard,
                 "active_shard_line_offset": active_offset,
+                "active_shard_byte_offset": active_byte_offset,
                 "total_samples_trained": completed_records,
+                "samples_consumed": samples_consumed,
                 "completed_shards": completed_shards,
             }
         else:
             active_shard = data_cursor.get("active_shard")
             active_offset = data_cursor.get("active_shard_line_offset", 0)
+            active_byte_offset = data_cursor.get("active_shard_byte_offset", 0)
             completed_shards = data_cursor.get("completed_shards", list(shard_ledger.completed_shards) if shard_ledger else [])
             completed_records = data_cursor.get("total_samples_trained", 0)
+            samples_consumed = data_cursor.get("samples_consumed", completed_records)
 
         continuation_state = {
             "step": step,
@@ -1560,8 +1643,12 @@ def save_checkpoint(
             "data_cursor": data_cursor,
             "active_shard": active_shard,
             "active_shard_offset": active_offset,
+            "active_shard_line_offset": active_offset,
+            "active_shard_byte_offset": active_byte_offset,
             "completed_shards": completed_shards,
             "total_completed_records": completed_records,
+            "total_samples_trained": completed_records,
+            "samples_consumed": samples_consumed,
         }
         with open(os.path.join(output_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
             json.dump(continuation_state, f, indent=2)
@@ -1642,6 +1729,7 @@ def save_checkpoint(
                 active_offset,
                 completed_records,
                 step,
+                byte_offset=active_byte_offset,
             )
 
         # STEP 4: DELETE OLD / STALE ARTIFACTS
@@ -1780,9 +1868,18 @@ def try_resume_from_checkpoint(
                     best_cand_cursor = {
                         "active_shard": s_data.get("active_shard"),
                         "active_shard_line_offset": s_data.get("active_shard_offset", 0),
-                        "total_samples_trained": s_data.get("total_completed_records", 0),
+                        "active_shard_byte_offset": s_data.get("active_shard_byte_offset", 0),
+                        "total_samples_trained": s_data.get("total_samples_trained", s_data.get("total_completed_records", 0)),
+                        "samples_consumed": s_data.get("samples_consumed", s_data.get("total_completed_records", 0)),
                         "completed_shards": s_data.get("completed_shards", []),
                     }
+                else:
+                    if "active_shard_byte_offset" not in best_cand_cursor:
+                        best_cand_cursor["active_shard_byte_offset"] = s_data.get("active_shard_byte_offset", 0)
+                    if "total_samples_trained" not in best_cand_cursor:
+                        best_cand_cursor["total_samples_trained"] = s_data.get("total_samples_trained", s_data.get("total_completed_records", 0))
+                    if "samples_consumed" not in best_cand_cursor:
+                        best_cand_cursor["samples_consumed"] = s_data.get("samples_consumed", best_cand_cursor["total_samples_trained"])
         except Exception as e:
             print(f"  -> Notice: Could not parse candidate {cand}: {e}")
 
@@ -1828,6 +1925,12 @@ def try_resume_from_checkpoint(
             opt_data = torch.load(opt_file, map_location="cpu")
             if optimizer and "optimizer" in opt_data:
                 optimizer.load_state_dict(opt_data["optimizer"])
+                # Move optimizer state tensors to model parameter device to prevent device mismatch errors
+                target_device = next(model.parameters()).device if hasattr(model, "parameters") else "cpu"
+                for state in optimizer.state.values():
+                    for sk, sv in state.items():
+                        if isinstance(sv, torch.Tensor):
+                            state[sk] = sv.to(target_device)
             if scaler and opt_data.get("scaler"):
                 scaler.load_state_dict(opt_data["scaler"])
             if "torch_rng" in opt_data and opt_data["torch_rng"] is not None:
@@ -2390,7 +2493,10 @@ def main():
         if local_files:
             discovered_shards = local_files
         else:
-            discovered_shards = [f"tara_canonical_shard_{i:03d}.jsonl" for i in range(53)]
+            raise RuntimeError(
+                f"[Dataset Discovery Fatal] Zero dataset shards discovered on Hugging Face repository '{dataset_repo}' (v2/*.jsonl) "
+                f"or in local dataset directory '{args.dataset_dir}'. Cannot proceed with zero training shards."
+            )
 
     # Strictly filter out held-out shards to prevent evaluation leakage
     import fnmatch
@@ -2500,18 +2606,17 @@ def main():
         scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and autocast_dtype == torch.float16))
 
     # Preflight Validation Diagnostic (Stage 1: Isolated kernel, Stage 2: Full-model single microbatch)
-    diag_report = run_canary_preflight_diagnostic(
-        model=model,
-        optimizer=optimizer,
-        scaler=scaler,
-        autocast_dtype=autocast_dtype,
-        device=device,
-        batch_size=args.batch_size,
-        max_seq_len=args.max_seq_len,
-        vocab_size=vocab_size,
-    )
-
     if args.preflight_only:
+        diag_report = run_canary_preflight_diagnostic(
+            model=model,
+            optimizer=optimizer,
+            scaler=scaler,
+            autocast_dtype=autocast_dtype,
+            device=device,
+            batch_size=args.batch_size,
+            max_seq_len=args.max_seq_len,
+            vocab_size=vocab_size,
+        )
         print("=" * 80)
         print("  [PREFLIGHT-ONLY DIAGNOSTIC COMPLETE]")
         print("=" * 80)
@@ -2601,6 +2706,9 @@ def main():
     last_best_checkpoint_loss = best_loss if best_loss < float("inf") else float("inf")
     current_cursor = resumed_cursor
 
+    total_samples_trained = int(resumed_cursor.get("total_samples_trained", 0)) if resumed_cursor else 0
+    samples_consumed = int(resumed_cursor.get("samples_consumed", total_samples_trained)) if resumed_cursor else 0
+
     print(f"[Training] Launching Training: Epochs={args.epochs}, Batch={args.batch_size}, Accum={args.grad_accum}, Precision={precision_str}, Steps={start_step}..{args.max_steps}")
     model.train()
     step = start_step
@@ -2613,6 +2721,7 @@ def main():
 
     for epoch in range(start_epoch, args.epochs):
         optimizer.zero_grad(set_to_none=True)
+        accum_batches = []
         for batch_idx, (inputs, labels, cursors) in enumerate(dataloader):
             inputs = inputs.to(device)
             labels = labels.to(device)
@@ -2631,6 +2740,9 @@ def main():
             accum_ce += ce_loss.item() if ce_loss is not None else loss.item()
             accum_aux += aux_loss.item() if aux_loss is not None else 0.0
 
+            accum_batches.append((inputs, labels, cursors))
+            samples_consumed += len(cursors)
+
             if (batch_idx + 1) % args.grad_accum == 0:
                 scaler.unscale_(optimizer)
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -2640,29 +2752,92 @@ def main():
                 for pg in optimizer.param_groups:
                     pg["lr"] = cur_lr
 
+                scale_before = scaler.get_scale()
                 scaler.step(optimizer)
                 scaler.update()
-                optimizer.zero_grad(set_to_none=True)
+                scale_after = scaler.get_scale()
 
-                step += 1
-                cur_step_loss = accum_loss / args.grad_accum
-                cur_step_ce = accum_ce / args.grad_accum
-                cur_step_aux = accum_aux / args.grad_accum
-                running_loss += cur_step_loss
-                accum_loss = 0.0
-                accum_ce = 0.0
-                accum_aux = 0.0
+                # Detect if optimizer step was skipped due to Inf/NaN in GradScaler
+                is_step_skipped = scaler.is_enabled() and (scale_after < scale_before)
 
-                ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
+                if is_step_skipped:
+                    print(
+                        f"[AMP Dynamic Loss Scaler] Inf/NaN gradient detected! Scaler reduced scale factor: "
+                        f"{scale_before} -> {scale_after}. Optimizer step skipped. Retrying accumulation window...",
+                        flush=True,
+                    )
+                    max_overflow_retries = 5
+                    retry_count = 0
+                    while is_step_skipped and retry_count < max_overflow_retries:
+                        retry_count += 1
+                        optimizer.zero_grad(set_to_none=True)
+                        accum_loss = 0.0
+                        accum_ce = 0.0
+                        accum_aux = 0.0
+                        for r_inputs, r_labels, _ in accum_batches:
+                            with autocast_ctx:
+                                _, r_loss, r_ce, r_aux = model(r_inputs, labels=r_labels)
+                                r_loss_scaled = r_loss / args.grad_accum
+                            scaler.scale(r_loss_scaled).backward()
+                            accum_loss += r_loss.item()
+                            accum_ce += r_ce.item() if r_ce is not None else r_loss.item()
+                            accum_aux += r_aux.item() if r_aux is not None else 0.0
 
-                # Track exact committed data cursor from the last sample of this completed optimizer step
-                last_sample_cursor = cursors[-1] if cursors else (getattr(dataset, "current_active_shard", None), getattr(dataset, "active_shard_offset", 0))
-                current_cursor = {
-                    "active_shard": last_sample_cursor[0],
-                    "active_shard_line_offset": last_sample_cursor[1],
-                    "total_samples_trained": step * args.batch_size * args.grad_accum,
-                    "completed_shards": list(shard_ledger.completed_shards) if shard_ledger else [],
-                }
+                        scaler.unscale_(optimizer)
+                        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        scale_before = scaler.get_scale()
+                        scaler.step(optimizer)
+                        scaler.update()
+                        scale_after = scaler.get_scale()
+                        is_step_skipped = scaler.is_enabled() and (scale_after < scale_before)
+                        if not is_step_skipped:
+                            print(
+                                f"[AMP Scaler Recovery Succeeded] Window successfully retried and applied on attempt {retry_count} "
+                                f"with scale {scale_after}.",
+                                flush=True,
+                            )
+                            break
+
+                if not is_step_skipped:
+                    optimizer.zero_grad(set_to_none=True)
+                    step += 1
+                    window_samples = sum(len(c) for _, _, c in accum_batches)
+                    total_samples_trained += window_samples
+
+                    cur_step_loss = accum_loss / args.grad_accum
+                    cur_step_ce = accum_ce / args.grad_accum
+                    cur_step_aux = accum_aux / args.grad_accum
+                    running_loss += cur_step_loss
+                    accum_loss = 0.0
+                    accum_ce = 0.0
+                    accum_aux = 0.0
+
+                    ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
+
+                    # Track exact committed data cursor from the last sample of this successfully applied optimizer step
+                    last_sample_cursor = accum_batches[-1][2][-1] if (accum_batches and accum_batches[-1][2]) else (
+                        getattr(dataset, "current_active_shard", None), getattr(dataset, "active_shard_offset", 0)
+                    )
+                    current_cursor = {
+                        "active_shard": last_sample_cursor[0],
+                        "active_shard_line_offset": last_sample_cursor[1],
+                        "total_samples_trained": total_samples_trained,
+                        "samples_consumed": samples_consumed,
+                        "completed_shards": list(shard_ledger.completed_shards) if shard_ledger else [],
+                    }
+                    accum_batches.clear()
+                else:
+                    print(
+                        f"[AMP Scaler Unrecoverable] Gradient overflow persisted after {max_overflow_retries} retries. "
+                        f"Discarding corrupt window to maintain model parameter integrity. Weights and step preserved.",
+                        flush=True,
+                    )
+                    optimizer.zero_grad(set_to_none=True)
+                    accum_loss = 0.0
+                    accum_ce = 0.0
+                    accum_aux = 0.0
+                    accum_batches.clear()
+                    continue
 
                 # Real-Time Telemetry Logging (LIVE on EVERY SINGLE STEP with immediate stdout flush)
                 step_duration = max(time.time() - step_last_time, 1e-4) if 'step_last_time' in locals() else 0.5
@@ -2694,6 +2869,7 @@ def main():
                     f"LR: {cur_lr:.2e} | "
                     f"GradNorm: {grad_norm:.2f} | "
                     f"Speed: {step_speed:.0f} tok/s ({step_duration:.2f}s) | "
+                    f"Samples: {total_samples_trained:,} | "
                     f"{vram_str}",
                     flush=True
                 )

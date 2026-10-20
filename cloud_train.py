@@ -3350,11 +3350,12 @@ def print_frontier_comparison_matrix_colored(step: int, cur_loss: float, best_lo
 # 5. High-Speed Cloud Asset Ingestion (Hugging Face CDN)
 # =============================================================================
 
-def ensure_remote_assets_available(model_dir: str, dataset_dir: str, repo_id: str = "manjukp6/tara", prefix: str = "v2"):
+def ensure_remote_assets_available(model_dir: str, dataset_dir: str, repo_id: str = "manjukp6/tara", prefix: str = "v2", bulk_download_dataset: bool = False):
     """
     High-Speed Cloud Asset Ingestion via Hugging Face Hub (Pure Python).
-    Downloads base candidate model and dataset shards concurrently with resume support.
-    The ``prefix`` argument controls which versioned shard directory is fetched (e.g. ``"v2"``).
+    Downloads base candidate model weights/config if missing.
+    Dataset shards are streamed on-demand via single-shard JIT (download_single_shard_jit)
+    during training, avoiding multi-gigabyte bulk downloads unless bulk_download_dataset is True.
     """
     try:
         from huggingface_hub import snapshot_download
@@ -3364,6 +3365,7 @@ def ensure_remote_assets_available(model_dir: str, dataset_dir: str, repo_id: st
 
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(dataset_dir, exist_ok=True)
+    token = _resolve_hf_token()
 
     # 1. Check Model Weights & Config
     config_file = os.path.join(model_dir, "config.json")
@@ -3376,6 +3378,7 @@ def ensure_remote_assets_available(model_dir: str, dataset_dir: str, repo_id: st
                 repo_type="model",
                 local_dir=model_dir,
                 allow_patterns=["config.json", "tokenizer.json", "tokenizer_config.json", "*.safetensors", "neural_model_v1/*"],
+                token=token,
                 max_workers=8,
             )
             sub_dir = os.path.join(model_dir, "neural_model_v1")
@@ -3390,36 +3393,40 @@ def ensure_remote_assets_available(model_dir: str, dataset_dir: str, repo_id: st
         except Exception as e:
             print(f"[Warning] Model candidate download warning: {e}")
 
-    # 2. Check Dataset Shards
-    jsonl_shards = glob.glob(os.path.join(dataset_dir, "*.jsonl"))
-    if len(jsonl_shards) == 0:
-        print(f"[High-Speed HF] Downloading Dataset Shards from {repo_id}...")
-        try:
-            snapshot_download(
-                repo_id=repo_id,
-                repo_type="dataset",
-                local_dir=dataset_dir,
-                allow_patterns=[f"{prefix}/*.jsonl", f"{prefix}/*.json", "*.jsonl"],
-                max_workers=8,
-            )
-            sub_v2 = os.path.join(dataset_dir, prefix)
-            if os.path.exists(sub_v2):
-                for item in os.listdir(sub_v2):
-                    s = os.path.join(sub_v2, item)
-                    d = os.path.join(dataset_dir, item)
-                    if not os.path.exists(d):
-                        shutil.move(s, d)
-                shutil.rmtree(sub_v2, ignore_errors=True)
+    # 2. Check Dataset Shards (Strict Single-Shard JIT Streaming by Default)
+    if bulk_download_dataset:
+        jsonl_shards = glob.glob(os.path.join(dataset_dir, "*.jsonl"))
+        if len(jsonl_shards) == 0:
+            print(f"[High-Speed HF] Bulk Downloading Dataset Shards from {repo_id}...")
+            try:
+                snapshot_download(
+                    repo_id=repo_id,
+                    repo_type="dataset",
+                    local_dir=dataset_dir,
+                    allow_patterns=[f"{prefix}/*.jsonl", f"{prefix}/*.json", "*.jsonl"],
+                    token=token,
+                    max_workers=8,
+                )
+                sub_v2 = os.path.join(dataset_dir, prefix)
+                if os.path.exists(sub_v2):
+                    for item in os.listdir(sub_v2):
+                        s = os.path.join(sub_v2, item)
+                        d = os.path.join(dataset_dir, item)
+                        if not os.path.exists(d):
+                            shutil.move(s, d)
+                    shutil.rmtree(sub_v2, ignore_errors=True)
 
-            # Purge hidden .cache directories to eliminate duplicate disk usage
-            for d in [model_dir, dataset_dir]:
-                shutil.rmtree(os.path.join(d, ".cache"), ignore_errors=True)
-            shutil.rmtree(os.path.expanduser("~/.cache/huggingface"), ignore_errors=True)
-            shutil.rmtree(os.path.expanduser("~/.cache/pip"), ignore_errors=True)
+                # Purge hidden .cache directories to eliminate duplicate disk usage
+                for d in [model_dir, dataset_dir]:
+                    shutil.rmtree(os.path.join(d, ".cache"), ignore_errors=True)
+                shutil.rmtree(os.path.expanduser("~/.cache/huggingface"), ignore_errors=True)
+                shutil.rmtree(os.path.expanduser("~/.cache/pip"), ignore_errors=True)
 
-            print(f"[High-Speed HF] Dataset shards ready in {dataset_dir}")
-        except Exception as e:
-            print(f"[Warning] Dataset shards download warning: {e}")
+                print(f"[High-Speed HF] Dataset shards ready in {dataset_dir}")
+            except Exception as e:
+                print(f"[Warning] Dataset shards download warning: {e}")
+    else:
+        print(f"[High-Speed HF] Single-shard JIT streaming active — shards will be fetched on-demand by TaraStreamingJsonlDataset.", flush=True)
 
 
 
@@ -3647,6 +3654,8 @@ def main():
     parser.add_argument("--max-shard-bytes", type=int, default=1_073_741_824,
                         help="Enforced maximum size per downloaded shard in bytes (default: 1 GiB = 1073741824). "
                              "Downloads exceeding this limit are aborted; incomplete temp files are removed.")
+    parser.add_argument("--bulk-download-dataset", action="store_true", default=False,
+                        help="Bulk pre-download all dataset shards instead of JIT single-shard streaming")
     parser.add_argument("--preflight-only", action="store_true", default=False, help="Execute only the dual-stage preflight validation diagnostic and exit with report")
     args = parser.parse_args()
 
@@ -3702,7 +3711,12 @@ def main():
         sys.exit(0)
 
     # 2. Fast Asset Verification & Streaming Download (if files missing)
-    ensure_remote_assets_available(args.model_dir, args.dataset_dir, prefix=args.dataset_prefix.strip("/"))
+    ensure_remote_assets_available(
+        args.model_dir,
+        args.dataset_dir,
+        prefix=args.dataset_prefix.strip("/"),
+        bulk_download_dataset=args.bulk_download_dataset,
+    )
 
     # 2b. Pretraining Authorization Gate check
     if args.verify_gate:

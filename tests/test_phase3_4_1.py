@@ -26,6 +26,7 @@ from cloud_train import (
     try_resume_from_checkpoint,
     compute_tokenizer_fingerprint,
     _cleanup_old_versioned_checkpoints,
+    ensure_remote_assets_available,
 )
 
 
@@ -242,6 +243,42 @@ class TestCheckpointSelectionIsolation(unittest.TestCase):
         )
         self.assertFalse(was_resumed, "Resume should fail closed when stage_id does not match expected_stage_id")
         self.assertEqual(step, 0)
+
+    def test_ensure_remote_assets_bypasses_bulk_dataset_by_default(self):
+        """Verify ensure_remote_assets_available does NOT trigger bulk dataset downloads when bulk_download_dataset=False."""
+        from unittest.mock import patch
+
+        m_dir = os.path.join(self.tmpdir, "mock_model")
+        d_dir = os.path.join(self.tmpdir, "mock_ds")
+        os.makedirs(m_dir, exist_ok=True)
+        # Create dummy config and safetensors so model download is skipped
+        with open(os.path.join(m_dir, "config.json"), "w") as f:
+            f.write("{}")
+        with open(os.path.join(m_dir, "model.safetensors"), "w") as f:
+            f.write("mock")
+
+        with patch("huggingface_hub.snapshot_download") as mock_snap:
+            ensure_remote_assets_available(m_dir, d_dir, repo_id="dummy/repo", bulk_download_dataset=False)
+            # Assert snapshot_download was NOT called for dataset
+            for call_item in mock_snap.call_args_list:
+                self.assertNotEqual(call_item.kwargs.get("repo_type"), "dataset", "Bulk dataset download should not be triggered by default!")
+
+    def test_ensure_remote_assets_calls_bulk_dataset_when_explicitly_requested(self):
+        """Verify ensure_remote_assets_available triggers dataset snapshot when bulk_download_dataset=True."""
+        from unittest.mock import patch
+
+        m_dir = os.path.join(self.tmpdir, "mock_model_2")
+        d_dir = os.path.join(self.tmpdir, "mock_ds_2")
+        os.makedirs(m_dir, exist_ok=True)
+        with open(os.path.join(m_dir, "config.json"), "w") as f:
+            f.write("{}")
+        with open(os.path.join(m_dir, "model.safetensors"), "w") as f:
+            f.write("mock")
+
+        with patch("huggingface_hub.snapshot_download") as mock_snap:
+            ensure_remote_assets_available(m_dir, d_dir, repo_id="dummy/repo", bulk_download_dataset=True)
+            called_dataset = any(c.kwargs.get("repo_type") == "dataset" for c in mock_snap.call_args_list)
+            self.assertTrue(called_dataset, "Bulk dataset download should be triggered when bulk_download_dataset=True")
 
 
 if __name__ == "__main__":

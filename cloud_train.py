@@ -779,10 +779,25 @@ class TaraStreamingJsonlDataset(IterableDataset):
             try:
                 with open(actual_fp, "r", encoding="utf-8") as f:
                     start_line_idx = 0
-                    if is_resume_target and target_resume_byte > 0:
+                    if is_resume_target and target_resume_byte > 0 and target_resume_chunk == 0:
+                        # Byte-seek optimisation: only safe when the resume line is entirely
+                        # committed (target_resume_chunk == 0).  The stored byte offset is the
+                        # file position *after* reading target_resume_line, so seeking to it
+                        # lands at the start of the next line.  When target_resume_chunk > 0
+                        # the resume line still has uncommitted chunks that must be re-streamed;
+                        # in that case the byte-seek is skipped and sequential line fast-forward
+                        # is used instead so that per-chunk filtering below applies correctly.
                         try:
-                            f.seek(target_resume_byte)
-                            start_line_idx = max(0, target_resume_line + 1)
+                            # Guard: reject the seek if the stored offset is beyond the current
+                            # file end (file may have been replaced or truncated since the
+                            # checkpoint was written).
+                            file_end = f.seek(0, 2)
+                            if 0 < target_resume_byte <= file_end:
+                                f.seek(target_resume_byte)
+                                start_line_idx = max(0, target_resume_line + 1)
+                            else:
+                                f.seek(0)
+                                start_line_idx = 0
                         except Exception:
                             f.seek(0)
                             start_line_idx = 0
@@ -800,15 +815,20 @@ class TaraStreamingJsonlDataset(IterableDataset):
                         if not line:
                             continue
 
-                        # Sequential line fast-forward fallback if byte seek was not performed.
+                        # Sequential line fast-forward when byte-seek was not performed.
                         #
-                        # Resume cursor semantics:
-                        # - Lines strictly before target_resume_line are always skipped (committed).
-                        # - The target_resume_line itself is skipped entirely when target_resume_chunk == 0
-                        #   (all of its chunks were committed).
-                        # - The target_resume_line is re-processed (with per-chunk filtering below)
-                        #   only when target_resume_chunk > 0, meaning at least one chunk of that
-                        #   line is uncommitted and must be replayed.
+                        # Resume cursor semantics for active_chunk_idx (stored in checkpoint):
+                        # - active_chunk_idx = 0 and line is the resume line → whole line is
+                        #   committed; skip it entirely and start from the next line.
+                        # - active_chunk_idx = N > 0 → chunks 0 .. N-1 of the resume line are
+                        #   committed; resume from chunk N onward (per-chunk filter below).
+                        # - Lines strictly before target_resume_line are always skipped.
+                        #
+                        # The training loop writes active_chunk_idx = c_chunk + 1, where c_chunk
+                        # is the chunk_idx of the last sample included in the successful
+                        # optimizer step.  This guarantees the stored value is always the index
+                        # of the first uncommitted chunk within the resume line (or 0 when the
+                        # entire line was consumed before the optimizer step committed).
                         if is_resume_target and target_resume_byte <= 0:
                             if line_idx < target_resume_line:
                                 continue
@@ -2288,6 +2308,7 @@ def try_resume_from_checkpoint(
                         "active_shard": s_data.get("active_shard"),
                         "active_shard_line_offset": s_data.get("active_shard_offset", 0),
                         "active_shard_byte_offset": s_data.get("active_shard_byte_offset", 0),
+                        "active_chunk_idx": s_data.get("active_chunk_idx", 0),
                         "total_samples_trained": s_data.get("total_samples_trained", s_data.get("total_completed_records", 0)),
                         "samples_consumed": s_data.get("samples_consumed", s_data.get("total_completed_records", 0)),
                         "completed_shards": s_data.get("completed_shards", []),
@@ -2295,6 +2316,8 @@ def try_resume_from_checkpoint(
                 else:
                     if "active_shard_byte_offset" not in best_cand_cursor:
                         best_cand_cursor["active_shard_byte_offset"] = s_data.get("active_shard_byte_offset", 0)
+                    if "active_chunk_idx" not in best_cand_cursor:
+                        best_cand_cursor["active_chunk_idx"] = s_data.get("active_chunk_idx", 0)
                     if "total_samples_trained" not in best_cand_cursor:
                         best_cand_cursor["total_samples_trained"] = s_data.get("total_samples_trained", s_data.get("total_completed_records", 0))
                     if "samples_consumed" not in best_cand_cursor:
@@ -3258,8 +3281,16 @@ def main():
 
                     ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
 
-                    # Track exact committed data cursor from the last sample of this successfully applied optimizer step
+                    # Track exact committed data cursor from the last sample of this
+                    # successfully applied optimizer step.
                     # Cursor tuple layout: (shard_name, line_idx, byte_offset, chunk_idx)
+                    #
+                    # active_chunk_idx is stored as c_chunk + 1 — the index of the FIRST
+                    # uncommitted chunk within the resume line.  The dataset iterator
+                    # interprets active_chunk_idx as the exclusive lower bound: it skips
+                    # chunks 0 .. active_chunk_idx-1 and resumes from active_chunk_idx.
+                    # When active_chunk_idx == 0 the entire resume line is considered
+                    # committed and is skipped on reload.
                     last_sample_cursor = accum_batches[-1][2][-1] if (accum_batches and accum_batches[-1][2]) else (
                         getattr(dataset, "current_active_shard", None),
                         getattr(dataset, "active_shard_offset", 0),
@@ -3269,13 +3300,16 @@ def main():
                     c_shard = last_sample_cursor[0]
                     c_line = last_sample_cursor[1] if len(last_sample_cursor) > 1 else 0
                     c_byte = last_sample_cursor[2] if len(last_sample_cursor) > 2 else 0
-                    c_chunk = last_sample_cursor[3] if len(last_sample_cursor) > 3 else 0
+                    c_chunk_last = last_sample_cursor[3] if len(last_sample_cursor) > 3 else 0
+                    # Store the next uncommitted chunk index so the iterator skips exactly
+                    # the committed chunks and resumes from the correct position.
+                    c_chunk_next = c_chunk_last + 1
 
                     current_cursor = {
                         "active_shard": c_shard,
                         "active_shard_line_offset": c_line,
                         "active_shard_byte_offset": c_byte,
-                        "active_chunk_idx": c_chunk,
+                        "active_chunk_idx": c_chunk_next,
                         "total_samples_trained": total_samples_trained,
                         "samples_consumed": samples_consumed,
                         "completed_shards": list(shard_ledger.completed_shards) if shard_ledger else [],
@@ -3388,8 +3422,11 @@ def main():
                 if step >= args.max_steps:
                     break
 
-        # Process any remaining partial accumulation window at the end of an epoch
-        if accum_batches and step < args.max_steps:
+        # Process any remaining partial accumulation window at the end of an epoch.
+        # The flush runs regardless of whether step >= max_steps so that every
+        # gradient accumulated into the model is either committed to an optimizer
+        # update or explicitly discarded with a log message — never silently dropped.
+        if accum_batches:
             partial_count = len(accum_batches)
             scaler.unscale_(optimizer)
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -3397,13 +3434,30 @@ def main():
             is_non_finite_grad = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
 
             if is_non_finite_grad and not scaler.is_enabled():
+                # Under BF16 / FP32, skip optimizer step on non-finite gradients to
+                # prevent parameter corruption.  The partial window is discarded and
+                # the committed step and cursor remain unchanged.
                 is_step_skipped = True
+                print(
+                    f"[Partial Window Non-Finite Gradient] Inf/NaN gradient detected in "
+                    f"end-of-epoch partial accumulation window ({partial_count} batches). "
+                    f"Optimizer step skipped; partial window discarded. Committed step "
+                    f"and cursor are unchanged.",
+                    flush=True,
+                )
             else:
                 scale_before = scaler.get_scale()
                 scaler.step(optimizer)
                 scaler.update()
                 scale_after = scaler.get_scale()
                 is_step_skipped = (scaler.is_enabled() and (scale_after < scale_before)) or is_non_finite_grad
+                if is_step_skipped:
+                    print(
+                        f"[Partial Window AMP Overflow] Scale reduction {scale_before} -> {scale_after} "
+                        f"in end-of-epoch partial window ({partial_count} batches). "
+                        f"Optimizer step skipped; partial window discarded.",
+                        flush=True,
+                    )
 
             if not is_step_skipped:
                 optimizer.zero_grad(set_to_none=True)
@@ -3428,13 +3482,15 @@ def main():
                 c_shard = last_sample_cursor[0]
                 c_line = last_sample_cursor[1] if len(last_sample_cursor) > 1 else 0
                 c_byte = last_sample_cursor[2] if len(last_sample_cursor) > 2 else 0
-                c_chunk = last_sample_cursor[3] if len(last_sample_cursor) > 3 else 0
+                c_chunk_last = last_sample_cursor[3] if len(last_sample_cursor) > 3 else 0
+                # Store the next uncommitted chunk index (first chunk to yield on resume)
+                c_chunk_next = c_chunk_last + 1
 
                 current_cursor = {
                     "active_shard": c_shard,
                     "active_shard_line_offset": c_line,
                     "active_shard_byte_offset": c_byte,
-                    "active_chunk_idx": c_chunk,
+                    "active_chunk_idx": c_chunk_next,
                     "total_samples_trained": total_samples_trained,
                     "samples_consumed": samples_consumed,
                     "completed_shards": list(shard_ledger.completed_shards) if shard_ledger else [],

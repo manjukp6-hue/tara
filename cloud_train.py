@@ -1782,11 +1782,10 @@ def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
         return
 
 
-    # If output_dir is already inside gdrive_root, do not copy to itself
+    # If output_dir is already inside Google Drive (/content/drive or gdrive_root), do not duplicate mirror
     try:
         abs_output = os.path.abspath(output_dir)
-        abs_gdrive = os.path.abspath(gdrive_root)
-        if abs_output.startswith(abs_gdrive):
+        if abs_output.startswith(os.path.abspath("/content/drive")) or (gdrive_root and abs_output.startswith(os.path.abspath(gdrive_root))):
             return
     except Exception:
         pass

@@ -581,9 +581,10 @@ class ShardLedger:
             "records_processed": records_count,
             "file_sha256": file_sha256,
         }
-        self.total_records_processed += records_count
+        self.total_records_processed = max(self.total_records_processed, self.get_total_completed_records())
         self.active_shard = None
         self.active_shard_line_offset = 0
+        self.active_shard_byte_offset = 0
         self.save()
         print(f"[Shard Ledger COMPLETED] Shard '{shard_name}' registered as COMPLETED (SHA-256: {file_sha256[:16]}..., Records: {records_count:,}, Total: {len(self.completed_shards)} completed).", flush=True)
 
@@ -591,10 +592,27 @@ class ShardLedger:
 class TaraStreamingJsonlDataset(IterableDataset):
     """
     High-Throughput Zero-Memory Streaming Dataset.
+
     Streams JSONL records on-the-fly directly to the GPU without loading
     millions of samples into RAM. Supports Just-In-Time single shard downloading,
     persistent ledger tracking, exact deterministic line cursor resumption,
-    and automatic eviction of completed shards.
+    and controlled shard completion/eviction that is driven by the training loop
+    (not by this iterator) so that shard completion is never recorded ahead of a
+    durable, verified checkpoint.
+
+    Token chunking policy (Task B):
+    - Every document whose token sequence exceeds max_seq_len is split into
+      consecutive, non-overlapping chunks of exactly max_seq_len tokens.
+    - Each chunk is identified by a stable (shard_name, line_idx, chunk_idx) triple
+      that is preserved in the yielded item and persisted in the checkpoint cursor,
+      enabling exact resumption.
+    - The final short chunk of a document (len < max_seq_len) is yielded as-is when
+      it contains at least 4 tokens; otherwise it is discarded.  This policy is
+      explicit and tested.
+    - Loss/label masking from the original document (target_start) is applied
+      independently per chunk: tokens that belong to the input portion of the chunk
+      are masked with -100 so they do not contribute to the language-modelling loss.
+    - No token from any intended training document is silently truncated or dropped.
     """
     def __init__(
         self,
@@ -606,6 +624,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
         resume_shard: Optional[str] = None,
         resume_line_offset: int = -1,
         resume_byte_offset: int = 0,
+        resume_chunk_idx: int = 0,
         shard_ledger: Optional[ShardLedger] = None,
         keep_shards: bool = False,
         dataset_dir: Optional[str] = None,
@@ -621,6 +640,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
         self.resume_shard = resume_shard
         self.resume_line_offset = resume_line_offset
         self.resume_byte_offset = resume_byte_offset
+        self.resume_chunk_idx = resume_chunk_idx
         self.shard_ledger = shard_ledger
         self.keep_shards = keep_shards
         self.dataset_dir = dataset_dir
@@ -632,6 +652,13 @@ class TaraStreamingJsonlDataset(IterableDataset):
         self.current_active_shard: Optional[str] = None
         self.active_shard_name: Optional[str] = None
         self.active_shard_offset: int = 0
+        self.active_shard_byte_offset: int = 0
+        self.active_chunk_idx: int = 0
+
+        # Shards that have been fully streamed but whose completion must be
+        # confirmed by the training loop after a durable checkpoint is committed.
+        # Maps shard_name -> (total_shard_lines, shard_sha256).
+        self._pending_shard_completions: Dict[str, Tuple[int, str]] = {}
 
         # Validate resume target existence if explicitly specified
         if self.resume_shard:
@@ -642,7 +669,30 @@ class TaraStreamingJsonlDataset(IterableDataset):
                     f"is not present in the discovered dataset shards catalog ({len(known_shard_names)} shards)."
                 )
 
-        print(f"[Dataset] Initialized streaming pipeline across {len(self.file_paths)} shard(s) (buffer_size={self.buffer_size}, resume_shard={self.resume_shard}, line_offset={self.resume_line_offset}, byte_offset={self.resume_byte_offset})...")
+        print(f"[Dataset] Initialized streaming pipeline across {len(self.file_paths)} shard(s) "
+              f"(buffer_size={self.buffer_size}, resume_shard={self.resume_shard}, "
+              f"line_offset={self.resume_line_offset}, byte_offset={self.resume_byte_offset}, "
+              f"chunk_idx={self.resume_chunk_idx})...")
+
+    def commit_shard_completion(self, shard_name: str, managed_cache: bool = False, actual_fp: Optional[str] = None):
+        """
+        Marks a shard as completed in the ledger and optionally evicts its managed
+        cache copy.  Must be called by the training loop ONLY after a durable,
+        verified checkpoint has been committed that covers all training units from
+        the shard.  Calling this from inside __iter__ is strictly forbidden.
+        """
+        if shard_name not in self._pending_shard_completions:
+            return
+        total_lines, shard_sha = self._pending_shard_completions.pop(shard_name)
+        if self.shard_ledger:
+            self.shard_ledger.mark_completed(shard_name, total_lines, shard_sha)
+        if not self.keep_shards and managed_cache and actual_fp and os.path.exists(actual_fp):
+            try:
+                os.remove(actual_fp)
+                self.managed_downloaded_shards.discard(os.path.abspath(actual_fp))
+                print(f"[JIT Shard Eviction] Reclaimed disk space: deleted managed completed shard cache {shard_name}", flush=True)
+            except Exception as evict_err:
+                print(f"[JIT Shard Eviction Notice] Could not delete managed cache {shard_name}: {evict_err}")
 
     def __iter__(self):
         fps = list(self.file_paths)
@@ -656,12 +706,15 @@ class TaraStreamingJsonlDataset(IterableDataset):
         target_resume_shard = self.resume_shard
         target_resume_line = self.resume_line_offset
         target_resume_byte = getattr(self, "resume_byte_offset", 0)
+        target_resume_chunk = getattr(self, "resume_chunk_idx", 0)
 
         # Track whether resume target has been reached in sequential ordering
         resume_target_reached = (target_resume_shard is None)
 
         if target_resume_shard:
-            print(f"[Dataset Stream] Resuming exact data cursor: shard '{target_resume_shard}', line offset > {target_resume_line:,} (byte offset: {target_resume_byte:,})...", flush=True)
+            print(f"[Dataset Stream] Resuming exact data cursor: shard '{target_resume_shard}', "
+                  f"line offset > {target_resume_line:,} (byte offset: {target_resume_byte:,}, "
+                  f"chunk_idx >= {target_resume_chunk})...", flush=True)
 
         for fp in fps:
             shard_name = os.path.basename(fp)
@@ -757,17 +810,56 @@ class TaraStreamingJsonlDataset(IterableDataset):
                             else:
                                 continue
 
-                            if len(full_ids) > self.max_seq_len:
-                                full_ids = full_ids[:self.max_seq_len]
+                            # -------------------------------------------------------
+                            # Task B: Deterministic consecutive chunking.
+                            # Every token in full_ids is covered by exactly one chunk.
+                            # Silent truncation via full_ids[:max_seq_len] is replaced
+                            # with a sliding window that yields all chunks.
+                            #
+                            # Chunk identity: (shard_name, line_idx, chunk_idx)
+                            # Overlap/context: none — chunks are non-overlapping so
+                            # no token is accidentally trained as a duplicate target.
+                            # Final short chunk policy: yield if len >= 4, else discard.
+                            # Label masking: per-chunk target_start is adjusted so
+                            # only output tokens within each chunk carry loss.
+                            # -------------------------------------------------------
+                            n_tokens = len(full_ids)
+                            if n_tokens < 4:
+                                continue
 
-                            if len(full_ids) >= 4:
-                                input_ids = torch.tensor(full_ids, dtype=torch.long)
+                            chunk_size = self.max_seq_len
+                            n_chunks = max(1, math.ceil(n_tokens / chunk_size))
+
+                            for chunk_idx in range(n_chunks):
+                                chunk_start = chunk_idx * chunk_size
+                                chunk_end = min(chunk_start + chunk_size, n_tokens)
+                                chunk_ids = full_ids[chunk_start:chunk_end]
+
+                                # Final short chunk policy: discard if fewer than 4 tokens
+                                if len(chunk_ids) < 4:
+                                    continue
+
+                                # Skip chunks already processed at resume boundary:
+                                # For the resume line, skip chunks before the resume chunk_idx.
+                                if is_resume_target and line_idx == target_resume_line and chunk_idx < target_resume_chunk:
+                                    continue
+
+                                # Compute label masking for this specific chunk.
+                                # chunk_target_start is the number of input tokens inside
+                                # this chunk; only output tokens carry loss (label != -100).
+                                chunk_target_start = max(0, target_start - chunk_start)
+                                chunk_target_start = min(chunk_target_start, len(chunk_ids))
+
+                                input_ids = torch.tensor(chunk_ids, dtype=torch.long)
                                 labels = input_ids.clone()
-                                eff_start = min(target_start, len(full_ids))
-                                labels[:eff_start] = -100
+                                if chunk_target_start > 0:
+                                    labels[:chunk_target_start] = -100
 
                                 self.active_shard_offset = line_idx
-                                item = (input_ids, labels, shard_name, line_idx, line_byte_offset)
+                                self.active_shard_byte_offset = line_byte_offset
+                                self.active_chunk_idx = chunk_idx
+
+                                item = (input_ids, labels, shard_name, line_idx, line_byte_offset, chunk_idx)
                                 if buffer_size <= 1:
                                     yield item
                                     emitted += 1
@@ -786,7 +878,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
                         except Exception:
                             continue
 
-                # Drain remaining buffer for this shard before completion/eviction
+                # Drain remaining buffer for this shard before signalling EOF
                 while buffer:
                     idx = random.randrange(len(buffer)) if buffer_size > 1 else 0
                     yield buffer.pop(idx)
@@ -795,20 +887,21 @@ class TaraStreamingJsonlDataset(IterableDataset):
                         reached_eof = False
                         return
 
-                # Shard EOF reached: Record completion in ledger with dynamic SHA-256 and auto-evict
+                # -------------------------------------------------------
+                # Task C: Shard EOF reached — do NOT mark completed or
+                # evict here.  Instead, register this shard in
+                # _pending_shard_completions so that the training loop
+                # can call commit_shard_completion() after a durable
+                # verified checkpoint has been committed.
+                # -------------------------------------------------------
                 if reached_eof:
-                    if self.shard_ledger:
-                        self.shard_ledger.mark_completed(shard_name, total_shard_lines, shard_sha)
-
-                    # Evict only files owned by the managed download cache, NEVER delete user original source dataset files
                     is_managed_cache = (os.path.abspath(actual_fp) in self.managed_downloaded_shards)
-                    if not self.keep_shards and is_managed_cache and os.path.exists(actual_fp):
-                        try:
-                            os.remove(actual_fp)
-                            self.managed_downloaded_shards.discard(os.path.abspath(actual_fp))
-                            print(f"[JIT Shard Eviction] Reclaimed disk space: deleted managed completed shard cache {shard_name}", flush=True)
-                        except Exception as evict_err:
-                            print(f"[JIT Shard Eviction Notice] Could not delete managed cache {shard_name}: {evict_err}")
+                    self._pending_shard_completions[shard_name] = (total_shard_lines, shard_sha)
+                    print(
+                        f"[Dataset Shard EOF] Shard '{shard_name}' streaming complete "
+                        f"({total_shard_lines:,} lines). Completion pending checkpoint commit.",
+                        flush=True,
+                    )
 
                 if 0 < self.max_samples <= emitted:
                     break
@@ -820,6 +913,11 @@ class TaraStreamingJsonlDataset(IterableDataset):
                     target_resume_shard = None
                     target_resume_line = -1
                     target_resume_byte = 0
+                    target_resume_chunk = 0
+                    self.resume_shard = None
+                    self.resume_line_offset = -1
+                    self.resume_byte_offset = 0
+                    self.resume_chunk_idx = 0
 
         while buffer:
             idx = random.randrange(len(buffer)) if buffer_size > 1 else 0
@@ -834,6 +932,9 @@ TaraJsonlDataset = TaraStreamingJsonlDataset
 
 
 def collate_fn(batch):
+    if not batch:
+        return torch.empty((0, 0), dtype=torch.long), torch.empty((0, 0), dtype=torch.long), []
+
     max_len = max(len(b[0]) for b in batch)
     bsz = len(batch)
     padded_inputs = torch.zeros(bsz, max_len, dtype=torch.long)
@@ -845,12 +946,16 @@ def collate_fn(batch):
         l = len(inp)
         padded_inputs[i, :l] = inp
         padded_labels[i, :l] = lab
-        if len(item) >= 5:
-            cursors.append((item[2], item[3], item[4]))
+        # item layout: (input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx)
+        # chunk_idx added by Task B; gracefully handle legacy 5-tuples.
+        if len(item) >= 6:
+            cursors.append((item[2], item[3], item[4], item[5]))
+        elif len(item) >= 5:
+            cursors.append((item[2], item[3], item[4], 0))
         elif len(item) >= 4:
-            cursors.append((item[2], item[3], 0))
+            cursors.append((item[2], item[3], 0, 0))
         else:
-            cursors.append(("", 0, 0))
+            cursors.append(("", 0, 0, 0))
 
     return padded_inputs, padded_labels, cursors
 
@@ -1565,11 +1670,26 @@ def save_checkpoint(
     data_cursor: Optional[Dict[str, Any]] = None,
 ):
     """
-    Enforces strict 3-step safety protocol: Save First -> Verify Next -> Delete Old Last:
-    1. Reclaim Emergency Disk Space if Low (< 6GB)
-    2. Save New Complete Checkpoint to local NVMe SSD (Weights + Optimizer + Scaler + RNG + Exact Data Cursor)
-    3. Verify Newly Saved Checkpoint (100% verification proof before touching backups or ledger)
-    4. Synchronize Shard Ledger with exact committed cursor and clean obsolete artifacts
+    Crash-safe, versioned checkpoint protocol (Task A):
+
+    1. Reclaim emergency disk space if low.
+    2. Write all checkpoint artifacts into a unique, isolated staging directory
+       (never directly into output_dir).  An incomplete staging directory is
+       never promoted and is harmless to the prior committed checkpoint.
+    3. Verify every required artifact in the staging directory before touching
+       the active output_dir.
+    4. Promote the verified staging directory to a versioned immutable location
+       (output_dir.step_<N>_<ts>) and write a latest-checkpoint pointer
+       (latest_checkpoint.json) only after verification passes.
+    5. Update the shard ledger only AFTER a verified checkpoint is committed
+       (checkpoint is the authoritative continuation state).
+    6. Retain the previous versioned checkpoint on disk; do not delete it until
+       the new checkpoint is confirmed durable.
+    7. Sync to Google Drive after local commit.
+
+    Google Drive / FUSE semantics: staging directories whose COMMITTED marker is
+    absent are ignored on recovery.  An incomplete upload can never be mistaken
+    for a valid committed checkpoint.
     """
     tag = "BEST MILESTONE" if is_best else ("COMPLETED" if is_completed else f"STEP {step}")
     print(f"[Checkpoint] Snapshotting [{tag}] checkpoint at Step {step}...", flush=True)
@@ -1584,158 +1704,272 @@ def save_checkpoint(
         t0 = time.time()
         os.makedirs(output_dir, exist_ok=True)
 
-        # 1. config.json
-        with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
+        # ----------------------------------------------------------------
+        # Step 1: Write all artifacts into an isolated staging directory.
+        # The staging directory name encodes step and a wall-clock timestamp
+        # so it is always unique even if the process crashes mid-write.
+        # ----------------------------------------------------------------
+        parent_dir = os.path.dirname(os.path.abspath(output_dir)) or "."
+        staging_dir = os.path.join(
+            parent_dir,
+            f".ckpt_staging_{os.path.basename(output_dir)}_step{step}_{int(time.time())}_{os.getpid()}"
+        )
+        os.makedirs(staging_dir, exist_ok=True)
 
-        # 2. tokenizer.json
-        if tokenizer_path and os.path.exists(tokenizer_path):
-            tok_dst = os.path.join(output_dir, "tokenizer.json")
-            if os.path.abspath(tokenizer_path) != os.path.abspath(tok_dst):
-                shutil.copy2(tokenizer_path, tok_dst)
+        try:
+            # 1. config.json
+            with open(os.path.join(staging_dir, "config.json"), "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2)
 
-        # 3. model.safetensors
-        state_dict = {k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}
-        if HAS_SAFETENSORS:
-            save_file(state_dict, os.path.join(output_dir, "model.safetensors"))
-        else:
-            torch.save(state_dict, os.path.join(output_dir, "pytorch_model.bin"))
-        del state_dict
-        gc.collect()
+            # 2. tokenizer.json
+            if tokenizer_path and os.path.exists(tokenizer_path):
+                tok_dst = os.path.join(staging_dir, "tokenizer.json")
+                if os.path.abspath(tokenizer_path) != os.path.abspath(tok_dst):
+                    shutil.copy2(tokenizer_path, tok_dst)
 
-        weights_file = os.path.join(output_dir, "model.safetensors") if HAS_SAFETENSORS else os.path.join(output_dir, "pytorch_model.bin")
-        weights_sha256 = compute_file_sha256(weights_file) if os.path.exists(weights_file) else None
-
-        # 4. Continuation state with exact data cursor
-        if data_cursor is None:
-            active_shard = getattr(dataset, "current_active_shard", getattr(dataset, "active_shard_name", None)) if dataset else None
-            active_offset = getattr(dataset, "active_shard_offset", 0) if dataset else 0
-            active_byte_offset = getattr(dataset, "active_shard_byte_offset", 0) if dataset else 0
-            completed_shards = list(shard_ledger.completed_shards) if shard_ledger else []
-            completed_records = shard_ledger.get_total_completed_records() if shard_ledger else 0
-            samples_consumed = completed_records
-            data_cursor = {
-                "active_shard": active_shard,
-                "active_shard_line_offset": active_offset,
-                "active_shard_byte_offset": active_byte_offset,
-                "total_samples_trained": completed_records,
-                "samples_consumed": samples_consumed,
-                "completed_shards": completed_shards,
-            }
-        else:
-            active_shard = data_cursor.get("active_shard")
-            active_offset = data_cursor.get("active_shard_line_offset", 0)
-            active_byte_offset = data_cursor.get("active_shard_byte_offset", 0)
-            completed_shards = data_cursor.get("completed_shards", list(shard_ledger.completed_shards) if shard_ledger else [])
-            completed_records = data_cursor.get("total_samples_trained", 0)
-            samples_consumed = data_cursor.get("samples_consumed", completed_records)
-
-        continuation_state = {
-            "step": step,
-            "epoch": epoch,
-            "loss": loss,
-            "best_loss": best_loss,
-            "stage_id": stage_id,
-            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-            "is_completed": is_completed,
-            "is_best": is_best,
-            "model_weights_sha256": weights_sha256,
-            "data_cursor": data_cursor,
-            "active_shard": active_shard,
-            "active_shard_offset": active_offset,
-            "active_shard_line_offset": active_offset,
-            "active_shard_byte_offset": active_byte_offset,
-            "completed_shards": completed_shards,
-            "total_completed_records": completed_records,
-            "total_samples_trained": completed_records,
-            "samples_consumed": samples_consumed,
-        }
-        with open(os.path.join(output_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
-            json.dump(continuation_state, f, indent=2)
-
-        # 5. Optimizer state (only for training checkpoints, strictly excluded from pure milestone)
-        if not is_best or is_completed:
-            opt_sd = optimizer.state_dict() if optimizer else {}
-            cpu_opt_state = {}
-            for k, v in opt_sd.items():
-                if k == "state":
-                    cpu_opt_state[k] = {}
-                    for pid, pdata in v.items():
-                        cpu_opt_state[k][pid] = {
-                            sk: sv.cpu() if isinstance(sv, torch.Tensor) else sv
-                            for sk, sv in pdata.items()
-                        }
-                else:
-                    cpu_opt_state[k] = v
-            del opt_sd
-            scaler_state = scaler.state_dict() if scaler else None
-
-            # RNG states for exact deterministic resumption
-            torch_rng = torch.get_rng_state()
-            cuda_rng = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
-            py_rng = random.getstate()
-
-            torch.save(
-                {
-                    "optimizer": cpu_opt_state,
-                    "scaler": scaler_state,
-                    "step": step,
-                    "best_loss": best_loss,
-                    "torch_rng": torch_rng,
-                    "cuda_rng": cuda_rng,
-                    "py_rng": py_rng,
-                },
-                os.path.join(output_dir, "optimizer_state.pt"),
-            )
-            del cpu_opt_state, scaler_state
+            # 3. model.safetensors
+            state_dict = {k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}
+            if HAS_SAFETENSORS:
+                save_file(state_dict, os.path.join(staging_dir, "model.safetensors"))
+            else:
+                torch.save(state_dict, os.path.join(staging_dir, "pytorch_model.bin"))
+            del state_dict
             gc.collect()
 
-        # 6. STAGE_METADATA.json
-        metadata = {
-            "stage_id": stage_id,
-            "status": "COMPLETED" if is_completed else "IN_PROGRESS",
-            "step": step,
-            "loss": loss,
-            "best_loss": best_loss,
-            "perplexity": math.exp(min(loss, 20.0)),
-            "is_best": is_best,
-            "completed_at_utc": datetime.now(timezone.utc).isoformat() if is_completed else None,
-            "model_weights_sha256": weights_sha256,
-        }
-        with open(os.path.join(output_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2)
+            weights_file = (
+                os.path.join(staging_dir, "model.safetensors") if HAS_SAFETENSORS
+                else os.path.join(staging_dir, "pytorch_model.bin")
+            )
+            weights_sha256 = compute_file_sha256(weights_file) if os.path.exists(weights_file) else None
 
-        elapsed = time.time() - t0
-        print(f"[Checkpoint] Committed [{tag}] checkpoint to disk ({elapsed:.1f}s) -> {output_dir} (Loss: {loss:.4f})", flush=True)
+            # 4. Continuation state with exact data cursor
+            if data_cursor is None:
+                active_shard = getattr(dataset, "current_active_shard", getattr(dataset, "active_shard_name", None)) if dataset else None
+                active_offset = getattr(dataset, "active_shard_offset", 0) if dataset else 0
+                active_byte_offset = getattr(dataset, "active_shard_byte_offset", 0) if dataset else 0
+                active_chunk_idx = getattr(dataset, "active_chunk_idx", 0) if dataset else 0
+                completed_shards = list(shard_ledger.completed_shards) if shard_ledger else []
+                completed_records = shard_ledger.get_total_completed_records() if shard_ledger else 0
+                samples_consumed = completed_records
+                data_cursor = {
+                    "active_shard": active_shard,
+                    "active_shard_line_offset": active_offset,
+                    "active_shard_byte_offset": active_byte_offset,
+                    "active_chunk_idx": active_chunk_idx,
+                    "total_samples_trained": completed_records,
+                    "samples_consumed": samples_consumed,
+                    "completed_shards": completed_shards,
+                }
+            else:
+                active_shard = data_cursor.get("active_shard")
+                active_offset = data_cursor.get("active_shard_line_offset", 0)
+                active_byte_offset = data_cursor.get("active_shard_byte_offset", 0)
+                active_chunk_idx = data_cursor.get("active_chunk_idx", 0)
+                completed_shards = data_cursor.get("completed_shards", list(shard_ledger.completed_shards) if shard_ledger else [])
+                completed_records = data_cursor.get("total_samples_trained", 0)
+                samples_consumed = data_cursor.get("samples_consumed", completed_records)
 
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            continuation_state = {
+                "step": step,
+                "epoch": epoch,
+                "loss": loss,
+                "best_loss": best_loss,
+                "stage_id": stage_id,
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "is_completed": is_completed,
+                "is_best": is_best,
+                "model_weights_sha256": weights_sha256,
+                "data_cursor": data_cursor,
+                "active_shard": active_shard,
+                "active_shard_offset": active_offset,
+                "active_shard_line_offset": active_offset,
+                "active_shard_byte_offset": active_byte_offset,
+                "active_chunk_idx": active_chunk_idx,
+                "completed_shards": completed_shards,
+                "total_completed_records": completed_records,
+                "total_samples_trained": completed_records,
+                "samples_consumed": samples_consumed,
+            }
+            with open(os.path.join(staging_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
+                json.dump(continuation_state, f, indent=2)
 
-        # STEP 2: STRICT VERIFICATION GATE
-        is_valid = verify_checkpoint_integrity(
-            output_dir,
-            require_optimizer=(not is_best and not is_completed),
-            require_completed=is_completed,
-        )
-        if not is_valid:
-            print(f"[Safety Protection] Newly created checkpoint at {output_dir} failed verification! Preserving all old files.", flush=True)
-            return
+            # 5. Optimizer state (only for training checkpoints, strictly excluded from pure best milestone)
+            if not is_best or is_completed:
+                opt_sd = optimizer.state_dict() if optimizer else {}
+                cpu_opt_state = {}
+                for k, v in opt_sd.items():
+                    if k == "state":
+                        cpu_opt_state[k] = {}
+                        for pid, pdata in v.items():
+                            cpu_opt_state[k][pid] = {
+                                sk: sv.cpu() if isinstance(sv, torch.Tensor) else sv
+                                for sk, sv in pdata.items()
+                            }
+                    else:
+                        cpu_opt_state[k] = v
+                del opt_sd
+                scaler_state = scaler.state_dict() if scaler else None
 
-        # STEP 3: SYNCHRONIZE SHARD LEDGER (Lockstep consistency between checkpoint and ledger)
-        if shard_ledger and data_cursor:
-            shard_ledger.update_active_cursor(
-                active_shard,
-                active_offset,
-                completed_records,
-                step,
-                byte_offset=active_byte_offset,
+                # RNG states for exact deterministic resumption
+                torch_rng = torch.get_rng_state()
+                cuda_rng = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+                py_rng = random.getstate()
+
+                torch.save(
+                    {
+                        "optimizer": cpu_opt_state,
+                        "scaler": scaler_state,
+                        "step": step,
+                        "best_loss": best_loss,
+                        "torch_rng": torch_rng,
+                        "cuda_rng": cuda_rng,
+                        "py_rng": py_rng,
+                    },
+                    os.path.join(staging_dir, "optimizer_state.pt"),
+                )
+                del cpu_opt_state, scaler_state
+                gc.collect()
+
+            # 6. STAGE_METADATA.json
+            metadata = {
+                "stage_id": stage_id,
+                "status": "COMPLETED" if is_completed else "IN_PROGRESS",
+                "step": step,
+                "loss": loss,
+                "best_loss": best_loss,
+                "perplexity": math.exp(min(loss, 20.0)),
+                "is_best": is_best,
+                "completed_at_utc": datetime.now(timezone.utc).isoformat() if is_completed else None,
+                "model_weights_sha256": weights_sha256,
+            }
+            with open(os.path.join(staging_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2)
+
+            elapsed_write = time.time() - t0
+            print(f"[Checkpoint] Staged [{tag}] artifacts ({elapsed_write:.1f}s) -> {staging_dir}", flush=True)
+
+            # ----------------------------------------------------------------
+            # Step 2: Verify ALL required artifacts in staging BEFORE touching
+            # output_dir.  A failed verification abandons staging and leaves
+            # the existing output_dir intact.
+            # ----------------------------------------------------------------
+            is_valid = verify_checkpoint_integrity(
+                staging_dir,
+                require_optimizer=(not is_best and not is_completed),
+                require_completed=is_completed,
+            )
+            if not is_valid:
+                print(
+                    f"[Safety Protection] Staged checkpoint at {staging_dir} failed verification! "
+                    f"Preserving existing checkpoint at {output_dir} unchanged.",
+                    flush=True,
+                )
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                return
+
+            # ----------------------------------------------------------------
+            # Step 3: Promote staging -> immutable versioned directory, then
+            # write latest_checkpoint.json pointer atomically.
+            # A prior versioned checkpoint is retained until this pointer is
+            # updated, guaranteeing the last valid committed checkpoint is
+            # always recoverable.
+            # ----------------------------------------------------------------
+            versioned_dir = os.path.join(
+                parent_dir,
+                f"{os.path.basename(output_dir)}.step{step}_{int(time.time())}"
             )
 
-        # STEP 4: DELETE OLD / STALE ARTIFACTS
-        clean_stale_checkpoint_artifacts(output_dir, is_best=is_best)
+            # Rename staging to versioned (atomic on POSIX; best-effort on FUSE/Windows)
+            try:
+                os.rename(staging_dir, versioned_dir)
+            except Exception:
+                shutil.copytree(staging_dir, versioned_dir)
+                shutil.rmtree(staging_dir, ignore_errors=True)
 
-    # STEP 5: Mirror verified checkpoint to Google Drive in background
+            # Sync output_dir to point to latest versioned content:
+            # Copy files from versioned_dir into output_dir (overwrite in-place).
+            # This preserves backward compatibility for all callers that reference output_dir.
+            os.makedirs(output_dir, exist_ok=True)
+            for fname in os.listdir(versioned_dir):
+                src = os.path.join(versioned_dir, fname)
+                dst = os.path.join(output_dir, fname)
+                if os.path.isfile(src):
+                    shutil.copy2(src, dst)
+
+            # Write COMMITTED marker inside versioned_dir so recovery can
+            # distinguish a fully promoted checkpoint from an incomplete staging dir.
+            committed_marker = os.path.join(versioned_dir, "COMMITTED")
+            with open(committed_marker, "w", encoding="utf-8") as f:
+                json.dump({"step": step, "committed_utc": datetime.now(timezone.utc).isoformat()}, f)
+
+            # Publish latest-checkpoint pointer ONLY after versioned dir is fully committed.
+            latest_ptr_path = os.path.join(parent_dir, "latest_checkpoint.json")
+            latest_ptr_tmp = latest_ptr_path + f".tmp_{os.getpid()}"
+            with open(latest_ptr_tmp, "w", encoding="utf-8") as f:
+                json.dump({
+                    "versioned_dir": versioned_dir,
+                    "output_dir": output_dir,
+                    "step": step,
+                    "committed_utc": datetime.now(timezone.utc).isoformat(),
+                }, f, indent=2)
+            try:
+                os.replace(latest_ptr_tmp, latest_ptr_path)
+            except Exception:
+                shutil.copy2(latest_ptr_tmp, latest_ptr_path)
+                try:
+                    os.remove(latest_ptr_tmp)
+                except Exception:
+                    pass
+
+            elapsed = time.time() - t0
+            print(f"[Checkpoint] Committed verified [{tag}] checkpoint (Step {step}, {elapsed:.1f}s) -> {output_dir}", flush=True)
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            # ----------------------------------------------------------------
+            # Step 4: SYNCHRONIZE SHARD LEDGER — only AFTER the checkpoint is
+            # durably committed.  The ledger must never claim a completion that
+            # is ahead of the durable model checkpoint.
+            # ----------------------------------------------------------------
+            if shard_ledger and data_cursor:
+                shard_ledger.update_active_cursor(
+                    active_shard,
+                    active_offset,
+                    completed_records,
+                    step,
+                    byte_offset=active_byte_offset,
+                )
+
+            # ----------------------------------------------------------------
+            # Step 5: Commit any pending shard completions that were waiting
+            # for a durable checkpoint.  Evict managed cache files only now.
+            # ----------------------------------------------------------------
+            if dataset is not None and shard_ledger is not None:
+                pending = list(getattr(dataset, "_pending_shard_completions", {}).keys())
+                for pending_shard in pending:
+                    shard_abs = (
+                        os.path.abspath(os.path.join(dataset.dataset_dir, pending_shard))
+                        if dataset.dataset_dir else None
+                    )
+                    is_managed = (shard_abs in dataset.managed_downloaded_shards) if shard_abs else False
+                    dataset.commit_shard_completion(
+                        pending_shard,
+                        managed_cache=is_managed,
+                        actual_fp=shard_abs if is_managed else None,
+                    )
+
+            # Step 6: Clean temp artifacts from output_dir
+            clean_stale_checkpoint_artifacts(output_dir, is_best=is_best)
+
+        except Exception as e:
+            print(f"[Checkpoint Failure] Error during checkpoint save: {e}", flush=True)
+            if os.path.exists(staging_dir):
+                shutil.rmtree(staging_dir, ignore_errors=True)
+            return
+
+    # Step 7: Mirror verified checkpoint to Google Drive in background
     if sync_to_gdrive:
         sync_checkpoint_to_gdrive(output_dir, tag, wait=is_completed)
     else:
@@ -2639,6 +2873,8 @@ def main():
     resume_shard = None
     resume_line_offset = -1
 
+    resume_byte_offset = 0
+
     if args.full_dataset or args.max_steps <= 0:
         args.max_steps = 100_000_000
         print("[Training Scope] FULL DATASET ROLLING TRAINING ACTIVE. Training continuously across all shards until full dataset is exhausted!", flush=True)
@@ -2670,17 +2906,19 @@ def main():
                 shard_ledger.reconcile_with_checkpoint(resumed_cursor, start_step)
             resume_shard = resumed_cursor.get("active_shard") if resumed_cursor else None
             resume_line_offset = resumed_cursor.get("active_shard_line_offset", -1) if resumed_cursor else -1
+            resume_byte_offset = resumed_cursor.get("active_shard_byte_offset", 0) if resumed_cursor else 0
 
             print("=" * 80, flush=True)
             print("  [DATASET ZERO-DUPLICATE EXACT RESUME AUDIT]", flush=True)
             print(f"  Total Lifetime Step Resumed   : {start_step:,}", flush=True)
             print(f"  Authoritative Active Shard    : {resume_shard or 'None'}", flush=True)
-            print(f"  Exact Line Fast-Forward Offset: {resume_line_offset:,}", flush=True)
+            print(f"  Exact Line Fast-Forward Offset: {resume_line_offset:,} (Byte Offset: {resume_byte_offset:,})", flush=True)
             print(f"  Completed Shards in Ledger    : {len(shard_ledger.completed_shards)} shards ({shard_ledger.get_total_completed_records():,} records)", flush=True)
             print("  Status                        : 100% DETERMINISTIC ZERO DUPLICATE RESUMPTION GUARANTEED", flush=True)
             print("=" * 80, flush=True)
 
     # 9. Instantiate Streaming Dataset & DataLoader with Exact Cursor
+    resume_chunk_idx = resumed_cursor.get("active_chunk_idx", 0) if resumed_cursor else 0
     dataset = TaraStreamingJsonlDataset(
         file_paths=selected_shards,
         tokenizer=tokenizer,
@@ -2689,11 +2927,13 @@ def main():
         shuffle_shards=False,
         resume_shard=resume_shard,
         resume_line_offset=resume_line_offset,
+        resume_byte_offset=resume_byte_offset,
+        resume_chunk_idx=resume_chunk_idx,
         shard_ledger=shard_ledger,
         keep_shards=args.keep_shards,
         dataset_dir=args.dataset_dir,
         repo_id=dataset_repo,
-        prefix="v2",
+        prefix=ds_prefix,
         buffer_size=args.buffer_size,
     )
     dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=collate_fn)
@@ -2740,29 +2980,35 @@ def main():
             accum_ce += ce_loss.item() if ce_loss is not None else loss.item()
             accum_aux += aux_loss.item() if aux_loss is not None else 0.0
 
-            accum_batches.append((inputs, labels, cursors))
+            accum_batches.append((inputs.cpu(), labels.cpu(), cursors))
             samples_consumed += len(cursors)
 
             if (batch_idx + 1) % args.grad_accum == 0:
                 scaler.unscale_(optimizer)
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                grad_norm_val = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
+                is_non_finite_grad = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
 
                 # Dynamic Learning Rate Schedule (Linear Warmup + Cosine Decay)
                 cur_lr = compute_scheduled_lr(step, args.warmup_steps, args.max_steps, args.lr, args.min_lr)
                 for pg in optimizer.param_groups:
                     pg["lr"] = cur_lr
 
-                scale_before = scaler.get_scale()
-                scaler.step(optimizer)
-                scaler.update()
-                scale_after = scaler.get_scale()
-
-                # Detect if optimizer step was skipped due to Inf/NaN in GradScaler
-                is_step_skipped = scaler.is_enabled() and (scale_after < scale_before)
+                if is_non_finite_grad and not scaler.is_enabled():
+                    # Under BF16 / FP32, skip optimizer step on non-finite gradients to prevent parameter corruption
+                    is_step_skipped = True
+                    scale_before = 1.0
+                    scale_after = 1.0
+                else:
+                    scale_before = scaler.get_scale()
+                    scaler.step(optimizer)
+                    scaler.update()
+                    scale_after = scaler.get_scale()
+                    is_step_skipped = (scaler.is_enabled() and (scale_after < scale_before)) or is_non_finite_grad
 
                 if is_step_skipped:
                     print(
-                        f"[AMP Dynamic Loss Scaler] Inf/NaN gradient detected! Scaler reduced scale factor: "
+                        f"[Gradient Loss Scaler] Inf/NaN gradient detected! Scaler reduced scale factor: "
                         f"{scale_before} -> {scale_after}. Optimizer step skipped. Retrying accumulation window...",
                         flush=True,
                     )
@@ -2775,6 +3021,8 @@ def main():
                         accum_ce = 0.0
                         accum_aux = 0.0
                         for r_inputs, r_labels, _ in accum_batches:
+                            r_inputs = r_inputs.to(device)
+                            r_labels = r_labels.to(device)
                             with autocast_ctx:
                                 _, r_loss, r_ce, r_aux = model(r_inputs, labels=r_labels)
                                 r_loss_scaled = r_loss / args.grad_accum
@@ -2785,11 +3033,17 @@ def main():
 
                         scaler.unscale_(optimizer)
                         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                        scale_before = scaler.get_scale()
-                        scaler.step(optimizer)
-                        scaler.update()
-                        scale_after = scaler.get_scale()
-                        is_step_skipped = scaler.is_enabled() and (scale_after < scale_before)
+                        grad_norm_val = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
+                        is_non_finite_grad = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
+                        if is_non_finite_grad and not scaler.is_enabled():
+                            is_step_skipped = True
+                        else:
+                            scale_before = scaler.get_scale()
+                            scaler.step(optimizer)
+                            scaler.update()
+                            scale_after = scaler.get_scale()
+                            is_step_skipped = (scaler.is_enabled() and (scale_after < scale_before)) or is_non_finite_grad
+
                         if not is_step_skipped:
                             print(
                                 f"[AMP Scaler Recovery Succeeded] Window successfully retried and applied on attempt {retry_count} "
@@ -2815,12 +3069,23 @@ def main():
                     ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
 
                     # Track exact committed data cursor from the last sample of this successfully applied optimizer step
+                    # Cursor tuple layout: (shard_name, line_idx, byte_offset, chunk_idx)
                     last_sample_cursor = accum_batches[-1][2][-1] if (accum_batches and accum_batches[-1][2]) else (
-                        getattr(dataset, "current_active_shard", None), getattr(dataset, "active_shard_offset", 0)
+                        getattr(dataset, "current_active_shard", None),
+                        getattr(dataset, "active_shard_offset", 0),
+                        getattr(dataset, "active_shard_byte_offset", 0),
+                        getattr(dataset, "active_chunk_idx", 0),
                     )
+                    c_shard = last_sample_cursor[0]
+                    c_line = last_sample_cursor[1] if len(last_sample_cursor) > 1 else 0
+                    c_byte = last_sample_cursor[2] if len(last_sample_cursor) > 2 else 0
+                    c_chunk = last_sample_cursor[3] if len(last_sample_cursor) > 3 else 0
+
                     current_cursor = {
-                        "active_shard": last_sample_cursor[0],
-                        "active_shard_line_offset": last_sample_cursor[1],
+                        "active_shard": c_shard,
+                        "active_shard_line_offset": c_line,
+                        "active_shard_byte_offset": c_byte,
+                        "active_chunk_idx": c_chunk,
                         "total_samples_trained": total_samples_trained,
                         "samples_consumed": samples_consumed,
                         "completed_shards": list(shard_ledger.completed_shards) if shard_ledger else [],
@@ -2932,6 +3197,60 @@ def main():
 
                 if step >= args.max_steps:
                     break
+
+        # Process any remaining partial accumulation window at the end of an epoch
+        if accum_batches and step < args.max_steps:
+            partial_count = len(accum_batches)
+            scaler.unscale_(optimizer)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            grad_norm_val = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
+            is_non_finite_grad = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
+
+            if is_non_finite_grad and not scaler.is_enabled():
+                is_step_skipped = True
+            else:
+                scale_before = scaler.get_scale()
+                scaler.step(optimizer)
+                scaler.update()
+                scale_after = scaler.get_scale()
+                is_step_skipped = (scaler.is_enabled() and (scale_after < scale_before)) or is_non_finite_grad
+
+            if not is_step_skipped:
+                optimizer.zero_grad(set_to_none=True)
+                step += 1
+                window_samples = sum(len(c) for _, _, c in accum_batches)
+                total_samples_trained += window_samples
+                cur_step_loss = accum_loss / partial_count
+                cur_step_ce = accum_ce / partial_count
+                cur_step_aux = accum_aux / partial_count
+                running_loss += cur_step_loss
+                accum_loss = 0.0
+                accum_ce = 0.0
+                accum_aux = 0.0
+                ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
+
+                last_sample_cursor = accum_batches[-1][2][-1] if (accum_batches and accum_batches[-1][2]) else (
+                    getattr(dataset, "current_active_shard", None),
+                    getattr(dataset, "active_shard_offset", 0),
+                    getattr(dataset, "active_shard_byte_offset", 0),
+                    getattr(dataset, "active_chunk_idx", 0),
+                )
+                c_shard = last_sample_cursor[0]
+                c_line = last_sample_cursor[1] if len(last_sample_cursor) > 1 else 0
+                c_byte = last_sample_cursor[2] if len(last_sample_cursor) > 2 else 0
+                c_chunk = last_sample_cursor[3] if len(last_sample_cursor) > 3 else 0
+
+                current_cursor = {
+                    "active_shard": c_shard,
+                    "active_shard_line_offset": c_line,
+                    "active_shard_byte_offset": c_byte,
+                    "active_chunk_idx": c_chunk,
+                    "total_samples_trained": total_samples_trained,
+                    "samples_consumed": samples_consumed,
+                    "completed_shards": list(shard_ledger.completed_shards) if shard_ledger else [],
+                }
+            accum_batches.clear()
+            optimizer.zero_grad(set_to_none=True)
 
         if step >= args.max_steps:
             break

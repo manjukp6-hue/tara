@@ -332,40 +332,58 @@ class TaraForCausalLM(nn.Module):
 # 2. High-Throughput Streaming Dataset, Persistent Shard Ledger & JIT Downloader
 # =============================================================================
 
-def _resolve_hf_token() -> Optional[str]:
+_token_logged: bool = False
+
+def _resolve_hf_token(cli_token: Optional[str] = None) -> Optional[str]:
     """
     Securely resolves the Hugging Face access token across multiple environments:
-    1. Direct HF_TOKEN environment variable.
-    2. Google Colab userdata secret 'tara_sync' or 'HF_TOKEN'.
-    3. Hugging Face Hub stored cache token (get_token()).
+    1. Direct CLI argument (--hf-token).
+    2. Direct HF_TOKEN environment variable.
+    3. Google Colab userdata secret 'tara_sync' or 'HF_TOKEN'.
+    4. Hugging Face Hub stored cache token (get_token()).
     """
-    token = os.environ.get("HF_TOKEN")
-    if token:
-        return token
+    global _token_logged
+    resolved: Optional[str] = None
 
-    # Check Google Colab userdata secrets if running in Colab
-    try:
-        from google.colab import userdata
-        for secret_key in ("tara_sync", "HF_TOKEN"):
+    if cli_token and cli_token.strip():
+        resolved = cli_token.strip()
+        os.environ["HF_TOKEN"] = resolved
+    elif os.environ.get("HF_TOKEN") and os.environ.get("HF_TOKEN").strip():
+        resolved = os.environ.get("HF_TOKEN").strip()
+    else:
+        # Check Google Colab userdata secrets if running in Colab
+        try:
+            from google.colab import userdata
+            for secret_key in ("tara_sync", "HF_TOKEN"):
+                try:
+                    colab_token = userdata.get(secret_key)
+                    if colab_token and colab_token.strip():
+                        resolved = colab_token.strip()
+                        os.environ["HF_TOKEN"] = resolved
+                        break
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        if not resolved:
             try:
-                colab_token = userdata.get(secret_key)
-                if colab_token:
-                    os.environ["HF_TOKEN"] = colab_token
-                    return colab_token
+                from huggingface_hub import get_token
+                cached = get_token()
+                if cached and cached.strip():
+                    resolved = cached.strip()
+                    os.environ["HF_TOKEN"] = resolved
             except Exception:
                 pass
-    except Exception:
-        pass
 
-    try:
-        from huggingface_hub import get_token
-        cached = get_token()
-        if cached:
-            return cached
-    except Exception:
-        pass
+    if not _token_logged:
+        _token_logged = True
+        if resolved:
+            print(f"[Auth] Hugging Face authentication token resolved (length: {len(resolved)}).", flush=True)
+        else:
+            print("[Auth Notice] No Hugging Face token resolved; unauthenticated access to public resources only.", flush=True)
 
-    return None
+    return resolved
 
 
 def download_single_shard_jit(
@@ -3636,6 +3654,7 @@ def main():
     parser.add_argument("--warmup-steps", type=int, default=50, help="Linear warmup optimizer steps")
     parser.add_argument("--min-lr", type=float, default=1e-5, help="Minimum learning rate floor for cosine decay")
     parser.add_argument("--hf-repo", type=str, default=os.environ.get("HF_REPO", os.environ.get("HF_MODEL_REPO", "")), help="Hugging Face repository for auto-upload")
+    parser.add_argument("--hf-token", type=str, default=None, help="Hugging Face authentication token (or via HF_TOKEN / Colab secret 'tara_sync')")
     parser.add_argument("--verify-gate", action="store_true", default=True, help="Verify pretraining authorization proof before training")
     parser.add_argument("--max-seq-len", type=int, default=256, help="Max sequence length")
     parser.add_argument("--max-shards", type=int, default=0, help="Max shards to ingest (0 for all discovered shards)")
@@ -3662,6 +3681,9 @@ def main():
                         help="Override memory preflight gate to allow FP32 AdamW on memory-constrained GPUs")
     parser.add_argument("--preflight-only", action="store_true", default=False, help="Execute only the dual-stage preflight validation diagnostic and exit with report")
     args = parser.parse_args()
+
+    # Pre-resolve and export HF_TOKEN across runtime
+    _resolve_hf_token(args.hf_token)
 
 
     # Canary Mode Contract & Isolation

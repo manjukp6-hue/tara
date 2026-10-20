@@ -647,8 +647,22 @@ class TaraStreamingJsonlDataset(IterableDataset):
         self.repo_id = repo_id
         self.prefix = prefix
         self.managed_downloaded_shards: Set[str] = set()
-        # Strict deterministic line cursor streaming: buffer_size = 1 guarantees zero duplicate and zero lost samples
+        # Strict deterministic line cursor streaming: buffer_size = 1 guarantees zero duplicate and zero lost samples.
+        # buffer_size > 1 introduces per-shard random shuffling of items in a rolling window.  When a resume cursor
+        # is active (resume_shard is set), items from multiple positions are mixed in the buffer before being yielded,
+        # which makes it impossible to guarantee that the cursor position recorded in the checkpoint corresponds to
+        # the last sample actually consumed by the optimizer.  This is a known data-ordering limitation: resumed
+        # training with buffer_size > 1 may replay or omit a window of samples equal in size to buffer_size around
+        # the resume boundary.  For exact deterministic resumption, buffer_size must be 1.
         self.buffer_size = max(1, int(buffer_size))
+        if self.buffer_size > 1 and resume_shard is not None:
+            print(
+                f"[Dataset Resume Warning] buffer_size={self.buffer_size} with an active resume cursor "
+                f"(resume_shard='{resume_shard}') produces non-deterministic cursor positions inside the "
+                f"shuffle window.  Exact-once resumption is not guaranteed for up to {self.buffer_size} "
+                f"samples around the resume boundary.  Set buffer_size=1 for fully deterministic resumption.",
+                flush=True,
+            )
         self.current_active_shard: Optional[str] = None
         self.active_shard_name: Optional[str] = None
         self.active_shard_offset: int = 0
@@ -786,9 +800,20 @@ class TaraStreamingJsonlDataset(IterableDataset):
                         if not line:
                             continue
 
-                        # Sequential line fast-forward fallback if byte seek was not performed
-                        if is_resume_target and target_resume_byte <= 0 and line_idx <= target_resume_line:
-                            continue
+                        # Sequential line fast-forward fallback if byte seek was not performed.
+                        #
+                        # Resume cursor semantics:
+                        # - Lines strictly before target_resume_line are always skipped (committed).
+                        # - The target_resume_line itself is skipped entirely when target_resume_chunk == 0
+                        #   (all of its chunks were committed).
+                        # - The target_resume_line is re-processed (with per-chunk filtering below)
+                        #   only when target_resume_chunk > 0, meaning at least one chunk of that
+                        #   line is uncommitted and must be replayed.
+                        if is_resume_target and target_resume_byte <= 0:
+                            if line_idx < target_resume_line:
+                                continue
+                            if line_idx == target_resume_line and target_resume_chunk == 0:
+                                continue
 
                         try:
                             record = json.loads(line)
@@ -1642,6 +1667,19 @@ def save_best_milestone(
                 return False
 
             print(f"[Best Checkpoint] Atomically committed verified best milestone (Loss: {best_loss:.4f}, Step {step}) -> {best_dir}", flush=True)
+
+            # Write COMMITTED marker so that recovery code can unambiguously
+            # distinguish a fully-committed best checkpoint from an incomplete
+            # or partially-written staging directory.  Without this marker,
+            # a crash mid-promotion leaves a partial best_dir that could be
+            # mistaken for a valid inference artifact.
+            committed_marker = os.path.join(best_dir, "COMMITTED")
+            try:
+                with open(committed_marker, "w", encoding="utf-8") as _cm:
+                    json.dump({"step": step, "is_best": True, "committed_utc": datetime.now(timezone.utc).isoformat()}, _cm)
+            except Exception as marker_err:
+                print(f"[Best Checkpoint Notice] Could not write COMMITTED marker: {marker_err}", flush=True)
+
             return True
         except Exception as e:
             print(f"[Best Checkpoint Failure] Error saving best milestone: {e}", flush=True)
@@ -1963,6 +2001,14 @@ def save_checkpoint(
             # Step 6: Clean temp artifacts from output_dir
             clean_stale_checkpoint_artifacts(output_dir, is_best=is_best)
 
+            # ----------------------------------------------------------------
+            # Step 7: Apply checkpoint retention policy — keep the two most
+            # recent versioned checkpoint directories; delete older ones only
+            # AFTER the new checkpoint is confirmed durable.  This call is
+            # safe here because the pointer has already been published above.
+            # ----------------------------------------------------------------
+            _cleanup_old_versioned_checkpoints(parent_dir, os.path.basename(output_dir), keep_n=2)
+
         except Exception as e:
             print(f"[Checkpoint Failure] Error during checkpoint save: {e}", flush=True)
             if os.path.exists(staging_dir):
@@ -2032,6 +2078,84 @@ def promote_checkpoint(
         print(f"[GDrive Promotion Mirror] Promoted model synced to: {gdrive_promoted}", flush=True)
 
 
+def _collect_versioned_checkpoint_dirs(parent_dir: str, output_dir_basename: str) -> List[str]:
+    """
+    Discovers immutable versioned checkpoint directories that have a COMMITTED marker.
+    Returns them sorted newest-first (highest step number first).
+    Pattern: <output_dir_basename>.step<N>_<ts>
+    """
+    prefix = output_dir_basename + ".step"
+    candidates = []
+    if not os.path.isdir(parent_dir):
+        return candidates
+    for entry in os.listdir(parent_dir):
+        if entry.startswith(prefix) and not entry.startswith("."):
+            full_path = os.path.join(parent_dir, entry)
+            committed_marker = os.path.join(full_path, "COMMITTED")
+            if os.path.isdir(full_path) and os.path.isfile(committed_marker):
+                # Extract step number for sorting
+                try:
+                    step_part = entry[len(prefix):].split("_")[0]
+                    step_num = int(step_part)
+                except (ValueError, IndexError):
+                    step_num = 0
+                candidates.append((step_num, full_path))
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return [path for _, path in candidates]
+
+
+def _cleanup_old_versioned_checkpoints(parent_dir: str, output_dir_basename: str, keep_n: int = 2) -> None:
+    """
+    Retains the most recent keep_n versioned checkpoint directories (by step number)
+    and safely deletes older ones.  This function MUST only be called AFTER the new
+    versioned checkpoint has been durably committed and its latest_checkpoint.json
+    pointer has been published — never before.
+
+    Safety contract:
+    - The newest keep_n versioned directories are NEVER deleted.
+    - Directories without a COMMITTED marker are staging remnants and are also removed.
+    - At least two recovery-capable checkpoints are retained (keep_n=2 minimum).
+    - Deletion of a checkpoint is logged explicitly.
+    """
+    keep_n = max(keep_n, 2)  # never keep fewer than 2 for crash-recovery safety
+    prefix = output_dir_basename + ".step"
+    all_versioned: List[Tuple[int, str]] = []
+
+    if not os.path.isdir(parent_dir):
+        return
+
+    for entry in os.listdir(parent_dir):
+        if entry.startswith(prefix) and not entry.startswith("."):
+            full_path = os.path.join(parent_dir, entry)
+            if not os.path.isdir(full_path):
+                continue
+            committed_marker = os.path.join(full_path, "COMMITTED")
+            try:
+                step_part = entry[len(prefix):].split("_")[0]
+                step_num = int(step_part)
+            except (ValueError, IndexError):
+                step_num = -1
+            all_versioned.append((step_num, full_path, os.path.isfile(committed_marker)))
+
+    # Sort newest-first
+    all_versioned.sort(key=lambda x: x[0], reverse=True)
+
+    # Keep the top keep_n committed; delete committed ones beyond keep_n and all uncommitted
+    committed_kept = 0
+    for step_num, dir_path, is_committed in all_versioned:
+        if is_committed:
+            if committed_kept < keep_n:
+                committed_kept += 1
+                continue  # preserve this one
+        # Delete: either an old committed checkpoint beyond keep_n, or an uncommitted staging remnant
+        try:
+            shutil.rmtree(dir_path, ignore_errors=True)
+            reason = "old committed checkpoint beyond retention window" if is_committed else "uncommitted staging remnant"
+            print(f"[Checkpoint Retention] Removed {reason}: {os.path.basename(dir_path)}", flush=True)
+        except Exception as cleanup_err:
+            print(f"[Checkpoint Retention Notice] Could not remove {dir_path}: {cleanup_err}", flush=True)
+
+
 def try_resume_from_checkpoint(
     checkpoint_dir: str,
     model: nn.Module,
@@ -2040,15 +2164,76 @@ def try_resume_from_checkpoint(
 ) -> Tuple[int, int, float, bool, Optional[Dict[str, Any]]]:
     """
     Attempts to resume training from the latest available COMPLETE training checkpoint.
-    Discovers candidate locations (checkpoint_dir and Google Drive mirror),
-    strictly requiring complete model weights, optimizer state, scaler, and metadata.
-    Strictly EXCLUDES inference-only best_checkpoint directories to protect optimizer continuity!
+
+    Checkpoint discovery order (most authoritative first):
+    1. latest_checkpoint.json pointer in the parent directory → resolved versioned directory.
+       This is the only path that is guaranteed to be mutually consistent because
+       the pointer is published AFTER all artifacts are written and the COMMITTED
+       marker is in place.  Using output_dir directly is unsafe: if the process
+       crashes mid-copy into output_dir, that directory may contain a mixture of
+       artifacts from two different checkpoints.
+    2. Scan versioned directories in the same parent for COMMITTED markers (fallback
+       when the pointer file itself is absent or corrupt).
+    3. output_dir itself — accepted only when it passes full integrity verification,
+       as a last-resort fallback for checkpoints created by the legacy code path.
+    4. Google Drive mirror of checkpoint_dir.
+
+    Strictly EXCLUDES inference-only best_checkpoint directories to protect optimizer continuity.
     """
-    candidate_dirs = [checkpoint_dir]
+    parent_dir = os.path.dirname(os.path.abspath(checkpoint_dir)) or "."
+    output_dir_basename = os.path.basename(checkpoint_dir)
+
+    # ----------------------------------------------------------------
+    # Priority-1: Follow latest_checkpoint.json pointer.
+    # This file is written with os.replace() only after all checkpoint
+    # artifacts are committed, so it always points to a consistent state.
+    # ----------------------------------------------------------------
+    latest_ptr_path = os.path.join(parent_dir, "latest_checkpoint.json")
+    pointer_versioned_dir: Optional[str] = None
+    if os.path.isfile(latest_ptr_path):
+        try:
+            with open(latest_ptr_path, "r", encoding="utf-8") as f:
+                ptr_data = json.load(f)
+            ptr_vdir = ptr_data.get("versioned_dir")
+            if ptr_vdir and os.path.isdir(ptr_vdir):
+                committed_marker = os.path.join(ptr_vdir, "COMMITTED")
+                if os.path.isfile(committed_marker):
+                    pointer_versioned_dir = ptr_vdir
+                    print(f"[Resume Discovery] Latest-checkpoint pointer resolved to versioned dir: {ptr_vdir}", flush=True)
+                else:
+                    print(f"[Resume Discovery] Pointer versioned dir has no COMMITTED marker — ignoring: {ptr_vdir}", flush=True)
+            else:
+                print(f"[Resume Discovery] Pointer versioned dir absent or not a directory: {ptr_vdir}", flush=True)
+        except Exception as ptr_err:
+            print(f"[Resume Discovery] Could not read latest_checkpoint.json pointer: {ptr_err}", flush=True)
+
+    # ----------------------------------------------------------------
+    # Build the ordered candidate list.
+    # ----------------------------------------------------------------
+    candidate_dirs: List[str] = []
+
+    # 1. Pointer-resolved versioned dir (highest priority)
+    if pointer_versioned_dir:
+        candidate_dirs.append(pointer_versioned_dir)
+
+    # 2. Other committed versioned dirs (scan, skip the one already in the list)
+    for vdir in _collect_versioned_checkpoint_dirs(parent_dir, output_dir_basename):
+        if vdir not in candidate_dirs:
+            candidate_dirs.append(vdir)
+
+    # 3. output_dir itself (legacy last-resort — only if no versioned dir was found)
+    if not candidate_dirs and os.path.isdir(checkpoint_dir):
+        candidate_dirs.append(checkpoint_dir)
+    elif os.path.isdir(checkpoint_dir) and checkpoint_dir not in candidate_dirs:
+        candidate_dirs.append(checkpoint_dir)
+
+    # 4. Google Drive mirror
     gdrive_root = _resolve_gdrive_root()
     if gdrive_root:
-        stage_name = os.path.basename(checkpoint_dir)
-        candidate_dirs.append(os.path.join(gdrive_root, stage_name))
+        stage_name = output_dir_basename
+        gdrive_stage = os.path.join(gdrive_root, stage_name)
+        if gdrive_stage not in candidate_dirs:
+            candidate_dirs.append(gdrive_stage)
 
     best_cand_dir = None
     best_cand_step = -1
@@ -2152,8 +2337,13 @@ def try_resume_from_checkpoint(
                 except Exception:
                     pass
 
-    # Ingest optimizer and RNG states
-    opt_file = os.path.join(checkpoint_dir, "optimizer_state.pt")
+    # Ingest optimizer and RNG states directly from the verified candidate directory.
+    # Using best_cand_dir here is critical: checkpoint_dir (output_dir) may contain a
+    # partially-overwritten mixture of artifacts from two different checkpoints if the
+    # process crashed mid-copy during the last save.  best_cand_dir always refers to an
+    # immutable, fully-committed versioned directory or a Google Drive mirror that passed
+    # integrity verification above.
+    opt_file = os.path.join(best_cand_dir, "optimizer_state.pt")
     if os.path.exists(opt_file):
         try:
             opt_data = torch.load(opt_file, map_location="cpu")

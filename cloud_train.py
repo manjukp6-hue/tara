@@ -1594,29 +1594,57 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
 _pending_gdrive_sync: Optional[Tuple[str, str, str, List[str]]] = None
 
 
+def is_real_gdrive_mount(mountpoint: str = "/content/drive") -> bool:
+    """
+    Verifies that the specified path is an authentic Google Drive FUSE mount,
+    not an unmounted local container directory.
+    """
+    clean_mp = os.path.abspath(mountpoint).rstrip("/\\")
+    if not os.path.exists(clean_mp):
+        return False
+    if os.path.ismount(clean_mp):
+        return True
+    try:
+        with open("/proc/mounts", "r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 3 and os.path.abspath(parts[1]).rstrip("/\\") == clean_mp:
+                    fs_type = parts[2].lower()
+                    dev = parts[0].lower()
+                    if "drive" in fs_type or "fuse" in fs_type or "drive" in dev:
+                        return True
+    except Exception:
+        pass
+    return False
+
+
 def _resolve_gdrive_root() -> Optional[str]:
     """
     Dynamically discovers or auto-mounts the Google Drive checkpoint directory.
     Supports both /content/drive/MyDrive and /content/drive/My Drive (with space)
     as well as custom GDRIVE_CHECKPOINT_DIR paths.
+    Strictly verifies authentic FUSE mount state to prevent silent local writes.
     """
     env_dir = os.environ.get("GDRIVE_CHECKPOINT_DIR")
     if env_dir:
         parent = os.path.dirname(env_dir)
         if os.path.exists(parent):
-            return env_dir
+            if env_dir.startswith("/content/drive") and not is_real_gdrive_mount("/content/drive"):
+                pass  # Do not adopt unmounted local container paths
+            else:
+                return env_dir
 
     for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
-        if os.path.exists(base):
+        if os.path.exists(base) and is_real_gdrive_mount("/content/drive"):
             return os.path.join(base, "TARA_CHECKPOINTS")
 
     # In Colab environments where drive was not pre-mounted, attempt non-interactive mount
-    if os.path.exists("/content") and not os.path.exists("/content/drive/MyDrive"):
+    if os.path.exists("/content") and not is_real_gdrive_mount("/content/drive"):
         try:
             from google.colab import drive
             drive.mount("/content/drive", force_remount=False)
             for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
-                if os.path.exists(base):
+                if os.path.exists(base) and is_real_gdrive_mount("/content/drive"):
                     return os.path.join(base, "TARA_CHECKPOINTS")
         except Exception:
             pass
@@ -3722,6 +3750,16 @@ def main():
     print("=" * 78)
     print(f"  TARA CLOUD MULTI-STAGE TRAINING SYSTEM [{args.stage_name}]")
     print("=" * 78)
+
+    # Strict Google Drive Mount Gate:
+    # If the output directory references /content/drive, verify that it is an authentic
+    # Google Drive FUSE mount. Fail-closed immediately if it is an unmounted local container path.
+    if args.output_dir.startswith("/content/drive") and not is_real_gdrive_mount("/content/drive"):
+        raise RuntimeError(
+            f"[GDrive Mount Gate Error] Output directory '{args.output_dir}' references Google Drive, "
+            f"but /content/drive is NOT an authentic mounted Google Drive (it is a local unmounted directory)! "
+            f"Mount Google Drive via drive.mount('/content/drive') before training to ensure genuine persistence."
+        )
 
     # 1. Idempotence Check
     if check_stage_already_completed(args.output_dir):

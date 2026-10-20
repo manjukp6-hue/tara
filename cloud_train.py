@@ -2583,12 +2583,14 @@ def save_checkpoint(
                 json.dump({"step": step, "committed_utc": datetime.now(timezone.utc).isoformat()}, f)
 
             # Publish latest-checkpoint pointer ONLY after versioned dir is fully committed.
-            latest_ptr_path = os.path.join(parent_dir, "latest_checkpoint.json")
+            latest_ptr_path = os.path.join(output_dir, "latest_checkpoint.json")
+            legacy_ptr_path = os.path.join(parent_dir, "latest_checkpoint.json")
             latest_ptr_tmp = latest_ptr_path + f".tmp_{os.getpid()}"
             with open(latest_ptr_tmp, "w", encoding="utf-8") as f:
                 json.dump({
                     "versioned_dir": versioned_dir,
                     "output_dir": output_dir,
+                    "stage_id": stage_id,
                     "step": step,
                     "committed_utc": datetime.now(timezone.utc).isoformat(),
                 }, f, indent=2)
@@ -2600,6 +2602,11 @@ def save_checkpoint(
                     os.remove(latest_ptr_tmp)
                 except Exception:
                     pass
+            # Also publish legacy pointer in parent_dir if output_dir is a subdirectory of parent_dir
+            try:
+                shutil.copy2(latest_ptr_path, legacy_ptr_path)
+            except Exception:
+                pass
 
             elapsed = time.time() - t0
             print(f"[Checkpoint] Committed verified [{tag}] checkpoint (Step {step}, {elapsed:.1f}s) -> {output_dir}", flush=True)
@@ -2774,18 +2781,27 @@ def _cleanup_old_versioned_checkpoints(
     if not os.path.isdir(parent_dir):
         return
 
-    # 1. Resolve and protect latest_checkpoint.json pointer target
-    latest_ptr_path = os.path.join(parent_dir, "latest_checkpoint.json")
+    # 1. Resolve and protect latest_checkpoint.json pointer target scoped to output_dir_basename
+    ptr_candidates = [
+        os.path.join(parent_dir, output_dir_basename, "latest_checkpoint.json"),
+        os.path.join(parent_dir, "latest_checkpoint.json"),
+    ]
     pointer_target: Optional[str] = None
-    if os.path.isfile(latest_ptr_path):
-        try:
-            with open(latest_ptr_path, "r", encoding="utf-8") as f:
-                ptr_data = json.load(f)
-            p_vdir = ptr_data.get("versioned_dir")
-            if p_vdir and os.path.isdir(p_vdir):
-                pointer_target = os.path.abspath(p_vdir)
-        except Exception:
-            pass
+    for latest_ptr_path in ptr_candidates:
+        if os.path.isfile(latest_ptr_path):
+            try:
+                with open(latest_ptr_path, "r", encoding="utf-8") as f:
+                    ptr_data = json.load(f)
+                ptr_output = ptr_data.get("output_dir", "")
+                p_vdir = ptr_data.get("versioned_dir")
+                if ptr_output and os.path.basename(ptr_output) != output_dir_basename:
+                    # Ignore pointer belonging to a sibling checkpoint/stage
+                    continue
+                if p_vdir and os.path.isdir(p_vdir) and os.path.basename(p_vdir).startswith(prefix):
+                    pointer_target = os.path.abspath(p_vdir)
+                    break
+            except Exception:
+                pass
 
     active_staging_abs = os.path.abspath(active_staging_dir) if active_staging_dir else None
     now = time.time()
@@ -2891,6 +2907,7 @@ def try_resume_from_checkpoint(
     scaler: torch.cuda.amp.GradScaler,
     tokenizer_path: Optional[str] = None,
     tokenizer: Optional[Any] = None,
+    expected_stage_id: Optional[str] = None,
 ) -> Tuple[int, int, float, bool, Optional[Dict[str, Any]]]:
     """
     Attempts to resume training from the latest available COMPLETE training checkpoint.
@@ -2921,28 +2938,63 @@ def try_resume_from_checkpoint(
     ) if (tokenizer_path or tokenizer) else None
 
     # ----------------------------------------------------------------
-    # Priority-1: Follow latest_checkpoint.json pointer.
-    # This file is written with os.replace() only after all checkpoint
-    # artifacts are committed, so it always points to a consistent state.
+    # Priority-1: Follow latest_checkpoint.json pointer scoped to output_dir_basename.
+    # Checks directory-scoped pointer first (checkpoint_dir/latest_checkpoint.json),
+    # then falls back to parent_dir/latest_checkpoint.json only if verified.
     # ----------------------------------------------------------------
-    latest_ptr_path = os.path.join(parent_dir, "latest_checkpoint.json")
+    ptr_paths = [
+        os.path.join(checkpoint_dir, "latest_checkpoint.json"),
+        os.path.join(parent_dir, "latest_checkpoint.json"),
+    ]
     pointer_versioned_dir: Optional[str] = None
-    if os.path.isfile(latest_ptr_path):
-        try:
-            with open(latest_ptr_path, "r", encoding="utf-8") as f:
-                ptr_data = json.load(f)
-            ptr_vdir = ptr_data.get("versioned_dir")
-            if ptr_vdir and os.path.isdir(ptr_vdir):
-                committed_marker = os.path.join(ptr_vdir, "COMMITTED")
-                if os.path.isfile(committed_marker):
-                    pointer_versioned_dir = ptr_vdir
-                    print(f"[Resume Discovery] Latest-checkpoint pointer resolved to versioned dir: {ptr_vdir}", flush=True)
+    for latest_ptr_path in ptr_paths:
+        if os.path.isfile(latest_ptr_path):
+            try:
+                with open(latest_ptr_path, "r", encoding="utf-8") as f:
+                    ptr_data = json.load(f)
+                ptr_output = ptr_data.get("output_dir", "")
+                ptr_stage = ptr_data.get("stage_id", "")
+                ptr_vdir = ptr_data.get("versioned_dir")
+
+                # Validate scope: reject pointer belonging to an unrelated sibling stage/directory
+                if ptr_output and os.path.basename(ptr_output) != output_dir_basename:
+                    print(
+                        f"[Resume Discovery] Rejecting pointer at {latest_ptr_path}: output_dir "
+                        f"'{os.path.basename(ptr_output)}' does not match target scope '{output_dir_basename}'.",
+                        flush=True,
+                    )
+                    continue
+
+                if expected_stage_id and ptr_stage and ptr_stage != expected_stage_id:
+                    print(
+                        f"[Resume Discovery] Rejecting pointer at {latest_ptr_path}: stage_id "
+                        f"'{ptr_stage}' does not match expected_stage_id '{expected_stage_id}'.",
+                        flush=True,
+                    )
+                    continue
+
+                if ptr_vdir and os.path.isdir(ptr_vdir):
+                    # Ensure versioned_dir name matches the target output_dir_basename prefix
+                    vdir_base = os.path.basename(ptr_vdir)
+                    if not vdir_base.startswith(output_dir_basename + ".step"):
+                        print(
+                            f"[Resume Discovery] Rejecting pointer versioned dir '{vdir_base}': "
+                            f"does not match output scope '{output_dir_basename}'.",
+                            flush=True,
+                        )
+                        continue
+
+                    committed_marker = os.path.join(ptr_vdir, "COMMITTED")
+                    if os.path.isfile(committed_marker):
+                        pointer_versioned_dir = ptr_vdir
+                        print(f"[Resume Discovery] Latest-checkpoint pointer resolved to scoped versioned dir: {ptr_vdir}", flush=True)
+                        break
+                    else:
+                        print(f"[Resume Discovery] Pointer versioned dir has no COMMITTED marker — ignoring: {ptr_vdir}", flush=True)
                 else:
-                    print(f"[Resume Discovery] Pointer versioned dir has no COMMITTED marker — ignoring: {ptr_vdir}", flush=True)
-            else:
-                print(f"[Resume Discovery] Pointer versioned dir absent or not a directory: {ptr_vdir}", flush=True)
-        except Exception as ptr_err:
-            print(f"[Resume Discovery] Could not read latest_checkpoint.json pointer: {ptr_err}", flush=True)
+                    print(f"[Resume Discovery] Pointer versioned dir absent or not a directory: {ptr_vdir}", flush=True)
+            except Exception as ptr_err:
+                print(f"[Resume Discovery] Could not read pointer at {latest_ptr_path}: {ptr_err}", flush=True)
 
     # ----------------------------------------------------------------
     # Build the ordered candidate list.
@@ -3044,6 +3096,33 @@ def try_resume_from_checkpoint(
                             f"Allowing legacy resume per backward-compatibility policy.",
                             flush=True,
                         )
+            # Scope check: candidate must match requested output_dir scope or stage_id
+            cand_basename = os.path.basename(os.path.normpath(cand))
+            is_direct_output = (os.path.abspath(cand) == os.path.abspath(checkpoint_dir))
+            is_versioned_match = cand_basename.startswith(output_dir_basename + ".step")
+            is_gdrive_match = (cand_basename == output_dir_basename)
+
+            cand_stage = s_data.get("stage_id", "")
+            if expected_stage_id and cand_stage and cand_stage != expected_stage_id:
+                print(
+                    f"  -> Fatal: Candidate at {cand} stage_id '{cand_stage}' does not match "
+                    f"expected_stage_id '{expected_stage_id}'. Rejecting candidate.",
+                    flush=True,
+                )
+                continue
+
+            if not (is_direct_output or is_versioned_match or is_gdrive_match):
+                # When expected_stage_id is provided and matches, accept it; otherwise reject scope mismatch
+                if expected_stage_id and cand_stage == expected_stage_id:
+                    pass
+                else:
+                    print(
+                        f"  -> Notice: Candidate at {cand} does not match target output scope "
+                        f"'{output_dir_basename}'. Skipping.",
+                        flush=True,
+                    )
+                    continue
+
             c_step = int(s_data.get("step", 0))
             c_loss = float(s_data.get("loss", float("inf")))
             c_best_loss = float(s_data.get("best_loss", c_loss))
@@ -3887,6 +3966,7 @@ def main():
             args.output_dir, model, optimizer, scaler,
             tokenizer_path=tok_path,
             tokenizer=tokenizer,
+            expected_stage_id=args.stage_id,
         )
         if start_step >= args.max_steps:
             print(f"[Resume] Training already completed all {args.max_steps} steps. Finishing.")

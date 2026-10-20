@@ -3656,6 +3656,10 @@ def main():
                              "Downloads exceeding this limit are aborted; incomplete temp files are removed.")
     parser.add_argument("--bulk-download-dataset", action="store_true", default=False,
                         help="Bulk pre-download all dataset shards instead of JIT single-shard streaming")
+    parser.add_argument("--gradient-checkpointing", action="store_true", default=False,
+                        help="Enable activation gradient checkpointing to save VRAM")
+    parser.add_argument("--allow-unsafe-fp32-adamw", action="store_true", default=False,
+                        help="Override memory preflight gate to allow FP32 AdamW on memory-constrained GPUs")
     parser.add_argument("--preflight-only", action="store_true", default=False, help="Execute only the dual-stage preflight validation diagnostic and exit with report")
     args = parser.parse_args()
 

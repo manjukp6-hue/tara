@@ -332,14 +332,33 @@ class TaraForCausalLM(nn.Module):
 # 2. High-Throughput Streaming Dataset, Persistent Shard Ledger & JIT Downloader
 # =============================================================================
 
-def download_single_shard_jit(repo_id: str, prefix: str, shard_name: str, local_dir: str) -> str:
+def download_single_shard_jit(
+    repo_id: str,
+    prefix: str,
+    shard_name: str,
+    local_dir: str,
+    max_shard_bytes: int = 0,
+) -> str:
     """
     Downloads ONLY a single JSONL shard on-demand from Hugging Face.
-    Maintains strictly a single active shard on disk, eliminating 27GB bulk downloads.
+
+    Maintains strictly a single active shard on disk, eliminating bulk downloads.
+    An enforced maximum shard size can be specified via ``max_shard_bytes``
+    (default 0 = unlimited).  When the downloaded file exceeds the limit the
+    incomplete temporary file is removed and a ``RuntimeError`` is raised —
+    original dataset files and user-owned files are never deleted.
     """
     os.makedirs(local_dir, exist_ok=True)
     target_path = os.path.join(local_dir, shard_name)
     if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+        if max_shard_bytes > 0:
+            existing_size = os.path.getsize(target_path)
+            if existing_size > max_shard_bytes:
+                raise RuntimeError(
+                    f"[JIT Downloader] Cached shard '{shard_name}' ({existing_size:,} bytes) exceeds "
+                    f"enforced maximum shard size ({max_shard_bytes:,} bytes). "
+                    f"Remove the oversized file from '{target_path}' and adjust --max-shard-bytes."
+                )
         return target_path
 
     token = os.environ.get("HF_TOKEN") or None
@@ -347,6 +366,7 @@ def download_single_shard_jit(repo_id: str, prefix: str, shard_name: str, local_
     print(f"[JIT Downloader] Fetching single shard '{remote_path}' from https://huggingface.co/{repo_id}...", flush=True)
 
     max_retries = 5
+    tmp_path: Optional[str] = None
     for attempt in range(1, max_retries + 1):
         try:
             from huggingface_hub import hf_hub_download
@@ -357,6 +377,26 @@ def download_single_shard_jit(repo_id: str, prefix: str, shard_name: str, local_
                 local_dir=local_dir,
                 token=token,
             )
+            tmp_path = dl_path if dl_path != target_path else None
+
+            # Enforce maximum shard size BEFORE promoting to the target path.
+            # Only TARA-owned temporary download files are removed on violation;
+            # original dataset files and user files are never deleted.
+            if max_shard_bytes > 0 and os.path.exists(dl_path):
+                dl_size = os.path.getsize(dl_path)
+                if dl_size > max_shard_bytes:
+                    if tmp_path and os.path.exists(tmp_path) and os.path.abspath(tmp_path) != os.path.abspath(target_path):
+                        try:
+                            os.remove(tmp_path)
+                        except Exception:
+                            pass
+                    raise RuntimeError(
+                        f"[JIT Downloader] Shard '{shard_name}' ({dl_size:,} bytes) exceeds enforced "
+                        f"maximum shard size ({max_shard_bytes:,} bytes). "
+                        f"Download aborted; incomplete temporary file removed. "
+                        f"Adjust --max-shard-bytes or choose a smaller shard."
+                    )
+
             if dl_path != target_path and os.path.exists(dl_path):
                 shutil.move(dl_path, target_path)
                 sub_dir = os.path.dirname(dl_path)
@@ -368,6 +408,8 @@ def download_single_shard_jit(repo_id: str, prefix: str, shard_name: str, local_
             if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
                 print(f"[JIT Downloader] Shard '{shard_name}' verified ({os.path.getsize(target_path)/(1024*1024):.1f} MB).", flush=True)
                 return target_path
+        except RuntimeError:
+            raise  # Re-raise size-bound violations without retry
         except Exception as err:
             print(f"[JIT Downloader Warning] Attempt {attempt}/{max_retries} failed to download '{shard_name}': {err}", flush=True)
             time.sleep(attempt * 4)
@@ -377,16 +419,46 @@ def download_single_shard_jit(repo_id: str, prefix: str, shard_name: str, local_
 
 class ShardLedger:
     """
-    Authoritative Persistent Shard Ledger.
-    Tracks completed shards, runtime dynamic SHA-256 digests, and active intra-shard progress.
-    Persisted to local checkpoint directory and mirrored continuously to Google Drive.
+    Authoritative Persistent Incremental Stage Ledger.
+
+    Tracks completed shards, runtime dynamic SHA-256 digests, and active
+    intra-shard progress across an unlimited number of incremental training
+    stages. Persisted to local checkpoint directory and mirrored continuously
+    to Google Drive.
+
+    Schema version 3.0 adds explicit stage identity and per-shard training-unit
+    accounting required for Stage 0 → Stage 1 → Stage N incremental workflows:
+
+    - ``stage_id``: the training stage that wrote this ledger.
+    - ``dataset_revision``: the remote dataset prefix/version (e.g. ``"v2"``).
+    - ``checkpoint_identity``: SHA-256 of the last committed checkpoint that
+      was verified after writing shard completion metadata.
+    - ``committed_optimizer_step``: the optimizer step number that was durably
+      committed in the last checkpoint associated with this ledger state.
+    - ``completed_metadata[shard_name]["token_chunks_trained"]``: how many
+      token chunks were trained for this shard (for audit and bookkeeping).
+
+    Completed prior-stage shards are skipped by default.  If identical content
+    is intentionally reused in a later stage, the caller must pass
+    ``allow_retrain=True`` to ``is_completed`` explicitly rather than silently
+    retraining data.
     """
-    def __init__(self, output_dir: str, gdrive_dir: Optional[str] = None):
+    # Ledger schema version written by this implementation.
+    SCHEMA_VERSION = "3.0"
+
+    def __init__(
+        self,
+        output_dir: str,
+        gdrive_dir: Optional[str] = None,
+        stage_id: str = "",
+        dataset_revision: str = "v2",
+    ):
         self.output_dir = output_dir
         self.gdrive_dir = gdrive_dir
         self.ledger_file = os.path.join(output_dir, "shard_ledger.json")
-        self.schema_version: str = "2.0"
-        self.dataset_revision: str = "v2"
+        self.schema_version: str = self.SCHEMA_VERSION
+        self.stage_id: str = stage_id
+        self.dataset_revision: str = dataset_revision
         self.completed_shards: List[str] = []
         self.completed_metadata: Dict[str, Any] = {}
         self.active_shard: Optional[str] = None
@@ -395,6 +467,9 @@ class ShardLedger:
         self.active_shard_start_step: int = 0
         self.total_records_processed: int = 0
         self.last_committed_step: int = 0
+        # Phase 3 fields — persisted for cross-session incremental integrity
+        self.committed_optimizer_step: int = 0
+        self.checkpoint_identity: str = ""
         self.load()
 
     def load(self):
@@ -417,7 +492,12 @@ class ShardLedger:
 
         if loaded_data:
             self.schema_version = loaded_data.get("schema_version", "1.0")
-            self.dataset_revision = loaded_data.get("dataset_revision", "v2")
+            # Accept stage_id and dataset_revision from disk only when the constructor
+            # did not supply an explicit non-default value.
+            if not self.stage_id:
+                self.stage_id = loaded_data.get("stage_id", "")
+            if self.dataset_revision == "v2":
+                self.dataset_revision = loaded_data.get("dataset_revision", "v2")
             self.completed_shards = loaded_data.get("completed_shards", [])
             self.completed_metadata = loaded_data.get("completed_metadata", {})
             self.active_shard = loaded_data.get("active_shard")
@@ -426,11 +506,15 @@ class ShardLedger:
             self.active_shard_start_step = loaded_data.get("active_shard_start_step", 0)
             self.total_records_processed = loaded_data.get("total_records_processed", 0)
             self.last_committed_step = loaded_data.get("last_committed_step", 0)
+            # Phase 3 fields — restored for cross-session incremental integrity
+            self.committed_optimizer_step = loaded_data.get("committed_optimizer_step", 0)
+            self.checkpoint_identity = loaded_data.get("checkpoint_identity", "")
 
     def save(self):
         os.makedirs(self.output_dir, exist_ok=True)
         data = {
             "schema_version": self.schema_version,
+            "stage_id": self.stage_id,
             "dataset_revision": self.dataset_revision,
             "completed_shards": self.completed_shards,
             "completed_metadata": self.completed_metadata,
@@ -440,6 +524,8 @@ class ShardLedger:
             "active_shard_start_step": self.active_shard_start_step,
             "total_records_processed": self.total_records_processed,
             "last_committed_step": self.last_committed_step,
+            "committed_optimizer_step": self.committed_optimizer_step,
+            "checkpoint_identity": self.checkpoint_identity,
             "last_updated_utc": datetime.now(timezone.utc).isoformat(),
         }
         tmp_ledger = self.ledger_file + f".tmp_{os.getpid()}"
@@ -573,13 +659,15 @@ class ShardLedger:
             self.active_shard_start_step = start_step
             self.save()
 
-    def mark_completed(self, shard_name: str, records_count: int, file_sha256: str):
+    def mark_completed(self, shard_name: str, records_count: int, file_sha256: str, token_chunks_trained: int = 0):
         if shard_name not in self.completed_shards:
             self.completed_shards.append(shard_name)
         self.completed_metadata[shard_name] = {
             "completed_at_utc": datetime.now(timezone.utc).isoformat(),
             "records_processed": records_count,
             "file_sha256": file_sha256,
+            "token_chunks_trained": token_chunks_trained,
+            "stage_id": self.stage_id,
         }
         self.total_records_processed = max(self.total_records_processed, self.get_total_completed_records())
         self.active_shard = None
@@ -587,6 +675,107 @@ class ShardLedger:
         self.active_shard_byte_offset = 0
         self.save()
         print(f"[Shard Ledger COMPLETED] Shard '{shard_name}' registered as COMPLETED (SHA-256: {file_sha256[:16]}..., Records: {records_count:,}, Total: {len(self.completed_shards)} completed).", flush=True)
+
+    def update_checkpoint_identity(self, checkpoint_sha: str, optimizer_step: int):
+        """Record the last committed checkpoint identity and optimizer step for cross-session integrity."""
+        self.checkpoint_identity = checkpoint_sha
+        self.committed_optimizer_step = optimizer_step
+        self.save()
+
+
+# ---------------------------------------------------------------------------
+# Persistent Shard Line Index (Task E)
+# ---------------------------------------------------------------------------
+
+class ShardLineIndex:
+    """
+    Content-hash-validated persistent line-byte-offset index for a JSONL shard.
+
+    Stores ``{line_number: byte_offset}`` pairs so that intra-shard resumption
+    can seek directly to the target line without a sequential scan.  The index
+    is invalidated and rebuilt whenever the shard's SHA-256 changes, ensuring
+    that a modified shard (same filename, different content) is never resumed
+    at a stale byte position.
+
+    Index files are stored under ``<dataset_dir>/.tara_idx/<shard_sha256>.idx.json``
+    and are treated as expendable operational cache — they are rebuilt on demand
+    and never modify the shard files themselves.
+    """
+
+    def __init__(self, dataset_dir: str):
+        self.idx_dir = os.path.join(dataset_dir, ".tara_idx")
+
+    def _index_path(self, shard_sha256: str) -> str:
+        return os.path.join(self.idx_dir, f"{shard_sha256}.idx.json")
+
+    def load(self, shard_sha256: str) -> Optional[Dict[int, int]]:
+        """
+        Load the byte-offset index for the given shard SHA-256.
+
+        Returns a ``{line_idx: byte_offset}`` dict if a valid index exists,
+        or ``None`` if the index is absent or unreadable.  The index key is the
+        SHA-256 of the shard content, so an index built for a different content
+        revision is automatically rejected.
+        """
+        idx_path = self._index_path(shard_sha256)
+        if not os.path.exists(idx_path):
+            return None
+        try:
+            with open(idx_path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            # JSON keys are always strings; convert back to int line numbers.
+            return {int(k): int(v) for k, v in raw.items()}
+        except Exception as e:
+            print(f"[ShardLineIndex] Index read error for SHA {shard_sha256[:16]}...: {e}", flush=True)
+            return None
+
+    def build_and_save(self, shard_path: str, shard_sha256: str) -> Dict[int, int]:
+        """
+        Build a byte-offset index by scanning ``shard_path`` once, then persist
+        it so subsequent resumes skip the scan.
+
+        Returns the ``{line_idx: byte_offset}`` mapping.  The mapping includes
+        offset 0 for line 0 so callers never need to special-case the first line.
+        """
+        offsets: Dict[int, int] = {}
+        try:
+            with open(shard_path, "rb") as f:
+                line_idx = 0
+                while True:
+                    pos = f.tell()
+                    line = f.readline()
+                    if not line:
+                        break
+                    offsets[line_idx] = pos
+                    line_idx += 1
+            os.makedirs(self.idx_dir, exist_ok=True)
+            idx_path = self._index_path(shard_sha256)
+            tmp_path = idx_path + f".tmp_{os.getpid()}"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                # Store keys as strings (JSON requirement); load() converts back.
+                json.dump({str(k): v for k, v in offsets.items()}, f)
+            try:
+                os.replace(tmp_path, idx_path)
+            except Exception:
+                shutil.copy2(tmp_path, idx_path)
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+            print(f"[ShardLineIndex] Built and saved index for SHA {shard_sha256[:16]}... ({len(offsets):,} lines).", flush=True)
+        except Exception as e:
+            print(f"[ShardLineIndex] Index build error for '{shard_path}': {e}", flush=True)
+        return offsets
+
+    def get_or_build(self, shard_path: str, shard_sha256: str) -> Dict[int, int]:
+        """
+        Return a valid byte-offset index, loading from disk if available or
+        building on demand if the cached index is absent or stale.
+        """
+        cached = self.load(shard_sha256)
+        if cached is not None:
+            return cached
+        return self.build_and_save(shard_path, shard_sha256)
 
 
 class TaraStreamingJsonlDataset(IterableDataset):
@@ -631,6 +820,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
         repo_id: Optional[str] = None,
         prefix: str = "v2",
         buffer_size: int = 1,
+        max_shard_bytes: int = 0,
     ):
         self.file_paths = list(file_paths)
         self.tokenizer = tokenizer
@@ -646,6 +836,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
         self.dataset_dir = dataset_dir
         self.repo_id = repo_id
         self.prefix = prefix
+        self.max_shard_bytes = max(0, int(max_shard_bytes))
         self.managed_downloaded_shards: Set[str] = set()
         # Strict deterministic line cursor streaming: buffer_size = 1 guarantees zero duplicate and zero lost samples.
         # buffer_size > 1 introduces per-shard random shuffling of items in a rolling window.  When a resume cursor
@@ -760,7 +951,8 @@ class TaraStreamingJsonlDataset(IterableDataset):
             # If local file missing or 0 bytes, download on-demand if remote repo configured
             if not os.path.exists(actual_fp) or os.path.getsize(actual_fp) == 0:
                 if self.repo_id and self.dataset_dir:
-                    actual_fp = download_single_shard_jit(self.repo_id, self.prefix, shard_name, self.dataset_dir)
+                    actual_fp = download_single_shard_jit(self.repo_id, self.prefix, shard_name, self.dataset_dir,
+                                                          max_shard_bytes=self.max_shard_bytes)
                     self.managed_downloaded_shards.add(os.path.abspath(actual_fp))
                 else:
                     continue
@@ -1297,6 +1489,57 @@ def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
 
         if wait:
             _gdrive_sync_thread.join()
+
+
+
+
+# ---------------------------------------------------------------------------
+# Cross-Runtime Optimizer Compatibility (Task D)
+# ---------------------------------------------------------------------------
+# The Python training engine uses torch.optim.AdamW or bitsandbytes AdamW8bit,
+# persisting optimizer state dicts with PyTorch tensor layouts and moment keys.
+# The native Rust training runtime (tara_training_stages) uses its own internal
+# optimizer representation — structurally incompatible with PyTorch state dicts.
+# Attempting to exchange optimizer state between the two runtimes would silently
+# reset optimizer moments and corrupt the learning-rate schedule.
+#
+# This sentinel is embedded in every Python-written checkpoint_state.json so
+# that the Rust runtime can detect Python-originated checkpoints and refuse to
+# load their optimizer state.  The reciprocal check in this module detects
+# Rust-originated checkpoints and fails clearly before any optimizer is touched.
+# ---------------------------------------------------------------------------
+
+_PYTHON_RUNTIME_SENTINEL = "python"
+_RUST_RUNTIME_SENTINEL = "tara_rust_runtime"
+
+
+def validate_checkpoint_runtime_compatibility(checkpoint_state: dict) -> None:
+    """
+    Fail closed if a checkpoint was written by the native Rust training runtime.
+
+    Optimizer state produced by the Rust runtime (tara_training_stages) uses an
+    internal tensor layout that is structurally incompatible with torch.optim.AdamW
+    and bitsandbytes AdamW8bit state dicts.  Resuming from a Rust checkpoint into
+    the Python training engine would silently reset all optimizer moments and corrupt
+    the learning-rate schedule, producing incorrect training trajectories with no
+    visible error.
+
+    When a Rust-originated checkpoint is detected this function raises RuntimeError
+    immediately, before any optimizer state is restored, so the operator can take
+    an explicit action (start from a clean Python-format checkpoint, or promote
+    the Rust checkpoint to model-only weights and begin a fresh Python session).
+    """
+    written_by = checkpoint_state.get("written_by_runtime", _PYTHON_RUNTIME_SENTINEL)
+    if written_by == _RUST_RUNTIME_SENTINEL:
+        raise RuntimeError(
+            "[Cross-Runtime Compatibility] This checkpoint was written by the native Rust "
+            "training runtime (tara_training_stages).  Its optimizer state layout is not "
+            "compatible with torch.optim.AdamW or bitsandbytes.AdamW8bit.  "
+            "Resuming from a Rust checkpoint into the Python training engine would silently "
+            "reset optimizer moments and corrupt the learning-rate schedule.  "
+            "To resume, either start from a clean Python-format checkpoint or promote the "
+            "Rust checkpoint to model-only weights and begin a new Python training session."
+        )
 
 
 def compute_file_sha256(filepath: str, chunk_size: int = 4 * 1024 * 1024) -> str:
@@ -1837,6 +2080,9 @@ def save_checkpoint(
                 "is_completed": is_completed,
                 "is_best": is_best,
                 "model_weights_sha256": weights_sha256,
+                # Runtime provenance tag: allows the native Rust training runtime to detect
+                # Python-originated checkpoints and refuse incompatible optimizer-state exchange.
+                "written_by_runtime": "python",
                 "data_cursor": data_cursor,
                 "active_shard": active_shard,
                 "active_shard_offset": active_offset,
@@ -2284,6 +2530,9 @@ def try_resume_from_checkpoint(
         try:
             with open(cand_state, "r", encoding="utf-8") as f:
                 s_data = json.load(f)
+            # Fail closed if this checkpoint originated from the native Rust
+            # training runtime — its optimizer state is not cross-compatible.
+            validate_checkpoint_runtime_compatibility(s_data)
             c_step = int(s_data.get("step", 0))
             c_loss = float(s_data.get("loss", float("inf")))
             c_best_loss = float(s_data.get("best_loss", c_loss))
@@ -2475,10 +2724,11 @@ def print_frontier_comparison_matrix_colored(step: int, cur_loss: float, best_lo
 # 5. High-Speed Cloud Asset Ingestion (Hugging Face CDN)
 # =============================================================================
 
-def ensure_remote_assets_available(model_dir: str, dataset_dir: str, repo_id: str = "manjukp6/tara"):
+def ensure_remote_assets_available(model_dir: str, dataset_dir: str, repo_id: str = "manjukp6/tara", prefix: str = "v2"):
     """
     High-Speed Cloud Asset Ingestion via Hugging Face Hub (Pure Python).
     Downloads base candidate model and dataset shards concurrently with resume support.
+    The ``prefix`` argument controls which versioned shard directory is fetched (e.g. ``"v2"``).
     """
     try:
         from huggingface_hub import snapshot_download
@@ -2523,10 +2773,10 @@ def ensure_remote_assets_available(model_dir: str, dataset_dir: str, repo_id: st
                 repo_id=repo_id,
                 repo_type="dataset",
                 local_dir=dataset_dir,
-                allow_patterns=["v2/*.jsonl", "v2/*.json", "*.jsonl"],
+                allow_patterns=[f"{prefix}/*.jsonl", f"{prefix}/*.json", "*.jsonl"],
                 max_workers=8,
             )
-            sub_v2 = os.path.join(dataset_dir, "v2")
+            sub_v2 = os.path.join(dataset_dir, prefix)
             if os.path.exists(sub_v2):
                 for item in os.listdir(sub_v2):
                     s = os.path.join(sub_v2, item)
@@ -2765,6 +3015,12 @@ def main():
     parser.add_argument("--buffer-size", type=int, default=1, help="Streaming buffer size (default: 1 for exact sequential crash-safe zero-duplicate recovery)")
     parser.add_argument("--full-dataset", action="store_true", default=False, help="Train continuously across all shards until full dataset is exhausted")
     parser.add_argument("--keep-shards", action="store_true", default=False, help="Do not delete local shards after completion")
+    parser.add_argument("--dataset-prefix", type=str, default="v2",
+                        help="Remote dataset version prefix on Hugging Face (e.g. 'v1', 'v2'). "
+                             "Determines which shard files are discovered and downloaded. Default: 'v2'")
+    parser.add_argument("--max-shard-bytes", type=int, default=1_073_741_824,
+                        help="Enforced maximum size per downloaded shard in bytes (default: 1 GiB = 1073741824). "
+                             "Downloads exceeding this limit are aborted; incomplete temp files are removed.")
     parser.add_argument("--preflight-only", action="store_true", default=False, help="Execute only the dual-stage preflight validation diagnostic and exit with report")
     args = parser.parse_args()
 
@@ -2820,7 +3076,7 @@ def main():
         sys.exit(0)
 
     # 2. Fast Asset Verification & Streaming Download (if files missing)
-    ensure_remote_assets_available(args.model_dir, args.dataset_dir)
+    ensure_remote_assets_available(args.model_dir, args.dataset_dir, prefix=args.dataset_prefix.strip("/"))
 
     # 2b. Pretraining Authorization Gate check
     if args.verify_gate:
@@ -2915,9 +3171,11 @@ def main():
     # 6. Initialize Authoritative Persistent Shard Ledger & Shard Discovery
     gdrive_root = _resolve_gdrive_root()
     gdrive_stage_dir = os.path.join(gdrive_root, args.stage_id) if gdrive_root else None
-    shard_ledger = ShardLedger(args.output_dir, gdrive_stage_dir)
+    shard_ledger = ShardLedger(args.output_dir, gdrive_stage_dir,
+                               stage_id=args.stage_id, dataset_revision=args.dataset_prefix.strip("/"))
 
     dataset_repo = args.hf_repo or os.environ.get("HF_DATASET_REPO", os.environ.get("HF_REPO", "manjukp6/tara"))
+    ds_prefix = args.dataset_prefix.strip("/")
     discovered_shards = []
 
     # Remote Hugging Face shard catalog discovery
@@ -2927,10 +3185,11 @@ def main():
             token = os.environ.get("HF_TOKEN") or None
             api = HfApi(token=token)
             files = api.list_repo_files(repo_id=dataset_repo, repo_type="dataset")
-            v2_files = sorted([os.path.basename(f) for f in files if f.startswith("v2/") and f.endswith(".jsonl")])
-            if v2_files:
-                discovered_shards = v2_files
-                print(f"[Dataset Discovery] Discovered {len(discovered_shards)} remote canonical shards on Hugging Face ({dataset_repo} : v2/*).", flush=True)
+            prefix_filter = f"{ds_prefix}/"
+            discovered_files = sorted([os.path.basename(f) for f in files if f.startswith(prefix_filter) and f.endswith(".jsonl")])
+            if discovered_files:
+                discovered_shards = discovered_files
+                print(f"[Dataset Discovery] Discovered {len(discovered_shards)} remote canonical shards on Hugging Face ({dataset_repo} : {ds_prefix}/*).", flush=True)
         except Exception as e:
             print(f"[Dataset Discovery Notice] Remote Hugging Face file discovery note: {e}", flush=True)
 
@@ -2941,7 +3200,8 @@ def main():
             discovered_shards = local_files
         else:
             raise RuntimeError(
-                f"[Dataset Discovery Fatal] Zero dataset shards discovered on Hugging Face repository '{dataset_repo}' (v2/*.jsonl) "
+                f"[Dataset Discovery Fatal] Zero dataset shards discovered on Hugging Face repository '{dataset_repo}' "
+                f"(prefix '{ds_prefix}/', pattern '{ds_prefix}/*.jsonl') "
                 f"or in local dataset directory '{args.dataset_dir}'. Cannot proceed with zero training shards."
             )
 
@@ -3148,6 +3408,7 @@ def main():
         repo_id=dataset_repo,
         prefix=ds_prefix,
         buffer_size=args.buffer_size,
+        max_shard_bytes=args.max_shard_bytes,
     )
     dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=collate_fn)
 

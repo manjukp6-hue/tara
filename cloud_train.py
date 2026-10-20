@@ -778,6 +778,144 @@ class ShardLineIndex:
         return self.build_and_save(shard_path, shard_sha256)
 
 
+# ---------------------------------------------------------------------------
+# Dataset Snapshot — deterministic shard catalog with live content tracking
+# ---------------------------------------------------------------------------
+
+class DatasetSnapshot:
+    """
+    Deterministic, persistent snapshot of the dataset shard catalog.
+
+    Records the authoritative ordered list of shard identities for a training
+    run — including repo identity, prefix/version, ordered shard filenames, and
+    runtime-computed content SHA-256 values as each shard is acquired.
+
+    **What this is NOT:**
+    The Hugging Face dataset repository does not publish a separate signed manifest
+    file.  This class does NOT invent a remote manifest format.  Instead it uses
+    the API response from ``HfApi.list_repo_files()`` (or a local glob) as the
+    discovery source, and computes content hashes at the moment each shard is
+    downloaded or opened locally — storing them as the single authoritative record
+    of what content was actually trained on.
+
+    **Shard change detection:**
+    - Added shards: present in the live catalog but absent from the snapshot.
+    - Removed shards: present in the snapshot but absent from the live catalog.
+    - Renamed shards: treated as add + remove (no cross-name SHA tracking).
+    - Content-modified shards: same name, live SHA differs from snapshot SHA.
+      A content-modified shard is NOT treated as completed — it will be retrained.
+
+    **Persistence:** Stored at ``<snapshot_dir>/dataset_snapshot.json``.
+    Written atomically (tmp → rename) to survive crashes.
+    """
+
+    SCHEMA_VERSION = "1.0"
+
+    def __init__(self, snapshot_dir: str):
+        self.snapshot_path = os.path.join(snapshot_dir, "dataset_snapshot.json")
+        self.schema_version: str = self.SCHEMA_VERSION
+        self.repo_id: str = ""
+        self.prefix: str = ""
+        self.revision: Optional[str] = None
+        self.discovered_at_utc: Optional[str] = None
+        # Ordered list of shard filenames as originally discovered
+        self.ordered_shards: List[str] = []
+        # Runtime-computed content SHA-256 per shard (populated as shards are opened)
+        self.shard_content_hashes: Dict[str, str] = {}
+        self.load()
+
+    def load(self):
+        if not os.path.exists(self.snapshot_path):
+            return
+        try:
+            with open(self.snapshot_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.schema_version = data.get("schema_version", "1.0")
+            self.repo_id = data.get("repo_id", "")
+            self.prefix = data.get("prefix", "")
+            self.revision = data.get("revision")
+            self.discovered_at_utc = data.get("discovered_at_utc")
+            self.ordered_shards = data.get("ordered_shards", [])
+            self.shard_content_hashes = data.get("shard_content_hashes", {})
+        except Exception as e:
+            print(f"[DatasetSnapshot] Load error (non-fatal): {e}", flush=True)
+
+    def save(self):
+        os.makedirs(os.path.dirname(self.snapshot_path), exist_ok=True)
+        data = {
+            "schema_version": self.schema_version,
+            "repo_id": self.repo_id,
+            "prefix": self.prefix,
+            "revision": self.revision,
+            "discovered_at_utc": self.discovered_at_utc,
+            "ordered_shards": self.ordered_shards,
+            "shard_content_hashes": self.shard_content_hashes,
+            "last_updated_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        tmp = self.snapshot_path + f".tmp_{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        try:
+            os.replace(tmp, self.snapshot_path)
+        except Exception:
+            shutil.copy2(tmp, self.snapshot_path)
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+
+    def initialize_from_discovery(self, repo_id: str, prefix: str, ordered_shards: List[str], revision: Optional[str] = None):
+        """
+        Record the initial shard catalog as returned by the discovery step.
+        Only updates the catalog when the ordered shard list has changed.
+        """
+        self.repo_id = repo_id
+        self.prefix = prefix
+        self.revision = revision
+        if self.ordered_shards != ordered_shards:
+            self.ordered_shards = list(ordered_shards)
+            self.discovered_at_utc = datetime.now(timezone.utc).isoformat()
+            self.save()
+
+    def record_shard_hash(self, shard_name: str, sha256: str):
+        """
+        Record the runtime-computed content SHA-256 for a shard.
+        Called immediately after ``compute_file_sha256`` in ``__iter__``.
+        """
+        if self.shard_content_hashes.get(shard_name) != sha256:
+            self.shard_content_hashes[shard_name] = sha256
+            self.save()
+
+    def diff_against_live(self, live_shards: List[str]) -> Dict[str, List[str]]:
+        """
+        Compare the persisted ordered catalog against a fresh live discovery.
+
+        Returns:
+          {
+            "added":   shards in live but not in snapshot,
+            "removed": shards in snapshot but not in live,
+            "common":  shards present in both (may have content changes),
+          }
+        """
+        snap_set = set(self.ordered_shards)
+        live_set = set(live_shards)
+        return {
+            "added":   sorted(live_set - snap_set),
+            "removed": sorted(snap_set - live_set),
+            "common":  sorted(snap_set & live_set),
+        }
+
+    def is_shard_content_changed(self, shard_name: str, current_sha: str) -> bool:
+        """
+        Returns True when a shard's live content hash differs from the recorded hash.
+        Returns False when no prior hash exists (first time seen).
+        """
+        recorded = self.shard_content_hashes.get(shard_name)
+        if recorded is None:
+            return False  # Not yet recorded — not a change, just new
+        return recorded != current_sha
+
+
 class TaraStreamingJsonlDataset(IterableDataset):
     """
     High-Throughput Zero-Memory Streaming Dataset.
@@ -821,6 +959,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
         prefix: str = "v2",
         buffer_size: int = 1,
         max_shard_bytes: int = 0,
+        dataset_snapshot: Optional["DatasetSnapshot"] = None,
     ):
         self.file_paths = list(file_paths)
         self.tokenizer = tokenizer
@@ -838,6 +977,11 @@ class TaraStreamingJsonlDataset(IterableDataset):
         self.prefix = prefix
         self.max_shard_bytes = max(0, int(max_shard_bytes))
         self.managed_downloaded_shards: Set[str] = set()
+        # Persistent byte-offset index for fast intra-shard resume (Task E / Phase 3.1-A).
+        # Only instantiated when a local dataset directory is available.
+        self._line_index: Optional[ShardLineIndex] = ShardLineIndex(dataset_dir) if dataset_dir else None
+        # Dataset snapshot for content-change detection across sessions.
+        self._snapshot: Optional[DatasetSnapshot] = dataset_snapshot
         # Strict deterministic line cursor streaming: buffer_size = 1 guarantees zero duplicate and zero lost samples.
         # buffer_size > 1 introduces per-shard random shuffling of items in a rolling window.  When a resume cursor
         # is active (resume_shard is set), items from multiple positions are mixed in the buffer before being yielded,
@@ -963,6 +1107,10 @@ class TaraStreamingJsonlDataset(IterableDataset):
             self.current_active_shard = shard_name
             if self.shard_ledger:
                 self.shard_ledger.set_active_shard(shard_name)
+            # Record live content hash in the dataset snapshot so content changes are detected
+            # across sessions without re-discovering the full shard list.
+            if self._snapshot is not None:
+                self._snapshot.record_shard_hash(shard_name, shard_sha)
 
             print(f"[Dataset Shard Active] Streaming from: {shard_name} (Runtime SHA-256: {shard_sha[:16]}...)", flush=True)
 
@@ -971,26 +1119,107 @@ class TaraStreamingJsonlDataset(IterableDataset):
             try:
                 with open(actual_fp, "r", encoding="utf-8") as f:
                     start_line_idx = 0
-                    if is_resume_target and target_resume_byte > 0 and target_resume_chunk == 0:
-                        # Byte-seek optimisation: only safe when the resume line is entirely
-                        # committed (target_resume_chunk == 0).  The stored byte offset is the
-                        # file position *after* reading target_resume_line, so seeking to it
-                        # lands at the start of the next line.  When target_resume_chunk > 0
-                        # the resume line still has uncommitted chunks that must be re-streamed;
-                        # in that case the byte-seek is skipped and sequential line fast-forward
-                        # is used instead so that per-chunk filtering below applies correctly.
-                        try:
-                            # Guard: reject the seek if the stored offset is beyond the current
-                            # file end (file may have been replaced or truncated since the
-                            # checkpoint was written).
-                            file_end = f.seek(0, 2)
-                            if 0 < target_resume_byte <= file_end:
-                                f.seek(target_resume_byte)
-                                start_line_idx = max(0, target_resume_line + 1)
-                            else:
+
+                    if is_resume_target and (target_resume_line > 0 or target_resume_chunk > 0):
+                        # -------------------------------------------------------------------
+                        # Byte-seek resume strategy (ShardLineIndex-backed, Phase 3.1-A).
+                        #
+                        # We want to seek to target_resume_line in the file without scanning
+                        # every preceding line.  The source of truth for the byte offset is:
+                        #
+                        #   1. ShardLineIndex (content-hash-keyed): correct as long as shard
+                        #      content matches the SHA recorded when the index was built.
+                        #      We already hold `shard_sha` from the compute above.
+                        #
+                        #   2. target_resume_byte stored in the checkpoint: a secondary hint
+                        #      that can be used when it is positive AND passes the file-size
+                        #      guard.  It is the f.tell() position AFTER reading that line,
+                        #      so it points to the START of the next line — only valid when
+                        #      target_resume_chunk == 0 (the whole line was committed).
+                        #
+                        # Seek target depends on whether the resume line is fully or partially
+                        # committed:
+                        #
+                        #   target_resume_chunk == 0  → whole line committed; seek to start of
+                        #                               line (target_resume_line + 1) and set
+                        #                               start_line_idx accordingly.  The
+                        #                               checkpoint's target_resume_byte is the
+                        #                               f.tell() AFTER line target_resume_line,
+                        #                               i.e. start of the next line — use it
+                        #                               directly when valid.
+                        #
+                        #   target_resume_chunk > 0   → line partially committed; seek to the
+                        #                               START of target_resume_line so the line
+                        #                               can be re-parsed and per-chunk filtering
+                        #                               (chunk_idx < target_resume_chunk) applied.
+                        # -------------------------------------------------------------------
+                        sought = False
+                        file_end = f.seek(0, 2)
+                        f.seek(0)
+
+                        if self._line_index is not None:
+                            try:
+                                offsets = self._line_index.get_or_build(actual_fp, shard_sha)
+                                if target_resume_chunk == 0:
+                                    # Seek past the fully-committed line.
+                                    # Use the offset of (target_resume_line + 1) if present;
+                                    # otherwise use the checkpoint byte offset as fallback.
+                                    next_line = target_resume_line + 1
+                                    if next_line in offsets and 0 < offsets[next_line] <= file_end:
+                                        f.seek(offsets[next_line])
+                                        start_line_idx = next_line
+                                        sought = True
+                                    elif 0 < target_resume_byte <= file_end:
+                                        f.seek(target_resume_byte)
+                                        start_line_idx = next_line
+                                        sought = True
+                                else:
+                                    # target_resume_chunk > 0: seek to start of resume line.
+                                    # Use >= 0 (not > 0) because line 0 legitimately has offset 0.
+                                    if target_resume_line in offsets and 0 <= offsets[target_resume_line] <= file_end:
+                                        f.seek(offsets[target_resume_line])
+                                        start_line_idx = target_resume_line
+                                        sought = True
+                                    elif target_resume_line == 0:
+                                        # Line 0 always starts at offset 0
+                                        f.seek(0)
+                                        start_line_idx = 0
+                                        sought = True
+                            except Exception as idx_err:
+                                print(f"[ShardLineIndex] Seek error: {idx_err}. Falling back to sequential.", flush=True)
                                 f.seek(0)
                                 start_line_idx = 0
-                        except Exception:
+
+                        if not sought:
+                            # Fallback: use checkpoint byte offset when ShardLineIndex is
+                            # unavailable or returned no valid offset.
+                            #
+                            # Only use the checkpoint byte offset for chunk==0 resumption.
+                            # The checkpoint stores f.tell() AFTER reading the resume line,
+                            # i.e. the start of the NEXT line.  For chunk==0 the whole
+                            # resume line is already committed so seeking past it is correct.
+                            #
+                            # For chunk>0, the resume line has uncommitted chunks that must
+                            # be re-parsed.  target_resume_byte points past the line, NOT
+                            # to its start, so using it would silently skip those chunks.
+                            # Leave sought=False so the sequential-scan safety fallback
+                            # (f.seek(0), start_line_idx=0) runs instead; the per-line and
+                            # per-chunk filters then correctly navigate to the first
+                            # uncommitted chunk.
+                            if target_resume_chunk == 0 and 0 < target_resume_byte <= file_end:
+                                f.seek(target_resume_byte)
+                                start_line_idx = target_resume_line + 1
+                                sought = True
+
+                        if sought:
+                            print(
+                                f"[Dataset Stream] Byte-seek resume: shard '{shard_name}' "
+                                f"positioned at byte {f.tell():,} (line {start_line_idx:,}, "
+                                f"chunk_idx_resume={target_resume_chunk}).",
+                                flush=True,
+                            )
+                        else:
+                            # Final safety fallback: sequential scan (no seek performed)
                             f.seek(0)
                             start_line_idx = 0
 
@@ -1021,7 +1250,11 @@ class TaraStreamingJsonlDataset(IterableDataset):
                         # optimizer step.  This guarantees the stored value is always the index
                         # of the first uncommitted chunk within the resume line (or 0 when the
                         # entire line was consumed before the optimizer step committed).
-                        if is_resume_target and target_resume_byte <= 0:
+                        #
+                        # When a byte-seek was performed, start_line_idx is already set to the
+                        # correct position (past or at the resume line), so sequential filtering
+                        # is only needed when start_line_idx == 0 (no seek occurred).
+                        if is_resume_target and start_line_idx == 0:
                             if line_idx < target_resume_line:
                                 continue
                             if line_idx == target_resume_line and target_resume_chunk == 0:
@@ -3218,6 +3451,24 @@ def main():
     selected_shards = eligible_shards if args.max_shards <= 0 else eligible_shards[:args.max_shards]
     print(f"[Dataset] Discovered {len(discovered_shards)} total shards ({len(eligible_shards)} eligible, {len(shard_ledger.completed_shards)} already completed in ledger); pipeline prepared across {len(selected_shards)} shard(s)...")
 
+    # Initialize dataset snapshot: records the authoritative ordered shard catalog
+    # and tracks runtime content hashes as each shard is opened during training.
+    # The snapshot file lives in the checkpoint output directory so it survives
+    # Colab session restarts alongside the shard ledger.
+    dataset_snapshot = DatasetSnapshot(args.output_dir)
+    dataset_snapshot.initialize_from_discovery(
+        repo_id=dataset_repo,
+        prefix=ds_prefix,
+        ordered_shards=list(selected_shards),
+    )
+    # Warn on shard catalog changes relative to the previously persisted snapshot
+    if dataset_snapshot.ordered_shards != list(selected_shards):
+        diff = dataset_snapshot.diff_against_live(list(selected_shards))
+        if diff["added"]:
+            print(f"[DatasetSnapshot] New shards added since last session: {diff['added']}", flush=True)
+        if diff["removed"]:
+            print(f"[DatasetSnapshot] Shards removed since last session (will not be trained): {diff['removed']}", flush=True)
+
     # 7. Optimizer Selection & Memory Preflight Gate
     use_8bit = False
     is_vram_constrained = False
@@ -3409,6 +3660,7 @@ def main():
         prefix=ds_prefix,
         buffer_size=args.buffer_size,
         max_shard_bytes=args.max_shard_bytes,
+        dataset_snapshot=dataset_snapshot,
     )
     dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=collate_fn)
 

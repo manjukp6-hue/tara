@@ -332,6 +332,42 @@ class TaraForCausalLM(nn.Module):
 # 2. High-Throughput Streaming Dataset, Persistent Shard Ledger & JIT Downloader
 # =============================================================================
 
+def _resolve_hf_token() -> Optional[str]:
+    """
+    Securely resolves the Hugging Face access token across multiple environments:
+    1. Direct HF_TOKEN environment variable.
+    2. Google Colab userdata secret 'tara_sync' or 'HF_TOKEN'.
+    3. Hugging Face Hub stored cache token (get_token()).
+    """
+    token = os.environ.get("HF_TOKEN")
+    if token:
+        return token
+
+    # Check Google Colab userdata secrets if running in Colab
+    try:
+        from google.colab import userdata
+        for secret_key in ("tara_sync", "HF_TOKEN"):
+            try:
+                colab_token = userdata.get(secret_key)
+                if colab_token:
+                    os.environ["HF_TOKEN"] = colab_token
+                    return colab_token
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    try:
+        from huggingface_hub import get_token
+        cached = get_token()
+        if cached:
+            return cached
+    except Exception:
+        pass
+
+    return None
+
+
 def download_single_shard_jit(
     repo_id: str,
     prefix: str,
@@ -361,7 +397,7 @@ def download_single_shard_jit(
                 )
         return target_path
 
-    token = os.environ.get("HF_TOKEN") or None
+    token = _resolve_hf_token()
     remote_path = f"{prefix}/{shard_name}" if prefix else shard_name
     print(f"[JIT Downloader] Fetching single shard '{remote_path}' from https://huggingface.co/{repo_id}...", flush=True)
 
@@ -3420,7 +3456,7 @@ def verify_pretraining_authorization_proof(model_dir: str, checkpoints_dir: str 
 
 def upload_promoted_model_to_hf(promoted_dir: str, repo_id: str, stage_id: str) -> bool:
     """Uploads the promoted inference model to Hugging Face repository with subfolder isolation."""
-    hf_token = os.environ.get("HF_TOKEN")
+    hf_token = _resolve_hf_token()
     if not hf_token or not repo_id:
         print("[Hugging Face Sync Notice] HF_TOKEN or HF_REPO not set. Skipping auto-upload.")
         return False
@@ -3772,7 +3808,7 @@ def main():
     if dataset_repo:
         try:
             from huggingface_hub import HfApi
-            token = os.environ.get("HF_TOKEN") or None
+            token = _resolve_hf_token()
             api = HfApi(token=token)
             files = api.list_repo_files(repo_id=dataset_repo, repo_type="dataset")
             prefix_filter = f"{ds_prefix}/"

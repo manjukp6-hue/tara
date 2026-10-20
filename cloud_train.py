@@ -3426,8 +3426,32 @@ def main():
         # The flush runs regardless of whether step >= max_steps so that every
         # gradient accumulated into the model is either committed to an optimizer
         # update or explicitly discarded with a log message — never silently dropped.
+        #
+        # Gradient normalisation fix: the main loop accumulated gradients using
+        # loss / args.grad_accum.  For a partial window of partial_count < grad_accum
+        # batches this would under-scale the effective gradient by a factor of
+        # partial_count / grad_accum.  We therefore zero the gradients and recompute
+        # the backward pass using loss / partial_count so that the partial optimizer
+        # step carries the same per-sample gradient magnitude as a full window.
         if accum_batches:
             partial_count = len(accum_batches)
+
+            # Recompute forward + backward with 1/partial_count normalization.
+            optimizer.zero_grad(set_to_none=True)
+            accum_loss = 0.0
+            accum_ce = 0.0
+            accum_aux = 0.0
+            for p_inputs, p_labels, _ in accum_batches:
+                p_inputs = p_inputs.to(device)
+                p_labels = p_labels.to(device)
+                with autocast_ctx:
+                    _, p_loss, p_ce, p_aux = model(p_inputs, labels=p_labels)
+                    p_loss_scaled = p_loss / partial_count
+                scaler.scale(p_loss_scaled).backward()
+                accum_loss += p_loss.item()
+                accum_ce += p_ce.item() if p_ce is not None else p_loss.item()
+                accum_aux += p_aux.item() if p_aux is not None else 0.0
+
             scaler.unscale_(optimizer)
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             grad_norm_val = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else float(grad_norm)

@@ -868,7 +868,12 @@ class DatasetSnapshot:
         """
         Record the initial shard catalog as returned by the discovery step.
         Only updates the catalog when the ordered shard list has changed.
+        A failed or incomplete/empty discovery cannot overwrite a valid prior snapshot.
         """
+        if not ordered_shards and self.ordered_shards:
+            print("[DatasetSnapshot Warning] Refusing to overwrite valid prior shard snapshot with empty discovery result.", flush=True)
+            return
+
         self.repo_id = repo_id
         self.prefix = prefix
         self.revision = revision
@@ -1086,11 +1091,29 @@ class TaraStreamingJsonlDataset(IterableDataset):
             else:
                 actual_fp = fp
 
-            # Check Shard Ledger: Skip if already marked completed AND not the active resume target
+            # Check Shard Ledger: Skip if already marked completed
             if self.shard_ledger and self.shard_ledger.is_completed(shard_name, local_path=actual_fp if os.path.exists(actual_fp) else None):
                 if not is_resume_target:
                     print(f"[Dataset Ledger] Shard '{shard_name}' is ALREADY COMPLETED and verified. Skipping.", flush=True)
                     continue
+                else:
+                    # Active resume target is already marked completed in the ledger.
+                    # Verify if the cursor indicates that all lines were processed.
+                    meta = self.shard_ledger.completed_metadata.get(shard_name, {})
+                    rec_count = meta.get("records_processed", 0)
+                    if rec_count > 0 and target_resume_line >= rec_count - 1:
+                        print(
+                            f"[Dataset Ledger] Resume target shard '{shard_name}' is verified COMPLETED in ledger "
+                            f"({rec_count:,} records, cursor line: {target_resume_line:,}). "
+                            f"Skipping unnecessary download and advancing to subsequent shard.",
+                            flush=True,
+                        )
+                        target_resume_shard = None
+                        target_resume_line = -1
+                        target_resume_byte = 0
+                        target_resume_chunk = 0
+                        resume_target_reached = True
+                        continue
 
             # If local file missing or 0 bytes, download on-demand if remote repo configured
             if not os.path.exists(actual_fp) or os.path.getsize(actual_fp) == 0:
@@ -1790,6 +1813,102 @@ def compute_file_sha256(filepath: str, chunk_size: int = 4 * 1024 * 1024) -> str
     return hasher.hexdigest()
 
 
+def compute_tokenizer_fingerprint(
+    tokenizer_path: Optional[str] = None,
+    tokenizer: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Computes a canonical cryptographic fingerprint for the active tokenizer.
+
+    Covers every artifact and configuration parameter required to deterministically
+    reproduce token representations:
+    - Primary tokenizer file (tokenizer.json) SHA-256
+    - Auxiliary configuration (tokenizer_config.json) SHA-256 if present
+    - Special tokens mapping (special_tokens_map.json) SHA-256 if present
+    - Vocabulary size
+
+    Produces a composite SHA-256 digest that guarantees cross-session vocabulary
+    invariance and fails closed on any uncoordinated tokenizer replacement.
+    """
+    tok_file_sha = None
+    tok_cfg_sha = None
+    tok_sp_sha = None
+    vocab_size = None
+
+    search_dir = None
+    if tokenizer_path:
+        if os.path.isfile(tokenizer_path):
+            tok_file_sha = compute_file_sha256(tokenizer_path)
+            search_dir = os.path.dirname(os.path.abspath(tokenizer_path))
+            try:
+                with open(tokenizer_path, "r", encoding="utf-8") as f:
+                    tok_data = json.load(f)
+                if isinstance(tok_data, dict):
+                    vocab = tok_data.get("model", {}).get("vocab") or tok_data.get("vocab")
+                    if isinstance(vocab, dict):
+                        vocab_size = len(vocab)
+            except Exception:
+                pass
+        elif os.path.isdir(tokenizer_path):
+            search_dir = os.path.abspath(tokenizer_path)
+            tok_json_path = os.path.join(search_dir, "tokenizer.json")
+            if os.path.isfile(tok_json_path):
+                tok_file_sha = compute_file_sha256(tok_json_path)
+                try:
+                    with open(tok_json_path, "r", encoding="utf-8") as f:
+                        tok_data = json.load(f)
+                    if isinstance(tok_data, dict):
+                        vocab = tok_data.get("model", {}).get("vocab") or tok_data.get("vocab")
+                        if isinstance(vocab, dict):
+                            vocab_size = len(vocab)
+                except Exception:
+                    pass
+
+    if search_dir and os.path.isdir(search_dir):
+        cfg_file = os.path.join(search_dir, "tokenizer_config.json")
+        if os.path.isfile(cfg_file):
+            tok_cfg_sha = compute_file_sha256(cfg_file)
+        sp_file = os.path.join(search_dir, "special_tokens_map.json")
+        if os.path.isfile(sp_file):
+            tok_sp_sha = compute_file_sha256(sp_file)
+
+    if tokenizer is not None:
+        if hasattr(tokenizer, "get_vocab_size"):
+            try:
+                vocab_size = tokenizer.get_vocab_size()
+            except Exception:
+                pass
+        elif hasattr(tokenizer, "get_vocab"):
+            try:
+                vocab_size = len(tokenizer.get_vocab())
+            except Exception:
+                pass
+        elif hasattr(tokenizer, "_vocab") and isinstance(tokenizer._vocab, dict):
+            vocab_size = len(tokenizer._vocab)
+        elif hasattr(tokenizer, "vocab_size"):
+            try:
+                vocab_size = getattr(tokenizer, "vocab_size")
+            except Exception:
+                pass
+
+    composite_raw = (
+        f"tok:{tok_file_sha or 'none'}|"
+        f"cfg:{tok_cfg_sha or 'none'}|"
+        f"sp:{tok_sp_sha or 'none'}|"
+        f"vocab:{vocab_size if vocab_size is not None else 'none'}"
+    )
+    composite_sha = hashlib.sha256(composite_raw.encode("utf-8")).hexdigest()
+
+    return {
+        "canonical_fingerprint": composite_sha,
+        "tokenizer_file_sha256": tok_file_sha,
+        "tokenizer_config_sha256": tok_cfg_sha,
+        "special_tokens_map_sha256": tok_sp_sha,
+        "vocab_size": vocab_size,
+        "computed_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def verify_checkpoint_integrity(
     checkpoint_dir: str,
     require_optimizer: bool = False,
@@ -2067,11 +2186,21 @@ def save_best_milestone(
             with open(os.path.join(staging_dir, "config.json"), "w", encoding="utf-8") as f:
                 json.dump(config, f, indent=2)
 
-            # 2. tokenizer.json
+            # 2. tokenizer.json and auxiliary config files
             if tokenizer_path and os.path.exists(tokenizer_path):
                 tok_dst = os.path.join(staging_dir, "tokenizer.json")
                 if os.path.abspath(tokenizer_path) != os.path.abspath(tok_dst):
                     shutil.copy2(tokenizer_path, tok_dst)
+                src_tok_dir = os.path.dirname(os.path.abspath(tokenizer_path))
+                for aux_name in ("tokenizer_config.json", "special_tokens_map.json"):
+                    src_aux = os.path.join(src_tok_dir, aux_name)
+                    if os.path.isfile(src_aux):
+                        shutil.copy2(src_aux, os.path.join(staging_dir, aux_name))
+
+            tok_fingerprint = compute_tokenizer_fingerprint(
+                tokenizer_path=tokenizer_path,
+                tokenizer=None,
+            )
 
             # 3. model.safetensors
             target_model = os.path.join(staging_dir, "model.safetensors")
@@ -2101,6 +2230,7 @@ def save_best_milestone(
                 "is_best": True,
                 "is_completed": False,
                 "model_weights_sha256": weights_sha256,
+                "tokenizer_fingerprint": tok_fingerprint,
             }
             with open(os.path.join(staging_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
                 json.dump(state, f, indent=2)
@@ -2115,6 +2245,7 @@ def save_best_milestone(
                 "perplexity": math.exp(min(loss, 20.0)),
                 "is_best": True,
                 "model_weights_sha256": weights_sha256,
+                "tokenizer_fingerprint": tok_fingerprint,
             }
             with open(os.path.join(staging_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=2)
@@ -2255,11 +2386,21 @@ def save_checkpoint(
             with open(os.path.join(staging_dir, "config.json"), "w", encoding="utf-8") as f:
                 json.dump(config, f, indent=2)
 
-            # 2. tokenizer.json
+            # 2. tokenizer.json and auxiliary config files
             if tokenizer_path and os.path.exists(tokenizer_path):
                 tok_dst = os.path.join(staging_dir, "tokenizer.json")
                 if os.path.abspath(tokenizer_path) != os.path.abspath(tok_dst):
                     shutil.copy2(tokenizer_path, tok_dst)
+                src_tok_dir = os.path.dirname(os.path.abspath(tokenizer_path))
+                for aux_name in ("tokenizer_config.json", "special_tokens_map.json"):
+                    src_aux = os.path.join(src_tok_dir, aux_name)
+                    if os.path.isfile(src_aux):
+                        shutil.copy2(src_aux, os.path.join(staging_dir, aux_name))
+
+            tok_fingerprint = compute_tokenizer_fingerprint(
+                tokenizer_path=tokenizer_path,
+                tokenizer=None,
+            )
 
             # 3. model.safetensors
             state_dict = {k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}
@@ -2313,6 +2454,7 @@ def save_checkpoint(
                 "is_completed": is_completed,
                 "is_best": is_best,
                 "model_weights_sha256": weights_sha256,
+                "tokenizer_fingerprint": tok_fingerprint,
                 # Runtime provenance tag: allows the native Rust training runtime to detect
                 # Python-originated checkpoints and refuse incompatible optimizer-state exchange.
                 "written_by_runtime": "python",
@@ -2378,6 +2520,7 @@ def save_checkpoint(
                 "is_best": is_best,
                 "completed_at_utc": datetime.now(timezone.utc).isoformat() if is_completed else None,
                 "model_weights_sha256": weights_sha256,
+                "tokenizer_fingerprint": tok_fingerprint,
             }
             with open(os.path.join(staging_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=2)
@@ -2603,53 +2746,139 @@ def _collect_versioned_checkpoint_dirs(parent_dir: str, output_dir_basename: str
     return [path for _, path in candidates]
 
 
-def _cleanup_old_versioned_checkpoints(parent_dir: str, output_dir_basename: str, keep_n: int = 2) -> None:
+def _cleanup_old_versioned_checkpoints(
+    parent_dir: str,
+    output_dir_basename: str,
+    keep_n: int = 2,
+    active_staging_dir: Optional[str] = None,
+    min_abandoned_age_seconds: int = 300,
+) -> None:
     """
     Retains the most recent keep_n versioned checkpoint directories (by step number)
-    and safely deletes older ones.  This function MUST only be called AFTER the new
-    versioned checkpoint has been durably committed and its latest_checkpoint.json
-    pointer has been published — never before.
+    and safely deletes older checkpoints and abandoned staging remnants.
 
     Safety contract:
-    - The newest keep_n versioned directories are NEVER deleted.
-    - Directories without a COMMITTED marker are staging remnants and are also removed.
-    - At least two recovery-capable checkpoints are retained (keep_n=2 minimum).
-    - Deletion of a checkpoint is logged explicitly.
+    - At least two recovery-capable checkpoints are always retained (keep_n >= 2).
+    - The directory referenced by latest_checkpoint.json is NEVER deleted.
+    - An active staging directory is NEVER deleted.
+    - Abandoned staging directories (.ckpt_staging_*) are deleted only if they
+      exceed min_abandoned_age_seconds and do not belong to an active process.
+    - Stale or invalid pointers do not cause valid checkpoints to be purged.
+    - All deletions are logged explicitly.
     """
     keep_n = max(keep_n, 2)  # never keep fewer than 2 for crash-recovery safety
     prefix = output_dir_basename + ".step"
-    all_versioned: List[Tuple[int, str]] = []
+    staging_prefix = f".ckpt_staging_{output_dir_basename}_"
+    all_versioned: List[Tuple[int, str, bool]] = []
 
     if not os.path.isdir(parent_dir):
         return
 
-    for entry in os.listdir(parent_dir):
-        if entry.startswith(prefix) and not entry.startswith("."):
-            full_path = os.path.join(parent_dir, entry)
-            if not os.path.isdir(full_path):
+    # 1. Resolve and protect latest_checkpoint.json pointer target
+    latest_ptr_path = os.path.join(parent_dir, "latest_checkpoint.json")
+    pointer_target: Optional[str] = None
+    if os.path.isfile(latest_ptr_path):
+        try:
+            with open(latest_ptr_path, "r", encoding="utf-8") as f:
+                ptr_data = json.load(f)
+            p_vdir = ptr_data.get("versioned_dir")
+            if p_vdir and os.path.isdir(p_vdir):
+                pointer_target = os.path.abspath(p_vdir)
+        except Exception:
+            pass
+
+    active_staging_abs = os.path.abspath(active_staging_dir) if active_staging_dir else None
+    now = time.time()
+
+    try:
+        entries = os.listdir(parent_dir)
+    except Exception as list_err:
+        print(f"[Checkpoint Retention Error] Could not list {parent_dir}: {list_err}", flush=True)
+        return
+
+    for entry in entries:
+        full_path = os.path.join(parent_dir, entry)
+        if not os.path.isdir(full_path):
+            continue
+
+        full_path_abs = os.path.abspath(full_path)
+
+        # Case A: Abandoned staging directories (.ckpt_staging_{output_dir_basename}_*)
+        if entry.startswith(staging_prefix):
+            if active_staging_abs and full_path_abs == active_staging_abs:
                 continue
+
+            # If directory has COMMITTED marker, it is a valid promoted checkpoint; do not purge here
+            if os.path.isfile(os.path.join(full_path, "COMMITTED")):
+                continue
+
+            try:
+                mtime = os.path.getmtime(full_path)
+                age = now - mtime
+            except Exception:
+                age = 0.0
+
+            if age < min_abandoned_age_seconds:
+                continue
+
+            is_dead = True
+            try:
+                pid_part = entry.rsplit("_", 1)[1]
+                target_pid = int(pid_part)
+                if target_pid == os.getpid():
+                    is_dead = False
+                else:
+                    try:
+                        import psutil
+                        is_dead = not psutil.pid_exists(target_pid)
+                    except Exception:
+                        try:
+                            os.kill(target_pid, 0)
+                            is_dead = False
+                        except (OSError, PermissionError):
+                            is_dead = True
+            except (ValueError, IndexError):
+                is_dead = True
+
+            if is_dead:
+                try:
+                    shutil.rmtree(full_path, ignore_errors=True)
+                    print(f"[Checkpoint Retention] Removed abandoned staging directory (age {int(age)}s): {entry}", flush=True)
+                except Exception as cleanup_err:
+                    print(f"[Checkpoint Retention Notice] Could not remove abandoned staging dir {entry}: {cleanup_err}", flush=True)
+            continue
+
+        # Case B: Versioned checkpoints ({output_dir_basename}.step*)
+        if entry.startswith(prefix) and not entry.startswith("."):
             committed_marker = os.path.join(full_path, "COMMITTED")
+            is_committed = os.path.isfile(committed_marker)
             try:
                 step_part = entry[len(prefix):].split("_")[0]
                 step_num = int(step_part)
             except (ValueError, IndexError):
                 step_num = -1
-            all_versioned.append((step_num, full_path, os.path.isfile(committed_marker)))
+            all_versioned.append((step_num, full_path, is_committed))
 
-    # Sort newest-first
-    all_versioned.sort(key=lambda x: x[0], reverse=True)
+    # Sort newest-first (by step number, then path)
+    all_versioned.sort(key=lambda x: (x[0], x[1]), reverse=True)
 
-    # Keep the top keep_n committed; delete committed ones beyond keep_n and all uncommitted
     committed_kept = 0
     for step_num, dir_path, is_committed in all_versioned:
+        dir_abs = os.path.abspath(dir_path)
+
+        if pointer_target and dir_abs == pointer_target:
+            if is_committed:
+                committed_kept += 1
+            continue
+
         if is_committed:
             if committed_kept < keep_n:
                 committed_kept += 1
-                continue  # preserve this one
-        # Delete: either an old committed checkpoint beyond keep_n, or an uncommitted staging remnant
+                continue
+
         try:
             shutil.rmtree(dir_path, ignore_errors=True)
-            reason = "old committed checkpoint beyond retention window" if is_committed else "uncommitted staging remnant"
+            reason = "old committed checkpoint beyond retention window" if is_committed else "uncommitted versioned remnant"
             print(f"[Checkpoint Retention] Removed {reason}: {os.path.basename(dir_path)}", flush=True)
         except Exception as cleanup_err:
             print(f"[Checkpoint Retention Notice] Could not remove {dir_path}: {cleanup_err}", flush=True)
@@ -2660,6 +2889,8 @@ def try_resume_from_checkpoint(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
     scaler: torch.cuda.amp.GradScaler,
+    tokenizer_path: Optional[str] = None,
+    tokenizer: Optional[Any] = None,
 ) -> Tuple[int, int, float, bool, Optional[Dict[str, Any]]]:
     """
     Attempts to resume training from the latest available COMPLETE training checkpoint.
@@ -2678,9 +2909,16 @@ def try_resume_from_checkpoint(
     4. Google Drive mirror of checkpoint_dir.
 
     Strictly EXCLUDES inference-only best_checkpoint directories to protect optimizer continuity.
+    Fails closed on tokenizer fingerprint mismatch when current runtime tokenizer is provided.
     """
     parent_dir = os.path.dirname(os.path.abspath(checkpoint_dir)) or "."
     output_dir_basename = os.path.basename(checkpoint_dir)
+
+    # Compute current runtime tokenizer fingerprint for validation if provided
+    current_tok_fp = compute_tokenizer_fingerprint(
+        tokenizer_path=tokenizer_path,
+        tokenizer=tokenizer,
+    ) if (tokenizer_path or tokenizer) else None
 
     # ----------------------------------------------------------------
     # Priority-1: Follow latest_checkpoint.json pointer.
@@ -2766,6 +3004,46 @@ def try_resume_from_checkpoint(
             # Fail closed if this checkpoint originated from the native Rust
             # training runtime — its optimizer state is not cross-compatible.
             validate_checkpoint_runtime_compatibility(s_data)
+
+            # Verify tokenizer compatibility if current runtime tokenizer is provided
+            if current_tok_fp is not None:
+                stored_tok_fp = s_data.get("tokenizer_fingerprint")
+                if stored_tok_fp is not None:
+                    stored_canon = stored_tok_fp.get("canonical_fingerprint")
+                    curr_canon = current_tok_fp.get("canonical_fingerprint")
+                    if stored_canon and curr_canon and stored_canon != curr_canon:
+                        print(
+                            f"  -> Fatal: Candidate at {cand} tokenizer fingerprint mismatch! "
+                            f"(Stored: {stored_canon[:16]}..., Current: {curr_canon[:16]}...). "
+                            f"Refusing to resume with incompatible tokenizer to prevent representation corruption.",
+                            flush=True,
+                        )
+                        continue
+                else:
+                    # Backward compatibility for legacy checkpoints without tokenizer_fingerprint:
+                    cand_tok = os.path.join(cand, "tokenizer.json")
+                    if os.path.exists(cand_tok) and tokenizer_path and os.path.exists(tokenizer_path):
+                        cand_sha = compute_file_sha256(cand_tok)
+                        curr_sha = compute_file_sha256(tokenizer_path)
+                        if cand_sha != curr_sha:
+                            print(
+                                f"  -> Fatal: Candidate at {cand} tokenizer.json SHA mismatch against current tokenizer! "
+                                f"(Stored: {cand_sha[:16]}..., Current: {curr_sha[:16]}...). Rejecting candidate.",
+                                flush=True,
+                            )
+                            continue
+                        else:
+                            print(
+                                f"  -> Notice: Candidate at {cand} lacks tokenizer_fingerprint metadata, "
+                                f"but tokenizer.json SHA matches. Allowing legacy resume.",
+                                flush=True,
+                            )
+                    else:
+                        print(
+                            f"  -> Notice: Candidate at {cand} lacks tokenizer_fingerprint metadata. "
+                            f"Allowing legacy resume per backward-compatibility policy.",
+                            flush=True,
+                        )
             c_step = int(s_data.get("step", 0))
             c_loss = float(s_data.get("loss", float("inf")))
             c_best_loss = float(s_data.get("best_loss", c_loss))
@@ -3456,18 +3734,19 @@ def main():
     # The snapshot file lives in the checkpoint output directory so it survives
     # Colab session restarts alongside the shard ledger.
     dataset_snapshot = DatasetSnapshot(args.output_dir)
-    dataset_snapshot.initialize_from_discovery(
-        repo_id=dataset_repo,
-        prefix=ds_prefix,
-        ordered_shards=list(selected_shards),
-    )
-    # Warn on shard catalog changes relative to the previously persisted snapshot
-    if dataset_snapshot.ordered_shards != list(selected_shards):
+    # Check for catalog changes against the previously persisted snapshot BEFORE updating it
+    if dataset_snapshot.ordered_shards:
         diff = dataset_snapshot.diff_against_live(list(selected_shards))
         if diff["added"]:
             print(f"[DatasetSnapshot] New shards added since last session: {diff['added']}", flush=True)
         if diff["removed"]:
             print(f"[DatasetSnapshot] Shards removed since last session (will not be trained): {diff['removed']}", flush=True)
+
+    dataset_snapshot.initialize_from_discovery(
+        repo_id=dataset_repo,
+        prefix=ds_prefix,
+        ordered_shards=list(selected_shards),
+    )
 
     # 7. Optimizer Selection & Memory Preflight Gate
     use_8bit = False
@@ -3605,7 +3884,9 @@ def main():
 
     if args.resume:
         start_step, start_epoch, best_loss, was_resumed, resumed_cursor = try_resume_from_checkpoint(
-            args.output_dir, model, optimizer, scaler
+            args.output_dir, model, optimizer, scaler,
+            tokenizer_path=tok_path,
+            tokenizer=tokenizer,
         )
         if start_step >= args.max_steps:
             print(f"[Resume] Training already completed all {args.max_steps} steps. Finishing.")
@@ -3631,6 +3912,39 @@ def main():
             resume_shard = resumed_cursor.get("active_shard") if resumed_cursor else None
             resume_line_offset = resumed_cursor.get("active_shard_line_offset", -1) if resumed_cursor else -1
             resume_byte_offset = resumed_cursor.get("active_shard_byte_offset", 0) if resumed_cursor else 0
+            resume_chunk_idx = resumed_cursor.get("active_chunk_idx", 0) if resumed_cursor else 0
+
+            # Shard boundary reconciliation:
+            # If the resumed shard is already marked COMPLETED in the ledger and the cursor line offset
+            # reached or exceeded the end of that shard, advance resume_shard to the next eligible shard
+            # without triggering an unnecessary download of the completed shard.
+            if resume_shard and shard_ledger and shard_ledger.is_completed(resume_shard):
+                meta = shard_ledger.completed_metadata.get(resume_shard, {})
+                rec_count = meta.get("records_processed", 0)
+                if rec_count > 0 and resume_line_offset >= rec_count - 1:
+                    if resume_shard in selected_shards:
+                        curr_idx = selected_shards.index(resume_shard)
+                        if curr_idx + 1 < len(selected_shards):
+                            next_shard = selected_shards[curr_idx + 1]
+                            print(
+                                f"[Resume Boundary Reconciliation] Shard '{resume_shard}' was confirmed COMPLETED "
+                                f"in ledger ({rec_count:,} records). Advancing cursor to next eligible shard: '{next_shard}'.",
+                                flush=True,
+                            )
+                            resume_shard = next_shard
+                            resume_line_offset = 0
+                            resume_byte_offset = 0
+                            resume_chunk_idx = 0
+                        else:
+                            print(
+                                f"[Resume Boundary Reconciliation] Final shard '{resume_shard}' was confirmed COMPLETED "
+                                f"in ledger. All dataset shards are completed.",
+                                flush=True,
+                            )
+                            resume_shard = None
+                            resume_line_offset = -1
+                            resume_byte_offset = 0
+                            resume_chunk_idx = 0
 
             print("=" * 80, flush=True)
             print("  [DATASET ZERO-DUPLICATE EXACT RESUME AUDIT]", flush=True)

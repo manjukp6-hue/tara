@@ -2,9 +2,9 @@
 Phase 3.4.1 Acceptance Tests: Checkpoint Selection Isolation & Multi-Stage Scope Verification
 
 Tests cover:
-1. Two intentionally different test checkpoints (stage_0 at step 5 vs stage_interrupted_test at step 9).
-2. Resume stage_0 asserts exact step 5, weights, optimizer, tokenizer fingerprint, and cursor.
-3. Resume stage_interrupted_test separately asserts its own exact step 9, weights, optimizer, and cursor.
+1. Two intentionally different test checkpoints (stage_0 at step 10 vs stage_interrupted_test at step 15).
+2. Resume stage_0 asserts exact step 10, weights, optimizer, tokenizer fingerprint, cursor, and ShardLedger.
+3. Resume stage_interrupted_test separately asserts its own exact step 15, weights, optimizer, and cursor.
 4. Sibling pointer rejection: Pointer to a sibling stage is rejected, preventing cross-stage state contamination.
 5. Missing pointer fallback: Seamless fallback to versioned directory within target scope when pointer is missing.
 6. Stale/corrupt pointer: Corrupt pointer fails safe without adopting unrelated sibling checkpoint.
@@ -27,6 +27,7 @@ from cloud_train import (
     compute_tokenizer_fingerprint,
     _cleanup_old_versioned_checkpoints,
     ensure_remote_assets_available,
+    ShardLedger,
 )
 
 
@@ -65,13 +66,15 @@ class TestCheckpointSelectionIsolation(unittest.TestCase):
         self.stage_0_dir = os.path.join(self.shared_parent, "stage_0")
         self.stage_interrupted_dir = os.path.join(self.shared_parent, "stage_interrupted_test")
 
-        # Checkpoint A (stage_0): step 5, distinct weights, distinct cursor
+        # Checkpoint A (stage_0): 10 steps, distinct weights, distinct cursor & ShardLedger
         torch.manual_seed(100)
         self.model_a = TaraForCausalLM(self.config)
         self.opt_a = torch.optim.AdamW(self.model_a.parameters(), lr=1e-4)
         self.scaler_a = _make_tiny_scaler()
-        # Train 5 steps
-        for _ in range(5):
+        self.ledger_a = ShardLedger(self.stage_0_dir, stage_id="stage_0")
+
+        # Train 10 steps
+        for _ in range(10):
             self.opt_a.zero_grad()
             x = torch.randint(0, 128, (1, 16))
             out = self.model_a(x)
@@ -81,26 +84,27 @@ class TestCheckpointSelectionIsolation(unittest.TestCase):
 
         self.cursor_a = {
             "active_shard": "shard_0.jsonl",
-            "active_shard_line_offset": 5,
-            "active_shard_byte_offset": 500,
+            "active_shard_line_offset": 10,
+            "active_shard_byte_offset": 1000,
             "active_chunk_idx": 0,
-            "total_samples_trained": 5,
-            "samples_consumed": 5,
+            "total_samples_trained": 10,
+            "samples_consumed": 10,
             "completed_shards": [],
-            "applied_unit_ids": ["u_0", "u_1", "u_2", "u_3", "u_4"],
+            "applied_unit_ids": [f"u_{i}" for i in range(10)],
         }
         save_checkpoint(
             self.model_a, self.opt_a, self.scaler_a, self.config, self.tok_path,
-            self.stage_0_dir, step=5, epoch=0, loss=1.25, best_loss=1.25,
+            self.stage_0_dir, step=10, epoch=0, loss=1.25, best_loss=1.25,
             stage_id="stage_0", data_cursor=self.cursor_a, sync_to_gdrive=False,
+            shard_ledger=self.ledger_a,
         )
 
-        # Checkpoint B (stage_interrupted_test): step 9, different weights, different cursor
+        # Checkpoint B (stage_interrupted_test): 15 steps, different weights, different cursor
         torch.manual_seed(200)
         self.model_b = TaraForCausalLM(self.config)
         self.opt_b = torch.optim.AdamW(self.model_b.parameters(), lr=2e-4)
         self.scaler_b = _make_tiny_scaler()
-        for _ in range(9):
+        for _ in range(15):
             self.opt_b.zero_grad()
             x = torch.randint(0, 128, (1, 16))
             out = self.model_b(x)
@@ -110,17 +114,17 @@ class TestCheckpointSelectionIsolation(unittest.TestCase):
 
         self.cursor_b = {
             "active_shard": "shard_1.jsonl",
-            "active_shard_line_offset": 9,
-            "active_shard_byte_offset": 900,
+            "active_shard_line_offset": 15,
+            "active_shard_byte_offset": 1500,
             "active_chunk_idx": 1,
-            "total_samples_trained": 9,
-            "samples_consumed": 9,
+            "total_samples_trained": 15,
+            "samples_consumed": 15,
             "completed_shards": ["shard_0.jsonl"],
-            "applied_unit_ids": [f"u_b_{i}" for i in range(9)],
+            "applied_unit_ids": [f"u_b_{i}" for i in range(15)],
         }
         save_checkpoint(
             self.model_b, self.opt_b, self.scaler_b, self.config, self.tok_path,
-            self.stage_interrupted_dir, step=9, epoch=1, loss=0.95, best_loss=0.95,
+            self.stage_interrupted_dir, step=15, epoch=1, loss=0.95, best_loss=0.95,
             stage_id="stage_interrupted_test", data_cursor=self.cursor_b, sync_to_gdrive=False,
         )
 
@@ -128,7 +132,7 @@ class TestCheckpointSelectionIsolation(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_resume_stage_0_selects_exact_stage_0_state(self):
-        """Resuming stage_0 restores step 5, model_a weights, and cursor_a, NOT sibling stage."""
+        """Resuming stage_0 restores step 10, model_a weights, cursor_a, and ShardLedger, NOT sibling stage."""
         reload_model = TaraForCausalLM(self.config)
         reload_opt = torch.optim.AdamW(reload_model.parameters(), lr=1e-4)
         reload_scaler = _make_tiny_scaler()
@@ -140,12 +144,18 @@ class TestCheckpointSelectionIsolation(unittest.TestCase):
             expected_stage_id="stage_0",
         )
         self.assertTrue(was_resumed)
-        self.assertEqual(step, 5)
+        self.assertEqual(step, 10)
         self.assertAlmostEqual(best_loss, 1.25)
         self.assertIsNotNone(cursor)
         self.assertEqual(cursor["active_shard"], "shard_0.jsonl")
-        self.assertEqual(cursor["active_shard_line_offset"], 5)
-        self.assertEqual(cursor.get("applied_unit_ids"), ["u_0", "u_1", "u_2", "u_3", "u_4"])
+        self.assertEqual(cursor["active_shard_line_offset"], 10)
+        self.assertEqual(cursor.get("applied_unit_ids"), [f"u_{i}" for i in range(10)])
+
+        # ShardLedger verification: ledger persisted and matches step 10
+        reloaded_ledger = ShardLedger(self.stage_0_dir, stage_id="stage_0")
+        self.assertEqual(reloaded_ledger.last_committed_step, 10)
+        self.assertEqual(reloaded_ledger.active_shard_line_offset, 10)
+        self.assertEqual(reloaded_ledger.total_records_processed, 10)
 
         # Model weights must match model_a, NOT model_b
         for (k_a, v_a), (k_r, v_r) in zip(self.model_a.state_dict().items(), reload_model.state_dict().items()):
@@ -153,7 +163,7 @@ class TestCheckpointSelectionIsolation(unittest.TestCase):
             self.assertTrue(torch.allclose(v_a, v_r, atol=1e-6), f"Weight mismatch for {k_a}")
 
     def test_resume_stage_interrupted_selects_exact_stage_interrupted_state(self):
-        """Resuming stage_interrupted_test restores step 9, model_b weights, and cursor_b."""
+        """Resuming stage_interrupted_test restores step 15, model_b weights, and cursor_b."""
         reload_model = TaraForCausalLM(self.config)
         reload_opt = torch.optim.AdamW(reload_model.parameters(), lr=2e-4)
         reload_scaler = _make_tiny_scaler()
@@ -165,11 +175,11 @@ class TestCheckpointSelectionIsolation(unittest.TestCase):
             expected_stage_id="stage_interrupted_test",
         )
         self.assertTrue(was_resumed)
-        self.assertEqual(step, 9)
+        self.assertEqual(step, 15)
         self.assertAlmostEqual(best_loss, 0.95)
         self.assertIsNotNone(cursor)
         self.assertEqual(cursor["active_shard"], "shard_1.jsonl")
-        self.assertEqual(cursor["active_shard_line_offset"], 9)
+        self.assertEqual(cursor["active_shard_line_offset"], 15)
         self.assertEqual(cursor["active_chunk_idx"], 1)
 
         # Model weights must match model_b, NOT model_a
@@ -184,7 +194,7 @@ class TestCheckpointSelectionIsolation(unittest.TestCase):
         # Find stage_interrupted versioned directory
         vdirs_b = [
             os.path.join(self.shared_parent, d) for d in os.listdir(self.shared_parent)
-            if d.startswith("stage_interrupted_test.step9")
+            if d.startswith("stage_interrupted_test.step15")
         ]
         self.assertTrue(len(vdirs_b) > 0)
         with open(parent_ptr, "w", encoding="utf-8") as f:
@@ -192,10 +202,10 @@ class TestCheckpointSelectionIsolation(unittest.TestCase):
                 "versioned_dir": vdirs_b[0],
                 "output_dir": self.stage_interrupted_dir,
                 "stage_id": "stage_interrupted_test",
-                "step": 9,
+                "step": 15,
             }, f)
 
-        # Resume stage_0. It MUST reject parent_ptr and restore stage_0 (step 5)
+        # Resume stage_0. It MUST reject parent_ptr and restore stage_0 (step 10)
         reload_model = TaraForCausalLM(self.config)
         reload_opt = torch.optim.AdamW(reload_model.parameters(), lr=1e-4)
         reload_scaler = _make_tiny_scaler()
@@ -207,7 +217,7 @@ class TestCheckpointSelectionIsolation(unittest.TestCase):
             expected_stage_id="stage_0",
         )
         self.assertTrue(was_resumed)
-        self.assertEqual(step, 5, "stage_0 erroneously adopted sibling pointer step 9!")
+        self.assertEqual(step, 10, "stage_0 erroneously adopted sibling pointer step 15!")
         self.assertEqual(cursor["active_shard"], "shard_0.jsonl")
 
     def test_stale_corrupt_pointer_falls_back_to_valid_versioned_dir(self):
@@ -227,7 +237,7 @@ class TestCheckpointSelectionIsolation(unittest.TestCase):
             expected_stage_id="stage_0",
         )
         self.assertTrue(was_resumed)
-        self.assertEqual(step, 5)
+        self.assertEqual(step, 10)
 
     def test_stage_id_mismatch_fails_closed(self):
         """Calling try_resume_from_checkpoint with an expected_stage_id rejecting candidates returns False."""

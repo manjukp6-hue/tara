@@ -2503,6 +2503,8 @@ def save_checkpoint(
     dataset: Optional[Any] = None,
     shard_ledger: Optional[Any] = None,
     data_cursor: Optional[Dict[str, Any]] = None,
+    keep_n: int = 2,
+    force_keep_exact: bool = False,
 ):
     """
     Crash-safe, versioned checkpoint protocol (Task A):
@@ -2832,7 +2834,12 @@ def save_checkpoint(
             # AFTER the new checkpoint is confirmed durable.  This call is
             # safe here because the pointer has already been published above.
             # ----------------------------------------------------------------
-            _cleanup_old_versioned_checkpoints(parent_dir, os.path.basename(output_dir), keep_n=2)
+            _cleanup_old_versioned_checkpoints(
+                parent_dir,
+                os.path.basename(output_dir),
+                keep_n=keep_n,
+                force_keep_exact=force_keep_exact,
+            )
 
         except Exception as e:
             print(f"[Checkpoint Failure] Error during checkpoint save: {e}", flush=True)
@@ -2935,21 +2942,27 @@ def _cleanup_old_versioned_checkpoints(
     keep_n: int = 2,
     active_staging_dir: Optional[str] = None,
     min_abandoned_age_seconds: int = 300,
+    force_keep_exact: bool = False,
 ) -> None:
     """
     Retains the most recent keep_n versioned checkpoint directories (by step number)
-    and safely deletes older checkpoints and abandoned staging remnants.
+    and safely deletes older checkpoints, obsolete re-run duplicates, and abandoned staging remnants.
 
     Safety contract:
-    - At least two recovery-capable checkpoints are always retained (keep_n >= 2).
+    - Never deletes before new checkpoint is verified and committed.
     - The directory referenced by latest_checkpoint.json is NEVER deleted.
     - An active staging directory is NEVER deleted.
     - Abandoned staging directories (.ckpt_staging_*) are deleted only if they
       exceed min_abandoned_age_seconds and do not belong to an active process.
+    - Obsolete duplicate runs for the exact same step number are purged immediately.
     - Stale or invalid pointers do not cause valid checkpoints to be purged.
     - All deletions are logged explicitly.
     """
-    keep_n = max(keep_n, 2)  # never keep fewer than 2 for crash-recovery safety
+    if force_keep_exact:
+        keep_n = max(keep_n, 1)
+    else:
+        keep_n = max(keep_n, 2)  # default safety floor for backward compatibility
+
     prefix = output_dir_basename + ".step"
     staging_prefix = f".ckpt_staging_{output_dir_basename}_"
     all_versioned: List[Tuple[int, str, bool]] = []
@@ -3060,11 +3073,35 @@ def _cleanup_old_versioned_checkpoints(
                 step_num = -1
             all_versioned.append((step_num, full_path, is_committed))
 
-    # Sort newest-first (by step number, then path)
-    all_versioned.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    # Group versioned directories by step number:
+    # For any given step number, only the NEWEST directory (highest timestamp/mtime) is retained;
+    # all older directories for the EXACT SAME step number are obsolete superseded runs and deleted immediately.
+    step_groups: Dict[int, List[Tuple[str, bool]]] = {}
+    for step_num, dir_path, is_committed in all_versioned:
+        step_groups.setdefault(step_num, []).append((dir_path, is_committed))
+
+    candidates_to_evaluate: List[Tuple[int, str, bool]] = []
+    for step_num, dir_entries in step_groups.items():
+        # Sort newest-first within this step number (descending by directory path string containing timestamp)
+        dir_entries.sort(key=lambda x: x[0], reverse=True)
+        # Keep newest run as the candidate
+        candidates_to_evaluate.append((step_num, dir_entries[0][0], dir_entries[0][1]))
+        # All older runs for the exact same step number are purged immediately
+        for old_dir, old_committed in dir_entries[1:]:
+            dir_abs = os.path.abspath(old_dir)
+            if pointer_target and dir_abs == pointer_target:
+                continue
+            removed = _safe_rmtree(old_dir)
+            if removed:
+                print(f"[Checkpoint Retention] Removed obsolete superseded run for Step {step_num}: {os.path.basename(old_dir)}", flush=True)
+            else:
+                print(f"[Checkpoint Retention Notice] Could not remove {old_dir}", flush=True)
+
+    # Sort distinct steps newest-first (highest step number first)
+    candidates_to_evaluate.sort(key=lambda x: (x[0], x[1]), reverse=True)
 
     committed_kept = 0
-    for step_num, dir_path, is_committed in all_versioned:
+    for step_num, dir_path, is_committed in candidates_to_evaluate:
         dir_abs = os.path.abspath(dir_path)
 
         if pointer_target and dir_abs == pointer_target:
@@ -3810,6 +3847,8 @@ def main():
                         help="Enable activation gradient checkpointing to save VRAM")
     parser.add_argument("--allow-unsafe-fp32-adamw", action="store_true", default=False,
                         help="Override memory preflight gate to allow FP32 AdamW on memory-constrained GPUs")
+    parser.add_argument("--keep-checkpoints", type=int, default=int(os.environ.get("KEEP_CHECKPOINTS", 1)),
+                        help="Number of past checkpoints to retain (default: 1; deletes older checkpoints upon verified new commit)")
     parser.add_argument("--preflight-only", action="store_true", default=False, help="Execute only the dual-stage preflight validation diagnostic and exit with report")
     args = parser.parse_args()
 
@@ -4508,6 +4547,7 @@ def main():
                         step, epoch, cur_step_loss, best_loss, args.stage_id,
                         is_best=False, is_completed=False, sync_to_gdrive=True,
                         dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
+                        keep_n=args.keep_checkpoints, force_keep_exact=True,
                     )
 
                 # Rate-Limited Best Milestone Commit Gate:
@@ -4662,12 +4702,14 @@ def main():
         step, epoch, final_loss, best_loss, args.stage_id,
         is_best=False, is_completed=True,
         dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
+        keep_n=args.keep_checkpoints, force_keep_exact=True,
     )
     save_checkpoint(
         model, optimizer, scaler, config, tok_path, best_cp_dir,
         step, epoch, best_loss, best_loss, args.stage_id,
         is_best=True, is_completed=True,
         dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
+        keep_n=args.keep_checkpoints, force_keep_exact=True,
     )
 
     print(f"[Stage Complete] Training checkpoint preserved in: {args.output_dir}")

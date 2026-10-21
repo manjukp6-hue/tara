@@ -1491,14 +1491,71 @@ class TaraStreamingJsonlDataset(IterableDataset):
 TaraJsonlDataset = TaraStreamingJsonlDataset
 
 
+def route_dataset_record(rec: Any) -> str:
+    """
+    Categorizes a dataset record into its designated processing pathway:
+      - 'transition': genuine environment dynamics with (s_t, a_t, s_{t+1})
+      - 'knowledge_fact': discrete knowledge graph triples / relational entities
+      - 'neural_text': natural language text, instructions, or conversations
+      - 'invalid': malformed, unparseable, or non-compliant records
+    Strictly prevents schema conflation: knowledge triples are never treated as transitions.
+    """
+    if not isinstance(rec, dict):
+        return "invalid"
+
+    # Support optional nested "state_transition" wrapper
+    t_obj = rec.get("state_transition") if isinstance(rec.get("state_transition"), dict) else rec
+
+    s_obs = t_obj.get("state_observation") or t_obj.get("state") or t_obj.get("observation")
+    act = t_obj.get("action") or t_obj.get("intervention")
+    ns_obs = t_obj.get("next_state_observation") or t_obj.get("next_state") or t_obj.get("subsequent_state")
+
+    # 1. Genuine environment state transition
+    if (
+        isinstance(s_obs, str) and s_obs.strip()
+        and isinstance(act, str) and act.strip()
+        and isinstance(ns_obs, str) and ns_obs.strip()
+    ):
+        # Validate optional numeric fields
+        reward = t_obj.get("reward")
+        if reward is not None and not isinstance(reward, (int, float)):
+            return "invalid"
+        confidence = t_obj.get("confidence")
+        if confidence is not None:
+            if not isinstance(confidence, (int, float)) or confidence < 0.0 or confidence > 1.0:
+                return "invalid"
+        return "transition"
+
+    # 2. Knowledge graph / relational facts pathway
+    knowledge_keys = ("subject", "predicate", "relation", "triples", "entities", "ontology_node", "world_fact")
+    if any(k in rec for k in knowledge_keys):
+        subj = rec.get("subject")
+        pred = rec.get("predicate") or rec.get("relation")
+        obj = rec.get("object")
+        if (
+            (isinstance(subj, str) and subj.strip() and isinstance(pred, str) and pred.strip() and isinstance(obj, str) and obj.strip())
+            or rec.get("triples") or rec.get("entities") or rec.get("world_fact")
+        ):
+            return "knowledge_fact"
+
+    # 3. Neural sequence modeling pathway
+    neural_keys = ("prompt", "instruction", "input", "output", "completion", "text", "conversation", "messages")
+    if any(k in rec for k in neural_keys):
+        text_val = rec.get("text") or rec.get("instruction") or rec.get("prompt") or rec.get("input")
+        if text_val is not None:
+            return "neural_text"
+
+    return "invalid"
+
+
 class WorldModelTransitionDataset(IterableDataset):
     """
     Streaming dataset for genuine World Model state transitions: (s_t, a_t) -> s_{t+1}.
-    Validates transition records adhering to:
+    Validates transition records adhering strictly to:
       {"state_observation": ..., "action": ..., "next_state_observation": ..., "reward": ...}
       or {"state": ..., "action": ..., "next_state": ...}
-      or {"subject": ..., "predicate": ..., "object": ...}
-    Strictly rejects non-transition records or empty fields.
+    Knowledge-graph facts and triples are routed to the knowledge graph pathway,
+    and are strictly rejected as transition supervision.
     """
     def __init__(
         self,
@@ -1528,24 +1585,35 @@ class WorldModelTransitionDataset(IterableDataset):
                         except Exception:
                             continue
 
-                        # Extract state transition components
-                        s_obs = rec.get("state_observation") or rec.get("state") or rec.get("observation")
-                        act = rec.get("action") or rec.get("intervention")
-                        ns_obs = rec.get("next_state_observation") or rec.get("next_state") or rec.get("subsequent_state")
-
-                        # Handle relational triples as discrete dynamics
-                        if not (s_obs and act and ns_obs):
-                            subj = rec.get("subject")
-                            pred = rec.get("predicate") or rec.get("relation")
-                            obj = rec.get("object")
-                            if subj and pred and obj:
-                                s_obs = str(subj)
-                                act = str(pred)
-                                ns_obs = str(obj)
-
-                        # Must be genuine transition data
-                        if not (s_obs and act and ns_obs):
+                        if not isinstance(rec, dict):
                             continue
+
+                        # Extract state transition components (support optional state_transition nested wrapper)
+                        t_obj = rec.get("state_transition") if isinstance(rec.get("state_transition"), dict) else rec
+                        s_obs = t_obj.get("state_observation") or t_obj.get("state") or t_obj.get("observation")
+                        act = t_obj.get("action") or t_obj.get("intervention")
+                        ns_obs = t_obj.get("next_state_observation") or t_obj.get("next_state") or t_obj.get("subsequent_state")
+
+                        # Validate field types, non-empty required values, and sequence semantics
+                        if not (
+                            isinstance(s_obs, str) and s_obs.strip()
+                            and isinstance(act, str) and act.strip()
+                            and isinstance(ns_obs, str) and ns_obs.strip()
+                        ):
+                            continue
+
+                        # Validate optional reward and confidence semantics
+                        reward = t_obj.get("reward")
+                        if reward is not None and not isinstance(reward, (int, float)):
+                            continue
+                        confidence = t_obj.get("confidence")
+                        if confidence is not None:
+                            if not isinstance(confidence, (int, float)) or confidence < 0.0 or confidence > 1.0:
+                                continue
+
+                        s_obs = s_obs.strip()
+                        act = act.strip()
+                        ns_obs = ns_obs.strip()
 
                         # Format prompt: [STATE] s_t [ACTION] a_t -> [NEXT_STATE] s_{t+1}
                         prompt_text = f"[STATE] {s_obs} [ACTION] {act} [NEXT_STATE] "
@@ -4863,16 +4931,17 @@ def main():
                             continue
                         try:
                             rec = json.loads(line)
-                            s_obs = rec.get("state_observation") or rec.get("state") or rec.get("observation")
-                            act = rec.get("action") or rec.get("intervention")
-                            ns_obs = rec.get("next_state_observation") or rec.get("next_state") or rec.get("subsequent_state")
-                            if not (s_obs and act and ns_obs):
-                                subj = rec.get("subject")
-                                pred = rec.get("predicate") or rec.get("relation")
-                                obj = rec.get("object")
-                                if subj and pred and obj:
-                                    s_obs, act, ns_obs = str(subj), str(pred), str(obj)
-                            if s_obs and act and ns_obs:
+                            if not isinstance(rec, dict):
+                                continue
+                            t_obj = rec.get("state_transition") if isinstance(rec.get("state_transition"), dict) else rec
+                            s_obs = t_obj.get("state_observation") or t_obj.get("state") or t_obj.get("observation")
+                            act = t_obj.get("action") or t_obj.get("intervention")
+                            ns_obs = t_obj.get("next_state_observation") or t_obj.get("next_state") or t_obj.get("subsequent_state")
+                            if (
+                                isinstance(s_obs, str) and s_obs.strip()
+                                and isinstance(act, str) and act.strip()
+                                and isinstance(ns_obs, str) and ns_obs.strip()
+                            ):
                                 valid_transition_sample_count += 1
                                 if valid_transition_sample_count >= 10:
                                     break
@@ -4886,9 +4955,10 @@ def main():
         if valid_transition_sample_count == 0:
             raise RuntimeError(
                 f"[Joint World Model Preflight Gate] Files were discovered in '{args.world_dataset_dir}', "
-                f"but zero valid state-transition records were found. Records must provide either "
-                f"(state_observation, action, next_state_observation) or (subject, predicate, object) dynamics. "
-                f"Failing preflight safely to prevent non-transition training."
+                f"but zero valid state-transition records were found. Records must strictly provide valid, non-empty "
+                f"(state_observation, action, next_state_observation) sequence semantics. "
+                f"Relational facts (subject, predicate, object) and raw text are strictly rejected as transition supervision. "
+                f"Failing preflight safely per directive."
             )
 
         print(f"[Joint World Model Dataset] Discovered {len(world_files)} transition dataset file(s) with verified usable records.")
@@ -5390,43 +5460,30 @@ def main():
         # gradient accumulated into the model is either committed to an optimizer
         # update or explicitly discarded with a log message — never silently dropped.
         #
-        # Gradient normalisation fix: the main loop accumulated gradients using
-        # loss / args.grad_accum.  For a partial window of partial_count < grad_accum
-        # batches this would under-scale the effective gradient by a factor of
-        # partial_count / grad_accum.  We therefore zero the gradients and recompute
-        # the backward pass using loss / partial_count so that the partial optimizer
-        # step carries the same per-sample gradient magnitude as a full window.
+        # Mathematical Gradient Normalization:
+        # Micro-batches in the active window were accumulated with loss / args.grad_accum.
+        # For a final partial window of partial_count < grad_accum batches, the accumulated
+        # gradient in param.grad is (1 / grad_accum) * sum_{i=1}^n grad(L_i).
+        # To produce the mathematically exact average gradient (1 / n) * sum_{i=1}^n grad(L_i),
+        # we rescale the accumulated gradients by (args.grad_accum / partial_count).
         if accum_batches:
             partial_count = len(accum_batches)
+            rescale_factor = float(args.grad_accum) / float(partial_count)
 
-            # Recompute forward + backward with 1/partial_count normalization.
-            optimizer.zero_grad(set_to_none=True)
+            for p in model.parameters():
+                if p.grad is not None:
+                    p.grad.mul_(rescale_factor)
+            if world_model is not None:
+                for p in world_model.parameters():
+                    if p.grad is not None:
+                        p.grad.mul_(rescale_factor)
+
+            cur_lr = compute_scheduled_lr(step, args.warmup_steps, args.max_steps, args.lr, args.min_lr)
+            for pg in optimizer.param_groups:
+                pg["lr"] = cur_lr
             if world_optimizer is not None:
-                world_optimizer.zero_grad(set_to_none=True)
-            accum_loss = 0.0
-            accum_ce = 0.0
-            accum_aux = 0.0
-            accum_world_loss = 0.0
-            for p_idx, (p_inputs, p_labels, _) in enumerate(accum_batches):
-                p_inputs = p_inputs.to(device)
-                p_labels = p_labels.to(device)
-                with autocast_ctx:
-                    _, p_loss, p_ce, p_aux = model(p_inputs, labels=p_labels)
-                    p_loss_scaled = p_loss / partial_count
-                scaler.scale(p_loss_scaled).backward()
-                accum_loss += p_loss.item()
-                accum_ce += p_ce.item() if p_ce is not None else p_loss.item()
-                accum_aux += p_aux.item() if p_aux is not None else 0.0
-
-                if world_model is not None and p_idx < len(accum_world_batches):
-                    w_inputs, w_labels, _ = accum_world_batches[p_idx]
-                    w_inputs = w_inputs.to(device)
-                    w_labels = w_labels.to(device)
-                    with autocast_ctx:
-                        _, w_loss, _, _ = world_model(w_inputs, labels=w_labels)
-                        w_loss_scaled = (w_loss * args.lambda_world) / partial_count
-                    world_scaler.scale(w_loss_scaled).backward()
-                    accum_world_loss += w_loss.item()
+                for w_pg in world_optimizer.param_groups:
+                    w_pg["lr"] = cur_lr
 
             scaler.unscale_(optimizer)
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)

@@ -197,34 +197,69 @@ pub fn discover_state_transitions_in_dir(
 
                                             if let (Some(s), Some(a), Some(ns)) = (s_obs, act, ns_obs)
                                             {
+                                                if s.trim().is_empty()
+                                                    || a.trim().is_empty()
+                                                    || ns.trim().is_empty()
+                                                {
+                                                    continue;
+                                                }
+
                                                 let ep_id = t_obj
                                                     .get("episode_id")
                                                     .and_then(Value::as_str)
                                                     .unwrap_or("default_episode");
-                                                let step_idx = t_obj
-                                                    .get("step_index")
-                                                    .or_else(|| t_obj.get("step"))
-                                                    .and_then(Value::as_u64)
-                                                    .unwrap_or(line_idx as u64)
-                                                    as usize;
-                                                let reward = t_obj
-                                                    .get("reward")
-                                                    .and_then(Value::as_f64)
-                                                    .unwrap_or(0.0)
-                                                    as f32;
-                                                let done = t_obj
-                                                    .get("done")
-                                                    .and_then(Value::as_bool)
-                                                    .unwrap_or(false);
+                                                let step_idx = if let Some(st_val) =
+                                                    t_obj.get("step_index").or_else(|| t_obj.get("step"))
+                                                {
+                                                    if let Some(st_num) = st_val.as_u64() {
+                                                        st_num as usize
+                                                    } else {
+                                                        continue;
+                                                    }
+                                                } else {
+                                                    line_idx
+                                                };
+
+                                                let reward = if let Some(r_val) = t_obj.get("reward") {
+                                                    if let Some(r_num) = r_val.as_f64() {
+                                                        if !r_num.is_finite() {
+                                                            continue;
+                                                        }
+                                                        r_num as f32
+                                                    } else {
+                                                        continue;
+                                                    }
+                                                } else {
+                                                    0.0f32
+                                                };
+
+                                                let done = if let Some(d_val) = t_obj.get("done") {
+                                                    if let Some(d_bool) = d_val.as_bool() {
+                                                        d_bool
+                                                    } else {
+                                                        continue;
+                                                    }
+                                                } else {
+                                                    false
+                                                };
+
                                                 let domain = t_obj
                                                     .get("domain")
                                                     .and_then(Value::as_str)
                                                     .unwrap_or("general");
-                                                let confidence = t_obj
-                                                    .get("confidence")
-                                                    .and_then(Value::as_f64)
-                                                    .unwrap_or(1.0)
-                                                    as f32;
+
+                                                let confidence = if let Some(c_val) = t_obj.get("confidence") {
+                                                    if let Some(c_num) = c_val.as_f64() {
+                                                        if !c_num.is_finite() || c_num < 0.0 || c_num > 1.0 {
+                                                            continue;
+                                                        }
+                                                        c_num as f32
+                                                    } else {
+                                                        continue;
+                                                    }
+                                                } else {
+                                                    1.0f32
+                                                };
 
                                                 let rec = StateTransitionRecord {
                                                     id: format!("{}_{line_idx}", p.display()),
@@ -1095,6 +1130,70 @@ mod tests {
             run_coordinated_joint_training(&resume_cfg).expect("Resumed joint training must succeed");
         assert_eq!(resume_report.status, "COMPLETED");
         assert_eq!(resume_report.steps_completed, 2); // 4 - 2 = 2 steps executed
+
+        let _ = fs::remove_dir_all(&test_root);
+    }
+
+    #[test]
+    fn test_kg_triples_rejected_as_state_transitions() {
+        let test_root = std::env::temp_dir().join(format!("tara_kg_triples_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&test_root);
+        fs::create_dir_all(&test_root).unwrap();
+
+        let ds_dir = test_root.join("triples_only");
+        fs::create_dir_all(&ds_dir).unwrap();
+
+        // Write knowledge graph triples only
+        let triples = vec![
+            json!({"subject": "Sun", "predicate": "emits", "object": "Light"}),
+            json!({"subject": "Water", "predicate": "consists_of", "object": "H2O"}),
+        ];
+        let mut content = String::new();
+        for t in triples {
+            content.push_str(&t.to_string());
+            content.push('\n');
+        }
+        fs::write(ds_dir.join("triples.jsonl"), content).unwrap();
+
+        let transitions = discover_state_transitions_in_dir(&ds_dir).unwrap();
+        assert!(
+            transitions.is_empty(),
+            "Relational knowledge graph triples must not be treated as environment transitions"
+        );
+
+        let _ = fs::remove_dir_all(&test_root);
+    }
+
+    #[test]
+    fn test_invalid_and_malformed_transitions_rejected() {
+        let test_root = std::env::temp_dir().join(format!("tara_malformed_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&test_root);
+        fs::create_dir_all(&test_root).unwrap();
+
+        let ds_dir = test_root.join("bad_trans");
+        fs::create_dir_all(&ds_dir).unwrap();
+
+        let bad_records = vec![
+            json!({"state_observation": "", "action": "step", "next_state_observation": "s2"}), // empty state
+            json!({"state_observation": "s1", "action": "  ", "next_state_observation": "s2"}), // empty action
+            json!({"state_observation": "s1", "action": "step"}), // missing next_state
+            json!({"state_observation": 123, "action": "step", "next_state_observation": "s2"}), // non-string state
+            json!({"state_observation": "s1", "action": "step", "next_state_observation": "s2", "reward": f64::NAN}), // NaN reward
+            json!({"state_observation": "s1", "action": "step", "next_state_observation": "s2", "confidence": 2.5}), // confidence > 1.0
+        ];
+        let mut content = String::new();
+        for b in bad_records {
+            content.push_str(&b.to_string());
+            content.push('\n');
+        }
+        fs::write(ds_dir.join("bad.jsonl"), content).unwrap();
+
+        let transitions = discover_state_transitions_in_dir(&ds_dir).unwrap();
+        assert_eq!(
+            transitions.len(),
+            0,
+            "Malformed transitions must be completely rejected"
+        );
 
         let _ = fs::remove_dir_all(&test_root);
     }

@@ -27,6 +27,7 @@ from cloud_train import (
     TaraWorldModel,
     TaraNativeTokenizer,
     WorldModelTransitionDataset,
+    route_dataset_record,
     save_checkpoint,
     save_best_milestone,
     try_resume_from_checkpoint,
@@ -362,7 +363,7 @@ class TestJointNeuralWorldTraining(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(promo_1, "model.safetensors")))
 
     def test_world_model_transition_dataset_extraction(self):
-        """Proof 9: WorldModelTransitionDataset correctly parses transitions and masks prompt tokens."""
+        """Proof 9: WorldModelTransitionDataset extracts genuine transitions, rejects relational triples, and masks prompt tokens."""
         dataset_dir = os.path.join(self.tmpdir, "transition_data")
         os.makedirs(dataset_dir, exist_ok=True)
         sample_file = os.path.join(dataset_dir, "transitions_001.jsonl")
@@ -383,8 +384,8 @@ class TestJointNeuralWorldTraining(unittest.TestCase):
         )
 
         samples = list(ds)
-        # Should extract 2 valid transitions
-        self.assertEqual(len(samples), 2)
+        # Only the genuine state-transition record must be accepted; knowledge triple and invalid record must be rejected
+        self.assertEqual(len(samples), 1)
 
         input_ids, labels, shard_name, line_idx, _, _, is_last = samples[0]
         self.assertIsInstance(input_ids, torch.Tensor)
@@ -393,6 +394,222 @@ class TestJointNeuralWorldTraining(unittest.TestCase):
         self.assertTrue((labels == -100).any())
         # Next-state tokens must NOT be -100
         self.assertTrue((labels != -100).any())
+
+    def test_knowledge_graph_triples_rejected_as_world_model_transitions(self):
+        """Regression Proof 11: A record containing only subject, predicate, and object is rejected as transition supervision."""
+        dataset_dir = os.path.join(self.tmpdir, "triples_only_data")
+        os.makedirs(dataset_dir, exist_ok=True)
+        triples_file = os.path.join(dataset_dir, "kg_triples.jsonl")
+
+        triples = [
+            {"subject": "Paris", "predicate": "capital_of", "object": "France"},
+            {"subject": "Sun", "predicate": "center_of", "object": "SolarSystem"},
+            {"subject": "DNA", "predicate": "encodes", "object": "Proteins"},
+        ]
+        with open(triples_file, "w", encoding="utf-8") as f:
+            for t in triples:
+                f.write(json.dumps(t) + "\n")
+
+        ds = WorldModelTransitionDataset(
+            file_paths=[triples_file],
+            tokenizer=self.tokenizer,
+            max_seq_len=64,
+        )
+        samples = list(ds)
+        self.assertEqual(len(samples), 0, "Knowledge graph triples must yield 0 World Model transition samples")
+
+        # Routing check
+        for t in triples:
+            self.assertEqual(route_dataset_record(t), "knowledge_fact")
+
+    def test_valid_transition_record_accepted(self):
+        """Regression Proof 12: Genuine, well-formed transition records are accepted with prompt masking."""
+        dataset_dir = os.path.join(self.tmpdir, "valid_trans_data")
+        os.makedirs(dataset_dir, exist_ok=True)
+        trans_file = os.path.join(dataset_dir, "transitions.jsonl")
+
+        valid_records = [
+            {
+                "state_observation": "cart_position=-0.05, velocity=0.1",
+                "action": "push_left",
+                "next_state_observation": "cart_position=-0.08, velocity=-0.05",
+                "reward": 1.0,
+                "done": False,
+            },
+            {
+                "state": "temperature=25C",
+                "action": "turn_on_heater",
+                "next_state": "temperature=28C",
+            },
+            {
+                "state_transition": {
+                    "observation": "door_is_closed",
+                    "intervention": "turn_doorknob_and_push",
+                    "subsequent_state": "door_is_open",
+                }
+            },
+        ]
+        with open(trans_file, "w", encoding="utf-8") as f:
+            for r in valid_records:
+                f.write(json.dumps(r) + "\n")
+
+        ds = WorldModelTransitionDataset(
+            file_paths=[trans_file],
+            tokenizer=self.tokenizer,
+            max_seq_len=64,
+        )
+        samples = list(ds)
+        self.assertEqual(len(samples), 3, "All 3 valid transition records must be accepted")
+        for r in valid_records:
+            self.assertEqual(route_dataset_record(r), "transition")
+
+    def test_mixture_of_knowledge_facts_and_transitions_routed_correctly(self):
+        """Regression Proof 13: Mixture of knowledge facts, neural text, and transitions route to correct destinations."""
+        mixed_records = [
+            {"subject": "Gravity", "predicate": "accelerates", "object": "Mass"},  # KG fact
+            {"state_observation": "robot_at_dock", "action": "undock", "next_state_observation": "robot_navigating"},  # Transition
+            {"text": "The quick brown fox jumps over the lazy dog."},  # Neural text
+            {"subject": "Oxygen", "predicate": "atomic_number", "object": "8"},  # KG fact
+            {"state": "speed=0", "action": "accelerate", "next_state": "speed=10"},  # Transition
+            {"prompt": "Summarize relativity", "response": "Mass and energy are equivalent."},  # Neural QA
+        ]
+
+        routed = [route_dataset_record(r) for r in mixed_records]
+        self.assertEqual(
+            routed,
+            ["knowledge_fact", "transition", "neural_text", "knowledge_fact", "transition", "neural_text"]
+        )
+
+    def test_invalid_or_malformed_transitions_rejected(self):
+        """Regression Proof 14: Non-string, empty, or incomplete transition records are strictly rejected."""
+        malformed = [
+            {"state_observation": "", "action": "jump", "next_state_observation": "landing"},  # empty state
+            {"state_observation": "pos=1", "action": "   ", "next_state_observation": "pos=2"},  # whitespace action
+            {"state_observation": "pos=1", "action": "step"},  # missing next_state
+            {"state_observation": 1234, "action": "step", "next_state_observation": "pos=2"},  # non-string state
+            {"state_observation": "pos=1", "action": ["step"], "next_state_observation": "pos=2"},  # non-string action
+            {"state_observation": "pos=1", "action": "step", "next_state_observation": {"key": "val"}},  # non-string next_state
+            {"state_observation": "pos=1", "action": "step", "next_state_observation": "pos=2", "reward": "not_a_number"},  # invalid reward
+            {"state_observation": "pos=1", "action": "step", "next_state_observation": "pos=2", "confidence": 1.5},  # out-of-range confidence
+        ]
+
+        for r in malformed:
+            self.assertEqual(route_dataset_record(r), "invalid")
+
+        bad_dir = os.path.join(self.tmpdir, "malformed_trans")
+        os.makedirs(bad_dir, exist_ok=True)
+        bad_file = os.path.join(bad_dir, "bad.jsonl")
+        with open(bad_file, "w", encoding="utf-8") as f:
+            for r in malformed:
+                f.write(json.dumps(r) + "\n")
+
+        ds = WorldModelTransitionDataset(
+            file_paths=[bad_file],
+            tokenizer=self.tokenizer,
+            max_seq_len=64,
+        )
+        samples = list(ds)
+        self.assertEqual(len(samples), 0, "Malformed transitions must yield 0 samples")
+
+    def test_gradient_accumulation_partial_window_mathematical_exactness(self):
+        """Proof 15: Mathematical verification that grad_accum/n rescaling yields exact average gradient."""
+        torch.manual_seed(1234)
+
+        # Tiny linear layer as controlled mathematical model
+        class ControlledModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = nn.Linear(4, 2, bias=False)
+            def forward(self, x):
+                return self.fc(x)
+
+        x1 = torch.randn(2, 4)
+        y1 = torch.tensor([0, 1])
+        x2 = torch.randn(2, 4)
+        y2 = torch.tensor([1, 0])
+        criterion = nn.CrossEntropyLoss()
+
+        # 1. Reference calculation: direct average over the 2 micro-batches
+        m_ref = ControlledModel()
+        with torch.no_grad():
+            m_ref.fc.weight.copy_(torch.randn(2, 4))
+        target_weight = m_ref.fc.weight.clone()
+
+        loss1_ref = criterion(m_ref(x1), y1)
+        loss2_ref = criterion(m_ref(x2), y2)
+        ref_loss = (loss1_ref + loss2_ref) / 2.0
+        ref_loss.backward()
+        expected_gradient = m_ref.fc.weight.grad.clone()
+
+        # 2. Accumulation calculation: each micro-batch loss is divided by grad_accum=4,
+        # then the accumulated gradient is rescaled by (grad_accum / n) = (4 / 2) = 2.0
+        m_accum = ControlledModel()
+        with torch.no_grad():
+            m_accum.fc.weight.copy_(target_weight)
+
+        grad_accum = 4
+        n_batches = 2
+
+        loss1_acc = criterion(m_accum(x1), y1) / grad_accum
+        loss1_acc.backward()
+
+        loss2_acc = criterion(m_accum(x2), y2) / grad_accum
+        loss2_acc.backward()
+
+        # Rescale accumulated gradient
+        rescale_factor = float(grad_accum) / float(n_batches)
+        m_accum.fc.weight.grad.mul_(rescale_factor)
+        actual_gradient = m_accum.fc.weight.grad.clone()
+
+        # Compare mathematical exactness
+        max_diff = (expected_gradient - actual_gradient).abs().max().item()
+        self.assertLess(max_diff, 1e-6, f"Gradient accumulation partial window error: {max_diff}")
+
+    def test_gradient_isolation_and_optimizer_state_independence(self):
+        """Proof 16: Mathematical proof of complete gradient isolation and distinct optimizer states."""
+        neural_model = TaraForCausalLM(self.config)
+        world_model = TaraWorldModel(self.config)
+
+        neural_opt = torch.optim.AdamW(neural_model.parameters(), lr=1e-4)
+        world_opt = torch.optim.AdamW(world_model.parameters(), lr=1e-4)
+
+        # 1. Optimizer states must be separate objects
+        self.assertIsNot(neural_opt.state, world_opt.state)
+
+        # 2. Neural forward/backward must leave World Model gradients as None
+        neural_input = torch.randint(0, 128, (2, 8))
+        neural_labels = neural_input.clone()
+        _, n_loss, _, _ = neural_model(neural_input, labels=neural_labels)
+        n_loss.backward()
+
+        for name, p in world_model.named_parameters():
+            self.assertIsNone(p.grad, f"World model parameter {name} received unexpected gradient from neural loss")
+
+        for name, p in neural_model.named_parameters():
+            self.assertIsNotNone(p.grad, f"Neural model parameter {name} missing gradient")
+
+        neural_opt.step()
+        neural_opt.zero_grad(set_to_none=True)
+
+        # 3. World Model forward/backward must leave Neural Model gradients as None
+        world_input = torch.randint(0, 128, (2, 8))
+        world_labels = world_input.clone()
+        _, w_loss, _, _ = world_model(world_input, labels=world_labels)
+        w_loss.backward()
+
+        for name, p in neural_model.named_parameters():
+            self.assertIsNone(p.grad, f"Neural model parameter {name} received unexpected gradient from world loss")
+
+        for name, p in world_model.named_parameters():
+            self.assertIsNotNone(p.grad, f"World model parameter {name} missing gradient")
+
+        world_opt.step()
+        world_opt.zero_grad(set_to_none=True)
+
+        # 4. Verify optimizer states remain distinct after stepping
+        neural_opt_param_ids = {id(p) for group in neural_opt.param_groups for p in group["params"]}
+        world_opt_param_ids = {id(p) for group in world_opt.param_groups for p in group["params"]}
+        self.assertEqual(len(neural_opt_param_ids & world_opt_param_ids), 0, "No parameter sharing permitted between models")
 
     def test_per_shard_promotion_and_previous_shard_pruning(self):
         """Proof 10: Per-shard promotion promotes model snapshot and deletes prior shard model snapshot."""

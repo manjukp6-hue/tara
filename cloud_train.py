@@ -3754,19 +3754,11 @@ def main():
     # If the output directory references /content/drive, verify that it is an authentic
     # Google Drive FUSE mount. Fail-closed immediately if it is an unmounted local container path.
     if args.output_dir.startswith("/content/drive") and not is_real_gdrive_mount("/content/drive"):
-        if os.path.exists("/content"):
-            try:
-                from google.colab import drive
-                print("[GDrive Gate] Attempting automatic drive mount via google.colab.drive.mount('/content/drive')...")
-                drive.mount("/content/drive", force_remount=False)
-            except Exception:
-                pass
-        if not is_real_gdrive_mount("/content/drive"):
-            raise RuntimeError(
-                f"[GDrive Mount Gate Error] Output directory '{args.output_dir}' references Google Drive, "
-                f"but /content/drive is NOT an authentic mounted Google Drive (it is a local unmounted directory)! "
-                f"Mount Google Drive via drive.mount('/content/drive') before training to ensure genuine persistence."
-            )
+        raise RuntimeError(
+            f"[GDrive Mount Gate Error] Output directory '{args.output_dir}' references Google Drive, "
+            f"but /content/drive is NOT an authentic mounted Google Drive (it is a local unmounted directory)! "
+            f"Mount Google Drive via drive.mount('/content/drive') before training to ensure genuine persistence."
+        )
 
     # 1. Idempotence Check
     if check_stage_already_completed(args.output_dir):

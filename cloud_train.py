@@ -4021,12 +4021,6 @@ def main():
     else:
         print("[Hardware] No GPU detected. Defaulting to CPU (FP32).")
 
-    # Auto-adjust checkpoint_interval for short smoke tests / custom test runs
-    if args.max_steps > 0 and args.checkpoint_interval > args.max_steps:
-        old_interval = args.checkpoint_interval
-        args.checkpoint_interval = max(1, args.max_steps // 2)
-        print(f"[Configuration Note] Auto-adjusted checkpoint_interval from {old_interval} to {args.checkpoint_interval} to align with max_steps={args.max_steps}.", flush=True)
-
     # Print Fully Resolved Configuration Matrix Before Dataset Loading & State Allocation
     print("=" * 80)
     print("  TARA FULLY RESOLVED CONFIGURATION MATRIX")

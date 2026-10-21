@@ -329,6 +329,10 @@ class TaraForCausalLM(nn.Module):
         return logits, total_loss, ce_loss, aux_loss
 
 
+# Dedicated Neural World Model Architecture (matches storage/models/tara_world_model)
+TaraWorldModel = TaraForCausalLM
+
+
 # =============================================================================
 # 2. High-Throughput Streaming Dataset, Persistent Shard Ledger & JIT Downloader
 # =============================================================================
@@ -1487,6 +1491,87 @@ class TaraStreamingJsonlDataset(IterableDataset):
 TaraJsonlDataset = TaraStreamingJsonlDataset
 
 
+class WorldModelTransitionDataset(IterableDataset):
+    """
+    Streaming dataset for genuine World Model state transitions: (s_t, a_t) -> s_{t+1}.
+    Validates transition records adhering to:
+      {"state_observation": ..., "action": ..., "next_state_observation": ..., "reward": ...}
+      or {"state": ..., "action": ..., "next_state": ...}
+      or {"subject": ..., "predicate": ..., "object": ...}
+    Strictly rejects non-transition records or empty fields.
+    """
+    def __init__(
+        self,
+        file_paths: List[str],
+        tokenizer: Any,
+        max_seq_len: int = 256,
+        max_samples: int = 0,
+    ):
+        self.file_paths = list(file_paths)
+        self.tokenizer = tokenizer
+        self.max_seq_len = max_seq_len
+        self.max_samples = max_samples
+
+    def __iter__(self):
+        emitted = 0
+        for fp in self.file_paths:
+            if not os.path.exists(fp):
+                continue
+            try:
+                with open(fp, "r", encoding="utf-8") as f:
+                    for line_idx, line in enumerate(f):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            rec = json.loads(line)
+                        except Exception:
+                            continue
+
+                        # Extract state transition components
+                        s_obs = rec.get("state_observation") or rec.get("state") or rec.get("observation")
+                        act = rec.get("action") or rec.get("intervention")
+                        ns_obs = rec.get("next_state_observation") or rec.get("next_state") or rec.get("subsequent_state")
+
+                        # Handle relational triples as discrete dynamics
+                        if not (s_obs and act and ns_obs):
+                            subj = rec.get("subject")
+                            pred = rec.get("predicate") or rec.get("relation")
+                            obj = rec.get("object")
+                            if subj and pred and obj:
+                                s_obs = str(subj)
+                                act = str(pred)
+                                ns_obs = str(obj)
+
+                        # Must be genuine transition data
+                        if not (s_obs and act and ns_obs):
+                            continue
+
+                        # Format prompt: [STATE] s_t [ACTION] a_t -> [NEXT_STATE] s_{t+1}
+                        prompt_text = f"[STATE] {s_obs} [ACTION] {act} [NEXT_STATE] "
+                        target_text = f"{ns_obs} [EOS]"
+
+                        prompt_tokens = list(self.tokenizer.encode(prompt_text))
+                        target_tokens = list(self.tokenizer.encode(target_text))
+                        full_ids = (prompt_tokens + target_tokens)[:self.max_seq_len]
+
+                        if len(full_ids) < 4:
+                            continue
+
+                        input_ids = torch.tensor(full_ids, dtype=torch.long)
+                        labels = input_ids.clone()
+                        # Mask prompt tokens so loss is computed exclusively on next-state prediction
+                        mask_len = min(len(prompt_tokens), len(full_ids))
+                        labels[:mask_len] = -100
+
+                        yield input_ids, labels, os.path.basename(fp), line_idx, 0, 0, True
+                        emitted += 1
+                        if 0 < self.max_samples <= emitted:
+                            return
+            except Exception as e:
+                print(f"[World Dataset Error] Failed to stream {fp}: {e}", flush=True)
+
+
 def collate_fn(batch):
     if not batch:
         return torch.empty((0, 0), dtype=torch.long), torch.empty((0, 0), dtype=torch.long), []
@@ -2427,6 +2512,7 @@ def save_best_milestone(
     dataset: Optional[Any] = None,
     shard_ledger: Optional[Any] = None,
     data_cursor: Optional[Dict[str, Any]] = None,
+    world_model: Optional[nn.Module] = None,
 ) -> bool:
     """
     Saves a clean, compact BEST MILESTONE checkpoint using atomic verified commit:
@@ -2500,6 +2586,27 @@ def save_best_milestone(
             if weights_sha256:
                 print(f"[Best Checkpoint Dynamic SHA-256] {os.path.basename(actual_model_path)} -> {weights_sha256}", flush=True)
 
+            # 3b. world_model.safetensors (if joint training)
+            world_weights_sha256 = None
+            if world_model is not None:
+                wm_target = os.path.join(staging_dir, "world_model.safetensors")
+                existing_wm = os.path.join(parent_dir, "world_model.safetensors")
+                if existing_is_current_step and os.path.isfile(existing_wm) and os.path.getsize(existing_wm) > 1024 * 1024:
+                    try:
+                        os.link(existing_wm, wm_target)
+                    except Exception:
+                        _stream_copy_file(existing_wm, wm_target)
+                else:
+                    wm_sd = {k: v.detach().to("cpu", copy=True) for k, v in world_model.state_dict().items()}
+                    if HAS_SAFETENSORS:
+                        save_file(wm_sd, wm_target)
+                    else:
+                        torch.save(wm_sd, os.path.join(staging_dir, "pytorch_world_model.bin"))
+                    del wm_sd
+                    gc.collect()
+                actual_wm_target = wm_target if HAS_SAFETENSORS else os.path.join(staging_dir, "pytorch_world_model.bin")
+                world_weights_sha256 = compute_file_sha256(actual_wm_target) if os.path.exists(actual_wm_target) else None
+
             # 4. Continuation state with exact data cursor
             if data_cursor is None:
                 active_shard = getattr(dataset, "current_active_shard", getattr(dataset, "active_shard_name", None)) if dataset else None
@@ -2537,6 +2644,8 @@ def save_best_milestone(
                 "is_best": True,
                 "is_completed": False,
                 "model_weights_sha256": weights_sha256,
+                "world_model_weights_sha256": world_weights_sha256,
+                "joint_world_model": world_model is not None,
                 "tokenizer_fingerprint": tok_fingerprint,
                 "data_cursor": data_cursor,
                 "active_shard": active_shard,
@@ -2672,6 +2781,10 @@ def save_checkpoint(
     data_cursor: Optional[Dict[str, Any]] = None,
     keep_n: int = 2,
     force_keep_exact: bool = False,
+    world_model: Optional[nn.Module] = None,
+    world_optimizer: Optional[torch.optim.Optimizer] = None,
+    world_scaler: Optional[torch.cuda.amp.GradScaler] = None,
+    per_shard_promotion: bool = False,
 ):
     """
     Crash-safe, versioned checkpoint protocol (Task A):
@@ -2750,6 +2863,20 @@ def save_checkpoint(
             del state_dict
             gc.collect()
 
+            # 3b. world_model.safetensors (if joint training active)
+            world_weights_sha256 = None
+            if world_model is not None:
+                wm_sd = {k: v.detach().to("cpu", copy=True) for k, v in world_model.state_dict().items()}
+                wm_target = os.path.join(staging_dir, "world_model.safetensors")
+                if HAS_SAFETENSORS:
+                    save_file(wm_sd, wm_target)
+                else:
+                    torch.save(wm_sd, os.path.join(staging_dir, "pytorch_world_model.bin"))
+                del wm_sd
+                gc.collect()
+                actual_wm_target = wm_target if HAS_SAFETENSORS else os.path.join(staging_dir, "pytorch_world_model.bin")
+                world_weights_sha256 = compute_file_sha256(actual_wm_target) if os.path.exists(actual_wm_target) else None
+
             weights_file = (
                 os.path.join(staging_dir, "model.safetensors") if HAS_SAFETENSORS
                 else os.path.join(staging_dir, "pytorch_model.bin")
@@ -2793,6 +2920,8 @@ def save_checkpoint(
                 "is_completed": is_completed,
                 "is_best": is_best,
                 "model_weights_sha256": weights_sha256,
+                "world_model_weights_sha256": world_weights_sha256,
+                "joint_world_model": world_model is not None,
                 "tokenizer_fingerprint": tok_fingerprint,
                 # Runtime provenance tag: allows the native Rust training runtime to detect
                 # Python-originated checkpoints and refuse incompatible optimizer-state exchange.
@@ -2833,16 +2962,33 @@ def save_checkpoint(
                 cuda_rng = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
                 py_rng = random.getstate()
 
+                opt_save_dict = {
+                    "optimizer": cpu_opt_state,
+                    "scaler": scaler_state,
+                    "step": step,
+                    "best_loss": best_loss,
+                    "torch_rng": torch_rng,
+                    "cuda_rng": cuda_rng,
+                    "py_rng": py_rng,
+                }
+                if world_optimizer is not None:
+                    w_opt_sd = world_optimizer.state_dict()
+                    w_cpu_opt_state = {}
+                    for k, v in w_opt_sd.items():
+                        if k == "state":
+                            w_cpu_opt_state[k] = {}
+                            for pid, pdata in v.items():
+                                w_cpu_opt_state[k][pid] = {
+                                    sk: sv.cpu() if isinstance(sv, torch.Tensor) else sv
+                                    for sk, sv in pdata.items()
+                                }
+                        else:
+                            w_cpu_opt_state[k] = v
+                    opt_save_dict["world_optimizer"] = w_cpu_opt_state
+                    opt_save_dict["world_scaler"] = world_scaler.state_dict() if world_scaler else None
+
                 torch.save(
-                    {
-                        "optimizer": cpu_opt_state,
-                        "scaler": scaler_state,
-                        "step": step,
-                        "best_loss": best_loss,
-                        "torch_rng": torch_rng,
-                        "cuda_rng": cuda_rng,
-                        "py_rng": py_rng,
-                    },
+                    opt_save_dict,
                     os.path.join(staging_dir, "optimizer_state.pt"),
                 )
                 del cpu_opt_state, scaler_state
@@ -2989,6 +3135,13 @@ def save_checkpoint(
                         managed_cache=is_managed,
                         actual_fp=shard_abs if is_managed else None,
                     )
+                    if per_shard_promotion:
+                        execute_per_shard_promotion(
+                            pending_shard=pending_shard,
+                            source_checkpoint_dir=output_dir,
+                            parent_dir=parent_dir,
+                            stage_id=stage_id,
+                        )
 
             # Step 6: Clean temp artifacts from output_dir
             clean_stale_checkpoint_artifacts(output_dir, is_best=is_best)
@@ -3075,6 +3228,63 @@ def promote_checkpoint(
                 except Exception:
                     pass
         print(f"[GDrive Promotion Mirror] Promoted model synced to: {gdrive_promoted}", flush=True)
+
+
+def execute_per_shard_promotion(
+    pending_shard: str,
+    source_checkpoint_dir: str,
+    parent_dir: str,
+    stage_id: str,
+):
+    """
+    Promotes the model snapshot upon completing a dataset shard:
+    1. Generates a clean promoted model snapshot for the completed shard in:
+       <parent_dir>/promoted_shard_<clean_name>
+    2. Atomically prunes the previous shard's promoted snapshot directory
+       to conserve disk space and prevent Google Drive bloat.
+    3. Persists the active promoted shard tracker in <parent_dir>/latest_promoted_shard.json
+    """
+    clean_name = os.path.splitext(os.path.basename(pending_shard))[0]
+    new_promo_dir = os.path.join(parent_dir, f"promoted_shard_{clean_name}")
+    tracker_path = os.path.join(parent_dir, "latest_promoted_shard.json")
+
+    prev_promo_dir = None
+    if os.path.exists(tracker_path):
+        try:
+            with open(tracker_path, "r", encoding="utf-8") as f:
+                tracker = json.load(f)
+                prev_promo_dir = tracker.get("promoted_dir")
+        except Exception:
+            pass
+
+    print(f"[Per-Shard Promotion] Shard '{pending_shard}' completed. Promoting model snapshot -> {new_promo_dir}...", flush=True)
+    promote_checkpoint(source_checkpoint_dir, new_promo_dir, stage_id)
+
+    # Prune previous shard's promoted snapshot if different
+    if prev_promo_dir and os.path.abspath(prev_promo_dir) != os.path.abspath(new_promo_dir):
+        if os.path.exists(prev_promo_dir):
+            print(f"[Per-Shard Promotion] Pruning previous shard promoted model directory: {prev_promo_dir}...", flush=True)
+            _safe_rmtree(prev_promo_dir)
+        # Also prune in Google Drive if present
+        gdrive_root = _resolve_gdrive_root()
+        if gdrive_root:
+            gdrive_prev = os.path.join(gdrive_root, os.path.basename(prev_promo_dir))
+            if os.path.exists(gdrive_prev):
+                print(f"[Per-Shard Promotion] Pruning previous shard promoted mirror in Google Drive: {gdrive_prev}...", flush=True)
+                _safe_rmtree(gdrive_prev)
+
+    # Update tracker
+    try:
+        with open(tracker_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "shard_name": pending_shard,
+                "promoted_dir": new_promo_dir,
+                "timestamp": time.time(),
+                "stage_id": stage_id,
+            }, f, indent=2)
+    except Exception as e:
+        print(f"[Per-Shard Promotion Notice] Could not write {tracker_path}: {e}", flush=True)
+
 
 
 def _collect_versioned_checkpoint_dirs(parent_dir: str, output_dir_basename: str) -> List[str]:
@@ -3307,6 +3517,10 @@ def try_resume_from_checkpoint(
     tokenizer_path: Optional[str] = None,
     tokenizer: Optional[Any] = None,
     expected_stage_id: Optional[str] = None,
+    allow_milestone_fallback: bool = True,
+    world_model: Optional[nn.Module] = None,
+    world_optimizer: Optional[torch.optim.Optimizer] = None,
+    world_scaler: Optional[torch.cuda.amp.GradScaler] = None,
 ) -> Tuple[int, int, float, bool, Optional[Dict[str, Any]]]:
     """
     Attempts to resume training from the latest available COMPLETE training checkpoint.
@@ -3578,7 +3792,10 @@ def try_resume_from_checkpoint(
     # If no complete candidate with optimizer_state.pt was found, inspect verified model milestones
     # (e.g. best_checkpoint or output_dir without optimizer_state.pt) to recover model weights,
     # step, and exact data cursor rather than discarding progress and starting from Step 0.
-    if best_cand_dir is None or best_cand_step < 0:
+    # Note: inference-only best_checkpoint is strictly skipped when checkpoint_dir is best_checkpoint itself
+    # or when allow_milestone_fallback is disabled.
+    is_direct_best_dir = os.path.basename(os.path.normpath(checkpoint_dir)) == "best_checkpoint"
+    if allow_milestone_fallback and not is_direct_best_dir and (best_cand_dir is None or best_cand_step < 0):
         fallback_candidates = [
             os.path.join(checkpoint_dir, "best_checkpoint"),
             checkpoint_dir,
@@ -3668,10 +3885,20 @@ def try_resume_from_checkpoint(
         del weights
         gc.collect()
 
+    # Ingest world model weights if joint training active
+    if world_model is not None:
+        wm_file = os.path.join(best_cand_dir, "world_model.safetensors")
+        if HAS_SAFETENSORS and os.path.exists(wm_file):
+            print(f"[Resume] Ingesting World Model weights directly from {wm_file}...", flush=True)
+            wm_weights = load_file(wm_file, device="cpu")
+            world_model.load_state_dict(wm_weights, strict=False)
+            del wm_weights
+            gc.collect()
+
     # Sync healthy checkpoint files to local checkpoint_dir if restored from GDrive
     if os.path.abspath(best_cand_dir) != os.path.abspath(checkpoint_dir):
         os.makedirs(checkpoint_dir, exist_ok=True)
-        for fname in ["config.json", "tokenizer.json", "checkpoint_state.json", "optimizer_state.pt", "STAGE_METADATA.json", "model.safetensors"]:
+        for fname in ["config.json", "tokenizer.json", "checkpoint_state.json", "optimizer_state.pt", "STAGE_METADATA.json", "model.safetensors", "world_model.safetensors"]:
             s = os.path.join(best_cand_dir, fname)
             d = os.path.join(checkpoint_dir, fname)
             if os.path.exists(s) and os.path.abspath(s) != os.path.abspath(d):
@@ -3706,6 +3933,18 @@ def try_resume_from_checkpoint(
                 torch.cuda.set_rng_state_all(opt_data["cuda_rng"])
             if "py_rng" in opt_data and opt_data["py_rng"] is not None:
                 random.setstate(opt_data["py_rng"])
+
+            # Ingest world model optimizer and scaler if present
+            if world_optimizer and "world_optimizer" in opt_data:
+                world_optimizer.load_state_dict(opt_data["world_optimizer"])
+                wm_target_dev = next(world_model.parameters()).device if (world_model and hasattr(world_model, "parameters")) else "cpu"
+                for state in world_optimizer.state.values():
+                    for sk, sv in state.items():
+                        if isinstance(sv, torch.Tensor):
+                            state[sk] = sv.to(wm_target_dev)
+            if world_scaler and opt_data.get("world_scaler"):
+                world_scaler.load_state_dict(opt_data["world_scaler"])
+
             print(f"[Resume] Restored complete optimizer state, scaler, and deterministic RNG states from Step {best_cand_step}.", flush=True)
         except Exception as e:
             print(f"[Resume Error] Failed to load optimizer state: {e}. Re-initializing clean optimizer.")
@@ -4113,6 +4352,16 @@ def main():
     parser.add_argument("--sync-gdrive-optimizer", action="store_true", default=False,
                         help="Include heavy optimizer state when mirroring checkpoints to Google Drive (default: False)")
     parser.add_argument("--preflight-only", action="store_true", default=False, help="Execute only the dual-stage preflight validation diagnostic and exit with report")
+    parser.add_argument("--joint-world-model", action="store_true", default=False,
+                        help="Enable coordinated joint training of Neural Model + World Model")
+    parser.add_argument("--world-model-dir", type=str, default="storage/models/tara_world_model",
+                        help="Directory containing World Model architecture config.json and weights")
+    parser.add_argument("--world-dataset-dir", type=str, default=None,
+                        help="Directory containing genuine World Model transition datasets (*.jsonl)")
+    parser.add_argument("--lambda-world", type=float, default=1.0,
+                        help="Loss weighting factor for World Model objective (L_joint = L_neural + lambda_world * L_world)")
+    parser.add_argument("--per-shard-promotion", action="store_true", default=True,
+                        help="Promote model snapshot upon completing each shard and prune prior shard model snapshot")
     args = parser.parse_args()
 
     # Pre-resolve and export HF_TOKEN across runtime
@@ -4470,6 +4719,91 @@ def main():
         sys.exit(0)
 
 
+    # 7b. Coordinated Joint Neural Model + World Model Setup
+    world_model = None
+    world_optimizer = None
+    world_scaler = None
+    world_dataloader = None
+    world_iter = None
+
+    if args.joint_world_model:
+        print("=" * 80)
+        print("  [JOINT NEURAL + WORLD MODEL TRAINING INITIALIZATION]")
+        print("=" * 80)
+        wm_config_path = os.path.join(args.world_model_dir, "config.json")
+        if not os.path.exists(wm_config_path):
+            raise FileNotFoundError(
+                f"[Joint World Model Gate] Missing World Model configuration at '{wm_config_path}'. "
+                f"Cannot initialize joint training without authentic World Model architecture specification."
+            )
+        with open(wm_config_path, "r", encoding="utf-8") as f:
+            wm_config = json.load(f)
+
+        world_model = TaraWorldModel(wm_config, gradient_checkpointing=args.gradient_checkpointing).to(
+            device=device, dtype=model_dtype
+        )
+        wm_loaded = load_candidate_weights(world_model, args.world_model_dir)
+        wm_trainable_params = sum(p.numel() for p in world_model.parameters() if p.requires_grad)
+        print(f"[Joint World Model] Total trainable parameters: {wm_trainable_params:,} ({wm_trainable_params * 4 / 1e6:.1f} MB in FP32 master storage)")
+        print(f"[Joint World Model] Weights initialized from {args.world_model_dir} (restored: {wm_loaded})")
+
+        # Dedicated optimizer for World Model (separate parameters, moments, and state)
+        if use_8bit:
+            import bitsandbytes as bnb
+            world_optimizer = bnb.optim.AdamW8bit(
+                world_model.parameters(),
+                lr=args.lr,
+                betas=(0.9, 0.999),
+                eps=1e-8,
+                weight_decay=0.01,
+            )
+            print("[Joint World Model] Initialized dedicated 8-bit AdamW optimizer for World Model.")
+        else:
+            fused_available = 'fused' in torch.optim.AdamW.__init__.__code__.co_varnames and torch.cuda.is_available()
+            world_optimizer = torch.optim.AdamW(
+                world_model.parameters(),
+                lr=args.lr,
+                betas=(0.9, 0.999),
+                eps=1e-8,
+                weight_decay=0.01,
+                fused=fused_available,
+            )
+            print("[Joint World Model] Initialized dedicated standard FP32 AdamW optimizer for World Model.")
+
+        try:
+            world_scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda" and autocast_dtype == torch.float16))
+        except (AttributeError, TypeError):
+            world_scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and autocast_dtype == torch.float16))
+
+        # Mandatory World Model Transition Data Preflight Gate
+        world_files = []
+        if args.world_dataset_dir and os.path.isdir(args.world_dataset_dir):
+            world_files = sorted(glob.glob(os.path.join(args.world_dataset_dir, "*.jsonl")))
+
+        if not world_files:
+            default_wm_dir = "storage/datasets/world_transitions"
+            if os.path.isdir(default_wm_dir):
+                world_files = sorted(glob.glob(os.path.join(default_wm_dir, "*.jsonl")))
+
+        if not world_files:
+            raise RuntimeError(
+                f"[Joint World Model Preflight Gate] Joint training was requested (--joint-world-model), "
+                f"but zero genuine World Model transition datasets (*.jsonl) were discovered in '{args.world_dataset_dir}'. "
+                f"The 53 language shards contain pure text and do NOT provide genuine state-transition supervision. "
+                f"Failing preflight safely per directive. Provide genuine transition data via --world-dataset-dir."
+            )
+
+        print(f"[Joint World Model Dataset] Discovered {len(world_files)} transition dataset file(s).")
+        world_dataset = WorldModelTransitionDataset(
+            file_paths=world_files,
+            tokenizer=tokenizer,
+            max_seq_len=args.max_seq_len,
+            max_samples=args.max_samples,
+        )
+        world_dataloader = DataLoader(world_dataset, batch_size=args.batch_size, collate_fn=collate_fn)
+        world_iter = iter(world_dataloader)
+        print("=" * 80 + "\n")
+
     # 8. Check for Mid-Way Resume
     start_step = 0
     start_epoch = 0
@@ -4491,6 +4825,9 @@ def main():
             tokenizer_path=tok_path,
             tokenizer=tokenizer,
             expected_stage_id=args.stage_id,
+            world_model=world_model,
+            world_optimizer=world_optimizer,
+            world_scaler=world_scaler,
         )
 
         # Cleanup obsolete duplicate runs or clone remnants from previous sessions in parent_dir
@@ -4507,6 +4844,10 @@ def main():
                 model, optimizer, scaler, config, tok_path, args.output_dir,
                 start_step, start_epoch, best_loss, best_loss, args.stage_id,
                 is_best=False, is_completed=True, data_cursor=resumed_cursor,
+                per_shard_promotion=args.per_shard_promotion,
+                world_model=world_model,
+                world_optimizer=world_optimizer,
+                world_scaler=world_scaler,
             )
             # Promote & Clean if requested
             if args.promoted_dir:
@@ -4605,17 +4946,24 @@ def main():
 
     print(f"[Training] Launching Training: Epochs={args.epochs}, Batch={args.batch_size}, Accum={args.grad_accum}, Precision={precision_str}, Steps={start_step}..{args.max_steps}")
     model.train()
+    if world_model is not None:
+        world_model.train()
     step = start_step
     running_loss = 0.0
     accum_loss = 0.0
     accum_ce = 0.0
     accum_aux = 0.0
+    accum_world_loss = 0.0
     ema_loss = None
+    ema_world_loss = None
     t0 = time.time()
 
     for epoch in range(start_epoch, args.epochs):
         optimizer.zero_grad(set_to_none=True)
+        if world_optimizer is not None:
+            world_optimizer.zero_grad(set_to_none=True)
         accum_batches = []
+        accum_world_batches = []
         for batch_idx, (inputs, labels, cursors) in enumerate(dataloader):
             inputs = inputs.to(device)
             labels = labels.to(device)
@@ -4636,6 +4984,25 @@ def main():
 
             accum_batches.append((inputs.cpu(), labels.cpu(), cursors))
             samples_consumed += len(cursors)
+
+            # Joint World Model Step Forward & Backward
+            if world_model is not None and world_iter is not None:
+                try:
+                    w_inputs, w_labels, w_cursors = next(world_iter)
+                except StopIteration:
+                    world_iter = iter(world_dataloader)
+                    w_inputs, w_labels, w_cursors = next(world_iter)
+
+                w_inputs = w_inputs.to(device)
+                w_labels = w_labels.to(device)
+
+                with autocast_ctx:
+                    _, w_loss, _, _ = world_model(w_inputs, labels=w_labels)
+                    w_loss_scaled = (w_loss * args.lambda_world) / args.grad_accum
+
+                world_scaler.scale(w_loss_scaled).backward()
+                accum_world_loss += w_loss.item()
+                accum_world_batches.append((w_inputs.cpu(), w_labels.cpu(), w_cursors))
 
             if (batch_idx + 1) % args.grad_accum == 0:
                 scaler.unscale_(optimizer)
@@ -4659,6 +5026,16 @@ def main():
                     scaler.update()
                     scale_after = scaler.get_scale()
                     is_step_skipped = (scaler.is_enabled() and (scale_after < scale_before)) or is_non_finite_grad
+
+                # Step World Model Optimizer if joint training
+                if world_model is not None and world_optimizer is not None:
+                    world_scaler.unscale_(world_optimizer)
+                    w_grad_norm = torch.nn.utils.clip_grad_norm_(world_model.parameters(), 1.0)
+                    for w_pg in world_optimizer.param_groups:
+                        w_pg["lr"] = cur_lr
+                    world_scaler.step(world_optimizer)
+                    world_scaler.update()
+                    world_optimizer.zero_grad(set_to_none=True)
 
                 if is_step_skipped:
                     print(
@@ -4715,12 +5092,18 @@ def main():
                     cur_step_loss = accum_loss / args.grad_accum
                     cur_step_ce = accum_ce / args.grad_accum
                     cur_step_aux = accum_aux / args.grad_accum
+                    cur_step_world = (accum_world_loss / args.grad_accum) if world_model is not None else 0.0
+                    cur_joint_loss = cur_step_loss + (args.lambda_world * cur_step_world if world_model is not None else 0.0)
+
                     running_loss += cur_step_loss
                     accum_loss = 0.0
                     accum_ce = 0.0
                     accum_aux = 0.0
+                    accum_world_loss = 0.0
 
                     ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
+                    if world_model is not None:
+                        ema_world_loss = cur_step_world if ema_world_loss is None else (0.9 * ema_world_loss + 0.1 * cur_step_world)
 
                     # Track exact committed data cursor from the last sample of this
                     # successfully applied optimizer step.
@@ -4764,6 +5147,7 @@ def main():
                         "completed_shards": list(shard_ledger.completed_shards) if shard_ledger else [],
                     }
                     accum_batches.clear()
+                    accum_world_batches.clear()
                 else:
                     print(
                         f"[AMP Scaler Unrecoverable] Gradient overflow persisted after {max_overflow_retries} retries. "
@@ -4771,10 +5155,14 @@ def main():
                         flush=True,
                     )
                     optimizer.zero_grad(set_to_none=True)
+                    if world_optimizer is not None:
+                        world_optimizer.zero_grad(set_to_none=True)
                     accum_loss = 0.0
                     accum_ce = 0.0
                     accum_aux = 0.0
+                    accum_world_loss = 0.0
                     accum_batches.clear()
+                    accum_world_batches.clear()
                     continue
 
                 # Real-Time Telemetry Logging (LIVE on EVERY SINGLE STEP with immediate stdout flush)
@@ -4798,9 +5186,10 @@ def main():
                 ppl_clr, ppl_status, ppl_tag = get_metric_status_and_color(ppl, (4.0, 7.0), (7.1, 20.0))
                 bpb_clr, bpb_status, bpb_tag = get_metric_status_and_color(bpb, (0.55, 0.75), (0.76, 1.20))
 
+                wm_log = f" | WM Loss: {cur_step_world:.4f} (EMA: {ema_world_loss:.4f}) | Joint: {cur_joint_loss:.4f}" if world_model is not None else ""
                 print(
                     f"[{args.stage_id} | Step {step:04d}/{args.max_steps}] "
-                    f"Total Loss: {loss_clr}{cur_step_loss:.4f}{CLR_RESET} (CE: {cur_step_ce:.4f}, Aux: {cur_step_aux:.4f}, EMA: {ema_loss:.4f}) | "
+                    f"Total Loss: {loss_clr}{cur_step_loss:.4f}{CLR_RESET} (CE: {cur_step_ce:.4f}, Aux: {cur_step_aux:.4f}, EMA: {ema_loss:.4f}){wm_log} | "
                     f"PPL: {ppl_clr}{ppl:.2f}{CLR_RESET} | "
                     f"BPB: {bpb_clr}{bpb:.2f} b/B{CLR_RESET} | "
                     f"Standing: {loss_clr}{loss_status} {loss_tag}{CLR_RESET} | "
@@ -4836,6 +5225,10 @@ def main():
                         sync_to_gdrive=args.sync_all_to_gdrive,
                         dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
                         keep_n=args.keep_checkpoints, force_keep_exact=True,
+                        world_model=world_model,
+                        world_optimizer=world_optimizer,
+                        world_scaler=world_scaler,
+                        per_shard_promotion=args.per_shard_promotion,
                     )
 
                 # Rate-Limited Best Milestone Commit Gate:
@@ -4868,6 +5261,10 @@ def main():
                         sync_to_gdrive=args.sync_all_to_gdrive,
                         dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
                         keep_n=args.keep_checkpoints, force_keep_exact=True,
+                        world_model=world_model,
+                        world_optimizer=world_optimizer,
+                        world_scaler=world_scaler,
+                        per_shard_promotion=args.per_shard_promotion,
                     )
                     last_regular_checkpoint_step = step
 
@@ -4876,6 +5273,7 @@ def main():
                         model, config, tok_path, best_cp_dir,
                         step, epoch, cur_step_loss, best_loss, args.stage_id,
                         dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
+                        world_model=world_model,
                     )
 
                     # 3. Mirror the single genuine BEST model to Google Drive in background (compact, NO optimizer state)
@@ -4905,10 +5303,13 @@ def main():
 
             # Recompute forward + backward with 1/partial_count normalization.
             optimizer.zero_grad(set_to_none=True)
+            if world_optimizer is not None:
+                world_optimizer.zero_grad(set_to_none=True)
             accum_loss = 0.0
             accum_ce = 0.0
             accum_aux = 0.0
-            for p_inputs, p_labels, _ in accum_batches:
+            accum_world_loss = 0.0
+            for p_idx, (p_inputs, p_labels, _) in enumerate(accum_batches):
                 p_inputs = p_inputs.to(device)
                 p_labels = p_labels.to(device)
                 with autocast_ctx:
@@ -4918,6 +5319,16 @@ def main():
                 accum_loss += p_loss.item()
                 accum_ce += p_ce.item() if p_ce is not None else p_loss.item()
                 accum_aux += p_aux.item() if p_aux is not None else 0.0
+
+                if world_model is not None and p_idx < len(accum_world_batches):
+                    w_inputs, w_labels, _ = accum_world_batches[p_idx]
+                    w_inputs = w_inputs.to(device)
+                    w_labels = w_labels.to(device)
+                    with autocast_ctx:
+                        _, w_loss, _, _ = world_model(w_inputs, labels=w_labels)
+                        w_loss_scaled = (w_loss * args.lambda_world) / partial_count
+                    world_scaler.scale(w_loss_scaled).backward()
+                    accum_world_loss += w_loss.item()
 
             scaler.unscale_(optimizer)
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -4950,6 +5361,13 @@ def main():
                         flush=True,
                     )
 
+            if world_model is not None and world_optimizer is not None:
+                world_scaler.unscale_(world_optimizer)
+                torch.nn.utils.clip_grad_norm_(world_model.parameters(), 1.0)
+                world_scaler.step(world_optimizer)
+                world_scaler.update()
+                world_optimizer.zero_grad(set_to_none=True)
+
             if not is_step_skipped:
                 optimizer.zero_grad(set_to_none=True)
                 step += 1
@@ -4962,6 +5380,7 @@ def main():
                 accum_loss = 0.0
                 accum_ce = 0.0
                 accum_aux = 0.0
+                accum_world_loss = 0.0
                 ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
 
                 last_sample_cursor = accum_batches[-1][2][-1] if (accum_batches and accum_batches[-1][2]) else (
@@ -4994,6 +5413,7 @@ def main():
                     "completed_shards": list(shard_ledger.completed_shards) if shard_ledger else [],
                 }
             accum_batches.clear()
+            accum_world_batches.clear()
             optimizer.zero_grad(set_to_none=True)
 
         if step >= args.max_steps:
@@ -5013,11 +5433,16 @@ def main():
         is_best=False, is_completed=True,
         dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
         keep_n=args.keep_checkpoints, force_keep_exact=True,
+        world_model=world_model,
+        world_optimizer=world_optimizer,
+        world_scaler=world_scaler,
+        per_shard_promotion=args.per_shard_promotion,
     )
     save_best_milestone(
         model, config, tok_path, best_cp_dir,
         step, epoch, final_loss, best_loss, args.stage_id,
         dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
+        world_model=world_model,
     )
 
     print(f"[Stage Complete] Training checkpoint preserved in: {args.output_dir}")

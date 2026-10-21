@@ -71,6 +71,16 @@ pub struct ManualTrainingConfig {
     pub runs_dir: String,
     #[serde(default = "default_evaluation_dir")]
     pub evaluation_dir: String,
+    #[serde(default = "default_world_model_source_dir")]
+    pub world_model_source_dir: Option<String>,
+}
+
+fn default_world_model_source_dir() -> Option<String> {
+    if Path::new("storage/models/tara_world_model").exists() {
+        Some("storage/models/tara_world_model".to_string())
+    } else {
+        None
+    }
 }
 
 fn default_version() -> String {
@@ -145,6 +155,7 @@ impl Default for ManualTrainingConfig {
             logs_dir: default_logs_dir(),
             runs_dir: default_runs_dir(),
             evaluation_dir: default_evaluation_dir(),
+            world_model_source_dir: default_world_model_source_dir(),
         }
     }
 }
@@ -285,6 +296,16 @@ pub fn validate_manual_config(config: &ManualTrainingConfig) -> Result<(), Strin
                 config.model_source_dir
             ));
         }
+        if let Some(ref wm_src) = config.world_model_source_dir {
+            let wm_path = Path::new(wm_src);
+            if paths_overlap(dir, wm_path) {
+                return Err(format!(
+                    "{label} ('{}') overlaps with world_model_source_dir ('{}'). In-place overwrite of source model is prohibited.",
+                    dir.display(),
+                    wm_src
+                ));
+            }
+        }
     }
 
     for i in 0..managed_dirs.len() {
@@ -343,6 +364,7 @@ pub struct ParsedManualCli {
     pub config_path: PathBuf,
     pub explicit_config: bool,
     pub mode_override: Option<String>,
+    pub world_model_source_override: Option<String>,
     pub steps_override: Option<usize>,
     pub batch_size_override: Option<usize>,
     pub lr_override: Option<f32>,
@@ -388,6 +410,10 @@ pub fn parse_manual_cli(
                     ));
                 }
                 out.mode_override = Some(val);
+            }
+            "--world-model-source" => {
+                let val = require_arg_value(args, &mut i, "--world-model-source")?;
+                out.world_model_source_override = Some(val);
             }
             "--steps" => {
                 let val = require_arg_value(args, &mut i, "--steps")?;
@@ -1242,6 +1268,9 @@ fn execute_manual_trainer() -> Result<RunStatus, (RunStatus, String)> {
     if let Some(ref ds) = cli.dataset_override {
         config.dataset_dir = ds.clone();
     }
+    if let Some(ref wms) = cli.world_model_source_override {
+        config.world_model_source_dir = Some(wms.clone());
+    }
 
     validate_manual_config(&config).map_err(|e| (RunStatus::ValidationError, e))?;
 
@@ -1531,6 +1560,71 @@ fn execute_manual_trainer() -> Result<RunStatus, (RunStatus, String)> {
     if config.training_mode == "world_model" || config.training_mode == "both" {
         println!("\n=== [EXECUTING WORLD MODEL UPDATE & SNAPSHOT (run_id={run_id})] ===");
         let world_out = PathBuf::from(&config.world_model_checkpoint_dir);
+
+        // If a neural world model source is provided, execute neural training for the world model candidate
+        if let Some(ref wm_src_str) = config.world_model_source_dir {
+            let wm_src_path = PathBuf::from(wm_src_str);
+            if wm_src_path.exists() {
+                println!(
+                    "  Neural World Model Source verified at '{}'",
+                    wm_src_path.display()
+                );
+                verify_model_bundle(&wm_src_path).map_err(|e| {
+                    (
+                        RunStatus::ValidationError,
+                        format!(
+                            "Neural world model bundle verification failed for '{}': {e}",
+                            wm_src_str
+                        ),
+                    )
+                })?;
+
+                let intermediate_wm_cp_dir = run_dir.join("world_model_checkpoints");
+                fs::create_dir_all(&intermediate_wm_cp_dir)
+                    .map_err(|e| (RunStatus::ExecutionFailed, e.to_string()))?;
+
+                let wm_options = TrainingOptions {
+                    dataset_dir: Some(config.dataset_dir.clone()),
+                    curriculum_path: if Path::new(&config.curriculum_path).exists() {
+                        Some(config.curriculum_path.clone())
+                    } else {
+                        None
+                    },
+                    candidate_dir: Some(config.world_model_checkpoint_dir.clone()),
+                    learning_rate: Some(config.learning_rate),
+                    batch_size: Some(config.batch_size),
+                    max_steps: Some(config.max_steps),
+                    warmup_steps: Some(config.warmup_steps),
+                    weight_decay: Some(config.weight_decay),
+                    grad_clip_norm: Some(config.grad_clip_norm),
+                    device: Some("auto".to_string()),
+                    precision: Some("auto".to_string()),
+                    checkpoint_dir: Some(intermediate_wm_cp_dir.to_string_lossy().to_string()),
+                    checkpoint_interval: Some(config.checkpoint_interval_steps),
+                    resume: cli.resume,
+                    resume_from: cli.resume_from.clone(),
+                    max_memory_mb: Some(65536.0),
+                    ..Default::default()
+                };
+
+                println!("  Calling shared training infrastructure for neural world model...");
+                let _wm_report = run_controlled_training_with_options(
+                    wm_src_str,
+                    ".",
+                    1,
+                    wm_options,
+                )
+                .map_err(|e| {
+                    (
+                        RunStatus::ExecutionFailed,
+                        format!("Neural world model training failed: {e}"),
+                    )
+                })?;
+
+                println!("  Neural World Model training completed successfully.");
+            }
+        }
+
         let snapshot = execute_world_model_update(
             Path::new(&config.dataset_dir),
             Path::new(&config.curriculum_path),
@@ -1857,5 +1951,44 @@ mod tests {
         assert!(prod_dir.join("manual_eval_report.json").exists());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_world_model_neural_training_pathway_and_isolation() {
+        let mut cfg = ManualTrainingConfig::default();
+        cfg.world_model_source_dir = Some("storage/models/tara_world_model".to_string());
+        cfg.training_mode = "both".to_string();
+
+        // Valid configuration with isolated neural and world model paths passes validation
+        assert!(validate_manual_config(&cfg).is_ok());
+
+        // In-place overwrite attempt of world model source must be rejected
+        cfg.world_model_checkpoint_dir = "storage/models/tara_world_model".to_string();
+        assert!(validate_manual_config(&cfg).is_err());
+        cfg.world_model_checkpoint_dir = "manual_training/checkpoints/world_model".to_string();
+
+        // Overlap between neural and world model checkpoints must be rejected
+        cfg.world_model_checkpoint_dir = cfg.neural_checkpoint_dir.clone();
+        assert!(validate_manual_config(&cfg).is_err());
+        cfg.world_model_checkpoint_dir = "manual_training/checkpoints/world_model".to_string();
+
+        // Verify neural world model source bundle if present on disk
+        let wm_path = Path::new("storage/models/tara_world_model");
+        if wm_path.exists() {
+            let bundle_res = verify_model_bundle(wm_path);
+            assert!(bundle_res.is_ok(), "World model bundle must verify: {:?}", bundle_res);
+        }
+
+        // Test CLI override parsing for world model source
+        let args = vec![
+            "manual_trainer".to_string(),
+            "--world-model-source".to_string(),
+            "custom_wm_source".to_string(),
+        ];
+        let parsed = parse_manual_cli(&args, PathBuf::from("config.json")).unwrap();
+        assert_eq!(
+            parsed.world_model_source_override,
+            Some("custom_wm_source".to_string())
+        );
     }
 }

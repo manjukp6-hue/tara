@@ -68,6 +68,7 @@ pub struct DatasetMetadata {
     pub detected_at_utc: String,
     pub neural_records_count: usize,
     pub world_records_count: usize,
+    pub transition_records_count: usize,
 }
 
 /// Internal data representation for Neural Model training.
@@ -94,12 +95,59 @@ pub struct WorldModelRecord {
     pub source_dataset_id: String,
 }
 
+/// Internal data representation for dynamic World Model state transitions: (s, a, s', r).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StateTransitionRecord {
+    pub id: String,
+    pub episode_id: String,
+    pub step_index: usize,
+    pub state_observation: String,
+    pub action: String,
+    pub next_state_observation: String,
+    pub reward: f32,
+    pub done: bool,
+    pub domain: String,
+    pub confidence: f32,
+    pub source_dataset_id: String,
+}
+
+/// Validates that a state transition record has non-empty identifiers, observations, action,
+/// finite reward, and confidence bounded in [0.0, 1.0].
+pub fn validate_state_transition(rec: &StateTransitionRecord) -> Result<(), String> {
+    if rec.id.trim().is_empty() {
+        return Err("StateTransitionRecord id cannot be empty".to_string());
+    }
+    if rec.episode_id.trim().is_empty() {
+        return Err("StateTransitionRecord episode_id cannot be empty".to_string());
+    }
+    if rec.state_observation.trim().is_empty() {
+        return Err("StateTransitionRecord state_observation cannot be empty".to_string());
+    }
+    if rec.action.trim().is_empty() {
+        return Err("StateTransitionRecord action cannot be empty".to_string());
+    }
+    if rec.next_state_observation.trim().is_empty() {
+        return Err("StateTransitionRecord next_state_observation cannot be empty".to_string());
+    }
+    if !rec.reward.is_finite() {
+        return Err("StateTransitionRecord reward must be finite".to_string());
+    }
+    if !rec.confidence.is_finite() || rec.confidence < 0.0 || rec.confidence > 1.0 {
+        return Err(format!(
+            "StateTransitionRecord confidence must be in [0.0, 1.0], got {}",
+            rec.confidence
+        ));
+    }
+    Ok(())
+}
+
 /// Fully parsed and logically routed dataset in memory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutedDataset {
     pub metadata: DatasetMetadata,
     pub neural_records: Vec<NeuralRecord>,
     pub world_records: Vec<WorldModelRecord>,
+    pub transition_records: Vec<StateTransitionRecord>,
 }
 
 /// Configurable epistemic weighting parameters for dynamic ontological confidence computation (parameter-driven, extensible).
@@ -263,6 +311,7 @@ pub struct DatasetSyncReport {
     pub updated: usize,
     pub total_neural_records: usize,
     pub total_world_records: usize,
+    pub total_transition_records: usize,
     pub duration_ms: u64,
 }
 
@@ -338,11 +387,13 @@ impl DatasetEngine {
 
         let mut total_neural = 0;
         let mut total_world = 0;
+        let mut total_transition = 0;
         {
             let store = self.routed_store.read().unwrap_or_else(|p| p.into_inner());
             for routed in store.values() {
                 total_neural += routed.neural_records.len();
                 total_world += routed.world_records.len();
+                total_transition += routed.transition_records.len();
             }
         }
 
@@ -353,6 +404,7 @@ impl DatasetEngine {
             updated,
             total_neural_records: total_neural,
             total_world_records: total_world,
+            total_transition_records: total_transition,
             duration_ms,
         })
     }
@@ -389,7 +441,8 @@ impl DatasetEngine {
         let target_model = self.classify_dataset_records(&raw_records);
 
         // Auto-route records into internal representations
-        let (neural_records, world_records) = self.route_records(&dataset_id, &raw_records);
+        let (neural_records, world_records, transition_records) =
+            self.route_records(&dataset_id, &raw_records);
 
         let file_name = path
             .file_name()
@@ -412,12 +465,14 @@ impl DatasetEngine {
             detected_at_utc: now_utc_iso(),
             neural_records_count: neural_records.len(),
             world_records_count: world_records.len(),
+            transition_records_count: transition_records.len(),
         };
 
         let routed = RoutedDataset {
             metadata: metadata.clone(),
             neural_records,
             world_records,
+            transition_records,
         };
 
         // Store into routed store
@@ -492,14 +547,23 @@ impl DatasetEngine {
     /// Classifies an individual record based on structure and semantic field indicators.
     pub fn classify_single_record(&self, rec: &Value) -> TargetModel {
         if let Some(obj) = rec.as_object() {
-            // Check for explicit World Model graph/relational fields
-            let has_world_fields = obj.contains_key("subject")
+            let has_transition_fields = obj.contains_key("state_transition")
+                || ((obj.contains_key("state")
+                    || obj.contains_key("state_observation")
+                    || obj.contains_key("observation"))
+                    && (obj.contains_key("action") || obj.contains_key("intervention"))
+                    && (obj.contains_key("next_state")
+                        || obj.contains_key("next_state_observation")
+                        || obj.contains_key("subsequent_state")));
+
+            // Check for explicit World Model graph/relational/transition fields
+            let has_world_fields = has_transition_fields
+                || obj.contains_key("subject")
                 || obj.contains_key("predicate")
                 || obj.contains_key("relation")
                 || obj.contains_key("triples")
                 || obj.contains_key("entities")
                 || obj.contains_key("ontology_node")
-                || obj.contains_key("state_transition")
                 || obj.contains_key("world_fact");
 
             // Check for explicit Neural / Language prompt-completion fields
@@ -525,34 +589,161 @@ impl DatasetEngine {
         }
     }
 
-    /// Routes raw JSON values into internal Neural and World Model records.
+    /// Routes raw JSON values into internal Neural, World Model, and State Transition records.
     pub fn route_records(
         &self,
         dataset_id: &str,
         records: &[Value],
-    ) -> (Vec<NeuralRecord>, Vec<WorldModelRecord>) {
+    ) -> (
+        Vec<NeuralRecord>,
+        Vec<WorldModelRecord>,
+        Vec<StateTransitionRecord>,
+    ) {
         let mut neural_out = Vec::new();
         let mut world_out = Vec::new();
+        let mut transition_out = Vec::new();
 
         for (idx, rec) in records.iter().enumerate() {
             let rec_id = format!("{dataset_id}_rec_{idx:06}");
-            let classification = self.classify_single_record(rec);
 
-            match classification {
-                TargetModel::NeuralModel => {
-                    neural_out.push(self.extract_neural_record(&rec_id, dataset_id, rec));
-                }
-                TargetModel::WorldModel => {
-                    world_out.push(self.extract_world_record(&rec_id, dataset_id, rec));
-                }
-                TargetModel::Both => {
-                    neural_out.push(self.extract_neural_record(&rec_id, dataset_id, rec));
-                    world_out.push(self.extract_world_record(&rec_id, dataset_id, rec));
-                }
+            // 1. Attempt to extract dynamic state transition (s, a, s', r)
+            let is_transition =
+                if let Some(trans) = self.extract_transition_record(&rec_id, dataset_id, rec) {
+                    if validate_state_transition(&trans).is_ok() {
+                        transition_out.push(trans);
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+            // 2. Extract knowledge graph world records if knowledge fields are present,
+            // or if classified as WorldModel and not already handled as a state transition
+            let has_knowledge_fields = rec.as_object().map_or(false, |obj| {
+                obj.contains_key("subject")
+                    || obj.contains_key("predicate")
+                    || obj.contains_key("relation")
+                    || obj.contains_key("triples")
+                    || obj.contains_key("entities")
+                    || obj.contains_key("ontology_node")
+                    || obj.contains_key("world_fact")
+            });
+
+            let has_neural_fields = rec.as_object().map_or(false, |obj| {
+                obj.contains_key("prompt")
+                    || obj.contains_key("instruction")
+                    || obj.contains_key("input")
+                    || obj.contains_key("output")
+                    || obj.contains_key("completion")
+                    || obj.contains_key("text")
+                    || obj.contains_key("conversation")
+                    || obj.contains_key("messages")
+            });
+
+            if has_knowledge_fields
+                || (!is_transition
+                    && !has_neural_fields
+                    && self.classify_single_record(rec) == TargetModel::WorldModel)
+            {
+                world_out.push(self.extract_world_record(&rec_id, dataset_id, rec));
+            }
+
+            if has_neural_fields
+                || (!is_transition
+                    && !has_knowledge_fields
+                    && self.classify_single_record(rec) == TargetModel::NeuralModel)
+            {
+                neural_out.push(self.extract_neural_record(&rec_id, dataset_id, rec));
             }
         }
 
-        (neural_out, world_out)
+        (neural_out, world_out, transition_out)
+    }
+
+    fn extract_transition_record(
+        &self,
+        id: &str,
+        dataset_id: &str,
+        rec: &Value,
+    ) -> Option<StateTransitionRecord> {
+        let obj = rec.as_object()?;
+
+        // If nested inside "state_transition", inspect inner object, else inspect root obj
+        let t_obj = if let Some(nested) = obj.get("state_transition").and_then(Value::as_object) {
+            nested
+        } else {
+            obj
+        };
+
+        let state_obs = t_obj
+            .get("state_observation")
+            .or_else(|| t_obj.get("state"))
+            .or_else(|| t_obj.get("observation"))
+            .and_then(Value::as_str)?;
+
+        let action = t_obj
+            .get("action")
+            .or_else(|| t_obj.get("intervention"))
+            .and_then(Value::as_str)?;
+
+        let next_state_obs = t_obj
+            .get("next_state_observation")
+            .or_else(|| t_obj.get("next_state"))
+            .or_else(|| t_obj.get("subsequent_state"))
+            .and_then(Value::as_str)?;
+
+        let episode_id = t_obj
+            .get("episode_id")
+            .and_then(Value::as_str)
+            .unwrap_or(dataset_id)
+            .to_string();
+
+        let step_index = t_obj
+            .get("step_index")
+            .or_else(|| t_obj.get("step"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
+
+        let reward = t_obj
+            .get("reward")
+            .or_else(|| t_obj.get("outcome_reward"))
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0) as f32;
+
+        let done = t_obj
+            .get("done")
+            .or_else(|| t_obj.get("terminated"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let domain = t_obj
+            .get("domain")
+            .or_else(|| t_obj.get("environment"))
+            .and_then(Value::as_str)
+            .unwrap_or("general")
+            .to_string();
+
+        let confidence = t_obj
+            .get("confidence")
+            .and_then(Value::as_f64)
+            .map(|f| f.clamp(0.0, 1.0) as f32)
+            .unwrap_or(1.0);
+
+        Some(StateTransitionRecord {
+            id: id.to_string(),
+            episode_id,
+            step_index,
+            state_observation: state_obs.to_string(),
+            action: action.to_string(),
+            next_state_observation: next_state_obs.to_string(),
+            reward,
+            done,
+            domain,
+            confidence,
+            source_dataset_id: dataset_id.to_string(),
+        })
     }
 
     fn extract_neural_record(&self, id: &str, dataset_id: &str, rec: &Value) -> NeuralRecord {
@@ -794,6 +985,16 @@ impl DatasetEngine {
         out
     }
 
+    /// Access all training-ready state transition records across all routed datasets.
+    pub fn get_training_ready_transitions(&self) -> Vec<StateTransitionRecord> {
+        let store = self.routed_store.read().unwrap_or_else(|p| p.into_inner());
+        let mut out = Vec::new();
+        for routed in store.values() {
+            out.extend(routed.transition_records.clone());
+        }
+        out
+    }
+
     /// Get snapshot of manual datasets registry.
     pub fn get_manual_registry(&self) -> BTreeMap<String, DatasetMetadata> {
         self.manual_registry
@@ -879,5 +1080,105 @@ mod tests {
             ..Default::default()
         };
         assert!(cfg2.validate().is_err());
+    }
+
+    #[test]
+    fn test_state_transition_schema_validation_and_routing() {
+        let valid_trans = StateTransitionRecord {
+            id: "trans_001".to_string(),
+            episode_id: "ep_42".to_string(),
+            step_index: 0,
+            state_observation: "motor_speed=120,temp=45".to_string(),
+            action: "set_throttle(150)".to_string(),
+            next_state_observation: "motor_speed=150,temp=48".to_string(),
+            reward: 1.0,
+            done: false,
+            domain: "robotics".to_string(),
+            confidence: 0.95,
+            source_dataset_id: "test_source".to_string(),
+        };
+
+        assert!(validate_state_transition(&valid_trans).is_ok());
+
+        // Test routing from raw JSON values
+        let engine = DatasetEngine::new(DatasetEngineConfig::default()).unwrap();
+        let raw_records = vec![
+            serde_json::json!({
+                "state_observation": "pos=(0,0)",
+                "action": "move_forward",
+                "next_state_observation": "pos=(0,1)",
+                "reward": 0.5,
+                "done": false,
+                "episode_id": "ep_test",
+                "step_index": 1
+            }),
+            serde_json::json!({
+                "prompt": "Explain state transitions",
+                "completion": "A state transition moves an environment from state s to s'."
+            }),
+            serde_json::json!({
+                "subject": "WorldModel",
+                "predicate": "predicts",
+                "object": "EnvironmentDynamics"
+            }),
+        ];
+
+        let (neural, world, transitions) = engine.route_records("test_dataset", &raw_records);
+        assert_eq!(neural.len(), 1);
+        assert_eq!(world.len(), 1);
+        assert_eq!(transitions.len(), 1);
+
+        assert_eq!(transitions[0].state_observation, "pos=(0,0)");
+        assert_eq!(transitions[0].action, "move_forward");
+        assert_eq!(transitions[0].next_state_observation, "pos=(0,1)");
+        assert_eq!(transitions[0].reward, 0.5);
+    }
+
+    #[test]
+    fn test_state_transition_schema_rejection_of_invalid_records() {
+        let empty_state = StateTransitionRecord {
+            id: "trans_bad_state".to_string(),
+            episode_id: "ep_1".to_string(),
+            step_index: 0,
+            state_observation: "".to_string(),
+            action: "act".to_string(),
+            next_state_observation: "next".to_string(),
+            reward: 0.0,
+            done: false,
+            domain: "sim".to_string(),
+            confidence: 1.0,
+            source_dataset_id: "source".to_string(),
+        };
+        assert!(validate_state_transition(&empty_state).is_err());
+
+        let nan_reward = StateTransitionRecord {
+            id: "trans_nan".to_string(),
+            episode_id: "ep_1".to_string(),
+            step_index: 0,
+            state_observation: "state".to_string(),
+            action: "act".to_string(),
+            next_state_observation: "next".to_string(),
+            reward: f32::NAN,
+            done: false,
+            domain: "sim".to_string(),
+            confidence: 1.0,
+            source_dataset_id: "source".to_string(),
+        };
+        assert!(validate_state_transition(&nan_reward).is_err());
+
+        let oob_confidence = StateTransitionRecord {
+            id: "trans_oob".to_string(),
+            episode_id: "ep_1".to_string(),
+            step_index: 0,
+            state_observation: "state".to_string(),
+            action: "act".to_string(),
+            next_state_observation: "next".to_string(),
+            reward: 1.0,
+            done: false,
+            domain: "sim".to_string(),
+            confidence: 1.5,
+            source_dataset_id: "source".to_string(),
+        };
+        assert!(validate_state_transition(&oob_confidence).is_err());
     }
 }

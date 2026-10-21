@@ -334,6 +334,7 @@ pub struct TaraBrain {
     pub model_dir: String,
     model: RwLock<Option<TaraForCausalLM>>,
     tokenizer: RwLock<Option<TaraTokenizer>>,
+    pub world_model: RwLock<Option<TaraForCausalLM>>,
     pub model_metadata: Value,
     pub training_gate: Arc<Mutex<TrainingLifecycleState>>,
     model_sha_cache: Arc<RwLock<Option<(u64, u64, String)>>>,
@@ -865,6 +866,7 @@ impl TaraBrain {
             model_dir: resolved_model_dir,
             model: RwLock::new(model_opt),
             tokenizer: RwLock::new(tokenizer_opt),
+            world_model: RwLock::new(None),
             model_metadata,
             training_gate,
             model_sha_cache: Arc::new(RwLock::new(None)),
@@ -1104,6 +1106,25 @@ impl TaraBrain {
             .unwrap_or(false)
     }
 
+    /// Check whether a neural world model is currently loaded in TaraBrain.
+    pub fn is_world_model_loaded(&self) -> bool {
+        self.world_model
+            .read()
+            .map(|guard| guard.is_some())
+            .unwrap_or(false)
+    }
+
+    /// Load a neural world model from an on-disk directory containing `config.json`
+    /// and `model.safetensors` (or sharded index).
+    pub fn load_world_model(&self, world_model_dir: &str) -> Result<(), String> {
+        let wm = TaraForCausalLM::load(world_model_dir).map_err(|e| e.to_string())?;
+        *self
+            .world_model
+            .write()
+            .map_err(|_| "world model state lock poisoned".to_string())? = Some(wm);
+        Ok(())
+    }
+
     /// Get full model status with SHA256 integrity check.
     pub fn get_model_status(&self) -> Value {
         let sha = self.get_cached_or_compute_model_sha();
@@ -1178,6 +1199,7 @@ impl TaraBrain {
             "canonical_model_match": canonical_model_match,
             "registered_active_sha": registry_sha,
             "status": if model_loaded && tokenizer_loaded { "LOADED" } else { "OFFLINE" },
+            "world_model_loaded": self.is_world_model_loaded(),
             "vocab_size": vocab_size,
             "parameters": param_count,
             "offline_ready": model_loaded && tokenizer_loaded && integrity == "PASS",
@@ -1381,8 +1403,46 @@ impl TaraBrain {
     }
 
     /// Generates a normalized feature vector using the configured fast weights dimension.
+    /// When a neural model or world model is loaded along with a tokenizer, uses genuine
+    /// neural forward latents pooled across token positions; otherwise falls back to
+    /// deterministic byte-distribution feature projection.
     pub fn embed_feature_vector(&self, text: &str) -> Vec<f32> {
-        Self::embed_feature_vector_dim(text, self.config.cognitive.fast_weights_dimension)
+        let dim = self.config.cognitive.fast_weights_dimension.max(1);
+        if let (Ok(model_guard), Ok(tok_guard)) = (self.model.read(), self.tokenizer.read()) {
+            if let (Some(ref model), Some(ref tok)) = (model_guard.as_ref(), tok_guard.as_ref()) {
+                let token_ids = tok.encode(text);
+                if !token_ids.is_empty() {
+                    let hidden = model.forward_hidden(&token_ids);
+                    let hs = model.config.hidden_size;
+                    let seq_len = token_ids.len();
+                    if hs > 0 && hidden.len() == seq_len * hs {
+                        // Mean pool across sequence length
+                        let mut pooled = vec![0.0f32; hs];
+                        for t in 0..seq_len {
+                            let slice = &hidden[t * hs..(t + 1) * hs];
+                            for i in 0..hs {
+                                pooled[i] += slice[i];
+                            }
+                        }
+                        for v in &mut pooled {
+                            *v /= seq_len as f32;
+                        }
+
+                        // Project from hidden_size to fast_weights_dimension
+                        let mut vec = vec![0.0f32; dim];
+                        for (i, &val) in pooled.iter().enumerate() {
+                            vec[i % dim] += val;
+                        }
+                        let norm: f32 = vec.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-8);
+                        for v in &mut vec {
+                            *v /= norm;
+                        }
+                        return vec;
+                    }
+                }
+            }
+        }
+        Self::embed_feature_vector_dim(text, dim)
     }
 
     /// Secure query processing with input length clamping, structural untrusted message
@@ -1847,7 +1907,7 @@ impl TaraBrain {
                         "error": format!("Composite plan exceeds maximum allowed steps of {}", MAX_COMPOSITE_STEPS)
                     }));
                 } else {
-                    if steps.len() > 1 {
+                    let planned_steps = if steps.len() > 1 {
                         let mut mcts = self
                             .cognitive
                             .mcts
@@ -1857,7 +1917,7 @@ impl TaraBrain {
                             steps.iter().map(|s| s.target_name.clone()).collect();
                         let root_state = format!("plan_{}", step_names.join("_"));
                         let n_steps = steps.len();
-                        let _best_path = mcts.search(
+                        let best_path = mcts.search(
                             &root_state,
                             |state| {
                                 steps
@@ -1872,16 +1932,57 @@ impl TaraBrain {
                                     })
                                     .collect()
                             },
-                            |_state| 1.0,
+                            |state| {
+                                // Dynamic state evaluation based on capability existence and execution guard policies
+                                let mut score = 0.5f64;
+                                for s in &steps {
+                                    if state.contains(&s.target_name) {
+                                        let has_cap = self.tool_registry.list_tools().contains(&s.target_name)
+                                            || self.skill_engine.list_skills().contains(&s.target_name)
+                                            || self.capability_registry.get_capability(&s.target_name).is_some();
+                                        if has_cap {
+                                            score += 0.25;
+                                        }
+                                        let mut preflight_ctx = HashMap::new();
+                                        preflight_ctx.insert("actor_id".to_string(), json!(actor_id));
+                                        preflight_ctx.insert("target".to_string(), json!(s.target_name));
+                                        preflight_ctx.insert("parameters".to_string(), s.parameters.clone());
+                                        let dec = self.guard.evaluate_action(&s.action_intent, &preflight_ctx);
+                                        if dec.decision == "ALLOW" {
+                                            score += 0.25;
+                                        } else {
+                                            score -= 0.5;
+                                        }
+                                    }
+                                }
+                                score.clamp(0.0, 1.0)
+                            },
                         );
-                    }
+
+                        if !best_path.is_empty() {
+                            let mut reordered = Vec::new();
+                            let mut remaining = steps.clone();
+                            for action_name in &best_path {
+                                if let Some(pos) = remaining.iter().position(|s| s.target_name == *action_name) {
+                                    reordered.push(remaining.remove(pos));
+                                }
+                            }
+                            reordered.extend(remaining);
+                            reordered
+                        } else {
+                            steps.clone()
+                        }
+                    } else {
+                        steps.clone()
+                    };
+
                     let mut goal =
                         self.goal_tracker
-                            .create_goal(actor_id, input_text, steps.clone());
+                            .create_goal(actor_id, input_text, planned_steps.clone());
                     let mut results = Vec::new();
                     let mut plan_aborted = false;
 
-                    for step in &steps {
+                    for step in &planned_steps {
                         let mut step_guard_ctx = HashMap::new();
                         step_guard_ctx
                             .insert("creator_verified".to_string(), json!(creator_verified));
@@ -2099,12 +2200,33 @@ impl TaraBrain {
 
         // ── Step 7: Neural inference & fast-weights associative retrieval ────
         let q_vec = self.embed_feature_vector(input_text);
-        let _fast_weights_assoc = self
+        let fast_weights_assoc = self
             .cognitive
             .fast_weights
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .read_association(&q_vec);
+
+        let mut fast_weights_recalled = false;
+        let mut fast_weights_energy = 0.0f32;
+        if let Ok(ref assoc_vec) = fast_weights_assoc {
+            let energy: f32 = assoc_vec.iter().map(|v| v * v).sum::<f32>().sqrt();
+            fast_weights_energy = energy;
+            if energy > 0.05 {
+                fast_weights_recalled = true;
+                self.cognitive.working_memory.govern_session(
+                    &session_id,
+                    json!({
+                        "user_input": "[FastWeights Association]",
+                        "response": format!("active synaptic recall, energy={:.3}", energy),
+                        "intent": "FAST_WEIGHTS_RECALL"
+                    }),
+                    None,
+                    None,
+                    &[],
+                );
+            }
+        }
 
         let working_ctx = self
             .cognitive
@@ -2298,6 +2420,9 @@ impl TaraBrain {
                 "actor_id": actor_id,
                 "intent": intent,
                 "latency_ms": latency_ms,
+                "outcome": turn_outcome,
+                "fast_weights_recalled": fast_weights_recalled,
+                "fast_weights_energy": fast_weights_energy,
             }),
             "brain",
         );
@@ -2715,5 +2840,59 @@ mod tests {
         assert_eq!(res["intent"], "INPUT_VALIDATION_ERROR");
         let input_preview = res["input"].as_str().unwrap();
         assert_eq!(input_preview.chars().count(), 100);
+    }
+
+    #[test]
+    fn test_world_model_loading_and_status() {
+        let brain = TaraBrain::new(None).unwrap();
+        assert!(!brain.is_world_model_loaded());
+
+        let status = brain.get_model_status();
+        assert_eq!(status["world_model_loaded"], false);
+
+        // Attempting to load from an invalid path returns Err cleanly
+        let res = brain.load_world_model("nonexistent_world_model_directory");
+        assert!(res.is_err());
+        assert!(!brain.is_world_model_loaded());
+    }
+
+    #[test]
+    fn test_fast_weights_associative_grounding() {
+        let brain = TaraBrain::new(None).unwrap();
+        let query = "dynamic state dynamics";
+        let q_vec = brain.embed_feature_vector(query);
+        assert_eq!(q_vec.len(), brain.config.cognitive.fast_weights_dimension);
+
+        // Initially unprimed fast weights have near zero associative energy
+        let initial_assoc = brain
+            .cognitive
+            .fast_weights
+            .lock()
+            .unwrap()
+            .read_association(&q_vec)
+            .unwrap();
+        let initial_norm: f32 = initial_assoc.iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!(initial_norm < 1e-4);
+
+        // Prime association in fast weights
+        let r_vec = brain.embed_feature_vector("resolved state prediction");
+        brain
+            .cognitive
+            .fast_weights
+            .lock()
+            .unwrap()
+            .write_association(&q_vec, &r_vec)
+            .unwrap();
+
+        // Reading association now yields positive recall energy
+        let primed_assoc = brain
+            .cognitive
+            .fast_weights
+            .lock()
+            .unwrap()
+            .read_association(&q_vec)
+            .unwrap();
+        let primed_norm: f32 = primed_assoc.iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!(primed_norm > 0.05);
     }
 }

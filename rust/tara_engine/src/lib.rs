@@ -97,8 +97,9 @@ pub use curriculum_engine::{
     NeuralCurriculum, WorldModelCurriculum,
 };
 pub use dataset_engine::{
-    DatasetEngine, DatasetEngineConfig, DatasetMetadata, DatasetSource, DatasetSyncReport,
-    NeuralRecord, RoutedDataset, TargetModel, TopologicalConfidenceConfig, WorldModelRecord,
+    validate_state_transition, DatasetEngine, DatasetEngineConfig, DatasetMetadata, DatasetSource,
+    DatasetSyncReport, NeuralRecord, RoutedDataset, StateTransitionRecord, TargetModel,
+    TopologicalConfidenceConfig, WorldModelRecord,
 };
 pub use device_detector::{DeviceCapabilityDetector, DeviceProfile, GpuInfo};
 pub use generate::{generate_response, generate_stream, GenerateOptions, GenerateResult};

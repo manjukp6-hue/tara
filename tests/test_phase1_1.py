@@ -197,7 +197,7 @@ class TestG1TokenChunkCompleteness(unittest.TestCase):
         chunks = list(ds)
         self.assertEqual(len(chunks), 1,
                          f"Expected 1 chunk for exact-length doc, got {len(chunks)}")
-        input_ids, labels, _, _, _, chunk_idx = chunks[0]
+        input_ids, labels, _, _, _, chunk_idx, _ = chunks[0]
         self.assertEqual(len(input_ids), max_seq_len)
         self.assertEqual(chunk_idx, 0)
         # All labels must be real (no masking for pure text: target_start=0)

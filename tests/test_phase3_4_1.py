@@ -290,6 +290,59 @@ class TestCheckpointSelectionIsolation(unittest.TestCase):
             called_dataset = any(c.kwargs.get("repo_type") == "dataset" for c in mock_snap.call_args_list)
             self.assertTrue(called_dataset, "Bulk dataset download should be triggered when bulk_download_dataset=True")
 
+    def test_cleanup_purges_duplicate_runs_for_same_step_and_drive_clones(self):
+        """Verify _cleanup_old_versioned_checkpoints purges older runs of the same step and Drive clone duplicates."""
+        from cloud_train import _cleanup_old_versioned_checkpoints, _collect_versioned_checkpoint_dirs
+
+        parent = os.path.join(self.tmpdir, "retention_test_parent")
+        os.makedirs(parent, exist_ok=True)
+
+        # Create two runs for Step 5: an older timestamp and a newer timestamp
+        step5_old = os.path.join(parent, "stage_smoke_test.step5_1792565077")
+        step5_new = os.path.join(parent, "stage_smoke_test.step5_1792565270")
+        os.makedirs(step5_old, exist_ok=True)
+        os.makedirs(step5_new, exist_ok=True)
+        with open(os.path.join(step5_old, "COMMITTED"), "w") as f:
+            f.write("{}")
+        with open(os.path.join(step5_new, "COMMITTED"), "w") as f:
+            f.write("{}")
+
+        # Create a Google Drive clone folder and clone file
+        clone_dir = os.path.join(parent, "stage_smoke_test.step5_1792565077 (1)")
+        clone_file = os.path.join(parent, "latest_checkpoint (1).json")
+        os.makedirs(clone_dir, exist_ok=True)
+        with open(clone_file, "w") as f:
+            f.write("{}")
+
+        # Run cleanup retaining keep_n=1
+        _cleanup_old_versioned_checkpoints(parent, "stage_smoke_test", keep_n=1, force_keep_exact=True)
+
+        # Assert: the older run for Step 5 is deleted, newer run is preserved
+        self.assertFalse(os.path.exists(step5_old), "Older run for Step 5 should be purged!")
+        self.assertTrue(os.path.exists(step5_new), "Newer run for Step 5 should be retained!")
+
+        # Assert: clone copies are purged
+        self.assertFalse(os.path.exists(clone_dir), "Drive clone directory should be purged!")
+        self.assertFalse(os.path.exists(clone_file), "Drive clone file should be purged!")
+
+    def test_collect_versioned_dirs_without_committed_marker(self):
+        """Verify _collect_versioned_checkpoint_dirs discovers valid checkpoints even without COMMITTED marker."""
+        from cloud_train import _collect_versioned_checkpoint_dirs
+
+        parent = os.path.join(self.tmpdir, "collect_test_parent")
+        os.makedirs(parent, exist_ok=True)
+
+        # Create directory with model.safetensors and checkpoint_state.json but NO COMMITTED marker
+        legacy_dir = os.path.join(parent, "stage_smoke_test.step5_1792565270")
+        os.makedirs(legacy_dir, exist_ok=True)
+        with open(os.path.join(legacy_dir, "model.safetensors"), "wb") as f:
+            f.write(b"mock_weights")
+        with open(os.path.join(legacy_dir, "checkpoint_state.json"), "w") as f:
+            f.write("{}")
+
+        discovered = _collect_versioned_checkpoint_dirs(parent, "stage_smoke_test")
+        self.assertIn(legacy_dir, discovered, "Versioned directory with model and state json must be discovered even without COMMITTED marker")
+
 
 if __name__ == "__main__":
     unittest.main()

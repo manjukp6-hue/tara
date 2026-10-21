@@ -25,6 +25,7 @@ import os
 import random
 import shutil
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -582,27 +583,16 @@ class ShardLedger:
             "checkpoint_identity": self.checkpoint_identity,
             "last_updated_utc": datetime.now(timezone.utc).isoformat(),
         }
-        tmp_ledger = self.ledger_file + f".tmp_{os.getpid()}"
-        with open(tmp_ledger, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        if os.path.exists(self.ledger_file):
-            try:
-                os.replace(tmp_ledger, self.ledger_file)
-            except Exception:
-                shutil.copy2(tmp_ledger, self.ledger_file)
-                try:
-                    os.remove(tmp_ledger)
-                except Exception:
-                    pass
-        else:
-            try:
-                os.rename(tmp_ledger, self.ledger_file)
-            except Exception:
-                shutil.copy2(tmp_ledger, self.ledger_file)
-                try:
-                    os.remove(tmp_ledger)
-                except Exception:
-                    pass
+        # Write to local temporary file first to avoid creating lingering temp files on Google Drive FUSE
+        tmp_dir = tempfile.gettempdir()
+        tmp_ledger = os.path.join(tmp_dir, f"shard_ledger_{os.getpid()}_{int(time.time())}.json")
+        try:
+            with open(tmp_ledger, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            _stream_copy_file(tmp_ledger, self.ledger_file)
+        finally:
+            if os.path.exists(tmp_ledger):
+                _safe_unlink(tmp_ledger)
 
         if self.gdrive_dir and os.path.exists(os.path.dirname(self.gdrive_dir)):
             os.makedirs(self.gdrive_dir, exist_ok=True)
@@ -1539,6 +1529,34 @@ _gdrive_sync_thread: Optional[threading.Thread] = None
 _gdrive_sync_lock = threading.Lock()
 
 
+def _safe_unlink(path: str) -> bool:
+    """
+    Safely removes a file or symlink handling read-only permissions and Windows/FUSE retries.
+    """
+    if not os.path.lexists(path):
+        return True
+    try:
+        os.chmod(path, 0o777)
+    except Exception:
+        pass
+    try:
+        if os.path.islink(path) or os.path.isfile(path):
+            os.remove(path)
+            return True
+        elif os.path.isdir(path):
+            return _safe_rmtree(path)
+    except Exception:
+        pass
+    time.sleep(0.05)
+    try:
+        if os.path.islink(path) or os.path.isfile(path):
+            os.remove(path)
+            return True
+    except Exception:
+        pass
+    return not os.path.lexists(path)
+
+
 def _safe_rmtree(dir_path: str) -> bool:
     """
     Robust directory tree removal that succeeds on both local filesystem
@@ -1601,8 +1619,8 @@ def _safe_rmtree(dir_path: str) -> bool:
 
 def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
     """
-    Direct in-place streaming copy for Google Drive FUSE.
-    Avoids temp file rename/move which causes Google Drive to create duplicate numbered files: (1), (2), etc.
+    Direct in-place streaming copy for Google Drive FUSE and local files.
+    Pre-unlinks destination and cleans duplicate clone files (1), (2), etc.
     """
     try:
         # Pre-clean any accidental duplicate files in target folder before copy
@@ -1612,7 +1630,7 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
             for f in os.listdir(dst_dir):
                 if f.startswith(base) and f.endswith(ext) and f != os.path.basename(dst) and "(" in f:
                     try:
-                        os.remove(os.path.join(dst_dir, f))
+                        _safe_unlink(os.path.join(dst_dir, f))
                     except Exception:
                         pass
 
@@ -1620,7 +1638,7 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
             return
         src_sz = os.path.getsize(src)
         if src_sz == 0:
-            print(f"[GDrive Safety Block] Refusing to mirror empty 0-byte file to Google Drive: {src} -> {dst}", flush=True)
+            print(f"[GDrive Safety Block] Refusing to mirror empty 0-byte file: {src} -> {dst}", flush=True)
             return
         if src.endswith(".safetensors"):
             try:
@@ -1633,6 +1651,10 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
                 print(f"[GDrive Safety Block] Refusing to mirror invalid safetensors ({sf_err}): {src}", flush=True)
                 return
 
+        # Pre-unlink destination file so DriveFS FUSE does not generate clone copy "filename (1)"
+        if os.path.exists(dst) or os.path.islink(dst):
+            _safe_unlink(dst)
+
         # Direct in-place streaming copy
         with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
             while True:
@@ -1641,11 +1663,23 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
                     break
                 fdst.write(chunk)
                 del chunk
+            fdst.flush()
+            try:
+                os.fsync(fdst.fileno())
+            except Exception:
+                pass
     except Exception:
         # Fallback to direct byte copy if needed
         try:
+            if os.path.exists(dst):
+                _safe_unlink(dst)
             with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
                 shutil.copyfileobj(fsrc, fdst, length=chunk_size)
+                fdst.flush()
+                try:
+                    os.fsync(fdst.fileno())
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -2438,29 +2472,49 @@ def save_best_milestone(
 
             try:
                 if not os.path.exists(best_dir):
-                    os.rename(staging_dir, best_dir)
+                    try:
+                        os.rename(staging_dir, best_dir)
+                    except Exception:
+                        os.makedirs(best_dir, exist_ok=True)
+                        for item in os.listdir(staging_dir):
+                            s_src = os.path.join(staging_dir, item)
+                            s_dst = os.path.join(best_dir, item)
+                            if os.path.isdir(s_src):
+                                if os.path.exists(s_dst):
+                                    _safe_rmtree(s_dst)
+                                shutil.copytree(s_src, s_dst)
+                            else:
+                                if os.path.exists(s_dst):
+                                    _safe_unlink(s_dst)
+                                _stream_copy_file(s_src, s_dst)
+                        _safe_rmtree(staging_dir)
                 else:
                     for item in os.listdir(staging_dir):
                         s_src = os.path.join(staging_dir, item)
                         s_dst = os.path.join(best_dir, item)
                         if os.path.isdir(s_src):
                             if os.path.exists(s_dst):
-                                shutil.rmtree(s_dst, ignore_errors=True)
+                                _safe_rmtree(s_dst)
                             shutil.copytree(s_src, s_dst)
                         else:
-                            shutil.copy2(s_src, s_dst)
-                    shutil.rmtree(staging_dir, ignore_errors=True)
+                            if os.path.exists(s_dst):
+                                _safe_unlink(s_dst)
+                            _stream_copy_file(s_src, s_dst)
+                    _safe_rmtree(staging_dir)
 
                 if backup_dir and os.path.exists(backup_dir):
-                    shutil.rmtree(backup_dir, ignore_errors=True)
+                    _safe_rmtree(backup_dir)
             except Exception as commit_err:
                 print(f"[Best Checkpoint Fatal] Promotion failed: {commit_err}. Rolling back to backup.", flush=True)
                 if backup_dir and os.path.exists(backup_dir):
                     if os.path.exists(best_dir):
-                        shutil.rmtree(best_dir, ignore_errors=True)
-                    os.rename(backup_dir, best_dir)
+                        _safe_rmtree(best_dir)
+                    try:
+                        os.rename(backup_dir, best_dir)
+                    except Exception:
+                        pass
                 if os.path.exists(staging_dir):
-                    shutil.rmtree(staging_dir, ignore_errors=True)
+                    _safe_rmtree(staging_dir)
                 return False
 
             print(f"[Best Checkpoint] Atomically committed verified best milestone (Loss: {best_loss:.4f}, Step {step}) -> {best_dir}", flush=True)
@@ -2761,30 +2815,28 @@ def save_checkpoint(
                 json.dump({"step": step, "committed_utc": datetime.now(timezone.utc).isoformat()}, f)
 
             # Publish latest-checkpoint pointer ONLY after versioned dir is fully committed.
-            latest_ptr_path = os.path.join(output_dir, "latest_checkpoint.json")
-            legacy_ptr_path = os.path.join(parent_dir, "latest_checkpoint.json")
-            latest_ptr_tmp = latest_ptr_path + f".tmp_{os.getpid()}"
-            with open(latest_ptr_tmp, "w", encoding="utf-8") as f:
-                json.dump({
-                    "versioned_dir": versioned_dir,
-                    "output_dir": output_dir,
-                    "stage_id": stage_id,
-                    "step": step,
-                    "committed_utc": datetime.now(timezone.utc).isoformat(),
-                }, f, indent=2)
-            try:
-                os.replace(latest_ptr_tmp, latest_ptr_path)
-            except Exception:
-                shutil.copy2(latest_ptr_tmp, latest_ptr_path)
+            # Do NOT publish pointer when is_best=True because latest_checkpoint.json is reserved
+            # strictly for full training-resumable checkpoints (with optimizer state).
+            if not is_best:
+                latest_ptr_path = os.path.join(output_dir, "latest_checkpoint.json")
+                legacy_ptr_path = os.path.join(parent_dir, "latest_checkpoint.json")
+                tmp_dir = tempfile.gettempdir()
+                latest_ptr_tmp = os.path.join(tmp_dir, f"latest_ptr_{os.getpid()}_{int(time.time())}.json")
                 try:
-                    os.remove(latest_ptr_tmp)
-                except Exception:
-                    pass
-            # Also publish legacy pointer in parent_dir if output_dir is a subdirectory of parent_dir
-            try:
-                shutil.copy2(latest_ptr_path, legacy_ptr_path)
-            except Exception:
-                pass
+                    with open(latest_ptr_tmp, "w", encoding="utf-8") as f:
+                        json.dump({
+                            "versioned_dir": versioned_dir,
+                            "output_dir": output_dir,
+                            "stage_id": stage_id,
+                            "step": step,
+                            "committed_utc": datetime.now(timezone.utc).isoformat(),
+                        }, f, indent=2)
+                    _stream_copy_file(latest_ptr_tmp, latest_ptr_path)
+                    if os.path.abspath(output_dir) != os.path.abspath(parent_dir):
+                        _stream_copy_file(latest_ptr_tmp, legacy_ptr_path)
+                finally:
+                    if os.path.exists(latest_ptr_tmp):
+                        _safe_unlink(latest_ptr_tmp)
 
             elapsed = time.time() - t0
             print(f"[Checkpoint] Committed verified [{tag}] checkpoint (Step {step}, {elapsed:.1f}s) -> {output_dir}", flush=True)
@@ -2886,10 +2938,10 @@ def promote_checkpoint(
         if os.path.exists(src) and os.path.abspath(src) != os.path.abspath(dst):
             try:
                 if os.path.exists(dst):
-                    os.remove(dst)
+                    _safe_unlink(dst)
                 os.link(src, dst)
             except Exception:
-                shutil.copy2(src, dst)
+                _stream_copy_file(src, dst)
             copied += 1
 
     print(f"[Promotion] Successfully promoted clean inference model ({copied} files) -> {promoted_dir}", flush=True)
@@ -2904,7 +2956,9 @@ def promote_checkpoint(
             dst = os.path.join(gdrive_promoted, art)
             if os.path.exists(src) and os.path.abspath(src) != os.path.abspath(dst):
                 try:
-                    shutil.copy2(src, dst)
+                    if os.path.exists(dst):
+                        _safe_unlink(dst)
+                    _stream_copy_file(src, dst)
                 except Exception:
                     pass
         print(f"[GDrive Promotion Mirror] Promoted model synced to: {gdrive_promoted}", flush=True)
@@ -2912,7 +2966,8 @@ def promote_checkpoint(
 
 def _collect_versioned_checkpoint_dirs(parent_dir: str, output_dir_basename: str) -> List[str]:
     """
-    Discovers immutable versioned checkpoint directories that have a COMMITTED marker.
+    Discovers immutable versioned checkpoint directories that have a COMMITTED marker
+    or complete checkpoint assets (checkpoint_state.json + model.safetensors).
     Returns them sorted newest-first (highest step number first).
     Pattern: <output_dir_basename>.step<N>_<ts>
     """
@@ -2924,7 +2979,12 @@ def _collect_versioned_checkpoint_dirs(parent_dir: str, output_dir_basename: str
         if entry.startswith(prefix) and not entry.startswith("."):
             full_path = os.path.join(parent_dir, entry)
             committed_marker = os.path.join(full_path, "COMMITTED")
-            if os.path.isdir(full_path) and os.path.isfile(committed_marker):
+            cand_state = os.path.join(full_path, "checkpoint_state.json")
+            cand_model = os.path.join(full_path, "model.safetensors")
+            if os.path.isdir(full_path) and (
+                os.path.isfile(committed_marker) or
+                (os.path.isfile(cand_state) and os.path.isfile(cand_model))
+            ):
                 # Extract step number for sorting
                 try:
                     step_part = entry[len(prefix):].split("_")[0]
@@ -2973,10 +3033,14 @@ def _cleanup_old_versioned_checkpoints(
     # 0. Clean duplicate clone files/folders created by Google Drive / DriveFS in parent directory
     try:
         for entry in os.listdir(parent_dir):
-            if " (" in entry and ")" in entry and entry.startswith(output_dir_basename):
+            if " (" in entry and ")" in entry:
                 clone_path = os.path.join(parent_dir, entry)
-                if _safe_rmtree(clone_path):
-                    print(f"[Checkpoint Retention] Purged duplicate Drive clone: {entry}", flush=True)
+                if os.path.isdir(clone_path):
+                    if _safe_rmtree(clone_path):
+                        print(f"[Checkpoint Retention] Purged duplicate Drive clone directory: {entry}", flush=True)
+                else:
+                    if _safe_unlink(clone_path):
+                        print(f"[Checkpoint Retention] Purged duplicate Drive clone file: {entry}", flush=True)
     except Exception:
         pass
 
@@ -3957,6 +4021,12 @@ def main():
     else:
         print("[Hardware] No GPU detected. Defaulting to CPU (FP32).")
 
+    # Auto-adjust checkpoint_interval for short smoke tests / custom test runs
+    if args.max_steps > 0 and args.checkpoint_interval > args.max_steps:
+        old_interval = args.checkpoint_interval
+        args.checkpoint_interval = max(1, args.max_steps // 2)
+        print(f"[Configuration Note] Auto-adjusted checkpoint_interval from {old_interval} to {args.checkpoint_interval} to align with max_steps={args.max_steps}.", flush=True)
+
     # Print Fully Resolved Configuration Matrix Before Dataset Loading & State Allocation
     print("=" * 80)
     print("  TARA FULLY RESOLVED CONFIGURATION MATRIX")
@@ -3973,6 +4043,8 @@ def main():
     print(f"  Effective Batch Size  : {args.batch_size * args.grad_accum}")
     print(f"  Max Sequence Length   : {args.max_seq_len}")
     print(f"  Optimization Steps    : {args.max_steps}")
+    print(f"  Checkpoint Interval   : {args.checkpoint_interval}")
+    print(f"  Checkpoints Retained  : {args.keep_checkpoints}")
     print(f"  Warmup Steps          : {args.warmup_steps}")
     print(f"  Base Learning Rate    : {args.lr:.2e}")
     print(f"  Min Learning Rate     : {args.min_lr:.2e}")
@@ -4223,6 +4295,15 @@ def main():
             tokenizer_path=tok_path,
             tokenizer=tokenizer,
             expected_stage_id=args.stage_id,
+        )
+
+        # Cleanup obsolete duplicate runs or clone remnants from previous sessions in parent_dir
+        parent_ckpt_dir = os.path.dirname(os.path.abspath(args.output_dir)) or "."
+        _cleanup_old_versioned_checkpoints(
+            parent_ckpt_dir,
+            os.path.basename(args.output_dir),
+            keep_n=args.keep_checkpoints,
+            force_keep_exact=True,
         )
         if start_step >= args.max_steps:
             print(f"[Resume] Training already completed all {args.max_steps} steps. Finishing.")
@@ -4704,12 +4785,9 @@ def main():
         dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
         keep_n=args.keep_checkpoints, force_keep_exact=True,
     )
-    save_checkpoint(
-        model, optimizer, scaler, config, tok_path, best_cp_dir,
-        step, epoch, best_loss, best_loss, args.stage_id,
-        is_best=True, is_completed=True,
-        dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
-        keep_n=args.keep_checkpoints, force_keep_exact=True,
+    save_best_milestone(
+        model, config, tok_path, best_cp_dir,
+        step, epoch, final_loss, best_loss, args.stage_id,
     )
 
     print(f"[Stage Complete] Training checkpoint preserved in: {args.output_dir}")

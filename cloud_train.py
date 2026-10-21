@@ -2369,6 +2369,9 @@ def save_best_milestone(
     loss: float,
     best_loss: float,
     stage_id: str,
+    dataset: Optional[Any] = None,
+    shard_ledger: Optional[Any] = None,
+    data_cursor: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
     Saves a clean, compact BEST MILESTONE checkpoint using atomic verified commit:
@@ -2377,6 +2380,7 @@ def save_best_milestone(
     - Verifies integrity, model keys, and dynamic SHA-256 before touching active milestone.
     - Atomically promotes staging directory to best_dir with rollback safety.
     - Strictly ZERO optimizer state (saves 4GB of disk space and avoids OOM).
+    - Preserves exact data cursor so fallback resumption retains shard and line offsets.
     """
     with _checkpoint_write_lock:
         _reclaim_emergency_disk_space(min_free_gb=10.0)
@@ -2408,22 +2412,55 @@ def save_best_milestone(
 
             # 3. model.safetensors
             target_model = os.path.join(staging_dir, "model.safetensors")
-            state_dict = {k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}
-            if HAS_SAFETENSORS:
-                save_file(state_dict, target_model)
+            existing_model = os.path.join(parent_dir, "model.safetensors")
+            if os.path.isfile(existing_model) and os.path.getsize(existing_model) > 1024 * 1024:
+                try:
+                    os.link(existing_model, target_model)
+                except Exception:
+                    _stream_copy_file(existing_model, target_model)
             else:
-                torch.save(state_dict, os.path.join(staging_dir, "pytorch_model.bin"))
-            del state_dict
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+                state_dict = {k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}
+                if HAS_SAFETENSORS:
+                    save_file(state_dict, target_model)
+                else:
+                    torch.save(state_dict, os.path.join(staging_dir, "pytorch_model.bin"))
+                del state_dict
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
             actual_model_path = target_model if HAS_SAFETENSORS else os.path.join(staging_dir, "pytorch_model.bin")
             weights_sha256 = compute_file_sha256(actual_model_path) if os.path.exists(actual_model_path) else None
             if weights_sha256:
                 print(f"[Best Checkpoint Dynamic SHA-256] {os.path.basename(actual_model_path)} -> {weights_sha256}", flush=True)
 
-            # 4. checkpoint_state.json
+            # 4. Continuation state with exact data cursor
+            if data_cursor is None:
+                active_shard = getattr(dataset, "current_active_shard", getattr(dataset, "active_shard_name", None)) if dataset else None
+                active_offset = getattr(dataset, "active_shard_offset", 0) if dataset else 0
+                active_byte_offset = getattr(dataset, "active_shard_byte_offset", 0) if dataset else 0
+                active_chunk_idx = getattr(dataset, "active_chunk_idx", 0) if dataset else 0
+                completed_shards = list(shard_ledger.completed_shards) if shard_ledger else []
+                completed_records = shard_ledger.get_total_completed_records() if shard_ledger else 0
+                samples_consumed = completed_records
+                data_cursor = {
+                    "active_shard": active_shard,
+                    "active_shard_line_offset": active_offset,
+                    "active_shard_byte_offset": active_byte_offset,
+                    "active_chunk_idx": active_chunk_idx,
+                    "total_samples_trained": completed_records,
+                    "samples_consumed": samples_consumed,
+                    "completed_shards": completed_shards,
+                }
+            else:
+                active_shard = data_cursor.get("active_shard")
+                active_offset = data_cursor.get("active_shard_line_offset", 0)
+                active_byte_offset = data_cursor.get("active_shard_byte_offset", 0)
+                active_chunk_idx = data_cursor.get("active_chunk_idx", 0)
+                completed_shards = data_cursor.get("completed_shards", list(shard_ledger.completed_shards) if shard_ledger else [])
+                completed_records = data_cursor.get("total_samples_trained", 0)
+                samples_consumed = data_cursor.get("samples_consumed", completed_records)
+
             state = {
                 "step": step,
                 "epoch": epoch,
@@ -2435,6 +2472,16 @@ def save_best_milestone(
                 "is_completed": False,
                 "model_weights_sha256": weights_sha256,
                 "tokenizer_fingerprint": tok_fingerprint,
+                "data_cursor": data_cursor,
+                "active_shard": active_shard,
+                "active_shard_offset": active_offset,
+                "active_shard_line_offset": active_offset,
+                "active_shard_byte_offset": active_byte_offset,
+                "active_chunk_idx": active_chunk_idx,
+                "completed_shards": completed_shards,
+                "total_completed_records": completed_records,
+                "total_samples_trained": completed_records,
+                "samples_consumed": samples_consumed,
             }
             with open(os.path.join(staging_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
                 json.dump(state, f, indent=2)
@@ -3291,10 +3338,14 @@ def try_resume_from_checkpoint(
     if pointer_versioned_dir:
         candidate_dirs.append(pointer_versioned_dir)
 
-    # 2. Other committed versioned dirs (scan, skip the one already in the list)
-    for vdir in _collect_versioned_checkpoint_dirs(parent_dir, output_dir_basename):
-        if vdir not in candidate_dirs:
-            candidate_dirs.append(vdir)
+    # 2. Other committed versioned dirs (scan parent_dir and checkpoint_dir)
+    search_dirs = [parent_dir]
+    if os.path.isdir(checkpoint_dir) and os.path.abspath(checkpoint_dir) != os.path.abspath(parent_dir):
+        search_dirs.append(checkpoint_dir)
+    for s_dir in search_dirs:
+        for vdir in _collect_versioned_checkpoint_dirs(s_dir, output_dir_basename):
+            if vdir not in candidate_dirs:
+                candidate_dirs.append(vdir)
 
     # 3. output_dir itself (legacy last-resort — only if no versioned dir was found)
     if not candidate_dirs and os.path.isdir(checkpoint_dir):
@@ -3450,12 +3501,76 @@ def try_resume_from_checkpoint(
         except Exception as e:
             print(f"  -> Notice: Could not parse candidate {cand}: {e}")
 
+    # Fallback Graceful Recovery:
+    # If no complete candidate with optimizer_state.pt was found, inspect verified model milestones
+    # (e.g. best_checkpoint or output_dir without optimizer_state.pt) to recover model weights,
+    # step, and exact data cursor rather than discarding progress and starting from Step 0.
+    if best_cand_dir is None or best_cand_step < 0:
+        fallback_candidates = [
+            os.path.join(checkpoint_dir, "best_checkpoint"),
+            checkpoint_dir,
+        ]
+        if gdrive_root:
+            fallback_candidates.append(os.path.join(gdrive_root, output_dir_basename, "best_checkpoint"))
+            fallback_candidates.append(os.path.join(gdrive_root, output_dir_basename))
+
+        for cand in fallback_candidates:
+            if not os.path.isdir(cand):
+                continue
+            cand_state = os.path.join(cand, "checkpoint_state.json")
+            cand_model = os.path.join(cand, "model.safetensors")
+            if not (os.path.exists(cand_state) and os.path.exists(cand_model) and os.path.getsize(cand_model) > 0):
+                continue
+            if not verify_checkpoint_integrity(cand, require_optimizer=False, require_completed=False):
+                continue
+            try:
+                with open(cand_state, "r", encoding="utf-8") as f:
+                    s_data = json.load(f)
+                cand_stage = s_data.get("stage_id", "")
+                if expected_stage_id and cand_stage and cand_stage != expected_stage_id:
+                    continue
+                if current_tok_fp is not None:
+                    stored_tok_fp = s_data.get("tokenizer_fingerprint")
+                    if stored_tok_fp is not None:
+                        stored_canon = stored_tok_fp.get("canonical_fingerprint")
+                        curr_canon = current_tok_fp.get("canonical_fingerprint")
+                        if stored_canon and curr_canon and stored_canon != curr_canon:
+                            continue
+                c_step = int(s_data.get("step", 0))
+                if c_step > best_cand_step:
+                    best_cand_step = c_step
+                    best_cand_epoch = int(s_data.get("epoch", 0))
+                    best_cand_loss = float(s_data.get("best_loss", s_data.get("loss", float("inf"))))
+                    best_cand_dir = cand
+                    best_cand_cursor = s_data.get("data_cursor")
+                    if not best_cand_cursor:
+                        best_cand_cursor = {
+                            "active_shard": s_data.get("active_shard"),
+                            "active_shard_line_offset": s_data.get("active_shard_offset", 0),
+                            "active_shard_byte_offset": s_data.get("active_shard_byte_offset", 0),
+                            "active_chunk_idx": s_data.get("active_chunk_idx", 0),
+                            "total_samples_trained": s_data.get("total_samples_trained", s_data.get("total_completed_records", 0)),
+                            "samples_consumed": s_data.get("samples_consumed", s_data.get("total_completed_records", 0)),
+                            "completed_shards": s_data.get("completed_shards", []),
+                        }
+                    else:
+                        if "active_shard_byte_offset" not in best_cand_cursor:
+                            best_cand_cursor["active_shard_byte_offset"] = s_data.get("active_shard_byte_offset", 0)
+                        if "active_chunk_idx" not in best_cand_cursor:
+                            best_cand_cursor["active_chunk_idx"] = s_data.get("active_chunk_idx", 0)
+                        if "total_samples_trained" not in best_cand_cursor:
+                            best_cand_cursor["total_samples_trained"] = s_data.get("total_samples_trained", s_data.get("total_completed_records", 0))
+                        if "samples_consumed" not in best_cand_cursor:
+                            best_cand_cursor["samples_consumed"] = s_data.get("samples_consumed", best_cand_cursor["total_samples_trained"])
+            except Exception as fb_err:
+                print(f"  -> Notice: Could not parse fallback candidate {cand}: {fb_err}")
+
     if best_cand_dir is None or best_cand_step < 0:
         print("[Resume Discovery] No valid complete previous checkpoints found. Starting fresh from Step 0.")
         return 0, 0, float("inf"), False, None
 
     print("=" * 78)
-    print(f"  [RESUME] Discovered latest complete training checkpoint at Step {best_cand_step} in: {best_cand_dir}")
+    print(f"  [RESUME] Discovered latest training checkpoint at Step {best_cand_step} in: {best_cand_dir}")
     print(f"  Resumed Step        : {best_cand_step}")
     print(f"  Resumed Epoch       : {best_cand_epoch}")
     print(f"  Historical Best Loss: {best_cand_loss:.4f}")
@@ -4645,13 +4760,25 @@ def main():
                         flush=True,
                     )
 
-                    # 1. Save genuine best model weights to best milestone directory (atomic verified commit)
+                    # 1. Commit complete training checkpoint first
+                    # Guarantees crash-proof resumption from best milestones across Colab disconnects
+                    save_checkpoint(
+                        model, optimizer, scaler, config, tok_path, args.output_dir,
+                        step, epoch, cur_step_loss, best_loss, args.stage_id,
+                        is_best=False, is_completed=False, sync_to_gdrive=True,
+                        dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
+                        keep_n=args.keep_checkpoints, force_keep_exact=True,
+                    )
+                    last_regular_checkpoint_step = step
+
+                    # 2. Save genuine best model weights to best milestone directory (atomic verified commit)
                     save_best_milestone(
                         model, config, tok_path, best_cp_dir,
-                        step, epoch, cur_step_loss, best_loss, args.stage_id
+                        step, epoch, cur_step_loss, best_loss, args.stage_id,
+                        dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
                     )
 
-                    # 2. Mirror the single genuine BEST model to Google Drive in background
+                    # 3. Mirror the single genuine BEST model to Google Drive in background
                     sync_checkpoint_to_gdrive(
                         best_cp_dir,
                         f"BEST-MILESTONE (Step {step:04d}, Loss: {best_loss:.4f})",
@@ -4782,6 +4909,7 @@ def main():
     save_best_milestone(
         model, config, tok_path, best_cp_dir,
         step, epoch, final_loss, best_loss, args.stage_id,
+        dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
     )
 
     print(f"[Stage Complete] Training checkpoint preserved in: {args.output_dir}")

@@ -30,6 +30,7 @@ fi
 
 
 # 1. Enforce Cloud Training Environment Variables for PyTorch & Rust Orchestrator
+export TARA_CLOUD_TRAINING="1"
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export MALLOC_TRIM_THRESHOLD_=65536
 export TARA_MAX_MEMORY_MB="${TARA_MAX_MEMORY_MB:-}"
@@ -40,6 +41,28 @@ export GDRIVE_CHECKPOINT_DIR="${GDRIVE_CHECKPOINT_DIR:-/content/drive/MyDrive/TA
 export HF_DATASET_REPO="${HF_DATASET_REPO:-${HF_MODEL_REPO:-${HF_REPO:-manjukp6/tara}}}"
 export HF_MODEL_REPO="${HF_MODEL_REPO:-${HF_DATASET_REPO}}"
 export HF_REPO="${HF_REPO:-${HF_MODEL_REPO}}"
+
+# Resolve HF_TOKEN from Google Colab userdata secrets if not explicitly exported in Bash
+if [ -z "${HF_TOKEN:-}" ]; then
+    RESOLVED_HF_TOKEN=$(python3 -c "
+try:
+    from google.colab import userdata
+    for k in ('HF_TOKEN', 'tara_sync', 'hf_token'):
+        try:
+            t = userdata.get(k)
+            if t and t.strip():
+                print(t.strip())
+                break
+        except Exception:
+            pass
+except Exception:
+    pass
+" 2>/dev/null || true)
+    if [ -n "$RESOLVED_HF_TOKEN" ]; then
+        export HF_TOKEN="$RESOLVED_HF_TOKEN"
+        echo "[AUTH] HF_TOKEN successfully resolved from Google Colab Secrets."
+    fi
+fi
 
 TRAINER_MODE="${TRAINER_MODE:-python}"
 CANARY_MODE="${CANARY_MODE:-0}"
@@ -62,10 +85,15 @@ FULL_DATASET="${FULL_DATASET:-0}"
 FULL_DATASET_EXTRA=""
 if [ "$FULL_DATASET" = "1" ] || [ "${1:-}" = "--full-dataset" ]; then
     echo "=============================================================================="
-    echo "  [FULL DATASET CONTINUOUS ROLLING TRAINING ACTIVE (RULE 29)]"
+    echo "  [FULL DATASET CONTINUOUS ROLLING TRAINING ACTIVE]"
     echo "=============================================================================="
     FULL_DATASET_EXTRA="--full-dataset"
     STAGE_MAX_STEPS=0
+fi
+GRADIENT_CHECKPOINTING="${GRADIENT_CHECKPOINTING:-1}"
+GRAD_CHECKPOINT_FLAG=""
+if [ "$GRADIENT_CHECKPOINTING" = "1" ]; then
+    GRAD_CHECKPOINT_FLAG="--gradient-checkpointing"
 fi
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-50}"
 JOINT_STEPS="${JOINT_STEPS:-200}"
@@ -340,14 +368,26 @@ fi
 
 # If restarting in a fresh Colab session, clean stale temporary files and restore checkpoints from Google Drive mirror
 if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
-    echo "[GDRIVE CLEANUP] Purging stale temporary (.tmp) and duplicate (1), (2) files from Google Drive..."
+    echo "[GDRIVE CLEANUP] Purging stale temporary (.tmp), duplicate (1), (2) files, and bulky optimizer dumps from Google Drive..."
     find "$GDRIVE_CHECKPOINT_DIR" -name "*.tmp*" -type f -delete 2>/dev/null || true
     find "$GDRIVE_CHECKPOINT_DIR" -name "* (*)*" -type f -delete 2>/dev/null || true
-    find "$GDRIVE_CHECKPOINT_DIR" -path "*/best_checkpoint/optimizer_state.pt" -type f -delete 2>/dev/null || true
+    find "$GDRIVE_CHECKPOINT_DIR" -maxdepth 3 -name "* (*)" -type d -exec rm -rf {} + 2>/dev/null || true
+    find "$GDRIVE_CHECKPOINT_DIR" -name "optimizer_state*.pt" -type f -delete 2>/dev/null || true
     find "$ACTIVE_CP_DIR" -name "* (*)*" -type f -delete 2>/dev/null || true
 
-    for STAGE_SUBDIR in stage0_pretraining stage1_curriculum; do
-        GDRIVE_STAGE="$GDRIVE_CHECKPOINT_DIR/$STAGE_SUBDIR"
+    # Dynamically discover all stage directories in Google Drive (Unbounded N-Stage Support)
+    shopt -s nullglob
+    GDRIVE_STAGES=("$GDRIVE_CHECKPOINT_DIR"/*)
+    shopt -u nullglob
+
+    for GDRIVE_STAGE in "${GDRIVE_STAGES[@]}"; do
+        if [ ! -d "$GDRIVE_STAGE" ]; then
+            continue
+        fi
+        STAGE_SUBDIR=$(basename "$GDRIVE_STAGE")
+        if [ "$STAGE_SUBDIR" = "world_joint" ]; then
+            continue
+        fi
         LOCAL_STAGE="$ACTIVE_CP_DIR/$STAGE_SUBDIR"
         LOCAL_MODEL="$LOCAL_STAGE/model.safetensors"
         LOCAL_VALID=0
@@ -368,7 +408,11 @@ if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
 import os, shutil
 src = '$GDRIVE_STAGE'
 dst = '$LOCAL_STAGE'
-canonical = {'config.json', 'tokenizer.json', 'model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt'}
+canonical = {
+    'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json',
+    'model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt',
+    'shard_ledger.json', 'latest_checkpoint.json', 'dataset_snapshot.json'
+}
 if os.path.exists(src):
     for root, dirs, files in os.walk(src):
         rel = os.path.relpath(root, src)
@@ -387,7 +431,8 @@ if os.path.exists(src):
                 continue
             sf = os.path.join(root, f)
             df = os.path.join(trot, f)
-            if not os.path.exists(df) or os.path.getsize(df) < 1000000:
+            min_size = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
+            if not os.path.exists(df) or os.path.getsize(df) < min_size:
                 print(f'  -> Copying canonical {f}...', flush=True)
                 shutil.copy2(sf, df)
 " 2>/dev/null || true
@@ -398,10 +443,10 @@ if os.path.exists(src):
 fi
 
 # 5. Mandatory Pre-Training Verification, Deep De-duplication & Tokenizer Gate
-if [ ! -f "./target/release/tara_pretraining_gate" ]; then
-    echo "[BUILD] Compiling TARA Pre-Training Gate..."
-    cargo build --release --bin tara_pretraining_gate
-    # Reclaim intermediate Cargo build artifacts to preserve 10-15 GB disk space
+if [ ! -f "./target/release/tara_pretraining_gate" ] || [ ! -f "./target/release/manual_trainer" ]; then
+    echo "[BUILD] Compiling TARA Pre-Training Gate & Manual Trainer binaries..."
+    cargo build --release --bin tara_pretraining_gate --bin manual_trainer
+    # Reclaim intermediate Cargo build artifacts to preserve 10-15 GB disk space while keeping compiled binaries
     rm -rf target/release/deps target/release/build target/release/incremental target/debug ~/.cargo/registry/cache 2>/dev/null || true
 fi
 
@@ -422,9 +467,9 @@ if [ -f "storage/models/checkpoints/pretraining_authorization.json" ] && [ -d "$
 fi
 echo "Pre-Training Authorization Gate Passed!"
 
-# 5a. Proactive Pre-Training Disk Space Reclamation: Reclaim 15-25 GB from Rust build tree and package caches
-echo "[DISK HYGIENE] Purging intermediate Rust build tree and caches to reclaim 15-20 GB disk space..."
-rm -rf target/ /root/.cargo/registry/ /root/.cargo/git/ ~/.cargo/registry/ ~/.cargo/git/ 2>/dev/null || true
+# 5a. Proactive Pre-Training Disk Space Reclamation: Reclaim 15-20 GB while keeping compiled release binaries
+echo "[DISK HYGIENE] Purging intermediate Rust build tree artifacts to reclaim 15-20 GB disk space..."
+rm -rf target/release/deps target/release/build target/release/incremental target/debug ~/.cargo/registry/cache ~/.cargo/registry/src ~/.cargo/git/checkouts 2>/dev/null || true
 rm -rf /root/.cache/huggingface /root/.cache/pip ~/.cache/huggingface ~/.cache/pip 2>/dev/null || true
 if command -v df >/dev/null 2>&1; then
     df -h / | awk 'NR==2 {print "[DISK] Available disk space before training: " $4 " free / " $2 " total (" $5 " used)"}'
@@ -459,15 +504,18 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --stage-name "Stage 0: Foundational Pretraining" \
         --model-dir storage/models/tara_candidate_v1 \
         --dataset-dir "$MAIN_DS_DIR" \
+        --dataset-prefix "v2" \
         --output-dir "$ACTIVE_CP_DIR/stage0_pretraining" \
         --promoted-dir "$PROMOTED_BASE/stage0_pretraining" \
         --max-steps "$STAGE_MAX_STEPS" \
         --batch-size "$TRAIN_BATCH_SIZE" \
         --grad-accum "$GRAD_ACCUM" \
+        --max-seq-len "$TARA_MAX_SEQ_LEN" \
         --checkpoint-interval "$CHECKPOINT_INTERVAL" \
         --hf-repo "$HF_MODEL_REPO" \
         $CANARY_EXTRA_ARGS \
-        $FULL_DATASET_EXTRA
+        $FULL_DATASET_EXTRA \
+        $GRAD_CHECKPOINT_FLAG
 
     # In canary validation mode, stop after stage 0 verification to report telemetry
     if [ -n "$CANARY_EXTRA_ARGS" ]; then
@@ -499,15 +547,18 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --stage-name "Stage 1: Academic & Skills Curriculum" \
         --model-dir "$STAGE0_MODEL_INPUT" \
         --dataset-dir "$CURRICULUM_DS" \
+        --dataset-prefix "curriculum" \
         --output-dir "$ACTIVE_CP_DIR/stage1_curriculum" \
         --promoted-dir "$PROMOTED_BASE/stage1_curriculum" \
         --previous-stage-dir "$ACTIVE_CP_DIR/stage0_pretraining" \
         --max-steps "$STAGE_MAX_STEPS" \
         --batch-size "$TRAIN_BATCH_SIZE" \
         --grad-accum "$GRAD_ACCUM" \
+        --max-seq-len "$TARA_MAX_SEQ_LEN" \
         --checkpoint-interval "$CHECKPOINT_INTERVAL" \
         --hf-repo "$HF_MODEL_REPO" \
-        $FULL_DATASET_EXTRA
+        $FULL_DATASET_EXTRA \
+        $GRAD_CHECKPOINT_FLAG
 
     # Extensible Loop for Continual Expansion (Stages 2..N)
     STAGE_IDX=2
@@ -529,15 +580,18 @@ if [ "$TRAINER_MODE" = "python" ]; then
             --stage-name "Stage ${STAGE_IDX}: Continual Knowledge Expansion" \
             --model-dir "$PREV_MODEL_INPUT" \
             --dataset-dir "$NEXT_DS" \
+            --dataset-prefix "stage${STAGE_IDX}" \
             --output-dir "$ACTIVE_CP_DIR/stage${STAGE_IDX}" \
             --promoted-dir "$PROMOTED_BASE/stage${STAGE_IDX}" \
             --previous-stage-dir "$ACTIVE_CP_DIR/stage${PREV_STAGE_IDX}" \
             --max-steps "$STAGE_MAX_STEPS" \
             --batch-size "$TRAIN_BATCH_SIZE" \
             --grad-accum "$GRAD_ACCUM" \
+            --max-seq-len "$TARA_MAX_SEQ_LEN" \
             --checkpoint-interval "$CHECKPOINT_INTERVAL" \
             --hf-repo "$HF_MODEL_REPO" \
-            $FULL_DATASET_EXTRA
+            $FULL_DATASET_EXTRA \
+            $GRAD_CHECKPOINT_FLAG
 
         STAGE_IDX=$((STAGE_IDX + 1))
     done
@@ -564,7 +618,7 @@ fi
 
 if [ $PIPELINE_EXIT -ne 0 ]; then
     echo "=============================================================================="
-    echo "[PIPELINE FAILURE] tara_training_stages exited with status: $PIPELINE_EXIT"
+    echo "[PIPELINE FAILURE] Training pipeline ($TRAINER_MODE) exited with status: $PIPELINE_EXIT"
     echo "Host memory state at termination:"
     free -h || true
     echo "Kernel termination logs (dmesg):"
@@ -584,7 +638,8 @@ echo "=== [WORLD MODEL & NEURAL JOINT CO-TRAINING ($JOINT_STEPS STEPS, BATCH $TR
 ./target/release/manual_trainer \
     --mode both \
     --steps "$JOINT_STEPS" \
-    --batch-size "$TRAIN_BATCH_SIZE"
+    --batch-size "$TRAIN_BATCH_SIZE" \
+    --dataset "$MAIN_DS_DIR"
 
 echo "Neural & World Model Joint Training Completed Successfully!"
 

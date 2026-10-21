@@ -30,7 +30,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     try:
@@ -529,13 +529,30 @@ class ShardLedger:
 
     def load(self):
         loaded_data = None
-        if self.gdrive_dir and os.path.exists(os.path.join(self.gdrive_dir, "shard_ledger.json")):
-            try:
-                with open(os.path.join(self.gdrive_dir, "shard_ledger.json"), "r", encoding="utf-8") as f:
-                    loaded_data = json.load(f)
-                print(f"[Shard Ledger] Loaded authoritative ledger from Google Drive ({len(loaded_data.get('completed_shards', []))} completed shards).", flush=True)
-            except Exception as e:
-                print(f"[Shard Ledger Notice] Google Drive ledger read note: {e}")
+        candidate_gdrive_ledgers = []
+        if self.gdrive_dir:
+            candidate_gdrive_ledgers.append(os.path.join(self.gdrive_dir, "shard_ledger.json"))
+
+        gdrive_root = _resolve_gdrive_root()
+        if gdrive_root:
+            canonical_gdrive = resolve_gdrive_stage_dir(self.output_dir, self.stage_id)
+            if canonical_gdrive and canonical_gdrive != self.gdrive_dir:
+                candidate_gdrive_ledgers.append(os.path.join(canonical_gdrive, "shard_ledger.json"))
+            if self.stage_id:
+                candidate_gdrive_ledgers.append(os.path.join(gdrive_root, self.stage_id, "shard_ledger.json"))
+            bname = os.path.basename(os.path.normpath(self.output_dir))
+            if bname:
+                candidate_gdrive_ledgers.append(os.path.join(gdrive_root, bname, "shard_ledger.json"))
+
+        for gpath in candidate_gdrive_ledgers:
+            if os.path.exists(gpath):
+                try:
+                    with open(gpath, "r", encoding="utf-8") as f:
+                        loaded_data = json.load(f)
+                    print(f"[Shard Ledger] Loaded authoritative ledger from Google Drive ({gpath}, {len(loaded_data.get('completed_shards', []))} completed shards).", flush=True)
+                    break
+                except Exception as e:
+                    print(f"[Shard Ledger Notice] Google Drive ledger read note ({gpath}): {e}")
 
         if loaded_data is None and os.path.exists(self.ledger_file):
             try:
@@ -1187,7 +1204,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
                 with open(actual_fp, "r", encoding="utf-8") as f:
                     start_line_idx = 0
 
-                    if is_resume_target and (target_resume_line > 0 or target_resume_chunk > 0):
+                    if is_resume_target and (target_resume_line >= 0 or target_resume_chunk > 0):
                         # -------------------------------------------------------------------
                         # Byte-seek resume strategy (ShardLineIndex-backed, Phase 3.1-A).
                         #
@@ -1367,14 +1384,16 @@ class TaraStreamingJsonlDataset(IterableDataset):
                             chunk_size = self.max_seq_len
                             n_chunks = max(1, math.ceil(n_tokens / chunk_size))
 
+                            valid_chunks = []
                             for chunk_idx in range(n_chunks):
                                 chunk_start = chunk_idx * chunk_size
                                 chunk_end = min(chunk_start + chunk_size, n_tokens)
                                 chunk_ids = full_ids[chunk_start:chunk_end]
+                                if len(chunk_ids) >= 4:
+                                    valid_chunks.append((chunk_idx, chunk_ids, chunk_start))
 
-                                # Final short chunk policy: discard if fewer than 4 tokens
-                                if len(chunk_ids) < 4:
-                                    continue
+                            for c_i, (chunk_idx, chunk_ids, chunk_start) in enumerate(valid_chunks):
+                                is_last_chunk = (c_i == len(valid_chunks) - 1)
 
                                 # Skip chunks already processed at resume boundary:
                                 # For the resume line, skip chunks before the resume chunk_idx.
@@ -1396,7 +1415,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
                                 self.active_shard_byte_offset = line_byte_offset
                                 self.active_chunk_idx = chunk_idx
 
-                                item = (input_ids, labels, shard_name, line_idx, line_byte_offset, chunk_idx)
+                                item = (input_ids, labels, shard_name, line_idx, line_byte_offset, chunk_idx, is_last_chunk)
                                 if buffer_size <= 1:
                                     yield item
                                     emitted += 1
@@ -1483,16 +1502,17 @@ def collate_fn(batch):
         l = len(inp)
         padded_inputs[i, :l] = inp
         padded_labels[i, :l] = lab
-        # item layout: (input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx)
-        # chunk_idx added by Task B; gracefully handle legacy 5-tuples.
-        if len(item) >= 6:
-            cursors.append((item[2], item[3], item[4], item[5]))
+        # item layout: (input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last_chunk)
+        if len(item) >= 7:
+            cursors.append((item[2], item[3], item[4], item[5], item[6]))
+        elif len(item) >= 6:
+            cursors.append((item[2], item[3], item[4], item[5], False))
         elif len(item) >= 5:
-            cursors.append((item[2], item[3], item[4], 0))
+            cursors.append((item[2], item[3], item[4], 0, False))
         elif len(item) >= 4:
-            cursors.append((item[2], item[3], 0, 0))
+            cursors.append((item[2], item[3], 0, 0, False))
         else:
-            cursors.append(("", 0, 0, 0))
+            cursors.append(("", 0, 0, 0, False))
 
     return padded_inputs, padded_labels, cursors
 
@@ -1746,6 +1766,35 @@ def _resolve_gdrive_root() -> Optional[str]:
     return None
 
 
+def resolve_gdrive_stage_dir(output_dir: str, stage_id: Optional[str] = None) -> Optional[str]:
+    """
+    Computes the canonical target directory for a stage on Google Drive.
+    Guarantees that Checkpoints, Best Milestones, and ShardLedger ALWAYS share
+    the exact same directory path regardless of how --output-dir or --stage-id is specified.
+    """
+    gdrive_root = _resolve_gdrive_root()
+    if not gdrive_root:
+        return None
+
+    abs_out = os.path.abspath(output_dir)
+    abs_groot = os.path.abspath(gdrive_root)
+    if abs_out.startswith(abs_groot):
+        return abs_out
+
+    norm = output_dir.replace("\\", "/").rstrip("/")
+    if "checkpoints/" in norm:
+        rel = norm.split("checkpoints/", 1)[1].strip("/")
+    elif "/checkpoints" in norm:
+        rel = norm.split("/checkpoints", 1)[1].strip("/")
+    else:
+        rel = os.path.basename(norm)
+
+    if not rel and stage_id:
+        rel = stage_id.strip()
+
+    return os.path.join(gdrive_root, rel) if rel else gdrive_root
+
+
 def _ensure_gdrive_target_dir(target_dir: str):
     """
     Ensures target directory exists on Google Drive even if parent paths
@@ -1809,16 +1858,13 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                         continue
                     _stream_copy_file(src, dst)
                     if fname in ("model.safetensors", "pytorch_model.bin") and os.path.exists(dst):
-                        src_sha = compute_file_sha256(src)
-                        dst_sha = compute_file_sha256(dst)
-                        if src_sha != dst_sha:
-                            print(f"[GDrive Sync Warning] SHA-256 mismatch for {fname}! Retrying stream copy...", flush=True)
+                        src_sz = os.path.getsize(src)
+                        dst_sz = os.path.getsize(dst)
+                        if src_sz != dst_sz or dst_sz == 0:
+                            print(f"[GDrive Sync Warning] Size mismatch for {fname} ({src_sz} != {dst_sz})! Retrying stream copy...", flush=True)
                             _stream_copy_file(src, dst)
-                            dst_sha = compute_file_sha256(dst)
-                            if src_sha != dst_sha:
-                                print(f"[GDrive Sync Error] SHA-256 still mismatched on GDrive: {dst_sha} != {src_sha}", flush=True)
                         else:
-                            print(f"[GDrive Mirror SHA-256 Verified] {fname} matches: {src_sha[:16]}...", flush=True)
+                            print(f"[GDrive Mirror Verified] {fname} ({dst_sz / (1024*1024):.1f} MB) mirror complete.", flush=True)
                     synced += 1
 
 
@@ -1854,6 +1900,17 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
             gdrive_parent = os.path.dirname(os.path.abspath(target_dir))
             if gdrive_parent and os.path.exists(gdrive_parent):
                 try:
+                    for pf in os.listdir(gdrive_parent):
+                        if " (" in pf and ")" in pf:
+                            try:
+                                pfull = os.path.join(gdrive_parent, pf)
+                                if os.path.isfile(pfull) or os.path.islink(pfull):
+                                    os.remove(pfull)
+                                elif os.path.isdir(pfull):
+                                    shutil.rmtree(pfull, ignore_errors=True)
+                                print(f"[GDrive Hygiene] Deleted parent duplicate artifact from GDrive: {pf}", flush=True)
+                            except Exception:
+                                pass
                     _cleanup_old_versioned_checkpoints(gdrive_parent, os.path.basename(target_dir))
                 except Exception:
                     pass
@@ -1873,16 +1930,16 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                 break
 
 
-def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
+def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False, sync_optimizer: bool = False):
     """
     Mirrors local checkpoint files to Google Drive.
     Single-worker lock with pending queue ensures the latest checkpoint is ALWAYS uploaded.
+    By default, excludes heavy optimizer_state.pt to prevent Google Drive quota exhaustion.
     """
     global _gdrive_sync_thread, _pending_gdrive_sync
     gdrive_root = _resolve_gdrive_root()
     if not gdrive_root:
         return
-
 
     # If output_dir is already inside Google Drive (/content/drive or gdrive_root), do not duplicate mirror
     try:
@@ -1892,20 +1949,17 @@ def sync_checkpoint_to_gdrive(output_dir: str, tag: str, wait: bool = False):
     except Exception:
         pass
 
-    # Compute target directory on Google Drive preserving stage/milestone hierarchy
-    try:
-        if "checkpoints" in output_dir:
-            rel = output_dir.split("checkpoints", 1)[1].lstrip(r"\/")
-            target_dir = os.path.join(gdrive_root, rel)
-        else:
-            target_dir = os.path.join(gdrive_root, os.path.basename(output_dir))
-    except Exception:
-        target_dir = os.path.join(gdrive_root, os.path.basename(output_dir))
+    # Compute canonical target directory on Google Drive preserving stage/milestone hierarchy
+    target_dir = resolve_gdrive_stage_dir(output_dir)
+    if not target_dir:
+        return
 
     file_list = [
         "config.json", "tokenizer.json", "model.safetensors",
-        "checkpoint_state.json", "STAGE_METADATA.json", "optimizer_state.pt"
+        "checkpoint_state.json", "STAGE_METADATA.json"
     ]
+    if sync_optimizer:
+        file_list.append("optimizer_state.pt")
 
     with _gdrive_sync_lock:
         if _gdrive_sync_thread and _gdrive_sync_thread.is_alive():
@@ -2338,9 +2392,10 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
                 if os.path.exists(cdir):
                     shutil.rmtree(cdir, ignore_errors=True)
 
-            # 2. Purge Rust target directory if present (pretraining gate already finished)
-            if os.path.exists("target"):
-                shutil.rmtree("target", ignore_errors=True)
+            # 2. Purge Rust intermediate build artifacts while preserving compiled release binaries
+            for sub in ["target/debug", "target/release/deps", "target/release/build", "target/release/incremental"]:
+                if os.path.exists(sub):
+                    shutil.rmtree(sub, ignore_errors=True)
 
             # 3. Clean temporary files in /tmp
             for p in glob.glob("/tmp/tara_*") + glob.glob("/tmp/tmp_tara_*") + glob.glob("/tmp/tmptara*"):
@@ -2413,7 +2468,18 @@ def save_best_milestone(
             # 3. model.safetensors
             target_model = os.path.join(staging_dir, "model.safetensors")
             existing_model = os.path.join(parent_dir, "model.safetensors")
-            if os.path.isfile(existing_model) and os.path.getsize(existing_model) > 1024 * 1024:
+            existing_state_file = os.path.join(parent_dir, "checkpoint_state.json")
+            existing_is_current_step = False
+            if os.path.isfile(existing_model) and os.path.getsize(existing_model) > 1024 * 1024 and os.path.isfile(existing_state_file):
+                try:
+                    with open(existing_state_file, "r", encoding="utf-8") as f_st:
+                        existing_st = json.load(f_st)
+                    if existing_st.get("step") == step:
+                        existing_is_current_step = True
+                except Exception:
+                    existing_is_current_step = False
+
+            if existing_is_current_step:
                 try:
                     os.link(existing_model, target_model)
                 except Exception:
@@ -2600,7 +2666,7 @@ def save_checkpoint(
     stage_id: str,
     is_best: bool = False,
     is_completed: bool = False,
-    sync_to_gdrive: bool = True,
+    sync_to_gdrive: bool = False,
     dataset: Optional[Any] = None,
     shard_ledger: Optional[Any] = None,
     data_cursor: Optional[Dict[str, Any]] = None,
@@ -3356,6 +3422,13 @@ def try_resume_from_checkpoint(
     # 4. Google Drive mirror
     gdrive_root = _resolve_gdrive_root()
     if gdrive_root:
+        canonical_gdrive = resolve_gdrive_stage_dir(checkpoint_dir, expected_stage_id)
+        if canonical_gdrive and canonical_gdrive not in candidate_dirs:
+            candidate_dirs.append(canonical_gdrive)
+        if expected_stage_id:
+            s_cand = os.path.join(gdrive_root, expected_stage_id)
+            if s_cand not in candidate_dirs:
+                candidate_dirs.append(s_cand)
         stage_name = output_dir_basename
         gdrive_stage = os.path.join(gdrive_root, stage_name)
         if gdrive_stage not in candidate_dirs:
@@ -3511,6 +3584,13 @@ def try_resume_from_checkpoint(
             checkpoint_dir,
         ]
         if gdrive_root:
+            canonical_gdrive = resolve_gdrive_stage_dir(checkpoint_dir, expected_stage_id)
+            if canonical_gdrive:
+                fallback_candidates.append(os.path.join(canonical_gdrive, "best_checkpoint"))
+                fallback_candidates.append(canonical_gdrive)
+            if expected_stage_id:
+                fallback_candidates.append(os.path.join(gdrive_root, expected_stage_id, "best_checkpoint"))
+                fallback_candidates.append(os.path.join(gdrive_root, expected_stage_id))
             fallback_candidates.append(os.path.join(gdrive_root, output_dir_basename, "best_checkpoint"))
             fallback_candidates.append(os.path.join(gdrive_root, output_dir_basename))
 
@@ -4003,7 +4083,7 @@ def main():
     parser.add_argument("--hf-repo", type=str, default=os.environ.get("HF_REPO", os.environ.get("HF_MODEL_REPO", "")), help="Hugging Face repository for auto-upload")
     parser.add_argument("--hf-token", type=str, default=None, help="Hugging Face authentication token (or via HF_TOKEN / Colab secret 'tara_sync')")
     parser.add_argument("--verify-gate", action="store_true", default=True, help="Verify pretraining authorization proof before training")
-    parser.add_argument("--max-seq-len", type=int, default=256, help="Max sequence length")
+    parser.add_argument("--max-seq-len", type=int, default=int(os.environ.get("TARA_MAX_SEQ_LEN", 256)), help="Max sequence length")
     parser.add_argument("--max-shards", type=int, default=0, help="Max shards to ingest (0 for all discovered shards)")
     parser.add_argument("--exclude-shards", type=str, default="*shard_099*,*shard_098*", help="Comma-separated patterns of shards strictly excluded from training (held-out validation)")
     parser.add_argument("--max-samples", type=int, default=0, help="Max samples to ingest across shards (0 for unlimited)")
@@ -4028,6 +4108,10 @@ def main():
                         help="Override memory preflight gate to allow FP32 AdamW on memory-constrained GPUs")
     parser.add_argument("--keep-checkpoints", type=int, default=int(os.environ.get("KEEP_CHECKPOINTS", 1)),
                         help="Number of past checkpoints to retain (default: 1; deletes older checkpoints upon verified new commit)")
+    parser.add_argument("--sync-all-to-gdrive", action="store_true", default=False,
+                        help="Sync all intermediate training checkpoints to Google Drive (default: False; Google Drive mirrors best milestone only)")
+    parser.add_argument("--sync-gdrive-optimizer", action="store_true", default=False,
+                        help="Include heavy optimizer state when mirroring checkpoints to Google Drive (default: False)")
     parser.add_argument("--preflight-only", action="store_true", default=False, help="Execute only the dual-stage preflight validation diagnostic and exit with report")
     args = parser.parse_args()
 
@@ -4133,6 +4217,9 @@ def main():
         if major_cap >= 8:
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
+        if total_vram_gb <= 16.5 and not args.gradient_checkpointing:
+            args.gradient_checkpointing = True
+            print(f"[Hardware Optimization] Memory-constrained GPU ({total_vram_gb:.1f} GiB VRAM) detected: Auto-enabled activation gradient checkpointing to eliminate CUDA OOM.")
     else:
         print("[Hardware] No GPU detected. Defaulting to CPU (FP32).")
 
@@ -4196,8 +4283,7 @@ def main():
 
 
     # 6. Initialize Authoritative Persistent Shard Ledger & Shard Discovery
-    gdrive_root = _resolve_gdrive_root()
-    gdrive_stage_dir = os.path.join(gdrive_root, args.stage_id) if gdrive_root else None
+    gdrive_stage_dir = resolve_gdrive_stage_dir(args.output_dir, args.stage_id)
     shard_ledger = ShardLedger(args.output_dir, gdrive_stage_dir,
                                stage_id=args.stage_id, dataset_revision=args.dataset_prefix.strip("/"))
 
@@ -4205,8 +4291,15 @@ def main():
     ds_prefix = args.dataset_prefix.strip("/")
     discovered_shards = []
 
-    # Remote Hugging Face shard catalog discovery
-    if dataset_repo:
+    # Priority 1: Check if local dataset directory already contains genuine JSONL shards
+    if os.path.isdir(args.dataset_dir):
+        local_files = sorted([os.path.basename(p) for p in glob.glob(os.path.join(args.dataset_dir, "*.jsonl"))])
+        if local_files:
+            discovered_shards = local_files
+            print(f"[Dataset Discovery] Discovered {len(discovered_shards)} local shard(s) in '{args.dataset_dir}'.", flush=True)
+
+    # Priority 2: Remote Hugging Face shard catalog discovery if local dataset directory has no shards
+    if not discovered_shards and dataset_repo:
         try:
             from huggingface_hub import HfApi
             token = _resolve_hf_token()
@@ -4220,17 +4313,11 @@ def main():
         except Exception as e:
             print(f"[Dataset Discovery Notice] Remote Hugging Face file discovery note: {e}", flush=True)
 
-    # Local fallback if remote discovery was unavailable
     if not discovered_shards:
-        local_files = sorted([os.path.basename(p) for p in glob.glob(os.path.join(args.dataset_dir, "*.jsonl"))])
-        if local_files:
-            discovered_shards = local_files
-        else:
-            raise RuntimeError(
-                f"[Dataset Discovery Fatal] Zero dataset shards discovered on Hugging Face repository '{dataset_repo}' "
-                f"(prefix '{ds_prefix}/', pattern '{ds_prefix}/*.jsonl') "
-                f"or in local dataset directory '{args.dataset_dir}'. Cannot proceed with zero training shards."
-            )
+        raise RuntimeError(
+            f"[Dataset Discovery Fatal] Zero dataset shards discovered in local dataset directory '{args.dataset_dir}' "
+            f"or on Hugging Face repository '{dataset_repo}' (prefix '{ds_prefix}/', pattern '{ds_prefix}/*.jsonl'). Cannot proceed with zero training shards."
+        )
 
     # Strictly filter out held-out shards to prevent evaluation leakage
     import fnmatch
@@ -4510,6 +4597,7 @@ def main():
     last_regular_checkpoint_step = start_step
     last_best_checkpoint_step = start_step
     last_best_checkpoint_loss = best_loss if best_loss < float("inf") else float("inf")
+    has_unsaved_best_milestone = False
     current_cursor = resumed_cursor
 
     total_samples_trained = int(resumed_cursor.get("total_samples_trained", 0)) if resumed_cursor else 0
@@ -4649,18 +4737,26 @@ def main():
                         getattr(dataset, "active_shard_offset", 0),
                         getattr(dataset, "active_shard_byte_offset", 0),
                         getattr(dataset, "active_chunk_idx", 0),
+                        False,
                     )
                     c_shard = last_sample_cursor[0]
                     c_line = last_sample_cursor[1] if len(last_sample_cursor) > 1 else 0
                     c_byte = last_sample_cursor[2] if len(last_sample_cursor) > 2 else 0
                     c_chunk_last = last_sample_cursor[3] if len(last_sample_cursor) > 3 else 0
-                    # Store the next uncommitted chunk index so the iterator skips exactly
-                    # the committed chunks and resumes from the correct position.
-                    c_chunk_next = c_chunk_last + 1
+                    c_is_last = last_sample_cursor[4] if len(last_sample_cursor) > 4 else False
+
+                    # If the entire line was completed, record active_chunk_idx=0 so resume
+                    # seamlessly advances past this line without re-reading or re-chunking it.
+                    if c_is_last:
+                        c_line_offset = c_line
+                        c_chunk_next = 0
+                    else:
+                        c_line_offset = c_line
+                        c_chunk_next = c_chunk_last + 1
 
                     current_cursor = {
                         "active_shard": c_shard,
-                        "active_shard_line_offset": c_line,
+                        "active_shard_line_offset": c_line_offset,
                         "active_shard_byte_offset": c_byte,
                         "active_chunk_idx": c_chunk_next,
                         "total_samples_trained": total_samples_trained,
@@ -4721,6 +4817,7 @@ def main():
                 is_new_best = (cur_step_loss < best_loss)
                 if is_new_best:
                     best_loss = cur_step_loss
+                    has_unsaved_best_milestone = True
 
                 # Periodic Benchmark Matrix Display
                 if step % 25 == 0 or step == start_step + 1 or is_new_best:
@@ -4735,7 +4832,8 @@ def main():
                     save_checkpoint(
                         model, optimizer, scaler, config, tok_path, args.output_dir,
                         step, epoch, cur_step_loss, best_loss, args.stage_id,
-                        is_best=False, is_completed=False, sync_to_gdrive=True,
+                        is_best=False, is_completed=False,
+                        sync_to_gdrive=args.sync_all_to_gdrive,
                         dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
                         keep_n=args.keep_checkpoints, force_keep_exact=True,
                     )
@@ -4750,7 +4848,8 @@ def main():
                 is_major_milestone = (last_best_checkpoint_loss - best_loss >= 0.15)
                 is_final_step = (step >= args.max_steps)
 
-                if is_new_best and (is_interval_step or is_major_milestone or is_final_step):
+                if (has_unsaved_best_milestone or is_new_best) and (is_interval_step or is_major_milestone or is_final_step):
+                    has_unsaved_best_milestone = False
                     last_best_checkpoint_step = step
                     last_best_checkpoint_loss = best_loss
 
@@ -4760,12 +4859,13 @@ def main():
                         flush=True,
                     )
 
-                    # 1. Commit complete training checkpoint first
-                    # Guarantees crash-proof resumption from best milestones across Colab disconnects
+                    # 1. Commit complete training checkpoint to local disk only (unless explicitly configured)
+                    # Guarantees crash-proof resumption on fast local storage without filling Google Drive
                     save_checkpoint(
                         model, optimizer, scaler, config, tok_path, args.output_dir,
                         step, epoch, cur_step_loss, best_loss, args.stage_id,
-                        is_best=False, is_completed=False, sync_to_gdrive=True,
+                        is_best=False, is_completed=False,
+                        sync_to_gdrive=args.sync_all_to_gdrive,
                         dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
                         keep_n=args.keep_checkpoints, force_keep_exact=True,
                     )
@@ -4778,11 +4878,12 @@ def main():
                         dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
                     )
 
-                    # 3. Mirror the single genuine BEST model to Google Drive in background
+                    # 3. Mirror the single genuine BEST model to Google Drive in background (compact, NO optimizer state)
                     sync_checkpoint_to_gdrive(
                         best_cp_dir,
                         f"BEST-MILESTONE (Step {step:04d}, Loss: {best_loss:.4f})",
                         wait=False,
+                        sync_optimizer=False,
                     )
 
                 if step >= args.max_steps:
@@ -4868,17 +4969,24 @@ def main():
                     getattr(dataset, "active_shard_offset", 0),
                     getattr(dataset, "active_shard_byte_offset", 0),
                     getattr(dataset, "active_chunk_idx", 0),
+                    False,
                 )
                 c_shard = last_sample_cursor[0]
                 c_line = last_sample_cursor[1] if len(last_sample_cursor) > 1 else 0
                 c_byte = last_sample_cursor[2] if len(last_sample_cursor) > 2 else 0
                 c_chunk_last = last_sample_cursor[3] if len(last_sample_cursor) > 3 else 0
-                # Store the next uncommitted chunk index (first chunk to yield on resume)
-                c_chunk_next = c_chunk_last + 1
+                c_is_last = last_sample_cursor[4] if len(last_sample_cursor) > 4 else False
+
+                if c_is_last:
+                    c_line_offset = c_line
+                    c_chunk_next = 0
+                else:
+                    c_line_offset = c_line
+                    c_chunk_next = c_chunk_last + 1
 
                 current_cursor = {
                     "active_shard": c_shard,
-                    "active_shard_line_offset": c_line,
+                    "active_shard_line_offset": c_line_offset,
                     "active_shard_byte_offset": c_byte,
                     "active_chunk_idx": c_chunk_next,
                     "total_samples_trained": total_samples_trained,

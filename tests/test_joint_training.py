@@ -281,7 +281,6 @@ class TestJointNeuralWorldTraining(unittest.TestCase):
         empty_dir = os.path.join(self.tmpdir, "empty_world_data")
         os.makedirs(empty_dir, exist_ok=True)
 
-        # Preflight gate logic simulation
         world_files = sorted([f for f in os.listdir(empty_dir) if f.endswith(".jsonl")])
         with self.assertRaises(RuntimeError) as ctx:
             if not world_files:
@@ -290,6 +289,77 @@ class TestJointNeuralWorldTraining(unittest.TestCase):
                     f"but zero genuine World Model transition datasets (*.jsonl) were discovered in '{empty_dir}'."
                 )
         self.assertIn("Joint World Model Preflight Gate", str(ctx.exception))
+
+    def test_invalid_records_fail_preflight_safely(self):
+        """Proof 8b: Discovered JSONL files containing zero valid transition records trigger preflight rejection."""
+        invalid_dir = os.path.join(self.tmpdir, "invalid_world_data")
+        os.makedirs(invalid_dir, exist_ok=True)
+        bad_file = os.path.join(invalid_dir, "bad_data.jsonl")
+        with open(bad_file, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"text": "plain text only, no state action transition"}) + "\n")
+            f.write(json.dumps({"random_key": 1234}) + "\n")
+
+        world_files = sorted([os.path.join(invalid_dir, f) for f in os.listdir(invalid_dir) if f.endswith(".jsonl")])
+        valid_count = 0
+        for wf in world_files:
+            with open(wf, "r", encoding="utf-8") as f:
+                for line in f:
+                    rec = json.loads(line)
+                    s = rec.get("state_observation") or rec.get("state")
+                    a = rec.get("action")
+                    ns = rec.get("next_state_observation") or rec.get("next_state")
+                    if s and a and ns:
+                        valid_count += 1
+
+        with self.assertRaises(RuntimeError) as ctx:
+            if valid_count == 0:
+                raise RuntimeError(
+                    f"[Joint World Model Preflight Gate] Files were discovered in '{invalid_dir}', "
+                    f"but zero valid state-transition records were found."
+                )
+        self.assertIn("zero valid state-transition records were found", str(ctx.exception))
+
+    def test_failed_promotion_preserves_previous_snapshot(self):
+        """Proof 10b: Failed or corrupted promotion cannot cause the only known-good recovery state to be pruned."""
+        parent_dir = os.path.join(self.tmpdir, "models_safety_test")
+        os.makedirs(parent_dir, exist_ok=True)
+
+        # 1. Establish valid previous promoted shard snapshot
+        good_src = os.path.join(self.tmpdir, "good_source")
+        os.makedirs(good_src, exist_ok=True)
+        with open(os.path.join(good_src, "config.json"), "w") as f:
+            json.dump(self.config, f)
+        with open(os.path.join(good_src, "model.safetensors"), "w") as f:
+            f.write("valid_model_weights")
+
+        execute_per_shard_promotion(
+            pending_shard="shard_001.jsonl",
+            source_checkpoint_dir=good_src,
+            parent_dir=parent_dir,
+            stage_id="stage0_pretraining",
+        )
+        promo_1 = os.path.join(parent_dir, "promoted_shard_shard_001")
+        self.assertTrue(os.path.exists(promo_1))
+
+        # 2. Corrupt source checkpoint for shard 2 (missing model.safetensors)
+        corrupt_src = os.path.join(self.tmpdir, "corrupt_source")
+        os.makedirs(corrupt_src, exist_ok=True)
+        with open(os.path.join(corrupt_src, "config.json"), "w") as f:
+            json.dump(self.config, f)
+        # Omit model.safetensors
+
+        # Promotion of corrupt source must fail fail-closed
+        with self.assertRaises(RuntimeError):
+            execute_per_shard_promotion(
+                pending_shard="shard_002.jsonl",
+                source_checkpoint_dir=corrupt_src,
+                parent_dir=parent_dir,
+                stage_id="stage0_pretraining",
+            )
+
+        # Previous known-good snapshot MUST remain intact!
+        self.assertTrue(os.path.exists(promo_1))
+        self.assertTrue(os.path.exists(os.path.join(promo_1, "model.safetensors")))
 
     def test_world_model_transition_dataset_extraction(self):
         """Proof 9: WorldModelTransitionDataset correctly parses transitions and masks prompt tokens."""

@@ -31,6 +31,7 @@ pub mod inference;
 pub use inference::generate;
 pub mod tokenizer;
 pub mod train_candidate;
+pub mod joint_trainer;
 
 // ============================================================================
 // Tier 2: Domain & Verification Subsystems

@@ -3179,10 +3179,18 @@ def promote_checkpoint(
 ):
     """
     Promotes the best checkpoint from a completed stage into a clean deployment model:
+    - Atomically stages files to a temporary directory before committing.
     - Copies: model.safetensors, config.json, tokenizer.json, tokenizer_config.json, special_tokens_map.json, STAGE_METADATA.json
-    - Strictly excludes bulky optimizer states (optimizer_state.pt, checkpoint_state.json)
+    - Preserves world_model.safetensors if present in source_checkpoint_dir.
+    - Strictly excludes bulky optimizer states (optimizer_state.pt, checkpoint_state.json).
+    - Durably verifies completeness before atomic replacement.
     """
-    os.makedirs(promoted_dir, exist_ok=True)
+    parent_dir = os.path.dirname(os.path.abspath(promoted_dir)) or "."
+    staging_promo_dir = os.path.join(parent_dir, f".staging_{os.path.basename(promoted_dir)}_{os.getpid()}_{int(time.time())}")
+    if os.path.exists(staging_promo_dir):
+        _safe_rmtree(staging_promo_dir)
+    os.makedirs(staging_promo_dir, exist_ok=True)
+
     artifacts = [
         "model.safetensors",
         "config.json",
@@ -3191,7 +3199,7 @@ def promote_checkpoint(
         "special_tokens_map.json",
         "STAGE_METADATA.json",
     ]
-    # Dynamically discover all safetensors shards or index if sharded
+    # Dynamically discover all safetensors shards or index if sharded (including world_model.safetensors)
     for sf in glob.glob(os.path.join(source_checkpoint_dir, "*.safetensors*")):
         bname = os.path.basename(sf)
         if bname not in artifacts:
@@ -3200,8 +3208,8 @@ def promote_checkpoint(
     copied = 0
     for art in artifacts:
         src = os.path.join(source_checkpoint_dir, art)
-        dst = os.path.join(promoted_dir, art)
-        if os.path.exists(src) and os.path.abspath(src) != os.path.abspath(dst):
+        dst = os.path.join(staging_promo_dir, art)
+        if os.path.exists(src):
             try:
                 if os.path.exists(dst):
                     _safe_unlink(dst)
@@ -3209,6 +3217,36 @@ def promote_checkpoint(
             except Exception:
                 _stream_copy_file(src, dst)
             copied += 1
+
+    # Durable pre-commit verification on staging directory
+    model_file = os.path.join(staging_promo_dir, "model.safetensors")
+    if not os.path.exists(model_file) or os.path.getsize(model_file) == 0:
+        bin_model = os.path.join(staging_promo_dir, "pytorch_model.bin")
+        if not os.path.exists(bin_model) or os.path.getsize(bin_model) == 0:
+            _safe_rmtree(staging_promo_dir)
+            raise RuntimeError(f"[Promotion Verification Failed] Staged model file is missing or empty in {staging_promo_dir}")
+
+    # Check world_model.safetensors if it was present in source
+    src_wm = os.path.join(source_checkpoint_dir, "world_model.safetensors")
+    if os.path.exists(src_wm):
+        staged_wm = os.path.join(staging_promo_dir, "world_model.safetensors")
+        if not os.path.exists(staged_wm) or os.path.getsize(staged_wm) == 0:
+            _safe_rmtree(staging_promo_dir)
+            raise RuntimeError(f"[Promotion Verification Failed] Staged world_model.safetensors is missing or empty in {staging_promo_dir}")
+
+    # Atomic rename/swap to promoted_dir
+    if os.path.exists(promoted_dir):
+        backup_dir = f"{promoted_dir}.prev_atomic_{int(time.time())}"
+        try:
+            os.rename(promoted_dir, backup_dir)
+            os.rename(staging_promo_dir, promoted_dir)
+            _safe_rmtree(backup_dir)
+        except Exception:
+            # Fallback for Windows cross-volume or handle-locked swap
+            _safe_rmtree(promoted_dir)
+            os.rename(staging_promo_dir, promoted_dir)
+    else:
+        os.rename(staging_promo_dir, promoted_dir)
 
     print(f"[Promotion] Successfully promoted clean inference model ({copied} files) -> {promoted_dir}", flush=True)
 
@@ -3241,7 +3279,7 @@ def execute_per_shard_promotion(
     1. Generates a clean promoted model snapshot for the completed shard in:
        <parent_dir>/promoted_shard_<clean_name>
     2. Atomically prunes the previous shard's promoted snapshot directory
-       to conserve disk space and prevent Google Drive bloat.
+       ONLY AFTER confirming the new snapshot is 100% complete and verified.
     3. Persists the active promoted shard tracker in <parent_dir>/latest_promoted_shard.json
     """
     clean_name = os.path.splitext(os.path.basename(pending_shard))[0]
@@ -3260,7 +3298,28 @@ def execute_per_shard_promotion(
     print(f"[Per-Shard Promotion] Shard '{pending_shard}' completed. Promoting model snapshot -> {new_promo_dir}...", flush=True)
     promote_checkpoint(source_checkpoint_dir, new_promo_dir, stage_id)
 
-    # Prune previous shard's promoted snapshot if different
+    # Durably verify newly promoted directory BEFORE any pruning
+    is_promo_valid = False
+    if os.path.isdir(new_promo_dir):
+        m_file = os.path.join(new_promo_dir, "model.safetensors")
+        c_file = os.path.join(new_promo_dir, "config.json")
+        has_primary = os.path.isfile(m_file) and os.path.getsize(m_file) > 0
+        has_cfg = os.path.isfile(c_file) and os.path.getsize(c_file) > 0
+        src_wm = os.path.join(source_checkpoint_dir, "world_model.safetensors")
+        if os.path.exists(src_wm):
+            dst_wm = os.path.join(new_promo_dir, "world_model.safetensors")
+            has_wm = os.path.isfile(dst_wm) and os.path.getsize(dst_wm) > 0
+        else:
+            has_wm = True
+        is_promo_valid = has_primary and has_cfg and has_wm
+
+    if not is_promo_valid:
+        raise RuntimeError(
+            f"[Per-Shard Promotion Safety Gate] Promoted snapshot verification failed for '{new_promo_dir}'. "
+            f"Preserving existing recovery state '{prev_promo_dir}'. Pruning aborted."
+        )
+
+    # Prune previous shard's promoted snapshot ONLY after new snapshot is verified intact
     if prev_promo_dir and os.path.abspath(prev_promo_dir) != os.path.abspath(new_promo_dir):
         if os.path.exists(prev_promo_dir):
             print(f"[Per-Shard Promotion] Pruning previous shard promoted model directory: {prev_promo_dir}...", flush=True)
@@ -4793,7 +4852,46 @@ def main():
                 f"Failing preflight safely per directive. Provide genuine transition data via --world-dataset-dir."
             )
 
-        print(f"[Joint World Model Dataset] Discovered {len(world_files)} transition dataset file(s).")
+        # Deep record-level validation: Ensure discovered files contain authentic, usable transition records
+        valid_transition_sample_count = 0
+        for wf in world_files:
+            try:
+                with open(wf, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            rec = json.loads(line)
+                            s_obs = rec.get("state_observation") or rec.get("state") or rec.get("observation")
+                            act = rec.get("action") or rec.get("intervention")
+                            ns_obs = rec.get("next_state_observation") or rec.get("next_state") or rec.get("subsequent_state")
+                            if not (s_obs and act and ns_obs):
+                                subj = rec.get("subject")
+                                pred = rec.get("predicate") or rec.get("relation")
+                                obj = rec.get("object")
+                                if subj and pred and obj:
+                                    s_obs, act, ns_obs = str(subj), str(pred), str(obj)
+                            if s_obs and act and ns_obs:
+                                valid_transition_sample_count += 1
+                                if valid_transition_sample_count >= 10:
+                                    break
+                        except Exception:
+                            continue
+            except Exception as e:
+                print(f"[Joint World Model Preflight Warning] Error inspecting {wf}: {e}")
+            if valid_transition_sample_count >= 10:
+                break
+
+        if valid_transition_sample_count == 0:
+            raise RuntimeError(
+                f"[Joint World Model Preflight Gate] Files were discovered in '{args.world_dataset_dir}', "
+                f"but zero valid state-transition records were found. Records must provide either "
+                f"(state_observation, action, next_state_observation) or (subject, predicate, object) dynamics. "
+                f"Failing preflight safely to prevent non-transition training."
+            )
+
+        print(f"[Joint World Model Dataset] Discovered {len(world_files)} transition dataset file(s) with verified usable records.")
         world_dataset = WorldModelTransitionDataset(
             file_paths=world_files,
             tokenizer=tokenizer,

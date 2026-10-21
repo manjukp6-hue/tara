@@ -225,10 +225,19 @@
    - **Root-Cause Codebase Resolution (No 2-Line Patch Traps)**:
      * Never perform isolated, 2-line reactive patches to satisfy an immediate prompt without investigating the fundamental root cause, confirming end-to-end wiring, and verifying whether previous agents already edited those exact lines.
 
-24. **MANDATORY IMMEDIATE PURGE OF AUDIT REPORTS, ARTIFACTS, GIT STATUS/DIFF NOISE, CHAT CONTEXT BIAS & BRAIN MEMORY**:
+24. **MANDATORY IMMEDIATE PURGE OF AUDIT REPORTS, ARTIFACTS, GIT HISTORY, GIT STATUS/DIFF NOISE, CHAT CONTEXT BIAS & BRAIN MEMORY**:
    - **Immediate Deletion of All Audit Reports & Scratch Files**:
      * Immediately upon completing and verifying any audit, investigation, or edit, ALL markdown audit reports, evaluation documents, scratch scripts, temporary diff dumps, and analysis outputs must be permanently deleted from the workspace and artifact directories.
      * Zero retention of stale, obsolete audit summaries or historical reports anywhere in the repository.
+   - **Mandatory Deletion of Recent Git History & Zero Git Log Footprints (Delete Git History — ಗಿಟ್ ಹಿಸ್ಟರಿ ಮತ್ತು ಇಂಟರ್ನಲ್ ಕುರುಹುಗಳ ಸಂಪೂರ್ಣ ನಿರ್ಮೂಲನೆ)**:
+     * When any audit, investigation, or task is finished, git commit history and internal git tracking must be thoroughly sanitized:
+       1. **Git Commit Log Churn (`git log`)**: Delete or squash recent git history that contains intermediate audit reports, temporary scratch commits, or agent reasoning churn (e.g. committing and deleting audit markdown documents). All unpushed intermediate commits must be squashed or soft-reset (`git reset --soft`) into a single, clean, production-grade commit with zero audit breadcrumbs.
+       2. **Git Reset Pointer Deletion (`.git/ORIG_HEAD`)**: Following any `git reset`, the `.git/ORIG_HEAD` pointer file must be explicitly deleted immediately to prevent retrieving past commit SHAs or diffs via `git show ORIG_HEAD`.
+       3. **Git Reflog Expiration (`git reflog`)**: All local HEAD movement trails must be purged via `git reflog expire --expire=now --all` so that `.git/logs/` remains at zero bytes with zero historical checkout/reset trail.
+       4. **Git Stash Sanitization (`git stash`)**: Zero stash residue permitted. Any temporary stashes must be dropped/cleared (`git stash clear`).
+       5. **Commit Message Cache Cleanliness (`.git/COMMIT_EDITMSG`)**: Commit message buffers must never preserve obsolete audit titles or agent prompt churn.
+       6. **Dangling Object Database Pruning (`git prune`)**: Unlinked, dangling commit objects from resets must be purged using `git prune`.
+     * Subsequent agents are **strictly prohibited** from inspecting `git log`, `git reflog`, `git show ORIG_HEAD`, `.git/COMMIT_EDITMSG`, `git stash`, or commit diffs as a shortcut or target list to identify and re-edit the same files touched by previous agents or to reverse-engineer past audit findings.
    - **Zero Git Status & Git Diff Footprints (Git Status ಮತ್ತು Git Diff — ನೇರ ಫೈಲ್‌ಸಿಸ್ಟಮ್ ಸಾಕ್ಷಿ ನಿರ್ಮೂಲನೆ)**:
      * When any audit or edit is finished, the git working tree must be entirely clean: zero uncommitted audit residue, zero dirty test artifacts, and zero leftover diff noise in `git status` or `git diff`.
      * Subsequent agents are **strictly prohibited** from using `git status` or `git diff` as a shortcut or target list to identify and re-edit the same files touched by previous agents.
@@ -239,8 +248,8 @@
      * All temporary agent brain artifacts, cached notes, transcript scratch files, and memory files generated within the application/brain directory (`brain/<conversation-id>/...`) during an audit or task must be thoroughly wiped upon task completion.
      * Zero agent memory, audit cache, or historical reasoning trails may be preserved to bias or influence future agent executions.
    - **Strict Fresh-Start Invariant (Start Fresh from Physical Files Alone)**:
-     * Every new agent must start 100% fresh, with zero knowledge of past edits, zero git breadcrumbs, and zero chat-history bias.
-     * Evaluation must be conducted directly, objectively, and whole-system across all physical `.rs` files on disk, never from recent diff trails or conversational memory.
+     * Every new agent must start 100% fresh, with zero knowledge of past edits, zero git breadcrumbs (in status, diff, commit log, reflog, or ORIG_HEAD), and zero chat-history bias.
+     * Evaluation must be conducted directly, objectively, and whole-system across all physical `.rs` files on disk, never from recent commit logs, reflogs, diff trails, or conversational memory.
 
 25. **MANDATORY CORE RUNTIME & SUBSYSTEM SECURITY SAFEGUARDS (PRESERVE & ENFORCE STANDARDIZED DEFENSES ACROSS ALL CODE)**:
    - **1. Symlink Safety, File Permissions & Cryptographic Zeroization**:

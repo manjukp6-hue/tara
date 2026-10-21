@@ -1439,8 +1439,84 @@ fn execute_manual_trainer() -> Result<RunStatus, (RunStatus, String)> {
         )
     })?;
 
-    // 4. Execution: Neural Model Training (Strict model_source_dir verification & separated intermediate checkpoints)
-    if config.training_mode == "neural" || config.training_mode == "both" {
+    // 4. Execution: Coordinated Joint Training or Individual Training
+    if config.training_mode == "both" {
+        println!("\n=== [EXECUTING COORDINATED JOINT TRAINING (run_id={run_id})] ===");
+        let src_dir = PathBuf::from(&config.model_source_dir);
+        let _ = recover_interrupted_promotion(&src_dir)
+            .map_err(|e| (RunStatus::ExecutionFailed, e.to_string()))?;
+        verify_model_bundle(&src_dir).map_err(|e| {
+            (
+                RunStatus::ValidationError,
+                format!(
+                    "Configured model_source_dir '{}' is missing or invalid: {}",
+                    config.model_source_dir, e
+                ),
+            )
+        })?;
+
+        let neural_out = PathBuf::from(&config.neural_checkpoint_dir);
+        let world_out = PathBuf::from(&config.world_model_checkpoint_dir);
+        let _ = recover_interrupted_promotion(&neural_out)
+            .map_err(|e| (RunStatus::ExecutionFailed, e.to_string()))?;
+        let _ = recover_interrupted_promotion(&world_out)
+            .map_err(|e| (RunStatus::ExecutionFailed, e.to_string()))?;
+        verify_cloud_training_environment().map_err(|e| (RunStatus::ExecutionFailed, e))?;
+        verify_pretraining_authorization(&neural_out)
+            .map_err(|e| (RunStatus::ExecutionFailed, e))?;
+
+        let wm_source = config
+            .world_model_source_dir
+            .clone()
+            .unwrap_or_else(|| "storage/models/tara_world_model".to_string());
+
+        let joint_cfg = tara_engine::joint_trainer::JointTrainingConfig {
+            neural_model_dir: PathBuf::from(&config.model_source_dir),
+            world_model_dir: PathBuf::from(&wm_source),
+            neural_checkpoint_dir: neural_out.clone(),
+            world_model_checkpoint_dir: world_out.clone(),
+            dataset_dir: PathBuf::from(&config.dataset_dir),
+            curriculum_path: if Path::new(&config.curriculum_path).exists() {
+                Some(PathBuf::from(&config.curriculum_path))
+            } else {
+                None
+            },
+            max_steps: config.max_steps,
+            learning_rate: config.learning_rate,
+            weight_decay: config.weight_decay,
+            grad_clip_norm: config.grad_clip_norm,
+            batch_size: config.batch_size,
+            resume: cli.resume,
+            resume_from: cli.resume_from.as_ref().map(PathBuf::from),
+        };
+
+        println!("Calling coordinated joint training engine...");
+        let report = tara_engine::joint_trainer::run_coordinated_joint_training(&joint_cfg)
+            .map_err(|e| (RunStatus::ExecutionFailed, e))?;
+
+        let run_manifest = serde_json::json!({
+            "run_id": run_id,
+            "status": RunStatus::TrainingCompleted,
+            "training_mode": "both",
+            "neural_candidate_dir": config.neural_checkpoint_dir,
+            "world_model_candidate_dir": config.world_model_checkpoint_dir,
+            "neural_candidate_sha256": report.neural_candidate_sha256,
+            "world_candidate_sha256": report.world_candidate_sha256,
+            "steps_completed": report.steps_completed,
+            "neural_parameter_count": report.neural_parameter_count,
+            "world_parameter_count": report.world_parameter_count,
+            "config": config,
+            "telemetry": report,
+        });
+        let manifest_path = run_dir.join("manifest.json");
+        fs::write(
+            &manifest_path,
+            serde_json::to_string_pretty(&run_manifest)
+                .map_err(|e| (RunStatus::ExecutionFailed, e.to_string()))?,
+        )
+        .map_err(|e| (RunStatus::ExecutionFailed, e.to_string()))?;
+        println!("  Saved structured run manifest to {:?}", manifest_path);
+    } else if config.training_mode == "neural" {
         println!("\n=== [EXECUTING NEURAL MODEL TRAINING (run_id={run_id})] ===");
         let src_dir = PathBuf::from(&config.model_source_dir);
         let _ = recover_interrupted_promotion(&src_dir)
@@ -1556,8 +1632,8 @@ fn execute_manual_trainer() -> Result<RunStatus, (RunStatus, String)> {
         .map_err(|e| (RunStatus::ExecutionFailed, format!("Failed to write neural log: {e}")))?;
     }
 
-    // 5. Execution: Genuine World Model State Update & Consistency Verification
-    if config.training_mode == "world_model" || config.training_mode == "both" {
+    // 5. Execution: World Model Training (when mode == "world_model")
+    if config.training_mode == "world_model" {
         println!("\n=== [EXECUTING WORLD MODEL UPDATE & SNAPSHOT (run_id={run_id})] ===");
         let world_out = PathBuf::from(&config.world_model_checkpoint_dir);
 

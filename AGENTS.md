@@ -1,3 +1,49 @@
+# EXECUTION DISCIPLINE — HIGHEST PRIORITY
+
+1. TASK SCOPE
+- Complete only the exact user-requested task.
+- Change only files directly required for that task.
+- Do not audit, refactor, rename, reformat, document, or “improve” unrelated code.
+- Do not create new files, modules, dependencies, configs, or tests unless required.
+
+2. EXPLORATION LIMIT
+- Inspect only files directly related to the task.
+- Do not scan the entire repository unless the user explicitly requests a full audit.
+- If required information is missing or ambiguous, ask one focused question instead of guessing.
+
+3. PLAN POLICY
+- For trivial changes: implement directly.
+- For non-trivial changes: give a 3–5 bullet plan and wait for approval.
+- Do not produce long pros/cons analysis unless the user requests it.
+
+4. IMPLEMENTATION POLICY
+- Make the smallest sufficient, production-quality change.
+- Preserve existing architecture, public APIs, naming, and formatting.
+- Do not make speculative changes for possible future requirements.
+
+5. VERIFICATION POLICY
+- Run only the verification command relevant to the task.
+- Never claim success without real command output.
+- `cargo check` alone is not proof of runtime behavior.
+- If runtime verification is impossible, explicitly state what was and was not verified.
+
+6. FAILURE STOP RULE
+- Maximum 3 attempts per failing issue.
+- If still failing after 3 attempts, STOP.
+- Report: exact error, files inspected, root-cause hypothesis, attempted fixes, and recommended next step.
+- Do not start another approach without user approval.
+
+7. DESTRUCTIVE OPERATIONS
+- Never delete files, folders, Git history, reflogs, stashes, checkpoints, datasets, or artifacts unless the user explicitly requests that exact deletion.
+- Never run repository-wide cleanup, history rewriting, or artifact purges as part of a normal coding task.
+
+8. RESPONSE FORMAT
+- Finish with:
+  - Files changed
+  - Exact commands run
+  - Command results
+  - What remains unverified
+
 # CRITICAL CORE DIRECTIVES & OPERATIONAL RULES
 
 1. **DON'T WASTE TIME — PLAN, ANALYZE PROS & CONS, THEN EXECUTE**:

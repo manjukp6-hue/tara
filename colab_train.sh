@@ -78,10 +78,10 @@ if [ "$CANARY_MODE" = "1" ] || [ "${1:-}" = "--canary" ]; then
 else
     TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-2}"
     GRAD_ACCUM="${GRAD_ACCUM:-8}"
-    STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-1000}"
+    STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-0}"
 fi
 
-FULL_DATASET="${FULL_DATASET:-0}"
+FULL_DATASET="${FULL_DATASET:-1}"
 FULL_DATASET_EXTRA=""
 if [ "$FULL_DATASET" = "1" ] || [ "${1:-}" = "--full-dataset" ]; then
     echo "=============================================================================="
@@ -96,6 +96,7 @@ if [ "$GRADIENT_CHECKPOINTING" = "1" ]; then
     GRAD_CHECKPOINT_FLAG="--gradient-checkpointing"
 fi
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-50}"
+GDRIVE_SYNC_FLAGS="--sync-all-to-gdrive --sync-gdrive-optimizer --keep-checkpoints 1"
 JOINT_STEPS="${JOINT_STEPS:-200}"
 MAIN_DS_DIR="storage/datasets/main_dataset_v2"
 PROMOTED_BASE="storage/models/promoted"
@@ -368,11 +369,10 @@ fi
 
 # If restarting in a fresh Colab session, clean stale temporary files and restore checkpoints from Google Drive mirror
 if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
-    echo "[GDRIVE CLEANUP] Purging stale temporary (.tmp), duplicate (1), (2) files, and bulky optimizer dumps from Google Drive..."
+    echo "[GDRIVE CLEANUP] Purging stale temporary (.tmp) and duplicate (1), (2) files from Google Drive..."
     find "$GDRIVE_CHECKPOINT_DIR" -name "*.tmp*" -type f -delete 2>/dev/null || true
     find "$GDRIVE_CHECKPOINT_DIR" -name "* (*)*" -type f -delete 2>/dev/null || true
     find "$GDRIVE_CHECKPOINT_DIR" -maxdepth 3 -name "* (*)" -type d -exec rm -rf {} + 2>/dev/null || true
-    find "$GDRIVE_CHECKPOINT_DIR" -name "optimizer_state*.pt" -type f -delete 2>/dev/null || true
     find "$ACTIVE_CP_DIR" -name "* (*)*" -type f -delete 2>/dev/null || true
 
     # Dynamically discover all stage directories in Google Drive (Unbounded N-Stage Support)
@@ -513,6 +513,7 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --max-seq-len "$TARA_MAX_SEQ_LEN" \
         --checkpoint-interval "$CHECKPOINT_INTERVAL" \
         --hf-repo "$HF_MODEL_REPO" \
+        $GDRIVE_SYNC_FLAGS \
         $CANARY_EXTRA_ARGS \
         $FULL_DATASET_EXTRA \
         $GRAD_CHECKPOINT_FLAG
@@ -557,6 +558,7 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --max-seq-len "$TARA_MAX_SEQ_LEN" \
         --checkpoint-interval "$CHECKPOINT_INTERVAL" \
         --hf-repo "$HF_MODEL_REPO" \
+        $GDRIVE_SYNC_FLAGS \
         $FULL_DATASET_EXTRA \
         $GRAD_CHECKPOINT_FLAG
 
@@ -590,6 +592,7 @@ if [ "$TRAINER_MODE" = "python" ]; then
             --max-seq-len "$TARA_MAX_SEQ_LEN" \
             --checkpoint-interval "$CHECKPOINT_INTERVAL" \
             --hf-repo "$HF_MODEL_REPO" \
+            $GDRIVE_SYNC_FLAGS \
             $FULL_DATASET_EXTRA \
             $GRAD_CHECKPOINT_FLAG
 

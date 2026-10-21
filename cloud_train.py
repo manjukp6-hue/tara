@@ -2010,7 +2010,7 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                     if os.path.abspath(src) == os.path.abspath(dst):
                         continue
                     _stream_copy_file(src, dst)
-                    if fname in ("model.safetensors", "pytorch_model.bin") and os.path.exists(dst):
+                    if fname in ("model.safetensors", "pytorch_model.bin", "optimizer_state.pt") and os.path.exists(dst):
                         src_sz = os.path.getsize(src)
                         dst_sz = os.path.getsize(dst)
                         if src_sz != dst_sz or dst_sz == 0:
@@ -2037,18 +2037,6 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                         except Exception:
                             pass
 
-
-                # If optimizer_state.pt is not in src_dir (e.g. best_checkpoint), delete it from target_dir
-                for fname in ["optimizer_state.pt", "pytorch_model.bin"]:
-                    src_f = os.path.join(src_dir, fname)
-                    dst_f = os.path.join(target_dir, fname)
-                    if not os.path.exists(src_f) and os.path.exists(dst_f):
-                        try:
-                            os.remove(dst_f)
-                            print(f"[GDrive Hygiene] Deleted obsolete old checkpoint file from GDrive: {dst_f}", flush=True)
-                        except Exception as e:
-                            print(f"[GDrive Hygiene Notice] Could not delete obsolete {dst_f}: {e}", flush=True)
-
             # Enforce retention cleanup and clone purge in Google Drive parent directory
             gdrive_parent = os.path.dirname(os.path.abspath(target_dir))
             if gdrive_parent and os.path.exists(gdrive_parent):
@@ -2064,7 +2052,7 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                                 print(f"[GDrive Hygiene] Deleted parent duplicate artifact from GDrive: {pf}", flush=True)
                             except Exception:
                                 pass
-                    _cleanup_old_versioned_checkpoints(gdrive_parent, os.path.basename(target_dir))
+                    _cleanup_old_versioned_checkpoints(gdrive_parent, os.path.basename(target_dir), keep_n=1, force_keep_exact=True)
                 except Exception:
                     pass
 
@@ -2844,6 +2832,7 @@ def save_checkpoint(
     is_best: bool = False,
     is_completed: bool = False,
     sync_to_gdrive: bool = False,
+    sync_optimizer: bool = False,
     dataset: Optional[Any] = None,
     shard_ledger: Optional[Any] = None,
     data_cursor: Optional[Dict[str, Any]] = None,
@@ -3235,7 +3224,7 @@ def save_checkpoint(
 
     # Step 7: Mirror verified checkpoint to Google Drive in background
     if sync_to_gdrive:
-        sync_checkpoint_to_gdrive(output_dir, tag, wait=is_completed)
+        sync_checkpoint_to_gdrive(output_dir, tag, wait=is_completed, sync_optimizer=sync_optimizer)
     else:
         print(f"[GDrive Mirror] Skipped cloud sync for [{tag}] (Google Drive preserves best model only).", flush=True)
 
@@ -4494,6 +4483,9 @@ def main():
     # Pre-resolve and export HF_TOKEN across runtime
     _resolve_hf_token(args.hf_token)
 
+    if (args.full_dataset or args.max_steps <= 0) and not args.canary:
+        args.max_steps = 100_000_000
+
 
     # Canary Mode Contract & Isolation
     if args.canary:
@@ -4614,7 +4606,8 @@ def main():
     print(f"  Gradient Accumulation : {args.grad_accum}")
     print(f"  Effective Batch Size  : {args.batch_size * args.grad_accum}")
     print(f"  Max Sequence Length   : {args.max_seq_len}")
-    print(f"  Optimization Steps    : {args.max_steps}")
+    steps_label = f"{args.max_steps} (Continuous Full Dataset)" if (args.full_dataset or args.max_steps >= 100_000_000) else str(args.max_steps)
+    print(f"  Optimization Steps    : {steps_label}")
     print(f"  Checkpoint Interval   : {args.checkpoint_interval}")
     print(f"  Checkpoints Retained  : {args.keep_checkpoints}")
     print(f"  Warmup Steps          : {args.warmup_steps}")
@@ -5391,6 +5384,7 @@ def main():
                         step, epoch, cur_step_loss, best_loss, args.stage_id,
                         is_best=False, is_completed=False,
                         sync_to_gdrive=args.sync_all_to_gdrive,
+                        sync_optimizer=args.sync_gdrive_optimizer,
                         dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
                         keep_n=args.keep_checkpoints, force_keep_exact=True,
                         world_model=world_model,
@@ -5427,6 +5421,7 @@ def main():
                         step, epoch, cur_step_loss, best_loss, args.stage_id,
                         is_best=False, is_completed=False,
                         sync_to_gdrive=args.sync_all_to_gdrive,
+                        sync_optimizer=args.sync_gdrive_optimizer,
                         dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
                         keep_n=args.keep_checkpoints, force_keep_exact=True,
                         world_model=world_model,
@@ -5586,6 +5581,8 @@ def main():
         model, optimizer, scaler, config, tok_path, args.output_dir,
         step, epoch, final_loss, best_loss, args.stage_id,
         is_best=False, is_completed=True,
+        sync_to_gdrive=args.sync_all_to_gdrive,
+        sync_optimizer=args.sync_gdrive_optimizer,
         dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
         keep_n=args.keep_checkpoints, force_keep_exact=True,
         world_model=world_model,

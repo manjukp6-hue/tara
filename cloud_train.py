@@ -1539,6 +1539,66 @@ _gdrive_sync_thread: Optional[threading.Thread] = None
 _gdrive_sync_lock = threading.Lock()
 
 
+def _safe_rmtree(dir_path: str) -> bool:
+    """
+    Robust directory tree removal that succeeds on both local filesystem
+    and Google Drive / FUSE mounts, handling locked handles and retry logic.
+    """
+    if not os.path.exists(dir_path) and not os.path.islink(dir_path):
+        return True
+    try:
+        if os.path.islink(dir_path):
+            os.unlink(dir_path)
+            return True
+    except Exception:
+        pass
+
+    try:
+        # Step 1: Remove read-only flags and delete leaf files bottom-up
+        for root, dirs, files in os.walk(dir_path, topdown=False):
+            for fname in files:
+                fpath = os.path.join(root, fname)
+                try:
+                    os.chmod(fpath, 0o777)
+                    os.remove(fpath)
+                except Exception:
+                    pass
+            for dname in dirs:
+                dpath = os.path.join(root, dname)
+                try:
+                    os.rmdir(dpath)
+                except Exception:
+                    pass
+        try:
+            os.rmdir(dir_path)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    if not os.path.exists(dir_path) and not os.path.islink(dir_path):
+        return True
+
+    # Step 2: Try shutil.rmtree
+    try:
+        shutil.rmtree(dir_path, ignore_errors=True)
+    except Exception:
+        pass
+
+    if not os.path.exists(dir_path) and not os.path.islink(dir_path):
+        return True
+
+    # Step 3: On Linux / Colab FUSE, execute rm -rf directly
+    if os.name != "nt":
+        try:
+            import subprocess
+            subprocess.run(["rm", "-rf", dir_path], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    return not os.path.exists(dir_path) and not os.path.islink(dir_path)
+
+
 def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
     """
     Direct in-place streaming copy for Google Drive FUSE.
@@ -1755,6 +1815,14 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                             print(f"[GDrive Hygiene] Deleted obsolete old checkpoint file from GDrive: {dst_f}", flush=True)
                         except Exception as e:
                             print(f"[GDrive Hygiene Notice] Could not delete obsolete {dst_f}: {e}", flush=True)
+
+            # Enforce retention cleanup and clone purge in Google Drive parent directory
+            gdrive_parent = os.path.dirname(os.path.abspath(target_dir))
+            if gdrive_parent and os.path.exists(gdrive_parent):
+                try:
+                    _cleanup_old_versioned_checkpoints(gdrive_parent, os.path.basename(target_dir))
+                except Exception:
+                    pass
 
             elapsed = time.time() - t_start
             print(f"[GDrive Mirror] Successfully backed up [{tag}] ({synced} files, {elapsed:.1f}s) -> {target_dir}", flush=True)
@@ -2079,14 +2147,25 @@ def clean_stale_checkpoint_artifacts(checkpoint_dir: str, is_best: bool = False)
 
     # 1. Clean local directory
     for f in os.listdir(checkpoint_dir):
+        fp = os.path.join(checkpoint_dir, f)
         if f.endswith(".tmp") or ".tmp_" in f:
             try:
-                os.remove(os.path.join(checkpoint_dir, f))
+                os.remove(fp)
+            except Exception:
+                pass
+        # Delete duplicate numbered files/folders created by DriveFS: (1), (2), etc.
+        if " (" in f and ")" in f:
+            try:
+                if os.path.isdir(fp):
+                    _safe_rmtree(fp)
+                else:
+                    os.remove(fp)
+                print(f"[Hygiene] Removed duplicate clone from checkpoint directory: {f}", flush=True)
             except Exception:
                 pass
         if is_best and f == "optimizer_state.pt":
             try:
-                os.remove(os.path.join(checkpoint_dir, f))
+                os.remove(fp)
                 print(f"[Hygiene] Removed unneeded optimizer state from best milestone: {checkpoint_dir}/{f}", flush=True)
             except Exception:
                 pass
@@ -2103,14 +2182,24 @@ def clean_stale_checkpoint_artifacts(checkpoint_dir: str, is_best: bool = False)
 
             if os.path.exists(gdrive_target):
                 for f in os.listdir(gdrive_target):
+                    fp = os.path.join(gdrive_target, f)
                     if f.endswith(".tmp") or ".tmp_" in f:
                         try:
-                            os.remove(os.path.join(gdrive_target, f))
+                            os.remove(fp)
+                        except Exception:
+                            pass
+                    if " (" in f and ")" in f:
+                        try:
+                            if os.path.isdir(fp):
+                                _safe_rmtree(fp)
+                            else:
+                                os.remove(fp)
+                            print(f"[GDrive Hygiene] Removed duplicate clone from GDrive target: {f}", flush=True)
                         except Exception:
                             pass
                     if is_best and f == "optimizer_state.pt":
                         try:
-                            os.remove(os.path.join(gdrive_target, f))
+                            os.remove(fp)
                             print(f"[GDrive Hygiene] Removed unneeded optimizer state from GDrive best milestone: {gdrive_target}/{f}", flush=True)
                         except Exception:
                             pass
@@ -2625,7 +2714,7 @@ def save_checkpoint(
                     f"Preserving existing checkpoint at {output_dir} unchanged.",
                     flush=True,
                 )
-                shutil.rmtree(staging_dir, ignore_errors=True)
+                _safe_rmtree(staging_dir)
                 return
 
             # ----------------------------------------------------------------
@@ -2645,7 +2734,7 @@ def save_checkpoint(
                 os.rename(staging_dir, versioned_dir)
             except Exception:
                 shutil.copytree(staging_dir, versioned_dir)
-                shutil.rmtree(staging_dir, ignore_errors=True)
+                _safe_rmtree(staging_dir)
 
             # Sync output_dir to point to latest versioned content:
             # Copy files from versioned_dir into output_dir (overwrite in-place).
@@ -2655,7 +2744,13 @@ def save_checkpoint(
                 src = os.path.join(versioned_dir, fname)
                 dst = os.path.join(output_dir, fname)
                 if os.path.isfile(src):
-                    shutil.copy2(src, dst)
+                    # Unlink pre-existing dst to avoid DriveFS creating duplicate clone files: (1), (2)
+                    if os.path.exists(dst):
+                        try:
+                            os.remove(dst)
+                        except Exception:
+                            pass
+                    _stream_copy_file(src, dst)
 
             # Write COMMITTED marker inside versioned_dir so recovery can
             # distinguish a fully promoted checkpoint from an incomplete staging dir.
@@ -2742,7 +2837,7 @@ def save_checkpoint(
         except Exception as e:
             print(f"[Checkpoint Failure] Error during checkpoint save: {e}", flush=True)
             if os.path.exists(staging_dir):
-                shutil.rmtree(staging_dir, ignore_errors=True)
+                _safe_rmtree(staging_dir)
             return
 
     # Step 7: Mirror verified checkpoint to Google Drive in background
@@ -2862,6 +2957,16 @@ def _cleanup_old_versioned_checkpoints(
     if not os.path.isdir(parent_dir):
         return
 
+    # 0. Clean duplicate clone files/folders created by Google Drive / DriveFS in parent directory
+    try:
+        for entry in os.listdir(parent_dir):
+            if " (" in entry and ")" in entry and entry.startswith(output_dir_basename):
+                clone_path = os.path.join(parent_dir, entry)
+                if _safe_rmtree(clone_path):
+                    print(f"[Checkpoint Retention] Purged duplicate Drive clone: {entry}", flush=True)
+    except Exception:
+        pass
+
     # 1. Resolve and protect latest_checkpoint.json pointer target scoped to output_dir_basename
     ptr_candidates = [
         os.path.join(parent_dir, output_dir_basename, "latest_checkpoint.json"),
@@ -2938,11 +3043,10 @@ def _cleanup_old_versioned_checkpoints(
                 is_dead = True
 
             if is_dead:
-                try:
-                    shutil.rmtree(full_path, ignore_errors=True)
+                if _safe_rmtree(full_path):
                     print(f"[Checkpoint Retention] Removed abandoned staging directory (age {int(age)}s): {entry}", flush=True)
-                except Exception as cleanup_err:
-                    print(f"[Checkpoint Retention Notice] Could not remove abandoned staging dir {entry}: {cleanup_err}", flush=True)
+                else:
+                    print(f"[Checkpoint Retention Notice] Could not remove abandoned staging dir {entry}", flush=True)
             continue
 
         # Case B: Versioned checkpoints ({output_dir_basename}.step*)
@@ -2973,12 +3077,12 @@ def _cleanup_old_versioned_checkpoints(
                 committed_kept += 1
                 continue
 
-        try:
-            shutil.rmtree(dir_path, ignore_errors=True)
+        removed = _safe_rmtree(dir_path)
+        if removed:
             reason = "old committed checkpoint beyond retention window" if is_committed else "uncommitted versioned remnant"
             print(f"[Checkpoint Retention] Removed {reason}: {os.path.basename(dir_path)}", flush=True)
-        except Exception as cleanup_err:
-            print(f"[Checkpoint Retention Notice] Could not remove {dir_path}: {cleanup_err}", flush=True)
+        else:
+            print(f"[Checkpoint Retention Notice] Could not remove {dir_path}", flush=True)
 
 
 def try_resume_from_checkpoint(

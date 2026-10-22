@@ -4632,6 +4632,8 @@ def main():
                         help="Override memory preflight gate to allow FP32 AdamW on memory-constrained GPUs")
     parser.add_argument("--keep-checkpoints", type=int, default=int(os.environ.get("KEEP_CHECKPOINTS", 1)),
                         help="Number of past checkpoints to retain (default: 1; deletes older checkpoints upon verified new commit)")
+    parser.add_argument("--skip-save-steps", type=int, default=int(os.environ.get("SKIP_SAVE_STEPS", 1)),
+                        help="Number of initial steps to skip checkpoint and best-milestone disk/cloud saves (default: 1; saves start at step > skip_save_steps)")
     parser.add_argument("--sync-all-to-gdrive", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true", default=True,
                         help="Sync all intermediate training checkpoints to Google Drive (default: True)")
     parser.add_argument("--sync-gdrive-optimizer", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true", default=True,
@@ -4781,6 +4783,7 @@ def main():
     print(f"  Optimization Steps    : {steps_label}")
     print(f"  Checkpoint Interval   : {args.checkpoint_interval}")
     print(f"  Checkpoints Retained  : {args.keep_checkpoints}")
+    print(f"  Skip Save Steps       : {args.skip_save_steps}")
     print(f"  Warmup Steps          : {args.warmup_steps}")
     print(f"  Base Learning Rate    : {args.lr:.2e}")
     print(f"  Min Learning Rate     : {args.min_lr:.2e}")
@@ -5579,11 +5582,13 @@ def main():
                 if step % 25 == 0 or step == start_step + 1 or is_new_best:
                     print_frontier_comparison_matrix_colored(step, cur_step_loss, min(best_loss, cur_step_loss))
 
+                can_save_at_current_step = (step > args.skip_save_steps) or (step >= args.max_steps)
+
                 # Periodic Regular Training Checkpoint Gate (Model + Optimizer + Scaler + RNG + Shard Cursor):
                 # Preserves full recoverable training state at checkpoint_interval steps.
                 # Guarantees seamless, exact, crash-proof resumption with full AdamW moments and exact line offset!
                 is_regular_interval = (step - last_regular_checkpoint_step >= args.checkpoint_interval)
-                if is_regular_interval:
+                if can_save_at_current_step and is_regular_interval:
                     last_regular_checkpoint_step = step
                     save_checkpoint(
                         model, optimizer, scaler, config, tok_path, args.output_dir,
@@ -5609,7 +5614,7 @@ def main():
                 is_major_milestone = (last_best_checkpoint_loss - best_loss >= 0.15)
                 is_final_step = (step >= args.max_steps)
 
-                if (has_unsaved_best_milestone or is_new_best) and (is_interval_step or is_major_milestone or is_final_step):
+                if can_save_at_current_step and (has_unsaved_best_milestone or is_new_best) and (is_interval_step or is_major_milestone or is_final_step):
                     has_unsaved_best_milestone = False
                     last_best_checkpoint_step = step
                     last_best_checkpoint_loss = best_loss

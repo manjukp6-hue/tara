@@ -42,25 +42,57 @@ export HF_DATASET_REPO="${HF_DATASET_REPO:-${HF_MODEL_REPO:-${HF_REPO:-manjukp6/
 export HF_MODEL_REPO="${HF_MODEL_REPO:-${HF_DATASET_REPO}}"
 export HF_REPO="${HF_REPO:-${HF_MODEL_REPO}}"
 
-# Resolve HF_TOKEN from Google Colab userdata secrets if not explicitly exported in Bash
-if [ -z "${HF_TOKEN:-}" ]; then
-    RESOLVED_HF_TOKEN=$(python3 -c "
+# Resolve and validate HF_TOKEN from environment or Google Colab userdata secrets
+RESOLVED_HF_TOKEN=$(python3 -c "
+import os, sys
+
+def clean(val):
+    if not val:
+        return None
+    s = str(val).strip().strip('\'\"').strip()
+    if s and all(ord(c) < 128 for c in s):
+        return s
+    return None
+
+candidates = []
+if os.environ.get('HF_TOKEN'):
+    candidates.append(os.environ.get('HF_TOKEN'))
+
 try:
     from google.colab import userdata
-    for k in ('HF_TOKEN', 'tara_sync', 'hf_token'):
+    for k in ('HF_TOKEN', 'hf_token', 'tara_sync'):
         try:
-            t = userdata.get(k)
-            if t and t.strip():
-                print(t.strip())
-                break
+            val = userdata.get(k)
+            if val:
+                candidates.append(val)
         except Exception:
             pass
 except Exception:
     pass
+
+# Priority 1: Tokens starting with 'hf_'
+for cand in candidates:
+    c = clean(cand)
+    if c and c.startswith('hf_'):
+        print(c)
+        sys.exit(0)
+
+# Priority 2: Any non-empty ASCII candidate
+for cand in candidates:
+    c = clean(cand)
+    if c:
+        print(c)
+        sys.exit(0)
 " 2>/dev/null || true)
-    if [ -n "$RESOLVED_HF_TOKEN" ]; then
-        export HF_TOKEN="$RESOLVED_HF_TOKEN"
-        echo "[AUTH] HF_TOKEN successfully resolved from Google Colab Secrets."
+
+if [ -n "$RESOLVED_HF_TOKEN" ]; then
+    export HF_TOKEN="$RESOLVED_HF_TOKEN"
+    echo "[AUTH] HF_TOKEN verified and exported successfully."
+else
+    if [ -n "${HF_TOKEN:-}" ]; then
+        echo "[AUTH WARNING] HF_TOKEN contains non-ASCII characters (e.g. copied masked dots '•'). Clearing invalid token."
+        unset HF_TOKEN
+        rm -f /root/.cache/huggingface/token ~/.cache/huggingface/token 2>/dev/null || true
     fi
 fi
 
@@ -144,6 +176,13 @@ repo_type = sys.argv[2]
 prefix = sys.argv[3]
 local_dir = sys.argv[4]
 token = os.environ.get('HF_TOKEN') or None
+if token:
+    token_str = str(token).strip().strip('\'\"').strip()
+    if token_str and all(ord(c) < 128 for c in token_str):
+        token = token_str
+    else:
+        print('[HF DOWNLOAD] Warning: Provided HF_TOKEN contains non-ASCII characters. Proceeding without token.', flush=True)
+        token = None
 allow = [prefix] if prefix else None
 
 snapshot_download(

@@ -2759,6 +2759,7 @@ def save_best_milestone(
             existing_model = os.path.join(parent_dir, "model.safetensors")
             existing_state_file = os.path.join(parent_dir, "checkpoint_state.json")
             existing_is_current_step = False
+            existing_st = None
             if os.path.isfile(existing_model) and os.path.getsize(existing_model) > 1024 * 1024 and os.path.isfile(existing_state_file):
                 try:
                     with open(existing_state_file, "r", encoding="utf-8") as f_st:
@@ -2785,7 +2786,10 @@ def save_best_milestone(
                     torch.cuda.empty_cache()
 
             actual_model_path = target_model if HAS_SAFETENSORS else os.path.join(staging_dir, "pytorch_model.bin")
-            weights_sha256 = compute_file_sha256(actual_model_path) if os.path.exists(actual_model_path) else None
+            if existing_is_current_step and existing_st and existing_st.get("model_weights_sha256"):
+                weights_sha256 = existing_st.get("model_weights_sha256")
+            else:
+                weights_sha256 = compute_file_sha256(actual_model_path) if os.path.exists(actual_model_path) else None
             if weights_sha256:
                 print(f"[Best Checkpoint Dynamic SHA-256] {os.path.basename(actual_model_path)} -> {weights_sha256}", flush=True)
 
@@ -2808,7 +2812,10 @@ def save_best_milestone(
                     del wm_sd
                     gc.collect()
                 actual_wm_target = wm_target if HAS_SAFETENSORS else os.path.join(staging_dir, "pytorch_world_model.bin")
-                world_weights_sha256 = compute_file_sha256(actual_wm_target) if os.path.exists(actual_wm_target) else None
+                if existing_is_current_step and existing_st and existing_st.get("world_model_weights_sha256"):
+                    world_weights_sha256 = existing_st.get("world_model_weights_sha256")
+                else:
+                    world_weights_sha256 = compute_file_sha256(actual_wm_target) if os.path.exists(actual_wm_target) else None
 
             # 4. Continuation state with exact data cursor
             if data_cursor is None:
@@ -2911,7 +2918,10 @@ def save_best_milestone(
                             else:
                                 if os.path.exists(s_dst):
                                     _safe_unlink(s_dst)
-                                _stream_copy_file(s_src, s_dst)
+                                try:
+                                    os.link(s_src, s_dst)
+                                except OSError:
+                                    _stream_copy_file(s_src, s_dst)
                         _safe_rmtree(staging_dir)
                 else:
                     for item in os.listdir(staging_dir):
@@ -2924,7 +2934,10 @@ def save_best_milestone(
                         else:
                             if os.path.exists(s_dst):
                                 _safe_unlink(s_dst)
-                            _stream_copy_file(s_src, s_dst)
+                            try:
+                                os.link(s_src, s_dst)
+                            except OSError:
+                                _stream_copy_file(s_src, s_dst)
                     _safe_rmtree(staging_dir)
 
                 if backup_dir and os.path.exists(backup_dir):
@@ -3260,8 +3273,9 @@ def save_checkpoint(
                 _safe_rmtree(staging_dir)
 
             # Sync output_dir to point to latest versioned content:
-            # Copy files from versioned_dir into output_dir (overwrite in-place).
-            # This preserves backward compatibility for all callers that reference output_dir.
+            # Hardlink files from versioned_dir into output_dir (instant 0ms on the same local filesystem).
+            # Falls back to _stream_copy_file only if os.link raises an OSError (e.g. cross-filesystem boundary).
+            # This preserves backward compatibility for all callers that reference output_dir without redundant 5GB disk writes.
             os.makedirs(output_dir, exist_ok=True)
             for fname in os.listdir(versioned_dir):
                 src = os.path.join(versioned_dir, fname)
@@ -3273,7 +3287,10 @@ def save_checkpoint(
                             os.remove(dst)
                         except Exception:
                             pass
-                    _stream_copy_file(src, dst)
+                    try:
+                        os.link(src, dst)
+                    except OSError:
+                        _stream_copy_file(src, dst)
 
             # Write COMMITTED marker inside versioned_dir so recovery can
             # distinguish a fully promoted checkpoint from an incomplete staging dir.
@@ -5657,11 +5674,35 @@ def main():
 
                 can_save_at_current_step = (step > args.skip_save_steps) or (step >= args.max_steps)
 
+                # Rate-Limited Best Milestone Commit Gate:
+                # Commits best checkpoint to disk and Google Drive ONLY:
+                # 1. At checkpoint_interval steps (e.g. step 50, 100, 150...), OR
+                # 2. When a significant breakthrough occurs (loss drop >= 0.25 on current step after warmup and min 10/25 steps), OR
+                # 3. Upon reaching max_steps.
+                # Prevents writing 4GB on every consecutive step during rapid early loss drops!
+                is_interval_step = (step - last_best_checkpoint_step >= args.checkpoint_interval)
+                is_major_milestone = (
+                    is_new_best
+                    and (step > args.warmup_steps)
+                    and (step - last_best_checkpoint_step >= max(10, args.checkpoint_interval // 2))
+                    and (last_best_checkpoint_loss - best_loss >= 0.25)
+                )
+                is_final_step = (step >= args.max_steps)
+
+                should_save_best = (
+                    can_save_at_current_step
+                    and (has_unsaved_best_milestone or is_new_best)
+                    and (is_interval_step or is_major_milestone or is_final_step)
+                )
+
                 # Periodic Regular Training Checkpoint Gate (Model + Optimizer + Scaler + RNG + Shard Cursor):
                 # Preserves full recoverable training state at checkpoint_interval steps.
                 # Guarantees seamless, exact, crash-proof resumption with full AdamW moments and exact line offset!
                 is_regular_interval = (step - last_regular_checkpoint_step >= args.checkpoint_interval)
-                if can_save_at_current_step and is_regular_interval:
+                should_save_regular = can_save_at_current_step and (is_regular_interval or should_save_best)
+
+                # Unified Checkpoint Save: save_checkpoint is called AT MOST ONCE per step!
+                if should_save_regular:
                     last_regular_checkpoint_step = step
                     save_checkpoint(
                         model, optimizer, scaler, config, tok_path, args.output_dir,
@@ -5677,21 +5718,7 @@ def main():
                         per_shard_promotion=args.per_shard_promotion,
                     )
 
-                # Rate-Limited Best Milestone Commit Gate:
-                # Commits best checkpoint to disk and Google Drive ONLY:
-                # 1. At checkpoint_interval steps (e.g. step 50, 100, 150...), OR
-                # 2. When a significant breakthrough occurs (loss drop >= 0.25 after warmup and min 10/25 steps), OR
-                # 3. Upon reaching max_steps.
-                # Prevents writing 4GB on every consecutive step during rapid early loss drops!
-                is_interval_step = (step - last_best_checkpoint_step >= args.checkpoint_interval)
-                is_major_milestone = (
-                    (step > args.warmup_steps)
-                    and (step - last_best_checkpoint_step >= max(10, args.checkpoint_interval // 2))
-                    and (last_best_checkpoint_loss - best_loss >= 0.25)
-                )
-                is_final_step = (step >= args.max_steps)
-
-                if can_save_at_current_step and (has_unsaved_best_milestone or is_new_best) and (is_interval_step or is_major_milestone or is_final_step):
+                if should_save_best:
                     has_unsaved_best_milestone = False
                     last_best_checkpoint_step = step
                     last_best_checkpoint_loss = best_loss
@@ -5702,24 +5729,7 @@ def main():
                         flush=True,
                     )
 
-                    # 1. Commit complete training checkpoint to local disk only (unless explicitly configured)
-                    # Guarantees crash-proof resumption on fast local storage without filling Google Drive
-                    save_checkpoint(
-                        model, optimizer, scaler, config, tok_path, args.output_dir,
-                        step, epoch, cur_step_loss, best_loss, args.stage_id,
-                        is_best=False, is_completed=False,
-                        sync_to_gdrive=args.sync_all_to_gdrive,
-                        sync_optimizer=args.sync_gdrive_optimizer,
-                        dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
-                        keep_n=args.keep_checkpoints, force_keep_exact=True,
-                        world_model=world_model,
-                        world_optimizer=world_optimizer,
-                        world_scaler=world_scaler,
-                        per_shard_promotion=args.per_shard_promotion,
-                    )
-                    last_regular_checkpoint_step = step
-
-                    # 2. Save genuine best model weights to best milestone directory (atomic verified commit)
+                    # Save genuine best model weights to best milestone directory (atomic verified commit)
                     save_best_milestone(
                         model, config, tok_path, best_cp_dir,
                         step, epoch, cur_step_loss, best_loss, args.stage_id,
@@ -5727,7 +5737,7 @@ def main():
                         world_model=world_model,
                     )
 
-                    # 3. Mirror the single genuine BEST model to Google Drive in background (compact, NO optimizer state)
+                    # Mirror the single genuine BEST model to Google Drive in background (compact, NO optimizer state)
                     sync_checkpoint_to_gdrive(
                         best_cp_dir,
                         f"BEST-MILESTONE (Step {step:04d}, Loss: {best_loss:.4f})",

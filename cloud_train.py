@@ -16,6 +16,7 @@ Features:
 """
 
 import argparse
+import copy
 import gc
 import glob
 import hashlib
@@ -2049,10 +2050,13 @@ def resolve_gdrive_stage_dir(output_dir: str, stage_id: Optional[str] = None) ->
         return abs_out
 
     norm = output_dir.replace("\\", "/").rstrip("/")
-    if "checkpoints/" in norm:
-        rel = norm.split("checkpoints/", 1)[1].strip("/")
-    elif "/checkpoints" in norm:
-        rel = norm.split("/checkpoints", 1)[1].strip("/")
+    lower_norm = norm.lower()
+    if "checkpoints/" in lower_norm:
+        idx = lower_norm.find("checkpoints/") + len("checkpoints/")
+        rel = norm[idx:].strip("/")
+    elif "/checkpoints" in lower_norm:
+        idx = lower_norm.find("/checkpoints") + len("/checkpoints")
+        rel = norm[idx:].strip("/")
     else:
         rel = os.path.basename(norm)
 
@@ -5421,7 +5425,10 @@ def main():
     last_regular_checkpoint_step = start_step
     last_best_checkpoint_step = start_step
     last_best_checkpoint_loss = best_loss if best_loss < float("inf") else float("inf")
-    has_unsaved_best_milestone = False
+    has_unsaved_gdrive_best = False
+    best_loss_step = start_step
+    best_loss_epoch = start_epoch
+    best_loss_cursor = resumed_cursor
     current_cursor = resumed_cursor
 
     total_samples_trained = int(resumed_cursor.get("total_samples_trained", 0)) if resumed_cursor else 0
@@ -5693,45 +5700,63 @@ def main():
                     flush=True
                 )
 
-                # Dynamic In-Memory Best Loss Tracking:
-                # Instantly caches best loss in memory on every step without disk thrashing (0 disk writes)
+                # Dynamic In-Memory Best Loss Tracking & Authentic Best Snapshot:
                 is_new_best = (cur_step_loss < best_loss)
+                can_save_at_current_step = (step > args.skip_save_steps) or (step >= args.max_steps)
+
                 if is_new_best:
                     best_loss = cur_step_loss
-                    has_unsaved_best_milestone = True
+                    best_loss_step = step
+                    best_loss_epoch = epoch
+                    best_loss_cursor = copy.deepcopy(current_cursor) if current_cursor is not None else None
+
+                    if can_save_at_current_step:
+                        last_best_checkpoint_step = step
+                        last_best_checkpoint_loss = cur_step_loss
+
+                        print(
+                            f"[{args.stage_id}] >>> {CLR_GREEN}{CLR_BOLD}COMMITTING AUTHENTIC BEST MILESTONE CHECKPOINT: "
+                            f"{best_loss:.4f} (Step {step:04d}){CLR_RESET} <<<",
+                            flush=True,
+                        )
+
+                        # Immediately write authentic best weights of this exact step to local disk without delay
+                        save_best_milestone(
+                            model, config, tok_path, best_cp_dir,
+                            step, epoch, cur_step_loss, best_loss, args.stage_id,
+                            dataset=dataset, shard_ledger=shard_ledger, data_cursor=best_loss_cursor,
+                            world_model=world_model,
+                        )
+
+                        # Immediately mirror authentic best milestone to Google Drive in background
+                        sync_checkpoint_to_gdrive(
+                            best_cp_dir,
+                            f"BEST-MILESTONE (Step {step:04d}, Loss: {best_loss:.4f})",
+                            wait=False,
+                            sync_optimizer=False,
+                        )
+                    else:
+                        print(
+                            f"[{args.stage_id} | Step {step:04d}] [Skip-Save Active (<= {args.skip_save_steps})] "
+                            f"New best loss {best_loss:.4f} tracked in memory; local save active at Step {args.skip_save_steps + 1}+.",
+                            flush=True,
+                        )
 
                 # Periodic Benchmark Matrix Display
                 if step % 25 == 0 or step == start_step + 1 or is_new_best:
                     print_frontier_comparison_matrix_colored(step, cur_step_loss, min(best_loss, cur_step_loss))
 
                 # ------------------------------------------------------------------
-                # UNIFIED SINGLE-PASS CHECKPOINT & BEST MILESTONE GATE
-                # Prevents saving [STEP N] twice when Regular Interval and Best Milestone
-                # trigger on the exact same step (e.g., Step 101)!
+                # REGULAR CHECKPOINT GATE & RATE-LIMITED GDRIVE SYNC
                 # ------------------------------------------------------------------
-                can_save_at_current_step = (step > args.skip_save_steps) or (step >= args.max_steps)
-
                 is_regular_interval = (step - last_regular_checkpoint_step >= args.checkpoint_interval)
-                is_best_interval = (step - last_best_checkpoint_step >= args.checkpoint_interval)
-                is_major_milestone = (
-                    is_new_best
-                    and (step > args.warmup_steps)
-                    and (step - last_best_checkpoint_step >= max(10, args.checkpoint_interval // 2))
-                    and (last_best_checkpoint_loss - best_loss >= 0.25)
-                )
                 is_final_step = (step >= args.max_steps)
+                should_save_regular = can_save_at_current_step and (is_regular_interval or is_final_step)
 
-                should_save_best = (
-                    can_save_at_current_step
-                    and (has_unsaved_best_milestone or is_new_best)
-                    and (is_best_interval or is_major_milestone or is_final_step)
-                )
-                should_save_regular = can_save_at_current_step and (is_regular_interval or should_save_best)
-
-                # Unified Checkpoint Save: save_checkpoint is called AT MOST ONCE per step!
+                # Unified Checkpoint Save: save_checkpoint is called AT MOST ONCE per interval!
                 if should_save_regular:
                     last_regular_checkpoint_step = step
-                    # 1. Save full training checkpoint ONCE (never twice on the same step!)
+                    # 1. Save full training checkpoint ONCE (with optimizer state)
                     save_checkpoint(
                         model, optimizer, scaler, config, tok_path, args.output_dir,
                         step, epoch, cur_step_loss, best_loss, args.stage_id,
@@ -5746,39 +5771,6 @@ def main():
                         per_shard_promotion=args.per_shard_promotion,
                     )
 
-                if should_save_best:
-                    has_unsaved_best_milestone = False
-                    last_best_checkpoint_step = step
-                    last_best_checkpoint_loss = best_loss
-
-                    print(
-                        f"[{args.stage_id}] >>> {CLR_GREEN}{CLR_BOLD}COMMITTING BEST MILESTONE CHECKPOINT: "
-                        f"{best_loss:.4f} (Step {step:04d}){CLR_RESET} <<<",
-                        flush=True,
-                    )
-
-                    # 2. Save best milestone (instantly hardlinks model.safetensors from output_dir in 0.01s!)
-                    save_best_milestone(
-                        model, config, tok_path, best_cp_dir,
-                        step, epoch, cur_step_loss, best_loss, args.stage_id,
-                        dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
-                        world_model=world_model,
-                    )
-
-                    # 3. Mirror genuine BEST model to Google Drive in background (compact, NO optimizer state)
-                    # Guarantees crash-proof disaster recovery from GDrive best_checkpoint if top-level FUSE sync ever corrupts
-                    sync_checkpoint_to_gdrive(
-                        best_cp_dir,
-                        f"BEST-MILESTONE (Step {step:04d}, Loss: {best_loss:.4f})",
-                        wait=False,
-                        sync_optimizer=False,
-                    )
-                elif not can_save_at_current_step and is_new_best:
-                    print(
-                        f"[{args.stage_id} | Step {step:04d}] [Skip-Save Active (<= {args.skip_save_steps})] "
-                        f"New best loss {best_loss:.4f} tracked in memory; disk & GDrive save deferred to Step {args.skip_save_steps + 1}+.",
-                        flush=True,
-                    )
 
                 if step >= args.max_steps:
                     break
@@ -5924,12 +5916,25 @@ def main():
         world_scaler=world_scaler,
         per_shard_promotion=args.per_shard_promotion,
     )
-    save_best_milestone(
-        model, config, tok_path, best_cp_dir,
-        step, epoch, final_loss, best_loss, args.stage_id,
-        dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
-        world_model=world_model,
-    )
+    if final_loss <= best_loss:
+        best_loss = final_loss
+        best_loss_step = step
+        save_best_milestone(
+            model, config, tok_path, best_cp_dir,
+            step, epoch, final_loss, best_loss, args.stage_id,
+            dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
+            world_model=world_model,
+        )
+        has_unsaved_gdrive_best = True
+
+    if has_unsaved_gdrive_best:
+        has_unsaved_gdrive_best = False
+        sync_checkpoint_to_gdrive(
+            best_cp_dir,
+            f"BEST-MILESTONE-FINAL (Step {best_loss_step:04d}, Loss: {best_loss:.4f})",
+            wait=True,
+            sync_optimizer=False,
+        )
 
     print(f"[Stage Complete] Training checkpoint preserved in: {args.output_dir}")
     print(f"[Stage Complete] Best Milestone model archived in: {best_cp_dir}")

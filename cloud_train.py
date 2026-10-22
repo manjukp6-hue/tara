@@ -5672,15 +5672,15 @@ def main():
                 if step % 25 == 0 or step == start_step + 1 or is_new_best:
                     print_frontier_comparison_matrix_colored(step, cur_step_loss, min(best_loss, cur_step_loss))
 
+                # ------------------------------------------------------------------
+                # UNIFIED SINGLE-PASS CHECKPOINT & BEST MILESTONE GATE
+                # Prevents saving [STEP N] twice when Regular Interval and Best Milestone
+                # trigger on the exact same step (e.g., Step 101)!
+                # ------------------------------------------------------------------
                 can_save_at_current_step = (step > args.skip_save_steps) or (step >= args.max_steps)
 
-                # Rate-Limited Best Milestone Commit Gate:
-                # Commits best checkpoint to disk and Google Drive ONLY:
-                # 1. At checkpoint_interval steps (e.g. step 50, 100, 150...), OR
-                # 2. When a significant breakthrough occurs (loss drop >= 0.25 on current step after warmup and min 10/25 steps), OR
-                # 3. Upon reaching max_steps.
-                # Prevents writing 4GB on every consecutive step during rapid early loss drops!
-                is_interval_step = (step - last_best_checkpoint_step >= args.checkpoint_interval)
+                is_regular_interval = (step - last_regular_checkpoint_step >= args.checkpoint_interval)
+                is_best_interval = (step - last_best_checkpoint_step >= args.checkpoint_interval)
                 is_major_milestone = (
                     is_new_best
                     and (step > args.warmup_steps)
@@ -5692,18 +5692,14 @@ def main():
                 should_save_best = (
                     can_save_at_current_step
                     and (has_unsaved_best_milestone or is_new_best)
-                    and (is_interval_step or is_major_milestone or is_final_step)
+                    and (is_best_interval or is_major_milestone or is_final_step)
                 )
-
-                # Periodic Regular Training Checkpoint Gate (Model + Optimizer + Scaler + RNG + Shard Cursor):
-                # Preserves full recoverable training state at checkpoint_interval steps.
-                # Guarantees seamless, exact, crash-proof resumption with full AdamW moments and exact line offset!
-                is_regular_interval = (step - last_regular_checkpoint_step >= args.checkpoint_interval)
                 should_save_regular = can_save_at_current_step and (is_regular_interval or should_save_best)
 
                 # Unified Checkpoint Save: save_checkpoint is called AT MOST ONCE per step!
                 if should_save_regular:
                     last_regular_checkpoint_step = step
+                    # 1. Save full training checkpoint ONCE (never twice on the same step!)
                     save_checkpoint(
                         model, optimizer, scaler, config, tok_path, args.output_dir,
                         step, epoch, cur_step_loss, best_loss, args.stage_id,
@@ -5729,7 +5725,7 @@ def main():
                         flush=True,
                     )
 
-                    # Save genuine best model weights to best milestone directory (atomic verified commit)
+                    # 2. Save best milestone (instantly hardlinks model.safetensors from output_dir in 0.01s!)
                     save_best_milestone(
                         model, config, tok_path, best_cp_dir,
                         step, epoch, cur_step_loss, best_loss, args.stage_id,
@@ -5737,7 +5733,8 @@ def main():
                         world_model=world_model,
                     )
 
-                    # Mirror the single genuine BEST model to Google Drive in background (compact, NO optimizer state)
+                    # 3. Mirror genuine BEST model to Google Drive in background (compact, NO optimizer state)
+                    # Guarantees crash-proof disaster recovery from GDrive best_checkpoint if top-level FUSE sync ever corrupts
                     sync_checkpoint_to_gdrive(
                         best_cp_dir,
                         f"BEST-MILESTONE (Step {step:04d}, Loss: {best_loss:.4f})",

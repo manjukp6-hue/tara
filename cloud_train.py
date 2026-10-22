@@ -522,7 +522,9 @@ class ShardLedger:
         self.completed_metadata: Dict[str, Any] = {}
         self.active_shard: Optional[str] = None
         self.active_shard_line_offset: int = 0
+        self.active_shard_total_lines: int = 0
         self.active_shard_byte_offset: int = 0
+        self.total_eligible_shards: int = 0
         self.active_shard_start_step: int = 0
         self.total_records_processed: int = 0
         self.last_committed_step: int = 0
@@ -578,7 +580,9 @@ class ShardLedger:
             self.completed_metadata = loaded_data.get("completed_metadata", {})
             self.active_shard = loaded_data.get("active_shard")
             self.active_shard_line_offset = loaded_data.get("active_shard_line_offset", loaded_data.get("active_shard_offset", 0))
+            self.active_shard_total_lines = loaded_data.get("active_shard_total_lines", 0)
             self.active_shard_byte_offset = loaded_data.get("active_shard_byte_offset", 0)
+            self.total_eligible_shards = loaded_data.get("total_eligible_shards", 0)
             self.active_shard_start_step = loaded_data.get("active_shard_start_step", 0)
             self.total_records_processed = loaded_data.get("total_records_processed", 0)
             self.last_committed_step = loaded_data.get("last_committed_step", 0)
@@ -596,7 +600,9 @@ class ShardLedger:
             "completed_metadata": self.completed_metadata,
             "active_shard": self.active_shard,
             "active_shard_line_offset": self.active_shard_line_offset,
+            "active_shard_total_lines": self.active_shard_total_lines,
             "active_shard_byte_offset": self.active_shard_byte_offset,
+            "total_eligible_shards": self.total_eligible_shards,
             "active_shard_start_step": self.active_shard_start_step,
             "total_records_processed": self.total_records_processed,
             "last_committed_step": self.last_committed_step,
@@ -710,13 +716,42 @@ class ShardLedger:
             flush=True,
         )
 
-    def update_active_cursor(self, shard_name: Optional[str], line_offset: int, total_samples: int, step: int, byte_offset: int = 0):
+    def update_active_cursor(
+        self,
+        shard_name: Optional[str],
+        line_offset: int,
+        total_samples: int,
+        step: int,
+        byte_offset: int = 0,
+        total_lines: Optional[int] = None,
+    ):
         self.active_shard = shard_name
         self.active_shard_line_offset = line_offset
         self.active_shard_byte_offset = byte_offset
+        if total_lines is not None and total_lines > 0:
+            self.active_shard_total_lines = total_lines
         self.total_records_processed = total_samples
         self.last_committed_step = step
         self.save()
+
+        # Telemetry block:
+        tot_lines = self.active_shard_total_lines
+        pct = (line_offset / tot_lines * 100.0) if tot_lines > 0 else 0.0
+        pct_str = f"{pct:.2f}%" if tot_lines > 0 else "N/A"
+        tot_lines_str = f"{tot_lines:,}" if tot_lines > 0 else "Unknown"
+        comp_count = len(self.completed_shards)
+        elig_str = f"{comp_count}/{self.total_eligible_shards}" if self.total_eligible_shards > 0 else f"{comp_count}"
+        local_path = os.path.abspath(self.ledger_file)
+        gdrive_path = os.path.join(self.gdrive_dir, "shard_ledger.json") if self.gdrive_dir else "N/A"
+
+        print("------------------------------------------------------------------------------", flush=True)
+        print(f"  [SHARD LEDGER SYNC] Cursor Updated at Step {step}", flush=True)
+        print(f"  Active Shard       : {shard_name or 'None'}", flush=True)
+        print(f"  Shard Progress     : Line {line_offset:,} / {tot_lines_str} ({pct_str}) | Byte: {byte_offset:,}", flush=True)
+        print(f"  Completed Shards   : {elig_str}", flush=True)
+        print(f"  Local Ledger File  : {local_path}", flush=True)
+        print(f"  GDrive Ledger File : {gdrive_path}", flush=True)
+        print("------------------------------------------------------------------------------", flush=True)
 
     def set_active_shard(self, shard_name: str, start_step: int = 0):
         if self.active_shard != shard_name:
@@ -1071,6 +1106,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
         self.current_active_shard: Optional[str] = None
         self.active_shard_name: Optional[str] = None
         self.active_shard_offset: int = 0
+        self.active_shard_total_lines: int = 0
         self.active_shard_byte_offset: int = 0
         self.active_chunk_idx: int = 0
 
@@ -1193,14 +1229,27 @@ class TaraStreamingJsonlDataset(IterableDataset):
             shard_sha = compute_file_sha256(actual_fp)
             self.active_shard_name = shard_name
             self.current_active_shard = shard_name
+
+            # Determine total lines in this shard using ShardLineIndex
+            if self._line_index:
+                try:
+                    offsets = self._line_index.get_or_build(actual_fp, shard_sha)
+                    self.active_shard_total_lines = len(offsets)
+                except Exception:
+                    self.active_shard_total_lines = 0
+            else:
+                self.active_shard_total_lines = 0
+
             if self.shard_ledger:
                 self.shard_ledger.set_active_shard(shard_name)
+                self.shard_ledger.active_shard_total_lines = self.active_shard_total_lines
+
             # Record live content hash in the dataset snapshot so content changes are detected
             # across sessions without re-discovering the full shard list.
             if self._snapshot is not None:
                 self._snapshot.record_shard_hash(shard_name, shard_sha)
 
-            print(f"[Dataset Shard Active] Streaming from: {shard_name} (Runtime SHA-256: {shard_sha[:16]}...)", flush=True)
+            print(f"[Dataset Shard Active] Streaming from: {shard_name} (Runtime SHA-256: {shard_sha[:16]}..., Total Lines: {self.active_shard_total_lines:,})", flush=True)
 
             total_shard_lines = 0
             reached_eof = True
@@ -1795,6 +1844,8 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
     Direct in-place streaming copy for Google Drive FUSE and local files.
     Pre-unlinks destination and cleans duplicate clone files (1), (2), etc.
     """
+    if os.path.abspath(src) == os.path.abspath(dst):
+        return
     try:
         # Pre-clean any accidental duplicate files in target folder before copy
         dst_dir = os.path.dirname(dst)
@@ -2172,7 +2223,8 @@ def sync_checkpoint_to_gdrive(
 
     file_list = [
         "config.json", "tokenizer.json", "model.safetensors",
-        "checkpoint_state.json", "STAGE_METADATA.json"
+        "checkpoint_state.json", "STAGE_METADATA.json",
+        "shard_ledger.json", "dataset_snapshot.json"
     ]
     if sync_optimizer:
         file_list.append("optimizer_state.pt")
@@ -3042,9 +3094,11 @@ def save_checkpoint(
                 completed_shards = list(shard_ledger.completed_shards) if shard_ledger else []
                 completed_records = shard_ledger.get_total_completed_records() if shard_ledger else 0
                 samples_consumed = completed_records
+                active_total_lines = getattr(dataset, "active_shard_total_lines", getattr(shard_ledger, "active_shard_total_lines", 0)) if (dataset or shard_ledger) else 0
                 data_cursor = {
                     "active_shard": active_shard,
                     "active_shard_line_offset": active_offset,
+                    "active_shard_total_lines": active_total_lines,
                     "active_shard_byte_offset": active_byte_offset,
                     "active_chunk_idx": active_chunk_idx,
                     "total_samples_trained": completed_records,
@@ -3054,6 +3108,7 @@ def save_checkpoint(
             else:
                 active_shard = data_cursor.get("active_shard")
                 active_offset = data_cursor.get("active_shard_line_offset", 0)
+                active_total_lines = data_cursor.get("active_shard_total_lines", getattr(dataset, "active_shard_total_lines", getattr(shard_ledger, "active_shard_total_lines", 0)))
                 active_byte_offset = data_cursor.get("active_shard_byte_offset", 0)
                 active_chunk_idx = data_cursor.get("active_chunk_idx", 0)
                 completed_shards = data_cursor.get("completed_shards", list(shard_ledger.completed_shards) if shard_ledger else [])
@@ -3080,6 +3135,7 @@ def save_checkpoint(
                 "active_shard": active_shard,
                 "active_shard_offset": active_offset,
                 "active_shard_line_offset": active_offset,
+                "active_shard_total_lines": active_total_lines,
                 "active_shard_byte_offset": active_byte_offset,
                 "active_chunk_idx": active_chunk_idx,
                 "completed_shards": completed_shards,
@@ -3266,6 +3322,7 @@ def save_checkpoint(
                     completed_records,
                     step,
                     byte_offset=active_byte_offset,
+                    total_lines=active_total_lines,
                 )
 
             # ----------------------------------------------------------------
@@ -4900,6 +4957,8 @@ def main():
             eligible_shards.append(sf)
 
     selected_shards = eligible_shards if args.max_shards <= 0 else eligible_shards[:args.max_shards]
+    shard_ledger.total_eligible_shards = len(selected_shards)
+    shard_ledger.save()
     print(f"[Dataset] Discovered {len(discovered_shards)} total shards ({len(eligible_shards)} eligible, {len(shard_ledger.completed_shards)} already completed in ledger); pipeline prepared across {len(selected_shards)} shard(s)...")
 
     # Initialize dataset snapshot: records the authoritative ordered shard catalog
@@ -5510,6 +5569,7 @@ def main():
                     current_cursor = {
                         "active_shard": c_shard,
                         "active_shard_line_offset": c_line_offset,
+                        "active_shard_total_lines": getattr(dataset, "active_shard_total_lines", 0),
                         "active_shard_byte_offset": c_byte,
                         "active_chunk_idx": c_chunk_next,
                         "total_samples_trained": total_samples_trained,
@@ -5556,6 +5616,14 @@ def main():
                 ppl_clr, ppl_status, ppl_tag = get_metric_status_and_color(ppl, (4.0, 7.0), (7.1, 20.0))
                 bpb_clr, bpb_status, bpb_tag = get_metric_status_and_color(bpb, (0.55, 0.75), (0.76, 1.20))
 
+                act_shard_tot_lines = getattr(dataset, "active_shard_total_lines", 0)
+                shard_pct = (c_line / act_shard_tot_lines * 100.0) if act_shard_tot_lines > 0 else 0.0
+                shard_line_log = (
+                    f"Shard: {c_shard} (Line {c_line:,}/{act_shard_tot_lines:,} [{shard_pct:.2f}%]) | "
+                    if (c_shard and act_shard_tot_lines > 0)
+                    else (f"Shard: {c_shard} (Line {c_line:,}) | " if c_shard else "")
+                )
+
                 wm_log = f" | WM Loss: {cur_step_world:.4f} (EMA: {ema_world_loss:.4f}) | Joint: {cur_joint_loss:.4f}" if world_model is not None else ""
                 print(
                     f"[{args.stage_id} | Step {step:04d}/{args.max_steps}] "
@@ -5566,6 +5634,7 @@ def main():
                     f"LR: {cur_lr:.2e} | "
                     f"GradNorm: {grad_norm:.2f} | "
                     f"Speed: {step_speed:.0f} tok/s ({step_duration:.2f}s) | "
+                    f"{shard_line_log}"
                     f"Samples: {total_samples_trained:,} | "
                     f"{vram_str}",
                     flush=True
@@ -5607,11 +5676,15 @@ def main():
                 # Rate-Limited Best Milestone Commit Gate:
                 # Commits best checkpoint to disk and Google Drive ONLY:
                 # 1. At checkpoint_interval steps (e.g. step 50, 100, 150...), OR
-                # 2. When a significant breakthrough occurs (loss drop >= 0.15), OR
+                # 2. When a significant breakthrough occurs (loss drop >= 0.25 after warmup and min 10/25 steps), OR
                 # 3. Upon reaching max_steps.
-                # Prevents writing 2GB on every microscopic 0.0001 loss fluctuation!
+                # Prevents writing 4GB on every consecutive step during rapid early loss drops!
                 is_interval_step = (step - last_best_checkpoint_step >= args.checkpoint_interval)
-                is_major_milestone = (last_best_checkpoint_loss - best_loss >= 0.15)
+                is_major_milestone = (
+                    (step > args.warmup_steps)
+                    and (step - last_best_checkpoint_step >= max(10, args.checkpoint_interval // 2))
+                    and (last_best_checkpoint_loss - best_loss >= 0.25)
+                )
                 is_final_step = (step >= args.max_steps)
 
                 if can_save_at_current_step and (has_unsaved_best_milestone or is_new_best) and (is_interval_step or is_major_milestone or is_final_step):
@@ -5773,6 +5846,7 @@ def main():
                 current_cursor = {
                     "active_shard": c_shard,
                     "active_shard_line_offset": c_line_offset,
+                    "active_shard_total_lines": getattr(dataset, "active_shard_total_lines", 0),
                     "active_shard_byte_offset": c_byte,
                     "active_chunk_idx": c_chunk_next,
                     "total_samples_trained": total_samples_trained,

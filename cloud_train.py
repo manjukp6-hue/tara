@@ -3318,13 +3318,16 @@ def save_checkpoint(
             # is ahead of the durable model checkpoint.
             # ----------------------------------------------------------------
             if shard_ledger and data_cursor:
+                shard_tot = getattr(dataset, "active_shard_total_lines", 0) if dataset else getattr(shard_ledger, "active_shard_total_lines", 0)
+                if shard_tot <= 0 and active_total_lines > 0:
+                    shard_tot = active_total_lines
                 shard_ledger.update_active_cursor(
                     active_shard,
                     active_offset,
                     completed_records,
                     step,
                     byte_offset=active_byte_offset,
-                    shard_total_lines=active_total_lines,
+                    shard_total_lines=shard_tot,
                 )
 
             # ----------------------------------------------------------------

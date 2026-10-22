@@ -96,6 +96,8 @@ if [ "$GRADIENT_CHECKPOINTING" = "1" ]; then
     GRAD_CHECKPOINT_FLAG="--gradient-checkpointing"
 fi
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-50}"
+SKIP_SAVE_STEPS="${SKIP_SAVE_STEPS:-100}"
+export SKIP_SAVE_STEPS
 GDRIVE_SYNC_FLAGS="--sync-all-to-gdrive --sync-gdrive-optimizer --keep-checkpoints 1"
 JOINT_STEPS="${JOINT_STEPS:-200}"
 MAIN_DS_DIR="storage/datasets/main_dataset_v2"

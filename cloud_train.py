@@ -723,35 +723,34 @@ class ShardLedger:
         total_samples: int,
         step: int,
         byte_offset: int = 0,
+        shard_total_lines: int = 0,
         total_lines: Optional[int] = None,
     ):
         self.active_shard = shard_name
         self.active_shard_line_offset = line_offset
         self.active_shard_byte_offset = byte_offset
-        if total_lines is not None and total_lines > 0:
-            self.active_shard_total_lines = total_lines
+        effective_lines = shard_total_lines if shard_total_lines > 0 else (total_lines or 0)
+        if effective_lines > 0:
+            self.active_shard_total_lines = effective_lines
         self.total_records_processed = total_samples
         self.last_committed_step = step
         self.save()
 
-        # Telemetry block:
+        # Detailed Telemetry Log for Shard & Ledger Save Paths
         tot_lines = self.active_shard_total_lines
-        pct = (line_offset / tot_lines * 100.0) if tot_lines > 0 else 0.0
-        pct_str = f"{pct:.2f}%" if tot_lines > 0 else "N/A"
-        tot_lines_str = f"{tot_lines:,}" if tot_lines > 0 else "Unknown"
-        comp_count = len(self.completed_shards)
-        elig_str = f"{comp_count}/{self.total_eligible_shards}" if self.total_eligible_shards > 0 else f"{comp_count}"
-        local_path = os.path.abspath(self.ledger_file)
-        gdrive_path = os.path.join(self.gdrive_dir, "shard_ledger.json") if self.gdrive_dir else "N/A"
+        pct_str = f" ({(line_offset / tot_lines) * 100:.2f}%)" if tot_lines > 0 else ""
+        tot_lines_str = f"{tot_lines:,}" if tot_lines > 0 else "counting..."
+        tot_shards_str = f"{len(self.completed_shards)}/{self.total_eligible_shards}" if self.total_eligible_shards > 0 else f"{len(self.completed_shards)}"
+        gdrive_ledger_path = os.path.join(self.gdrive_dir, "shard_ledger.json") if self.gdrive_dir else "Not Mounted"
 
-        print("------------------------------------------------------------------------------", flush=True)
-        print(f"  [SHARD LEDGER SYNC] Cursor Updated at Step {step}", flush=True)
-        print(f"  Active Shard       : {shard_name or 'None'}", flush=True)
-        print(f"  Shard Progress     : Line {line_offset:,} / {tot_lines_str} ({pct_str}) | Byte: {byte_offset:,}", flush=True)
-        print(f"  Completed Shards   : {elig_str}", flush=True)
-        print(f"  Local Ledger File  : {local_path}", flush=True)
-        print(f"  GDrive Ledger File : {gdrive_path}", flush=True)
-        print("------------------------------------------------------------------------------", flush=True)
+        print(
+            f"[Shard Ledger Saved] Step {step:04d} | Active Shard: '{shard_name}' | "
+            f"Line: {line_offset:,} / {tot_lines_str}{pct_str} | Byte Offset: {byte_offset:,} | "
+            f"Completed Shards: {tot_shards_str}\n"
+            f"  -> Local Ledger  : {os.path.abspath(self.ledger_file)}\n"
+            f"  -> GDrive Mirror : {gdrive_ledger_path}",
+            flush=True,
+        )
 
     def set_active_shard(self, shard_name: str, start_step: int = 0):
         if self.active_shard != shard_name:
@@ -3322,7 +3321,7 @@ def save_checkpoint(
                     completed_records,
                     step,
                     byte_offset=active_byte_offset,
-                    total_lines=active_total_lines,
+                    shard_total_lines=active_total_lines,
                 )
 
             # ----------------------------------------------------------------

@@ -5621,13 +5621,12 @@ def main():
                 ppl_clr, ppl_status, ppl_tag = get_metric_status_and_color(ppl, (4.0, 7.0), (7.1, 20.0))
                 bpb_clr, bpb_status, bpb_tag = get_metric_status_and_color(bpb, (0.55, 0.75), (0.76, 1.20))
 
-                act_shard_tot_lines = getattr(dataset, "active_shard_total_lines", 0)
-                shard_pct = (c_line / act_shard_tot_lines * 100.0) if act_shard_tot_lines > 0 else 0.0
-                shard_line_log = (
-                    f"Shard: {c_shard} (Line {c_line:,}/{act_shard_tot_lines:,} [{shard_pct:.2f}%]) | "
-                    if (c_shard and act_shard_tot_lines > 0)
-                    else (f"Shard: {c_shard} (Line {c_line:,}) | " if c_shard else "")
-                )
+                cur_shard_name = current_cursor.get("active_shard") if current_cursor else getattr(dataset, "current_active_shard", "N/A")
+                cur_line_num = current_cursor.get("active_shard_line_offset", 0) if current_cursor else getattr(dataset, "active_shard_offset", 0)
+                cur_shard_tot = getattr(dataset, "active_shard_total_lines", 0)
+                shard_pct = f" {(cur_line_num / cur_shard_tot) * 100:.2f}%" if cur_shard_tot > 0 else ""
+                shard_progress_str = f"Shard: {cur_shard_name} (Line {cur_line_num:,}/{cur_shard_tot:,}{shard_pct})" if cur_shard_tot > 0 else f"Shard: {cur_shard_name} (Line {cur_line_num:,})"
+                shard_line_log = f"{shard_progress_str} | " if (cur_shard_name and cur_shard_name != "N/A") else ""
 
                 wm_log = f" | WM Loss: {cur_step_world:.4f} (EMA: {ema_world_loss:.4f}) | Joint: {cur_joint_loss:.4f}" if world_model is not None else ""
                 print(

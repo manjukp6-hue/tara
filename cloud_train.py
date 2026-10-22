@@ -5657,6 +5657,12 @@ def main():
                         wait=False,
                         sync_optimizer=False,
                     )
+                elif not can_save_at_current_step and is_new_best:
+                    print(
+                        f"[{args.stage_id} | Step {step:04d}] [Skip-Save Active (<= {args.skip_save_steps})] "
+                        f"New best loss {best_loss:.4f} tracked in memory; disk & GDrive save deferred to Step {args.skip_save_steps + 1}+.",
+                        flush=True,
+                    )
 
                 if step >= args.max_steps:
                     break

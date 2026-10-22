@@ -306,18 +306,56 @@ canonical = {
 }
 if os.path.isdir(src):
     os.makedirs(dst, exist_ok=True)
-    # 1. Copy top-level canonical files strictly into dst (non-recursive, maxdepth 1)
+    best_src = os.path.join(src, 'best_checkpoint')
+    best_dst = os.path.join(dst, 'best_checkpoint')
+
+    top_model = os.path.join(src, 'model.safetensors')
+    top_is_valid = False
+    if os.path.isfile(top_model) and os.path.getsize(top_model) > 100000000:
+        try:
+            import safetensors
+            with safetensors.safe_open(top_model, framework='pt', device='cpu') as sf:
+                if len(sf.keys()) > 0:
+                    top_is_valid = True
+        except Exception:
+            top_is_valid = False
+
+    best_model = os.path.join(best_src, 'model.safetensors')
+    best_is_valid = False
+    if os.path.isfile(best_model) and os.path.getsize(best_model) > 100000000:
+        try:
+            import safetensors
+            with safetensors.safe_open(best_model, framework='pt', device='cpu') as sf:
+                if len(sf.keys()) > 0:
+                    best_is_valid = True
+        except Exception:
+            best_is_valid = False
+
+    # Auto-heal: If top-level model on GDrive has corrupted/truncated header but best_checkpoint is authentic:
+    # Heal GDrive top-level model and use authentic best_checkpoint to restore clean weights locally!
+    if not top_is_valid and best_is_valid:
+        print('[Auto-Heal] GDrive top-level model.safetensors has corrupt header; healing from authentic best_checkpoint...', flush=True)
+        try:
+            shutil.copy2(best_model, top_model)
+            top_is_valid = True
+        except Exception:
+            pass
+
+    # 1. Copy top-level canonical files strictly into dst
     for f in os.listdir(src):
         sf = os.path.join(src, f)
         if os.path.isfile(sf) and f in canonical:
             df = os.path.join(dst, f)
             min_size = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
+            if f == 'model.safetensors' and not top_is_valid and best_is_valid:
+                print('  -> Restoring model.safetensors directly from authentic best_checkpoint...', flush=True)
+                shutil.copy2(best_model, df)
+                continue
             if not os.path.exists(df) or os.path.getsize(df) < min_size:
                 print(f'  -> Copying canonical top-level {f}...', flush=True)
                 shutil.copy2(sf, df)
+
     # 2. Copy best_checkpoint subfolder strictly into dst/best_checkpoint
-    best_src = os.path.join(src, 'best_checkpoint')
-    best_dst = os.path.join(dst, 'best_checkpoint')
     if os.path.isdir(best_src):
         os.makedirs(best_dst, exist_ok=True)
         for f in os.listdir(best_src):
@@ -346,6 +384,7 @@ for cp_dir in "$ACTIVE_CP_DIR"/*; do
             if [ -f "$cand/model.safetensors" ] && [ -f "$cand/config.json" ]; then
                 CAND_SIZE=$(wc -c < "$cand/model.safetensors" 2>/dev/null || echo 0)
                 if [ "$CAND_SIZE" -gt 100000000 ]; then
+                    python3 -c "import safetensors; sf=safetensors.safe_open('$cand/model.safetensors', framework='pt', device='cpu'); assert len(sf.keys()) > 0" 2>/dev/null || continue
                     echo "[RESUME SEED] Populating tara_candidate_v1 from restored checkpoint: $cand"
                     cp -u "$cand/config.json" storage/models/tara_candidate_v1/ 2>/dev/null || cp "$cand/config.json" storage/models/tara_candidate_v1/
                     [ -f "$cand/tokenizer.json" ] && (cp -u "$cand/tokenizer.json" storage/models/tara_candidate_v1/ 2>/dev/null || cp "$cand/tokenizer.json" storage/models/tara_candidate_v1/)
@@ -366,6 +405,7 @@ for cp_dir in "$ACTIVE_CP_DIR"/*; do
             if [ -f "$cand/world_model.safetensors" ]; then
                 CAND_WM_SIZE=$(wc -c < "$cand/world_model.safetensors" 2>/dev/null || echo 0)
                 if [ "$CAND_WM_SIZE" -gt 10000000 ]; then
+                    python3 -c "import safetensors; sf=safetensors.safe_open('$cand/world_model.safetensors', framework='pt', device='cpu'); assert len(sf.keys()) > 0" 2>/dev/null || continue
                     echo "[RESUME SEED] Populating tara_world_model from restored checkpoint: $cand"
                     cp -u "$cand/world_model.safetensors" storage/models/tara_world_model/ 2>/dev/null || cp "$cand/world_model.safetensors" storage/models/tara_world_model/
                     [ -f "$cand/config.json" ] && (cp -u "$cand/config.json" storage/models/tara_world_model/ 2>/dev/null || cp "$cand/config.json" storage/models/tara_world_model/)

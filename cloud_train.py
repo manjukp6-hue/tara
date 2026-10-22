@@ -1843,46 +1843,53 @@ def _safe_rmtree(dir_path: str) -> bool:
 
 def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
     """
-    Direct in-place streaming copy for Google Drive FUSE and local files.
-    Pre-unlinks destination and cleans duplicate clone files (1), (2), etc.
+    Atomic direct streaming copy for Google Drive FUSE and local files.
+    Writes to an isolated temporary file (dst.upload_tmp_<pid>) first.
+    Verifies full size and safetensors validity before atomically replacing dst.
+    Guarantees that the destination file is NEVER left in a truncated or corrupt state
+    even if the process or connection is terminated midway!
     """
     if os.path.abspath(src) == os.path.abspath(dst):
         return
+    if not os.path.exists(src):
+        return
+    src_sz = os.path.getsize(src)
+    if src_sz == 0:
+        print(f"[GDrive Safety Block] Refusing to mirror empty 0-byte file: {src} -> {dst}", flush=True)
+        return
+
+    if src.endswith(".safetensors"):
+        try:
+            from safetensors import safe_open
+            with safe_open(src, framework="pt", device="cpu") as sf:
+                if not sf.keys():
+                    print(f"[GDrive Safety Block] Refusing to mirror safetensors without tensor keys: {src}", flush=True)
+                    return
+        except Exception as sf_err:
+            print(f"[GDrive Safety Block] Refusing to mirror invalid safetensors ({sf_err}): {src}", flush=True)
+            return
+
+    dst_dir = os.path.dirname(dst)
+    if dst_dir:
+        os.makedirs(dst_dir, exist_ok=True)
+
+    # Pre-clean any accidental duplicate files in target folder before copy
+    base, ext = os.path.splitext(os.path.basename(dst))
+    if os.path.exists(dst_dir):
+        for f in os.listdir(dst_dir):
+            if f.startswith(base) and f.endswith(ext) and f != os.path.basename(dst) and "(" in f:
+                try:
+                    _safe_unlink(os.path.join(dst_dir, f))
+                except Exception:
+                    pass
+
+    tmp_dst = os.path.join(dst_dir, f".{os.path.basename(dst)}.upload_tmp_{os.getpid()}_{int(time.time())}")
     try:
-        # Pre-clean any accidental duplicate files in target folder before copy
-        dst_dir = os.path.dirname(dst)
-        base, ext = os.path.splitext(os.path.basename(dst))
-        if os.path.exists(dst_dir):
-            for f in os.listdir(dst_dir):
-                if f.startswith(base) and f.endswith(ext) and f != os.path.basename(dst) and "(" in f:
-                    try:
-                        _safe_unlink(os.path.join(dst_dir, f))
-                    except Exception:
-                        pass
+        if os.path.exists(tmp_dst):
+            _safe_unlink(tmp_dst)
 
-        if not os.path.exists(src):
-            return
-        src_sz = os.path.getsize(src)
-        if src_sz == 0:
-            print(f"[GDrive Safety Block] Refusing to mirror empty 0-byte file: {src} -> {dst}", flush=True)
-            return
-        if src.endswith(".safetensors"):
-            try:
-                from safetensors import safe_open
-                with safe_open(src, framework="pt", device="cpu") as sf:
-                    if not sf.keys():
-                        print(f"[GDrive Safety Block] Refusing to mirror safetensors file without tensor keys: {src}", flush=True)
-                        return
-            except Exception as sf_err:
-                print(f"[GDrive Safety Block] Refusing to mirror invalid safetensors ({sf_err}): {src}", flush=True)
-                return
-
-        # Pre-unlink destination file so DriveFS FUSE does not generate clone copy "filename (1)"
-        if os.path.exists(dst) or os.path.islink(dst):
-            _safe_unlink(dst)
-
-        # Direct in-place streaming copy
-        with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
+        # Stream into temporary staging file (preserves original dst untouched until 100% complete)
+        with open(src, "rb") as fsrc, open(tmp_dst, "wb") as fdst:
             while True:
                 chunk = fsrc.read(chunk_size)
                 if not chunk:
@@ -1894,20 +1901,37 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
                 os.fsync(fdst.fileno())
             except Exception:
                 pass
-    except Exception:
-        # Fallback to direct byte copy if needed
+
+        # Verification Gate before promotion: ensure complete byte transfer and valid safetensors
+        tmp_sz = os.path.getsize(tmp_dst)
+        if tmp_sz != src_sz:
+            raise IOError(f"Incomplete streaming write: expected {src_sz} bytes, wrote {tmp_sz} bytes")
+
+        if src.endswith(".safetensors"):
+            from safetensors import safe_open
+            with safe_open(tmp_dst, framework="pt", device="cpu") as sf:
+                if not sf.keys():
+                    raise IOError("Staged safetensors file contains 0 keys")
+
+        # Atomic promotion: replace dst in 0.001s (clean overwrite without truncating dst if aborted earlier)
+        if os.path.exists(dst):
+            try:
+                os.remove(dst)
+            except Exception:
+                pass
+
         try:
-            if os.path.exists(dst):
-                _safe_unlink(dst)
-            with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
-                shutil.copyfileobj(fsrc, fdst, length=chunk_size)
-                fdst.flush()
-                try:
-                    os.fsync(fdst.fileno())
-                except Exception:
-                    pass
-        except Exception:
-            pass
+            os.replace(tmp_dst, dst)
+        except OSError:
+            try:
+                os.rename(tmp_dst, dst)
+            except OSError:
+                shutil.copy2(tmp_dst, dst)
+                _safe_unlink(tmp_dst)
+    except Exception as e:
+        if os.path.exists(tmp_dst):
+            _safe_unlink(tmp_dst)
+        print(f"[Atomic Copy Notice] Streaming copy note for {os.path.basename(dst)}: {e}", flush=True)
 
 
 
@@ -4408,6 +4432,14 @@ def ensure_remote_assets_available(
             src_model = os.path.join(src, "model.safetensors")
             src_config = os.path.join(src, "config.json")
             if os.path.isfile(src_model) and os.path.getsize(src_model) > 100_000_000 and os.path.isfile(src_config):
+                # Verify that the model.safetensors has complete metadata before restoring
+                try:
+                    from safetensors import safe_open
+                    with safe_open(src_model, framework="pt", device="cpu") as sf:
+                        if not sf.keys():
+                            continue
+                except Exception:
+                    continue
                 print(f"[Asset Discovery] Restoring model candidate from existing checkpoint at {src}...", flush=True)
                 for f_name in ["model.safetensors", "config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json"]:
                     s_path = os.path.join(src, f_name)

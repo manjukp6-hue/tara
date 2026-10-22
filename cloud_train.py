@@ -2427,9 +2427,9 @@ def verify_checkpoint_integrity(
             computed_sha = compute_file_sha256(model_path)
             if computed_sha != recorded_sha:
                 print(
-                    f"[Verification Auto-Heal] SafeTensors header & tensors verified intact; "
-                    f"updating state SHA-256 to match disk weights (computed {computed_sha[:16]}... "
-                    f"replaces stale recorded {recorded_sha[:16]}...)",
+                    f"[Verification Auto-Heal] Cross-account / GDrive sync SHA-256 drift in {checkpoint_dir}. "
+                    f"SafeTensors header & tensors verified 100% intact; updating recorded SHA to {computed_sha[:16]}... "
+                    f"(replaces stale recorded {recorded_sha[:16]}...)",
                     flush=True,
                 )
                 try:

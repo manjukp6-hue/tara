@@ -1229,26 +1229,29 @@ class TaraStreamingJsonlDataset(IterableDataset):
             self.active_shard_name = shard_name
             self.current_active_shard = shard_name
 
-            # Determine total lines in this shard using ShardLineIndex
-            if self._line_index:
+            # Count / fetch total lines in this shard via ShardLineIndex
+            self.active_shard_total_lines = 0
+            if self._line_index is not None:
                 try:
-                    offsets = self._line_index.get_or_build(actual_fp, shard_sha)
-                    self.active_shard_total_lines = len(offsets)
+                    idx_map = self._line_index.get_or_build(actual_fp, shard_sha)
+                    self.active_shard_total_lines = len(idx_map)
                 except Exception:
-                    self.active_shard_total_lines = 0
-            else:
-                self.active_shard_total_lines = 0
+                    pass
 
             if self.shard_ledger:
-                self.shard_ledger.set_active_shard(shard_name)
                 self.shard_ledger.active_shard_total_lines = self.active_shard_total_lines
+                self.shard_ledger.set_active_shard(shard_name)
 
             # Record live content hash in the dataset snapshot so content changes are detected
             # across sessions without re-discovering the full shard list.
             if self._snapshot is not None:
                 self._snapshot.record_shard_hash(shard_name, shard_sha)
 
-            print(f"[Dataset Shard Active] Streaming from: {shard_name} (Runtime SHA-256: {shard_sha[:16]}..., Total Lines: {self.active_shard_total_lines:,})", flush=True)
+            print(
+                f"[Dataset Shard Active] Streaming from: {shard_name} "
+                f"(Total Lines: {self.active_shard_total_lines:,}, Runtime SHA-256: {shard_sha[:16]}...)",
+                flush=True,
+            )
 
             total_shard_lines = 0
             reached_eof = True

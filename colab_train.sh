@@ -183,6 +183,198 @@ else
 fi
 echo "------------------------------------------------------------------------------"
 
+# ------------------------------------------------------------------------------
+# 2b. Early Checkpoint Discovery & Google Drive Restore (Zero Wasted HF Downloads)
+# ------------------------------------------------------------------------------
+ACTIVE_CP_DIR="storage/models/checkpoints"
+mkdir -p "$ACTIVE_CP_DIR"
+
+# Auto-detect or attempt mounting Google Drive if running in Google Colab environment
+if [ ! -d "/content/drive/MyDrive" ] && [ ! -d "/content/drive/My Drive" ] && [ ! -d "/content/drive/Shareddrives" ] && [ ! -d "/content/drive/Shared drives" ]; then
+    python3 -c "
+try:
+    from google.colab import drive
+    import os
+    if not any(os.path.exists(p) for p in ['/content/drive/MyDrive', '/content/drive/My Drive', '/content/drive/Shareddrives', '/content/drive/Shared drives']):
+        drive.mount('/content/drive', force_remount=False)
+except Exception:
+    pass
+" 2>/dev/null || true
+fi
+
+# Auto-link Google Drive if mounted under 'My Drive' with space
+if [ -d "/content/drive/My Drive" ] && [ ! -e "/content/drive/MyDrive" ]; then
+    ln -s "/content/drive/My Drive" "/content/drive/MyDrive" 2>/dev/null || true
+fi
+
+# Discover GDRIVE_CHECKPOINT_DIR across MyDrive and Shared Drives
+GDRIVE_CHECKPOINT_DIR=""
+if [ -n "${CUSTOM_GDRIVE_CHECKPOINT_DIR:-}" ] && [ -d "$CUSTOM_GDRIVE_CHECKPOINT_DIR" ]; then
+    GDRIVE_CHECKPOINT_DIR="$CUSTOM_GDRIVE_CHECKPOINT_DIR"
+elif [ -d "/content/drive/MyDrive/TARA_CHECKPOINTS" ]; then
+    GDRIVE_CHECKPOINT_DIR="/content/drive/MyDrive/TARA_CHECKPOINTS"
+elif [ -d "/content/drive/My Drive/TARA_CHECKPOINTS" ]; then
+    GDRIVE_CHECKPOINT_DIR="/content/drive/My Drive/TARA_CHECKPOINTS"
+else
+    # Search Shared Drives
+    for sroot in "/content/drive/Shareddrives" "/content/drive/Shared drives"; do
+        if [ -d "$sroot" ]; then
+            for sd in "$sroot"/*; do
+                if [ -d "$sd/TARA_CHECKPOINTS" ]; then
+                    GDRIVE_CHECKPOINT_DIR="$sd/TARA_CHECKPOINTS"
+                    echo "[GDRIVE] Discovered TARA_CHECKPOINTS in Shared Drive: $GDRIVE_CHECKPOINT_DIR"
+                    break 2
+                fi
+            done
+        fi
+    done
+fi
+
+if [ -z "$GDRIVE_CHECKPOINT_DIR" ]; then
+    if [ -d "/content/drive/MyDrive" ]; then
+        GDRIVE_CHECKPOINT_DIR="/content/drive/MyDrive/TARA_CHECKPOINTS"
+    elif [ -d "/content/drive/My Drive" ]; then
+        GDRIVE_CHECKPOINT_DIR="/content/drive/My Drive/TARA_CHECKPOINTS"
+    fi
+fi
+export GDRIVE_CHECKPOINT_DIR
+
+# Proactive Google Drive healing: if GDRIVE_CHECKPOINT_DIR is a broken shortcut, unlink and recreate real folder
+if [ -L "$GDRIVE_CHECKPOINT_DIR" ] && [ ! -d "$GDRIVE_CHECKPOINT_DIR" ]; then
+    echo "[GDRIVE AUTO-REPAIR] Removing broken shortcut at $GDRIVE_CHECKPOINT_DIR..."
+    rm -f "$GDRIVE_CHECKPOINT_DIR" 2>/dev/null || true
+fi
+if [ -d "/content/drive/MyDrive" ] || [ -d "/content/drive/My Drive" ]; then
+    mkdir -p "$GDRIVE_CHECKPOINT_DIR" 2>/dev/null || true
+fi
+
+# Restore checkpoints from Google Drive mirror into local active storage
+if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
+    echo "[GDRIVE CLEANUP] Purging stale temporary (.tmp) and duplicate (1), (2) files from Google Drive..."
+    find "$GDRIVE_CHECKPOINT_DIR" -name "*.tmp*" -type f -delete 2>/dev/null || true
+    find "$GDRIVE_CHECKPOINT_DIR" -name "* (*)*" -type f -delete 2>/dev/null || true
+    find "$GDRIVE_CHECKPOINT_DIR" -maxdepth 3 -name "* (*)" -type d -exec rm -rf {} + 2>/dev/null || true
+    find "$ACTIVE_CP_DIR" -name "* (*)*" -type f -delete 2>/dev/null || true
+
+    # Dynamically discover all stage directories in Google Drive (Unbounded N-Stage Support)
+    shopt -s nullglob
+    GDRIVE_STAGES=("$GDRIVE_CHECKPOINT_DIR"/*)
+    shopt -u nullglob
+
+    for GDRIVE_STAGE in "${GDRIVE_STAGES[@]}"; do
+        if [ ! -d "$GDRIVE_STAGE" ]; then
+            continue
+        fi
+        STAGE_SUBDIR=$(basename "$GDRIVE_STAGE")
+        if [ "$STAGE_SUBDIR" = "world_joint" ]; then
+            continue
+        fi
+        LOCAL_STAGE="$ACTIVE_CP_DIR/$STAGE_SUBDIR"
+        LOCAL_MODEL="$LOCAL_STAGE/model.safetensors"
+        LOCAL_VALID=0
+        if [ -f "$LOCAL_STAGE/checkpoint_state.json" ] && [ -f "$LOCAL_MODEL" ]; then
+            LOCAL_SIZE=$(wc -c < "$LOCAL_MODEL" 2>/dev/null || echo 0)
+            if [ "$LOCAL_SIZE" -gt 100000000 ]; then
+                LOCAL_VALID=1
+            fi
+        fi
+
+        if [ -d "$GDRIVE_STAGE" ]; then
+            if [ "$LOCAL_VALID" -eq 1 ]; then
+                echo "[RESUME SYNC] Local verified checkpoint already present in $LOCAL_STAGE; skipping Google Drive copy."
+            else
+                echo "[RESUME SYNC] Restoring Google Drive checkpoint mirror: $GDRIVE_STAGE -> $LOCAL_STAGE..."
+                mkdir -p "$LOCAL_STAGE"
+                python3 -c "
+import os, shutil
+src = '$GDRIVE_STAGE'
+dst = '$LOCAL_STAGE'
+canonical = {
+    'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json',
+    'model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt',
+    'shard_ledger.json', 'latest_checkpoint.json', 'dataset_snapshot.json', 'COMMITTED'
+}
+if os.path.isdir(src):
+    os.makedirs(dst, exist_ok=True)
+    # 1. Copy top-level canonical files strictly into dst (non-recursive, maxdepth 1)
+    for f in os.listdir(src):
+        sf = os.path.join(src, f)
+        if os.path.isfile(sf) and f in canonical:
+            df = os.path.join(dst, f)
+            min_size = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
+            if not os.path.exists(df) or os.path.getsize(df) < min_size:
+                print(f'  -> Copying canonical top-level {f}...', flush=True)
+                shutil.copy2(sf, df)
+    # 2. Copy best_checkpoint subfolder strictly into dst/best_checkpoint
+    best_src = os.path.join(src, 'best_checkpoint')
+    best_dst = os.path.join(dst, 'best_checkpoint')
+    if os.path.isdir(best_src):
+        os.makedirs(best_dst, exist_ok=True)
+        for f in os.listdir(best_src):
+            sf = os.path.join(best_src, f)
+            if os.path.isfile(sf) and f in canonical:
+                df = os.path.join(best_dst, f)
+                min_size = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
+                if not os.path.exists(df) or os.path.getsize(df) < min_size:
+                    print(f'  -> Copying canonical best_checkpoint/{f}...', flush=True)
+                    shutil.copy2(sf, df)
+" 2>/dev/null || true
+                echo "[RESUME SYNC] Checkpoint mirror restore complete."
+            fi
+        fi
+    done
+fi
+
+# Populate candidate model directory from restored checkpoints to avoid redundant HF downloads
+mkdir -p storage/models/tara_candidate_v1
+mkdir -p storage/models/tara_world_model
+
+FOUND_RESTORED_MODEL=0
+for cp_dir in "$ACTIVE_CP_DIR"/*; do
+    if [ -d "$cp_dir" ]; then
+        for cand in "$cp_dir" "$cp_dir/best_checkpoint"; do
+            if [ -f "$cand/model.safetensors" ] && [ -f "$cand/config.json" ]; then
+                CAND_SIZE=$(wc -c < "$cand/model.safetensors" 2>/dev/null || echo 0)
+                if [ "$CAND_SIZE" -gt 100000000 ]; then
+                    echo "[RESUME SEED] Populating tara_candidate_v1 from restored checkpoint: $cand"
+                    cp -u "$cand/config.json" storage/models/tara_candidate_v1/ 2>/dev/null || cp "$cand/config.json" storage/models/tara_candidate_v1/
+                    [ -f "$cand/tokenizer.json" ] && (cp -u "$cand/tokenizer.json" storage/models/tara_candidate_v1/ 2>/dev/null || cp "$cand/tokenizer.json" storage/models/tara_candidate_v1/)
+                    [ -f "$cand/tokenizer_config.json" ] && (cp -u "$cand/tokenizer_config.json" storage/models/tara_candidate_v1/ 2>/dev/null || cp "$cand/tokenizer_config.json" storage/models/tara_candidate_v1/)
+                    cp -u "$cand/model.safetensors" storage/models/tara_candidate_v1/ 2>/dev/null || cp "$cand/model.safetensors" storage/models/tara_candidate_v1/
+                    FOUND_RESTORED_MODEL=1
+                    break 2
+                fi
+            fi
+        done
+    fi
+done
+
+# Check if restored world model exists
+for cp_dir in "$ACTIVE_CP_DIR"/*; do
+    if [ -d "$cp_dir" ]; then
+        for cand in "$cp_dir" "$cp_dir/best_checkpoint"; do
+            if [ -f "$cand/world_model.safetensors" ]; then
+                CAND_WM_SIZE=$(wc -c < "$cand/world_model.safetensors" 2>/dev/null || echo 0)
+                if [ "$CAND_WM_SIZE" -gt 10000000 ]; then
+                    echo "[RESUME SEED] Populating tara_world_model from restored checkpoint: $cand"
+                    cp -u "$cand/world_model.safetensors" storage/models/tara_world_model/ 2>/dev/null || cp "$cand/world_model.safetensors" storage/models/tara_world_model/
+                    [ -f "$cand/config.json" ] && (cp -u "$cand/config.json" storage/models/tara_world_model/ 2>/dev/null || cp "$cand/config.json" storage/models/tara_world_model/)
+                    break 2
+                fi
+            fi
+        done
+    fi
+done
+
+# Check if shard ledger or active checkpoint state exists in any stage -> let Python JIT fetch active shard
+FOUND_RESUME_LEDGER=0
+for cp_dir in "$ACTIVE_CP_DIR"/*; do
+    if [ -f "$cp_dir/shard_ledger.json" ] || [ -f "$cp_dir/checkpoint_state.json" ]; then
+        FOUND_RESUME_LEDGER=1
+        break
+    fi
+done
+
 # Dynamic Parameter Configuration
 MAIN_DS_DIR="storage/datasets/main_dataset_v2"
 
@@ -191,8 +383,8 @@ MAIN_DS_DIR="storage/datasets/main_dataset_v2"
 mkdir -p "$MAIN_DS_DIR"
 LOCAL_DS_COUNT=$(find "$MAIN_DS_DIR" -maxdepth 1 \( -name "*.jsonl" -o -name "*.parquet" \) 2>/dev/null | wc -l)
 
-if [ "${SKIP_HF_DOWNLOAD:-0}" = "1" ] || [ "$LOCAL_DS_COUNT" -ge 1 ]; then
-    echo "=== [DATASET INGESTION: SKIPPED] Dataset already present locally ($LOCAL_DS_COUNT shard(s) found in $MAIN_DS_DIR). Zero downloads needed! ==="
+if [ "${SKIP_HF_DOWNLOAD:-0}" = "1" ] || [ "$LOCAL_DS_COUNT" -ge 1 ] || [ "$FOUND_RESUME_LEDGER" -eq 1 ]; then
+    echo "=== [DATASET INGESTION: SKIPPED] Dataset or resume ledger active (Local count: $LOCAL_DS_COUNT, Resume ledger: $FOUND_RESUME_LEDGER). Letting Python JIT stream only required active shards! ==="
 else
     echo "=== [DATASET INGESTION: STREAMING PRETRAINING SHARDS] ==="
     HF_DATASET_SOURCE="${HF_DATASET_REPO:-${HF_REPO:-manjukp6/tara}}"
@@ -324,124 +516,6 @@ else
         echo "Please ensure HF_TOKEN is exported with read access to https://huggingface.co/$HF_MODEL_SOURCE"
         exit 1
     fi
-fi
-
-# Determine active checkpoint root: Use fast local SSD storage during training to eliminate Google Drive FUSE write latency & locks
-ACTIVE_CP_DIR="storage/models/checkpoints"
-mkdir -p "$ACTIVE_CP_DIR"
-
-# Auto-detect or attempt mounting Google Drive if running in Google Colab environment
-if [ ! -d "/content/drive/MyDrive" ] && [ ! -d "/content/drive/My Drive" ]; then
-    python3 -c "
-try:
-    from google.colab import drive
-    import os
-    if not os.path.exists('/content/drive/MyDrive') and not os.path.exists('/content/drive/My Drive'):
-        drive.mount('/content/drive', force_remount=False)
-except Exception:
-    pass
-" 2>/dev/null || true
-fi
-
-# Auto-link Google Drive if mounted under 'My Drive' with space
-if [ -d "/content/drive/My Drive" ] && [ ! -e "/content/drive/MyDrive" ]; then
-    ln -s "/content/drive/My Drive" "/content/drive/MyDrive" 2>/dev/null || true
-fi
-
-# Determine resolved GDRIVE_CHECKPOINT_DIR
-if [ -d "/content/drive/MyDrive" ]; then
-    GDRIVE_CHECKPOINT_DIR="/content/drive/MyDrive/TARA_CHECKPOINTS"
-elif [ -d "/content/drive/My Drive" ]; then
-    GDRIVE_CHECKPOINT_DIR="/content/drive/My Drive/TARA_CHECKPOINTS"
-fi
-export GDRIVE_CHECKPOINT_DIR
-
-# Proactive Google Drive healing: if GDRIVE_CHECKPOINT_DIR is a broken shortcut, unlink and recreate real folder
-if [ -L "$GDRIVE_CHECKPOINT_DIR" ] && [ ! -d "$GDRIVE_CHECKPOINT_DIR" ]; then
-    echo "[GDRIVE AUTO-REPAIR] Removing broken shortcut at $GDRIVE_CHECKPOINT_DIR..."
-    rm -f "$GDRIVE_CHECKPOINT_DIR" "${GDRIVE_CHECKPOINT_DIR} (1)" 2>/dev/null || true
-fi
-if [ -d "/content/drive/MyDrive" ] || [ -d "/content/drive/My Drive" ]; then
-    mkdir -p "$GDRIVE_CHECKPOINT_DIR" 2>/dev/null || true
-fi
-
-
-
-# If restarting in a fresh Colab session, clean stale temporary files and restore checkpoints from Google Drive mirror
-if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
-    echo "[GDRIVE CLEANUP] Purging stale temporary (.tmp) and duplicate (1), (2) files from Google Drive..."
-    find "$GDRIVE_CHECKPOINT_DIR" -name "*.tmp*" -type f -delete 2>/dev/null || true
-    find "$GDRIVE_CHECKPOINT_DIR" -name "* (*)*" -type f -delete 2>/dev/null || true
-    find "$GDRIVE_CHECKPOINT_DIR" -maxdepth 3 -name "* (*)" -type d -exec rm -rf {} + 2>/dev/null || true
-    find "$ACTIVE_CP_DIR" -name "* (*)*" -type f -delete 2>/dev/null || true
-
-    # Dynamically discover all stage directories in Google Drive (Unbounded N-Stage Support)
-    shopt -s nullglob
-    GDRIVE_STAGES=("$GDRIVE_CHECKPOINT_DIR"/*)
-    shopt -u nullglob
-
-    for GDRIVE_STAGE in "${GDRIVE_STAGES[@]}"; do
-        if [ ! -d "$GDRIVE_STAGE" ]; then
-            continue
-        fi
-        STAGE_SUBDIR=$(basename "$GDRIVE_STAGE")
-        if [ "$STAGE_SUBDIR" = "world_joint" ]; then
-            continue
-        fi
-        LOCAL_STAGE="$ACTIVE_CP_DIR/$STAGE_SUBDIR"
-        LOCAL_MODEL="$LOCAL_STAGE/model.safetensors"
-        LOCAL_VALID=0
-        if [ -f "$LOCAL_STAGE/checkpoint_state.json" ] && [ -f "$LOCAL_MODEL" ]; then
-            LOCAL_SIZE=$(wc -c < "$LOCAL_MODEL" 2>/dev/null || echo 0)
-            if [ "$LOCAL_SIZE" -gt 100000000 ]; then
-                LOCAL_VALID=1
-            fi
-        fi
-
-        if [ -d "$GDRIVE_STAGE" ]; then
-            if [ "$LOCAL_VALID" -eq 1 ]; then
-                echo "[RESUME SYNC] Local verified checkpoint already present in $LOCAL_STAGE; skipping Google Drive copy."
-            else
-                echo "[RESUME SYNC] Restoring Google Drive checkpoint mirror: $GDRIVE_STAGE -> $LOCAL_STAGE..."
-                mkdir -p "$LOCAL_STAGE"
-                python3 -c "
-import os, shutil
-src = '$GDRIVE_STAGE'
-dst = '$LOCAL_STAGE'
-canonical = {
-    'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json',
-    'model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt',
-    'shard_ledger.json', 'latest_checkpoint.json', 'dataset_snapshot.json', 'COMMITTED'
-}
-if os.path.isdir(src):
-    os.makedirs(dst, exist_ok=True)
-    # 1. Copy top-level canonical files strictly into dst (non-recursive, maxdepth 1)
-    for f in os.listdir(src):
-        sf = os.path.join(src, f)
-        if os.path.isfile(sf) and f in canonical:
-            df = os.path.join(dst, f)
-            min_size = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
-            if not os.path.exists(df) or os.path.getsize(df) < min_size:
-                print(f'  -> Copying canonical top-level {f}...', flush=True)
-                shutil.copy2(sf, df)
-    # 2. Copy best_checkpoint subfolder strictly into dst/best_checkpoint
-    best_src = os.path.join(src, 'best_checkpoint')
-    best_dst = os.path.join(dst, 'best_checkpoint')
-    if os.path.isdir(best_src):
-        os.makedirs(best_dst, exist_ok=True)
-        for f in os.listdir(best_src):
-            sf = os.path.join(best_src, f)
-            if os.path.isfile(sf) and f in canonical:
-                df = os.path.join(best_dst, f)
-                min_size = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
-                if not os.path.exists(df) or os.path.getsize(df) < min_size:
-                    print(f'  -> Copying canonical best_checkpoint/{f}...', flush=True)
-                    shutil.copy2(sf, df)
-" 2>/dev/null || true
-                echo "[RESUME SYNC] Checkpoint mirror restore complete."
-            fi
-        fi
-    done
 fi
 
 # 5. Mandatory Pre-Training Verification, Deep De-duplication & Tokenizer Gate

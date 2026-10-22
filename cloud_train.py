@@ -1888,7 +1888,8 @@ def is_real_gdrive_mount(mountpoint: str = "/content/drive") -> bool:
 def _resolve_gdrive_root() -> Optional[str]:
     """
     Dynamically discovers or auto-mounts the Google Drive checkpoint directory.
-    Supports both /content/drive/MyDrive and /content/drive/My Drive (with space)
+    Supports both /content/drive/MyDrive and /content/drive/My Drive (with space),
+    Shared Drives (/content/drive/Shareddrives/*, /content/drive/Shared drives/*),
     as well as custom GDRIVE_CHECKPOINT_DIR paths.
     Strictly verifies authentic FUSE mount state to prevent silent local writes.
     """
@@ -1901,18 +1902,54 @@ def _resolve_gdrive_root() -> Optional[str]:
             else:
                 return env_dir
 
-    for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
-        if os.path.exists(base) and is_real_gdrive_mount("/content/drive"):
-            return os.path.join(base, "TARA_CHECKPOINTS")
+    candidate_bases = [
+        "/content/drive/MyDrive",
+        "/content/drive/My Drive",
+    ]
+    # Discover Google Shared Drives / Shortcuts
+    for sroot in ["/content/drive/Shareddrives", "/content/drive/Shared drives"]:
+        if os.path.isdir(sroot):
+            try:
+                for entry in os.listdir(sroot):
+                    full = os.path.join(sroot, entry)
+                    if os.path.isdir(full):
+                        candidate_bases.append(full)
+            except Exception:
+                pass
+
+    if is_real_gdrive_mount("/content/drive"):
+        # First priority: check existing TARA_CHECKPOINTS directory or shortcut
+        for base in candidate_bases:
+            cand = os.path.join(base, "TARA_CHECKPOINTS")
+            if os.path.isdir(cand):
+                return cand
+        # Second priority: default to MyDrive/TARA_CHECKPOINTS if MyDrive exists
+        for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
+            if os.path.isdir(base):
+                return os.path.join(base, "TARA_CHECKPOINTS")
 
     # In Colab environments where drive was not pre-mounted, attempt non-interactive mount
     if os.path.exists("/content") and not is_real_gdrive_mount("/content/drive"):
         try:
             from google.colab import drive
             drive.mount("/content/drive", force_remount=False)
-            for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
-                if os.path.exists(base) and is_real_gdrive_mount("/content/drive"):
-                    return os.path.join(base, "TARA_CHECKPOINTS")
+            if is_real_gdrive_mount("/content/drive"):
+                for sroot in ["/content/drive/Shareddrives", "/content/drive/Shared drives"]:
+                    if os.path.isdir(sroot):
+                        try:
+                            for entry in os.listdir(sroot):
+                                full = os.path.join(sroot, entry)
+                                if os.path.isdir(full):
+                                    candidate_bases.append(full)
+                        except Exception:
+                            pass
+                for base in candidate_bases:
+                    cand = os.path.join(base, "TARA_CHECKPOINTS")
+                    if os.path.isdir(cand):
+                        return cand
+                for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
+                    if os.path.isdir(base):
+                        return os.path.join(base, "TARA_CHECKPOINTS")
         except Exception:
             pass
 
@@ -1969,7 +2006,7 @@ def _ensure_gdrive_target_dir(target_dir: str):
             pass
 
     dup_shortcut = f"{gdrive_root} (1)"
-    if os.path.lexists(dup_shortcut):
+    if os.path.lexists(dup_shortcut) and not os.path.isdir(dup_shortcut):
         try:
             if os.path.islink(dup_shortcut):
                 os.unlink(dup_shortcut)
@@ -3699,6 +3736,10 @@ def try_resume_from_checkpoint(
     world_model: Optional[nn.Module] = None,
     world_optimizer: Optional[torch.optim.Optimizer] = None,
     world_scaler: Optional[torch.cuda.amp.GradScaler] = None,
+    base_lr: Optional[float] = None,
+    warmup_steps: int = 500,
+    max_steps: int = 100_000_000,
+    min_lr: float = 1e-5,
 ) -> Tuple[int, int, float, bool, Optional[Dict[str, Any]]]:
     """
     Attempts to resume training from the latest available COMPLETE training checkpoint.
@@ -3838,17 +3879,19 @@ def try_resume_from_checkpoint(
         cand_model = os.path.join(cand, "model.safetensors")
         cand_opt = os.path.join(cand, "optimizer_state.pt")
 
-        if not (os.path.exists(cand_state) and os.path.exists(cand_model) and os.path.exists(cand_opt)):
+        has_cand_opt = os.path.exists(cand_opt) and os.path.getsize(cand_opt) > 0
+
+        if not (os.path.exists(cand_state) and os.path.exists(cand_model)):
             if os.path.exists(cand):
-                print(f"  -> Notice: Candidate at {cand} is incomplete (missing model, optimizer state, or state json). Skipping.")
+                print(f"  -> Notice: Candidate at {cand} is incomplete (missing model or state json). Skipping.")
             continue
 
-        if os.path.getsize(cand_model) == 0 or os.path.getsize(cand_opt) == 0:
-            print(f"  -> Notice: Skipping candidate at {cand} (files are 0 bytes)")
+        if os.path.getsize(cand_model) == 0:
+            print(f"  -> Notice: Skipping candidate at {cand} (model is 0 bytes)")
             continue
 
-        # Strict integrity check: candidate must have valid optimizer for training resumption
-        if not verify_checkpoint_integrity(cand, require_optimizer=True, require_completed=False):
+        # Strict integrity check: verify candidate (require optimizer if present)
+        if not verify_checkpoint_integrity(cand, require_optimizer=has_cand_opt, require_completed=False):
             print(f"  -> Notice: Candidate at {cand} failed integrity verification. Skipping.")
             continue
 
@@ -3929,15 +3972,20 @@ def try_resume_from_checkpoint(
             c_loss = float(s_data.get("loss", float("inf")))
             c_best_loss = float(s_data.get("best_loss", c_loss))
 
-            # Verify optimizer state step alignment
-            opt_data = torch.load(cand_opt, map_location="cpu")
-            opt_step = opt_data.get("step")
-            del opt_data
-            if opt_step is not None and opt_step != c_step:
-                print(f"  -> Notice: Candidate at {cand} has desynchronized optimizer step ({opt_step} != {c_step}). Skipping.")
-                continue
+            # Verify optimizer state step alignment if optimizer state exists
+            if has_cand_opt:
+                try:
+                    opt_data = torch.load(cand_opt, map_location="cpu")
+                    opt_step = opt_data.get("step")
+                    del opt_data
+                    if opt_step is not None and opt_step != c_step:
+                        print(f"  -> Notice: Candidate at {cand} has desynchronized optimizer step ({opt_step} != {c_step}). Skipping.")
+                        continue
+                except Exception as opt_err:
+                    print(f"  -> Notice: Candidate at {cand} could not load optimizer: {opt_err}. Continuing with model-only recovery.")
 
-            print(f"  -> Found valid complete candidate at {cand} (Step: {c_step}, Loss: {c_loss:.4f}) [VERIFIED HEALTHY]")
+            cand_type_str = "complete" if has_cand_opt else "model-only"
+            print(f"  -> Found valid {cand_type_str} candidate at {cand} (Step: {c_step}, Loss: {c_loss:.4f}) [VERIFIED HEALTHY]")
             if c_step > best_cand_step:
                 best_cand_step = c_step
                 best_cand_epoch = int(s_data.get("epoch", 0))
@@ -4125,9 +4173,27 @@ def try_resume_from_checkpoint(
 
             print(f"[Resume] Restored complete optimizer state, scaler, and deterministic RNG states from Step {best_cand_step}.", flush=True)
         except Exception as e:
-            print(f"[Resume Error] Failed to load optimizer state: {e}. Re-initializing clean optimizer.")
+            print(f"[Resume Error] Failed to load optimizer state: {e}. Re-initializing clean optimizer with scheduled LR.", flush=True)
+            if optimizer:
+                try:
+                    eff_base_lr = base_lr if base_lr is not None else optimizer.param_groups[0].get("lr", 1e-4)
+                    target_lr = compute_scheduled_lr(best_cand_step, warmup_steps=warmup_steps, max_steps=max_steps, base_lr=eff_base_lr, min_lr=min_lr)
+                    for pg in optimizer.param_groups:
+                        pg["lr"] = target_lr
+                    print(f"[Resume] Re-initialized optimizer learning rate to {target_lr:.6e} at Step {best_cand_step}.", flush=True)
+                except Exception as lr_err:
+                    print(f"[Resume Notice] Could not compute scheduled LR: {lr_err}", flush=True)
     else:
-        print(f"[Resume Error] Missing optimizer state file at {opt_file}.")
+        print(f"[Resume Notice] Optimizer state file absent at {opt_file}. Re-initializing optimizer with scheduled LR for Step {best_cand_step}.", flush=True)
+        if optimizer:
+            try:
+                eff_base_lr = base_lr if base_lr is not None else optimizer.param_groups[0].get("lr", 1e-4)
+                target_lr = compute_scheduled_lr(best_cand_step, warmup_steps=warmup_steps, max_steps=max_steps, base_lr=eff_base_lr, min_lr=min_lr)
+                for pg in optimizer.param_groups:
+                    pg["lr"] = target_lr
+                print(f"[Resume] Re-initialized optimizer learning rate to {target_lr:.6e} at Step {best_cand_step}.", flush=True)
+            except Exception as lr_err:
+                print(f"[Resume Notice] Could not compute scheduled LR: {lr_err}", flush=True)
 
     return best_cand_step, best_cand_epoch, best_cand_loss, True, best_cand_cursor
 
@@ -4212,10 +4278,19 @@ def print_frontier_comparison_matrix_colored(step: int, cur_loss: float, best_lo
 # 5. High-Speed Cloud Asset Ingestion (Hugging Face CDN)
 # =============================================================================
 
-def ensure_remote_assets_available(model_dir: str, dataset_dir: str, repo_id: str = "manjukp6/tara", prefix: str = "v2", bulk_download_dataset: bool = False):
+def ensure_remote_assets_available(
+    model_dir: str,
+    dataset_dir: str,
+    repo_id: str = "manjukp6/tara",
+    prefix: str = "v2",
+    bulk_download_dataset: bool = False,
+    output_dir: Optional[str] = None,
+    stage_id: Optional[str] = None,
+):
     """
     High-Speed Cloud Asset Ingestion via Hugging Face Hub (Pure Python).
     Downloads base candidate model weights/config if missing.
+    Checks existing Google Drive / output_dir checkpoints first to avoid redundant downloads.
     Dataset shards are streamed on-demand via single-shard JIT (download_single_shard_jit)
     during training, avoiding multi-gigabyte bulk downloads unless bulk_download_dataset is True.
     """
@@ -4232,6 +4307,38 @@ def ensure_remote_assets_available(model_dir: str, dataset_dir: str, repo_id: st
     # 1. Check Model Weights & Config
     config_file = os.path.join(model_dir, "config.json")
     safetensor_files = glob.glob(os.path.join(model_dir, "*.safetensors"))
+
+    # Before downloading from Hugging Face, check if a valid checkpoint already exists in output_dir or Google Drive
+    if not (os.path.exists(config_file) and len(safetensor_files) > 0):
+        search_sources = []
+        if output_dir:
+            search_sources.append(output_dir)
+            search_sources.append(os.path.join(output_dir, "best_checkpoint"))
+            gdrive_stage = resolve_gdrive_stage_dir(output_dir, stage_id)
+            if gdrive_stage:
+                search_sources.append(gdrive_stage)
+                search_sources.append(os.path.join(gdrive_stage, "best_checkpoint"))
+        gdrive_root = _resolve_gdrive_root()
+        if gdrive_root and stage_id:
+            search_sources.append(os.path.join(gdrive_root, stage_id))
+            search_sources.append(os.path.join(gdrive_root, stage_id, "best_checkpoint"))
+
+        for src in search_sources:
+            if not os.path.isdir(src):
+                continue
+            src_model = os.path.join(src, "model.safetensors")
+            src_config = os.path.join(src, "config.json")
+            if os.path.isfile(src_model) and os.path.getsize(src_model) > 100_000_000 and os.path.isfile(src_config):
+                print(f"[Asset Discovery] Restoring model candidate from existing checkpoint at {src}...", flush=True)
+                for f_name in ["model.safetensors", "config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json"]:
+                    s_path = os.path.join(src, f_name)
+                    d_path = os.path.join(model_dir, f_name)
+                    if os.path.isfile(s_path) and not os.path.exists(d_path):
+                        shutil.copy2(s_path, d_path)
+                break
+
+        safetensor_files = glob.glob(os.path.join(model_dir, "*.safetensors"))
+
     if not (os.path.exists(config_file) and len(safetensor_files) > 0):
         print(f"[High-Speed HF] Downloading Model Candidate from {repo_id}...")
         try:
@@ -4525,10 +4632,10 @@ def main():
                         help="Override memory preflight gate to allow FP32 AdamW on memory-constrained GPUs")
     parser.add_argument("--keep-checkpoints", type=int, default=int(os.environ.get("KEEP_CHECKPOINTS", 1)),
                         help="Number of past checkpoints to retain (default: 1; deletes older checkpoints upon verified new commit)")
-    parser.add_argument("--sync-all-to-gdrive", action="store_true", default=False,
-                        help="Sync all intermediate training checkpoints to Google Drive (default: False; Google Drive mirrors best milestone only)")
-    parser.add_argument("--sync-gdrive-optimizer", action="store_true", default=False,
-                        help="Include heavy optimizer state when mirroring checkpoints to Google Drive (default: False)")
+    parser.add_argument("--sync-all-to-gdrive", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true", default=True,
+                        help="Sync all intermediate training checkpoints to Google Drive (default: True)")
+    parser.add_argument("--sync-gdrive-optimizer", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true", default=True,
+                        help="Include heavy optimizer state when mirroring checkpoints to Google Drive (default: True)")
     parser.add_argument("--preflight-only", action="store_true", default=False, help="Execute only the dual-stage preflight validation diagnostic and exit with report")
     parser.add_argument("--joint-world-model", action="store_true", default=False,
                         help="Enable coordinated joint training of Neural Model + World Model")
@@ -4615,6 +4722,8 @@ def main():
         args.dataset_dir,
         prefix=args.dataset_prefix.strip("/"),
         bulk_download_dataset=args.bulk_download_dataset,
+        output_dir=args.output_dir,
+        stage_id=args.stage_id,
     )
 
     # 2b. Pretraining Authorization Gate check
@@ -4707,7 +4816,34 @@ def main():
 
     # 5. Build Model (Parameters remain in FP32; AMP autocast evaluates in FP16/BF16)
     model = TaraForCausalLM(config, gradient_checkpointing=args.gradient_checkpointing).to(device=device, dtype=model_dtype)
-    load_candidate_weights(model, args.model_dir)
+
+    # Detect if resumable checkpoint already exists in output_dir or Google Drive
+    has_resumable_ckpt = False
+    if args.resume:
+        check_dirs = [args.output_dir]
+        gdrive_root = _resolve_gdrive_root()
+        if gdrive_root:
+            gdrive_stage = resolve_gdrive_stage_dir(args.output_dir, args.stage_id)
+            if gdrive_stage:
+                check_dirs.append(gdrive_stage)
+            if args.stage_id:
+                check_dirs.append(os.path.join(gdrive_root, args.stage_id))
+        for cdir in check_dirs:
+            if not os.path.isdir(cdir):
+                continue
+            for cand in [cdir, os.path.join(cdir, "best_checkpoint")]:
+                mf = os.path.join(cand, "model.safetensors")
+                sf = os.path.join(cand, "checkpoint_state.json")
+                if os.path.isfile(mf) and os.path.getsize(mf) > 100_000_000 and os.path.isfile(sf):
+                    has_resumable_ckpt = True
+                    break
+            if has_resumable_ckpt:
+                break
+
+    if has_resumable_ckpt:
+        print("[Model] Resumable checkpoint detected; skipping redundant candidate weights load to save RAM and time.", flush=True)
+    else:
+        load_candidate_weights(model, args.model_dir)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[Model] Total trainable parameters: {total_params:,} ({total_params * 4 / 1e6:.1f} MB in FP32 master storage)")
@@ -4924,7 +5060,11 @@ def main():
         world_model = TaraWorldModel(wm_config, gradient_checkpointing=args.gradient_checkpointing).to(
             device=device, dtype=model_dtype
         )
-        wm_loaded = load_candidate_weights(world_model, args.world_model_dir)
+        if has_resumable_ckpt:
+            print("[Joint World Model] Resumable checkpoint detected; skipping redundant candidate world model load.", flush=True)
+            wm_loaded = True
+        else:
+            wm_loaded = load_candidate_weights(world_model, args.world_model_dir)
         wm_trainable_params = sum(p.numel() for p in world_model.parameters() if p.requires_grad)
         print(f"[Joint World Model] Total trainable parameters: {wm_trainable_params:,} ({wm_trainable_params * 4 / 1e6:.1f} MB in FP32 master storage)")
         print(f"[Joint World Model] Weights initialized from {args.world_model_dir} (restored: {wm_loaded})")
@@ -5051,6 +5191,10 @@ def main():
             world_model=world_model,
             world_optimizer=world_optimizer,
             world_scaler=world_scaler,
+            base_lr=args.lr,
+            warmup_steps=args.warmup_steps,
+            max_steps=args.max_steps,
+            min_lr=args.min_lr,
         )
 
         # Cleanup obsolete duplicate runs or clone remnants from previous sessions in parent_dir

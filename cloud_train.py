@@ -2541,9 +2541,9 @@ def verify_checkpoint_integrity(
 
 def clean_stale_checkpoint_artifacts(checkpoint_dir: str, is_best: bool = False):
     """
-    Cleans obsolete, temporary, or unneeded files from a verified checkpoint directory:
+    Cleans obsolete or temporary files from a verified checkpoint directory:
     - Removes stale .tmp files
-    - If is_best=True, strictly removes any optimizer_state.pt to prevent 2GB waste
+    - Cleans duplicate DriveFS numbered clones
     - Enforces cleanup in both local directory and Google Drive mirror
     """
     if not os.path.exists(checkpoint_dir):
@@ -2565,12 +2565,6 @@ def clean_stale_checkpoint_artifacts(checkpoint_dir: str, is_best: bool = False)
                 else:
                     os.remove(fp)
                 print(f"[Hygiene] Removed duplicate clone from checkpoint directory: {f}", flush=True)
-            except Exception:
-                pass
-        if is_best and f == "optimizer_state.pt":
-            try:
-                os.remove(fp)
-                print(f"[Hygiene] Removed unneeded optimizer state from best milestone: {checkpoint_dir}/{f}", flush=True)
             except Exception:
                 pass
 
@@ -2599,12 +2593,6 @@ def clean_stale_checkpoint_artifacts(checkpoint_dir: str, is_best: bool = False)
                             else:
                                 os.remove(fp)
                             print(f"[GDrive Hygiene] Removed duplicate clone from GDrive target: {f}", flush=True)
-                        except Exception:
-                            pass
-                    if is_best and f == "optimizer_state.pt":
-                        try:
-                            os.remove(fp)
-                            print(f"[GDrive Hygiene] Removed unneeded optimizer state from GDrive best milestone: {gdrive_target}/{f}", flush=True)
                         except Exception:
                             pass
         except Exception:
@@ -2744,6 +2732,10 @@ def save_best_milestone(
     shard_ledger: Optional[Any] = None,
     data_cursor: Optional[Dict[str, Any]] = None,
     world_model: Optional[nn.Module] = None,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    scaler: Optional[torch.cuda.amp.GradScaler] = None,
+    world_optimizer: Optional[torch.optim.Optimizer] = None,
+    world_scaler: Optional[torch.cuda.amp.GradScaler] = None,
 ) -> bool:
     """
     Saves a clean, compact BEST MILESTONE checkpoint using atomic verified commit:
@@ -2751,7 +2743,7 @@ def save_best_milestone(
     - Saves all assets to an isolated versioned staging directory.
     - Verifies integrity, model keys, and dynamic SHA-256 before touching active milestone.
     - Atomically promotes staging directory to best_dir with rollback safety.
-    - Strictly ZERO optimizer state (saves 4GB of disk space and avoids OOM).
+    - Preserves optimizer state and RNG states if provided for 100% crash-proof recovery.
     - Preserves exact data cursor so fallback resumption retains shard and line offsets.
     """
     with _checkpoint_write_lock:
@@ -2844,6 +2836,59 @@ def save_best_milestone(
                     world_weights_sha256 = existing_st.get("world_model_weights_sha256")
                 else:
                     world_weights_sha256 = compute_file_sha256(actual_wm_target) if os.path.exists(actual_wm_target) else None
+
+            # 3c. optimizer_state.pt (for 100% full recovery without momentum loss)
+            if optimizer is not None:
+                opt_sd = optimizer.state_dict()
+                cpu_opt_state = {}
+                for k, v in opt_sd.items():
+                    if k == "state":
+                        cpu_opt_state[k] = {}
+                        for pid, pdata in v.items():
+                            cpu_opt_state[k][pid] = {
+                                sk: sv.cpu() if isinstance(sv, torch.Tensor) else sv
+                                for sk, sv in pdata.items()
+                            }
+                    else:
+                        cpu_opt_state[k] = v
+                del opt_sd
+                scaler_state = scaler.state_dict() if scaler else None
+
+                torch_rng = torch.get_rng_state()
+                cuda_rng = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+                py_rng = random.getstate()
+
+                opt_save_dict = {
+                    "optimizer": cpu_opt_state,
+                    "scaler": scaler_state,
+                    "step": step,
+                    "best_loss": best_loss,
+                    "torch_rng": torch_rng,
+                    "cuda_rng": cuda_rng,
+                    "py_rng": py_rng,
+                }
+                if world_optimizer is not None:
+                    w_opt_sd = world_optimizer.state_dict()
+                    w_cpu_opt_state = {}
+                    for k, v in w_opt_sd.items():
+                        if k == "state":
+                            w_cpu_opt_state[k] = {}
+                            for pid, pdata in v.items():
+                                w_cpu_opt_state[k][pid] = {
+                                    sk: sv.cpu() if isinstance(sv, torch.Tensor) else sv
+                                    for sk, sv in pdata.items()
+                                }
+                        else:
+                            w_cpu_opt_state[k] = v
+                    opt_save_dict["world_optimizer"] = w_cpu_opt_state
+                    opt_save_dict["world_scaler"] = world_scaler.state_dict() if world_scaler else None
+
+                torch.save(
+                    opt_save_dict,
+                    os.path.join(staging_dir, "optimizer_state.pt"),
+                )
+                del cpu_opt_state, scaler_state
+                gc.collect()
 
             # 4. Continuation state with exact data cursor
             if data_cursor is None:
@@ -5726,6 +5771,10 @@ def main():
                             step, epoch, cur_step_loss, best_loss, args.stage_id,
                             dataset=dataset, shard_ledger=shard_ledger, data_cursor=best_loss_cursor,
                             world_model=world_model,
+                            optimizer=optimizer,
+                            scaler=scaler,
+                            world_optimizer=world_optimizer,
+                            world_scaler=world_scaler,
                         )
 
                         # Immediately mirror authentic best milestone to Google Drive in background
@@ -5733,7 +5782,7 @@ def main():
                             best_cp_dir,
                             f"BEST-MILESTONE (Step {step:04d}, Loss: {best_loss:.4f})",
                             wait=False,
-                            sync_optimizer=False,
+                            sync_optimizer=True,
                         )
                     else:
                         print(
@@ -5924,6 +5973,10 @@ def main():
             step, epoch, final_loss, best_loss, args.stage_id,
             dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
             world_model=world_model,
+            optimizer=optimizer,
+            scaler=scaler,
+            world_optimizer=world_optimizer,
+            world_scaler=world_scaler,
         )
         has_unsaved_gdrive_best = True
 
@@ -5933,7 +5986,7 @@ def main():
             best_cp_dir,
             f"BEST-MILESTONE-FINAL (Step {best_loss_step:04d}, Loss: {best_loss:.4f})",
             wait=True,
-            sync_optimizer=False,
+            sync_optimizer=True,
         )
 
     print(f"[Stage Complete] Training checkpoint preserved in: {args.output_dir}")

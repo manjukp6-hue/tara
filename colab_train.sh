@@ -19,16 +19,7 @@ rm -rf /root/.julia /content/sample_data 2>/dev/null || true
 rm -rf storage/datasets/*/.cache storage/models/*/.cache 2>/dev/null || true
 rm -rf target/debug target/release/deps target/release/build target/release/incremental 2>/dev/null || true
 rm -rf storage/checkpoints/gpu_step_test_parity 2>/dev/null || true
-
-# Preserve any pre-existing Hugging Face token before clearing cache
-SAVED_HF_TOKEN=""
-if [ -f "/root/.cache/huggingface/token" ]; then
-    SAVED_HF_TOKEN=$(cat "/root/.cache/huggingface/token" 2>/dev/null || true)
-elif [ -f "$HOME/.cache/huggingface/token" ]; then
-    SAVED_HF_TOKEN=$(cat "$HOME/.cache/huggingface/token" 2>/dev/null || true)
-fi
-
-rm -rf /root/.cache/huggingface/hub /root/.cache/pip /root/.cache/torch /root/.cargo/registry/cache ~/.cache/huggingface/hub 2>/dev/null || true
+rm -rf /root/.cache/huggingface /root/.cache/pip /root/.cache/torch /root/.cargo/registry/cache ~/.cache/* 2>/dev/null || true
 if command -v apt-get >/dev/null 2>&1; then
     apt-get clean 2>/dev/null || true
     rm -rf /var/lib/apt/lists/* 2>/dev/null || true
@@ -51,19 +42,12 @@ export HF_DATASET_REPO="${HF_DATASET_REPO:-${HF_MODEL_REPO:-${HF_REPO:-manjukp6/
 export HF_MODEL_REPO="${HF_MODEL_REPO:-${HF_DATASET_REPO}}"
 export HF_REPO="${HF_REPO:-${HF_MODEL_REPO}}"
 
-# Resolve HF_TOKEN from environment, saved cache, or Google Colab userdata secrets
-if [ -z "${HF_TOKEN:-}" ]; then
-    if [ -n "$SAVED_HF_TOKEN" ]; then
-        export HF_TOKEN="$SAVED_HF_TOKEN"
-        echo "[AUTH] HF_TOKEN restored from local token cache."
-    fi
-fi
-
+# Resolve HF_TOKEN from Google Colab userdata secrets if not explicitly exported in Bash
 if [ -z "${HF_TOKEN:-}" ]; then
     RESOLVED_HF_TOKEN=$(python3 -c "
 try:
     from google.colab import userdata
-    for k in ('HF_TOKEN', 'HUGGINGFACE_TOKEN', 'HUGGINGFACE_HUB_TOKEN', 'HF_KEY', 'hf_token', 'hf_key', 'hf', 'HF', 'tara_sync'):
+    for k in ('HF_TOKEN', 'tara_sync', 'hf_token'):
         try:
             t = userdata.get(k)
             if t and t.strip():
@@ -78,21 +62,6 @@ except Exception:
         export HF_TOKEN="$RESOLVED_HF_TOKEN"
         echo "[AUTH] HF_TOKEN successfully resolved from Google Colab Secrets."
     fi
-fi
-
-if [ -n "${HF_TOKEN:-}" ]; then
-    echo "[AUTH] HF_TOKEN is active (length: ${#HF_TOKEN}, prefix: ${HF_TOKEN:0:4}***)."
-else
-    echo "=============================================================================="
-    echo "[AUTH WARNING] HF_TOKEN is not detected or inaccessible!"
-    echo "Hugging Face repository '$HF_REPO' is private. Unauthenticated requests will fail (401)."
-    echo "If you already added the key in Colab Secrets:"
-    echo "  1. Open the Secrets pane (Key icon 🔑) on the left sidebar in Colab."
-    echo "  2. Ensure the toggle switch 'Notebook access' is turned ON for your secret."
-    echo "  3. In your Colab notebook cell, pass it explicitly before launching the runner:"
-    echo "     from google.colab import userdata; import os; os.environ['HF_TOKEN'] = userdata.get('HF_TOKEN')"
-    echo "     !cd /content/taracore && HF_TOKEN=\"\$HF_TOKEN\" bash colab_train.sh"
-    echo "=============================================================================="
 fi
 
 TRAINER_MODE="${TRAINER_MODE:-python}"
@@ -166,7 +135,7 @@ download_hf() {
     echo "[HF DOWNLOAD] Streaming $repo_type '$repo_id' (prefix: '$prefix') -> '$local_dir' via Python..."
     if python3 -c "
 import os, sys
-from huggingface_hub import snapshot_download, HfApi
+from huggingface_hub import snapshot_download
 
 repo_id = sys.argv[1]
 repo_type = sys.argv[2]
@@ -174,10 +143,6 @@ prefix = sys.argv[3]
 local_dir = sys.argv[4]
 token = os.environ.get('HF_TOKEN') or None
 allow = [prefix] if prefix else None
-
-# Pre-validate repository access so authentication failures raise immediately instead of returning empty local_dir
-api = HfApi(token=token)
-api.repo_info(repo_id=repo_id, repo_type=repo_type)
 
 snapshot_download(
     repo_id=repo_id,
@@ -189,7 +154,7 @@ snapshot_download(
 )
 " "$repo_id" "$repo_type" "$prefix" "$local_dir"; then
         echo "[HF DOWNLOAD] Python download verified successfully into '$local_dir'."
-        rm -rf /root/.cache/huggingface/hub ~/.cache/huggingface/hub /root/.cache/pip ~/.cache/pip "$local_dir/.cache" 2>/dev/null || true
+        rm -rf /root/.cache/huggingface /root/.cache/pip ~/.cache/huggingface "$local_dir/.cache" 2>/dev/null || true
         return 0
 
     fi
@@ -253,7 +218,7 @@ else
                 shopt -u nullglob
                 rmdir "$MAIN_DS_DIR/v2"
             fi
-            rm -rf /root/.cache/huggingface/hub ~/.cache/huggingface/hub "$MAIN_DS_DIR/.cache" 2>/dev/null || true
+            rm -rf /root/.cache/huggingface ~/.cache/huggingface "$MAIN_DS_DIR/.cache" 2>/dev/null || true
             echo "Pretraining Dataset Ingestion Verified!"
         else
             echo "[DATASET NOTICE] Remote dataset download failed or not found. Checking local datasets in $MAIN_DS_DIR."
@@ -317,7 +282,7 @@ else
             shopt -u nullglob
             rmdir storage/models/tara_candidate_v1/neural_model_v1
         fi
-        rm -rf /root/.cache/huggingface/hub ~/.cache/huggingface/hub "storage/models/tara_candidate_v1/.cache" 2>/dev/null || true
+        rm -rf /root/.cache/huggingface ~/.cache/huggingface "storage/models/tara_candidate_v1/.cache" 2>/dev/null || true
         CHECK_SHARDS=(storage/models/tara_candidate_v1/*.safetensors)
         if [ -e "${CHECK_SHARDS[0]:-}" ]; then
             echo "Neural Model V1 Ingestion from Hugging Face Verified!"
@@ -505,7 +470,7 @@ echo "Pre-Training Authorization Gate Passed!"
 # 5a. Proactive Pre-Training Disk Space Reclamation: Reclaim 15-20 GB while keeping compiled release binaries
 echo "[DISK HYGIENE] Purging intermediate Rust build tree artifacts to reclaim 15-20 GB disk space..."
 rm -rf target/release/deps target/release/build target/release/incremental target/debug ~/.cargo/registry/cache ~/.cargo/registry/src ~/.cargo/git/checkouts 2>/dev/null || true
-rm -rf /root/.cache/huggingface/hub /root/.cache/pip ~/.cache/huggingface/hub ~/.cache/pip 2>/dev/null || true
+rm -rf /root/.cache/huggingface /root/.cache/pip ~/.cache/huggingface ~/.cache/pip 2>/dev/null || true
 if command -v df >/dev/null 2>&1; then
     df -h / | awk 'NR==2 {print "[DISK] Available disk space before training: " $4 " free / " $2 " total (" $5 " used)"}'
 fi

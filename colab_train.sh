@@ -237,6 +237,14 @@ if [ -z "$GDRIVE_CHECKPOINT_DIR" ]; then
         GDRIVE_CHECKPOINT_DIR="/content/drive/My Drive/TARA_CHECKPOINTS"
     fi
 fi
+
+# Resolve shared folder shortcut symlinks cleanly to real path
+if [ -n "$GDRIVE_CHECKPOINT_DIR" ] && [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
+    REAL_GDRIVE=$(readlink -f "$GDRIVE_CHECKPOINT_DIR" 2>/dev/null || true)
+    if [ -n "$REAL_GDRIVE" ] && [ -d "$REAL_GDRIVE" ]; then
+        GDRIVE_CHECKPOINT_DIR="$REAL_GDRIVE"
+    fi
+fi
 export GDRIVE_CHECKPOINT_DIR
 
 # Proactive Google Drive healing: if GDRIVE_CHECKPOINT_DIR is a broken shortcut, unlink and recreate real folder

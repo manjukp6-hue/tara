@@ -1900,7 +1900,7 @@ def _resolve_gdrive_root() -> Optional[str]:
             if env_dir.startswith("/content/drive") and not is_real_gdrive_mount("/content/drive"):
                 pass  # Do not adopt unmounted local container paths
             else:
-                return env_dir
+                return os.path.realpath(env_dir)
 
     candidate_bases = [
         "/content/drive/MyDrive",
@@ -1922,11 +1922,11 @@ def _resolve_gdrive_root() -> Optional[str]:
         for base in candidate_bases:
             cand = os.path.join(base, "TARA_CHECKPOINTS")
             if os.path.isdir(cand):
-                return cand
+                return os.path.realpath(cand)
         # Second priority: default to MyDrive/TARA_CHECKPOINTS if MyDrive exists
         for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
             if os.path.isdir(base):
-                return os.path.join(base, "TARA_CHECKPOINTS")
+                return os.path.realpath(os.path.join(base, "TARA_CHECKPOINTS"))
 
     # In Colab environments where drive was not pre-mounted, attempt non-interactive mount
     if os.path.exists("/content") and not is_real_gdrive_mount("/content/drive"):
@@ -1946,10 +1946,10 @@ def _resolve_gdrive_root() -> Optional[str]:
                 for base in candidate_bases:
                     cand = os.path.join(base, "TARA_CHECKPOINTS")
                     if os.path.isdir(cand):
-                        return cand
+                        return os.path.realpath(cand)
                 for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
                     if os.path.isdir(base):
-                        return os.path.join(base, "TARA_CHECKPOINTS")
+                        return os.path.realpath(os.path.join(base, "TARA_CHECKPOINTS"))
         except Exception:
             pass
 

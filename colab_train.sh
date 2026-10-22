@@ -411,30 +411,32 @@ dst = '$LOCAL_STAGE'
 canonical = {
     'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json',
     'model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt',
-    'shard_ledger.json', 'latest_checkpoint.json', 'dataset_snapshot.json'
+    'shard_ledger.json', 'latest_checkpoint.json', 'dataset_snapshot.json', 'COMMITTED'
 }
-if os.path.exists(src):
-    for root, dirs, files in os.walk(src):
-        rel = os.path.relpath(root, src)
-        trot = os.path.join(dst, rel)
-        os.makedirs(trot, exist_ok=True)
-        for f in files:
-            if f.endswith('.tmp') or '.tmp_' in f:
-                continue
-            if ' (' in f and ')' in f:
-                try:
-                    os.remove(os.path.join(root, f))
-                except Exception:
-                    pass
-                continue
-            if f not in canonical:
-                continue
-            sf = os.path.join(root, f)
-            df = os.path.join(trot, f)
+if os.path.isdir(src):
+    os.makedirs(dst, exist_ok=True)
+    # 1. Copy top-level canonical files strictly into dst (non-recursive, maxdepth 1)
+    for f in os.listdir(src):
+        sf = os.path.join(src, f)
+        if os.path.isfile(sf) and f in canonical:
+            df = os.path.join(dst, f)
             min_size = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
             if not os.path.exists(df) or os.path.getsize(df) < min_size:
-                print(f'  -> Copying canonical {f}...', flush=True)
+                print(f'  -> Copying canonical top-level {f}...', flush=True)
                 shutil.copy2(sf, df)
+    # 2. Copy best_checkpoint subfolder strictly into dst/best_checkpoint
+    best_src = os.path.join(src, 'best_checkpoint')
+    best_dst = os.path.join(dst, 'best_checkpoint')
+    if os.path.isdir(best_src):
+        os.makedirs(best_dst, exist_ok=True)
+        for f in os.listdir(best_src):
+            sf = os.path.join(best_src, f)
+            if os.path.isfile(sf) and f in canonical:
+                df = os.path.join(best_dst, f)
+                min_size = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
+                if not os.path.exists(df) or os.path.getsize(df) < min_size:
+                    print(f'  -> Copying canonical best_checkpoint/{f}...', flush=True)
+                    shutil.copy2(sf, df)
 " 2>/dev/null || true
                 echo "[RESUME SYNC] Checkpoint mirror restore complete."
             fi

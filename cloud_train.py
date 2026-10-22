@@ -4722,7 +4722,7 @@ def main():
     parser.add_argument("--max-shards", type=int, default=0, help="Max shards to ingest (0 for all discovered shards)")
     parser.add_argument("--exclude-shards", type=str, default="*shard_099*,*shard_098*", help="Comma-separated patterns of shards strictly excluded from training (held-out validation)")
     parser.add_argument("--max-samples", type=int, default=0, help="Max samples to ingest across shards (0 for unlimited)")
-    parser.add_argument("--checkpoint-interval", type=int, default=int(os.environ.get("CHECKPOINT_INTERVAL", 50)), help="Optimizer step interval between checkpoint commits and cloud backups (default: 50)")
+    parser.add_argument("--checkpoint-interval", type=int, default=int(os.environ.get("CHECKPOINT_INTERVAL", 500)), help="Optimizer step interval between checkpoint commits and cloud backups (default: 500)")
     parser.add_argument("--optimizer", type=str, default="auto", choices=["auto", "adamw", "adamw8bit"], help="Optimizer choice ('adamw8bit' saves 5.5GB VRAM for Tesla T4)")
     parser.add_argument("--resume", action="store_true", default=True, help="Auto-resume from existing checkpoint if available")
     parser.add_argument("--canary", action="store_true", default=False, help="Enable 15-step T4 canary validation mode (batch_size=1, grad_accum=4, max_seq_len=256, max_steps=15, warmup_steps=3)")

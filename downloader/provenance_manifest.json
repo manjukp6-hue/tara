@@ -1,0 +1,38 @@
+{
+  "manifest_version": "1.0.0",
+  "generated_at": "2026-10-23T08:49:50Z",
+  "datasets": [
+    {
+      "dataset_name": "MOLI — Randomized Go2 Expert Demonstrations",
+      "official_source_url": "https://huggingface.co/datasets/moli-robotics/go2-expert-100",
+      "license": "CC-BY-4.0",
+      "license_proof_url": "https://huggingface.co/datasets/moli-robotics/go2-expert-100/blob/main/LICENSE",
+      "commercial_use_allowed": true,
+      "modification_allowed": true,
+      "redistribution_allowed": true,
+      "ai_training_allowed": true,
+      "upstream_archives": [
+        {
+          "file": "archives/go2-push-raw.tar.gz",
+          "sha256": "6e0debd22de548e792e9eb5d6f0313df56f76a853d7a32eb1ad97aba1d86ed8b"
+        },
+        {
+          "file": "archives/go2-recontact-raw.tar.gz",
+          "sha256": "a2d210bc1f4fb9a9cefddd1544766d164a891046247ab0e26f2ebc8725d25030"
+        }
+      ]
+    },
+    {
+      "dataset_name": "D4RL PointMaze Large-v2",
+      "official_source_url": "https://rail.eecs.berkeley.edu/datasets/offline_rl/gym_mujoco_v2/pointmaze_large_v2/main_data.hdf5",
+      "license": "CC-BY-4.0",
+      "license_proof_url": "https://github.com/Farama-Foundation/D4RL/blob/master/LICENSE",
+      "commercial_use_allowed": true,
+      "modification_allowed": true,
+      "redistribution_allowed": true,
+      "ai_training_allowed": true,
+      "file": "d4rl_pointmaze_large_v2_main_data.hdf5",
+      "sha256": "7ee930174761268a85d6b655421a1500181e12afe00d2649df766df7bc5ddead"
+    }
+  ]
+}

@@ -53,6 +53,8 @@ impl LicenseEvaluator {
                 | "APACHE 2.0"
                 | "BSD-2-CLAUSE"
                 | "BSD-3-CLAUSE"
+                | "CC-BY-4.0"
+                | "CC BY 4.0"
                 | "CC0-1.0"
                 | "CC0"
                 | "UNLICENSE"

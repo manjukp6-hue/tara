@@ -4,7 +4,7 @@
 //! cryptographic integrity auditing, and provenance ledger maintenance.
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 use tara_standalone_downloader::{DownloaderService, LicenseEvaluator};
 
@@ -14,6 +14,7 @@ fn print_usage(prog_name: &str) {
     println!("  {} --verify --file <path> --url <source_url> --license <license> --proof <proof_url> [--dir <output_dir>]", prog_name);
     println!("  {} --ledger [--dir <output_dir>]", prog_name);
     println!("  {} --check-license <license_id>", prog_name);
+    println!("  {} --shard-all --input-dir <dir> --output-dir <dir> [--max-mb <mb>]", prog_name);
 }
 
 fn main() {
@@ -29,10 +30,35 @@ fn main() {
     let mut license_id = String::new();
     let mut proof_url = String::new();
     let mut output_dir: Option<PathBuf> = None;
+    let mut input_dir: Option<PathBuf> = None;
+    let mut max_mb: u64 = 500;
 
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "--shard-all" => {
+                mode = "shard-all".to_string();
+            }
+            "--input-dir" => {
+                if i + 1 < args.len() {
+                    input_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 1;
+                }
+            }
+            "--output-dir" => {
+                if i + 1 < args.len() {
+                    output_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 1;
+                }
+            }
+            "--max-mb" => {
+                if i + 1 < args.len() {
+                    if let Ok(v) = args[i + 1].parse::<u64>() {
+                        max_mb = v;
+                    }
+                    i += 1;
+                }
+            }
             "--verify" => {
                 mode = "verify".to_string();
             }
@@ -86,6 +112,150 @@ fn main() {
     }
 
     match mode.as_str() {
+        "shard-all" => {
+            let in_dir = match input_dir {
+                Some(d) => d,
+                None => {
+                    eprintln!("Error: --input-dir is required for shard-all");
+                    process::exit(1);
+                }
+            };
+            let out_dir = match output_dir {
+                Some(d) => d,
+                None => {
+                    eprintln!("Error: --output-dir is required for shard-all");
+                    process::exit(1);
+                }
+            };
+
+            if let Err(e) = std::fs::create_dir_all(&out_dir) {
+                eprintln!("Failed to create output directory: {}", e);
+                process::exit(1);
+            }
+
+            fn collect_files(dir: &Path, parquets: &mut Vec<PathBuf>) {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            collect_files(&path, parquets);
+                        } else if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                            if ext == "parquet" {
+                                parquets.push(path);
+                            }
+                        }
+                    }
+                }
+            }
+
+            let mut parquet_files = Vec::new();
+            collect_files(&in_dir, &mut parquet_files);
+            parquet_files.sort();
+
+            println!(
+                "Found {} Parquet files to convert to JSONL (max {} MB/shard)...",
+                parquet_files.len(),
+                max_mb
+            );
+
+            let max_bytes = max_mb * 1024 * 1024;
+            // Shard index starts at 3 because shard_00000 to shard_00002 already exist
+            let mut shard_idx = 3;
+            let mut current_bytes = 0;
+            let mut total_records = 0;
+            let mut current_file: Option<std::fs::File> = None;
+
+            use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+            use std::io::Write;
+
+            for (p_idx, p_path) in parquet_files.iter().enumerate() {
+                if (p_idx + 1) % 20 == 0 || p_idx == 0 || p_idx + 1 == parquet_files.len() {
+                    println!("Converting parquet [{}/{}] {:?}", p_idx + 1, parquet_files.len(), p_path.file_name().unwrap_or_default());
+                }
+
+                let file = match std::fs::File::open(p_path) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        eprintln!("Warning: skipping unreadable parquet {:?}: {}", p_path, e);
+                        continue;
+                    }
+                };
+
+                let builder = match ParquetRecordBatchReaderBuilder::try_new(file) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        eprintln!("Warning: failed reading parquet {:?}: {}", p_path, e);
+                        continue;
+                    }
+                };
+
+                let mut reader = match builder.build() {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("Warning: failed building parquet reader {:?}: {}", p_path, e);
+                        continue;
+                    }
+                };
+
+                for maybe_batch in &mut reader {
+                    let batch = match maybe_batch {
+                        Ok(b) => b,
+                        Err(e) => {
+                            eprintln!("Warning: batch error in {:?}: {}", p_path, e);
+                            continue;
+                        }
+                    };
+
+                    let mut json_buf = Vec::new();
+                    {
+                        let mut writer = arrow_json::LineDelimitedWriter::new(&mut json_buf);
+                        if let Err(e) = writer.write(&batch) {
+                            eprintln!("Warning: failed writing batch to json: {}", e);
+                            continue;
+                        }
+                        let _ = writer.finish();
+                    }
+
+                    let json_str = match std::str::from_utf8(&json_buf) {
+                        Ok(s) => s,
+                        Err(_) => continue,
+                    };
+
+                    for line in json_str.lines() {
+                        if line.trim().is_empty() {
+                            continue;
+                        }
+                        if current_file.is_none() || current_bytes >= max_bytes {
+                            let shard_name = format!("shard_{:05}.jsonl", shard_idx);
+                            let shard_path = out_dir.join(&shard_name);
+                            println!("Writing to new shard: {:?}", shard_path);
+                            let new_f = match std::fs::File::create(&shard_path) {
+                                Ok(f) => f,
+                                Err(e) => {
+                                    eprintln!("Failed to create shard {:?}: {}", shard_path, e);
+                                    process::exit(1);
+                                }
+                            };
+                            current_file = Some(new_f);
+                            current_bytes = 0;
+                            shard_idx += 1;
+                        }
+
+                        if let Some(ref mut out_f) = current_file {
+                            let bytes = line.as_bytes();
+                            let _ = out_f.write_all(bytes);
+                            let _ = out_f.write_all(b"\n");
+                            current_bytes += bytes.len() as u64 + 1;
+                            total_records += 1;
+                        }
+                    }
+                }
+            }
+
+            println!("All Parquet files converted and sharded successfully!");
+            println!("Total additional records written: {}", total_records);
+            println!("Final shard index reached: {}", shard_idx);
+        }
         "check-license" => {
             if license_id.is_empty() {
                 eprintln!("Error: Missing license identifier to evaluate.");

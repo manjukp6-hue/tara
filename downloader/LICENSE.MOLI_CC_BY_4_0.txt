@@ -1,0 +1,8 @@
+MOLI randomized expert datasets
+Copyright (c) 2026 Jeong-zju
+
+Generated dataset records and images are licensed under Creative Commons Attribution 4.0 International (CC BY 4.0).
+https://creativecommons.org/licenses/by/4.0/
+Full legal terms: https://creativecommons.org/licenses/by/4.0/legalcode
+
+External software, assets, pretrained controller weights and trademarks remain under their original terms. See THIRD_PARTY_NOTICES.md.

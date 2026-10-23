@@ -13,3 +13,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 hex = "0.4"
+parquet = { version = "53.0", default-features = false, features = ["arrow", "snap"] }
+arrow = { version = "53.0", default-features = false, features = ["json"] }
+arrow-json = "53.0"

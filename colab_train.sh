@@ -756,6 +756,7 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --hf-repo "$HF_DATASET_REPO" \
         --hf-dataset-repo "$HF_DATASET_REPO" \
         --hf-model-repo "$HF_MODEL_REPO" \
+        --max-shard-bytes 0 \
         $JOINT_WORLD_FLAG \
         $GDRIVE_SYNC_FLAGS \
         $CANARY_EXTRA_ARGS \

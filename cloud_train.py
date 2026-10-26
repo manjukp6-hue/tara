@@ -6564,9 +6564,9 @@ def main():
     parser.add_argument("--keep-shards", action="store_true", default=False, help="Do not delete local shards after completion")
     parser.add_argument("--dataset-prefix", type=str, default="",
                         help="Remote dataset version prefix on Hugging Face (default empty for root dataset structure e.g. tara_dataset_v1)")
-    parser.add_argument("--max-shard-bytes", type=int, default=1_073_741_824,
-                        help="Enforced maximum size per downloaded shard in bytes (default: 1 GiB = 1073741824). "
-                             "Downloads exceeding this limit are aborted; incomplete temp files are removed.")
+    parser.add_argument("--max-shard-bytes", type=int, default=0,
+                        help="Enforced maximum size per downloaded shard in bytes (default: 0 = dynamic / unlimited). "
+                             "When set > 0, downloads exceeding this limit are aborted; incomplete temp files are removed.")
     parser.add_argument("--bulk-download-dataset", action="store_true", default=False,
                         help="Bulk pre-download all dataset shards instead of JIT single-shard streaming")
     parser.add_argument("--gradient-checkpointing", action="store_true", default=False,

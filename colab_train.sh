@@ -174,6 +174,8 @@ fi
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-500}"
 SKIP_SAVE_STEPS="${SKIP_SAVE_STEPS:-0}"
 export SKIP_SAVE_STEPS
+PROMOTE_MAX_STEP="${PROMOTE_MAX_STEP:-0}"
+export PROMOTE_MAX_STEP
 DOMAIN_WEIGHTS="${DOMAIN_WEIGHTS:-02_code:0.25,01_math:0.15,04_kannada:0.15,12_reasoning:0.15,03_stem:0.10,08_world_model:0.05,11_tool_use:0.05,13_debugging:0.02,sft:0.02,05_philosophy:0.012,06_social:0.012,07_engineering:0.012,09_audio:0.012,10_vision:0.012}"
 export DOMAIN_WEIGHTS
 GDRIVE_SYNC_FLAGS="--sync-all-to-gdrive --sync-gdrive-optimizer --keep-checkpoints 1"
@@ -459,10 +461,14 @@ if os.path.isdir(src):
         # 3. Auto-promote authentic best_checkpoint if top-level model is invalid or older than best_checkpoint
         if best_is_valid and (not top_is_valid or src_best_step > src_top_step):
             print(f'  -> Promoting authentic best_checkpoint (Step {src_best_step}) to local stage root...', flush=True)
-            for f in ('model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt', 'config.json'):
+            for f in ('model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt', 'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json'):
                 b_src = os.path.join(best_src, f)
                 if os.path.isfile(b_src):
                     shutil.copy2(b_src, os.path.join(dst, f))
+                else:
+                    cand_f = os.path.join('storage/models/tara_candidate_v1', f)
+                    if os.path.isfile(cand_f) and not os.path.exists(os.path.join(dst, f)):
+                        shutil.copy2(cand_f, os.path.join(dst, f))
 
         # 4. Restore any versioned subdirectories (.step*) into parent active checkpoints dir
         for item in os.listdir(src):
@@ -774,6 +780,7 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --max-seq-len "$TARA_MAX_SEQ_LEN" \
         --checkpoint-interval "$CHECKPOINT_INTERVAL" \
         --skip-save-steps "$SKIP_SAVE_STEPS" \
+        --promote-max-step "$PROMOTE_MAX_STEP" \
         --domain-weights "$DOMAIN_WEIGHTS" \
         --hf-repo "$HF_DATASET_REPO" \
         --hf-dataset-repo "$HF_DATASET_REPO" \

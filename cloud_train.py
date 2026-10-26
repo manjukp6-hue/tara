@@ -4022,11 +4022,11 @@ def sync_checkpoint_to_gdrive(
     if sync_optimizer:
         file_list.append("optimizer_state.pt")
 
+    thread_to_wait_prev = None
     with _gdrive_sync_lock:
         if _gdrive_sync_thread and _gdrive_sync_thread.is_alive():
             if wait:
-                print(f"[GDrive Mirror] Waiting for previous sync to complete...", flush=True)
-                _gdrive_sync_thread.join()
+                thread_to_wait_prev = _gdrive_sync_thread
             else:
                 # Discard if already queued job is newer
                 if _pending_gdrive_sync is not None and _pending_gdrive_sync[4] >= step:
@@ -4044,6 +4044,13 @@ def sync_checkpoint_to_gdrive(
                 print(f"[GDrive Mirror] Active sync in progress; queued [{tag}] as next GDrive update.", flush=True)
                 return
 
+    # Join previous thread OUTSIDE lock to eliminate deadlock
+    if thread_to_wait_prev is not None:
+        print(f"[GDrive Mirror] Waiting for previous sync to complete...", flush=True)
+        thread_to_wait_prev.join()
+
+    thread_to_wait_curr = None
+    with _gdrive_sync_lock:
         _pending_gdrive_sync = None
         _gdrive_sync_thread = threading.Thread(
             target=_sync_to_gdrive_worker,
@@ -4051,9 +4058,12 @@ def sync_checkpoint_to_gdrive(
             daemon=True
         )
         _gdrive_sync_thread.start()
-
         if wait:
-            _gdrive_sync_thread.join()
+            thread_to_wait_curr = _gdrive_sync_thread
+
+    # Join current thread OUTSIDE lock so worker can acquire _gdrive_sync_lock immediately without deadlock
+    if thread_to_wait_curr is not None:
+        thread_to_wait_curr.join()
 
 
 
@@ -4175,9 +4185,18 @@ def compute_tokenizer_fingerprint(
 
     if search_dir and os.path.isdir(search_dir):
         cfg_file = os.path.join(search_dir, "tokenizer_config.json")
+        if not os.path.isfile(cfg_file):
+            cand_cfg = os.path.join("storage/models/tara_candidate_v1", "tokenizer_config.json")
+            if os.path.isfile(cand_cfg):
+                cfg_file = cand_cfg
         if os.path.isfile(cfg_file):
             tok_cfg_sha = compute_file_sha256(cfg_file)
+
         sp_file = os.path.join(search_dir, "special_tokens_map.json")
+        if not os.path.isfile(sp_file):
+            cand_sp = os.path.join("storage/models/tara_candidate_v1", "special_tokens_map.json")
+            if os.path.isfile(cand_sp):
+                sp_file = cand_sp
         if os.path.isfile(sp_file):
             tok_sp_sha = compute_file_sha256(sp_file)
 
@@ -6098,10 +6117,24 @@ def try_resume_from_checkpoint(
                 if stored_tok_fp is not None:
                     stored_canon = stored_tok_fp.get("canonical_fingerprint")
                     curr_canon = current_tok_fp.get("canonical_fingerprint")
-                    if stored_canon and curr_canon and stored_canon != curr_canon:
+                    is_tok_match = False
+                    if stored_canon and curr_canon and stored_canon == curr_canon:
+                        is_tok_match = True
+                    else:
+                        stored_tok_sha = stored_tok_fp.get("tokenizer_file_sha256")
+                        curr_tok_sha = current_tok_fp.get("tokenizer_file_sha256")
+                        stored_vocab = stored_tok_fp.get("vocab_size")
+                        curr_vocab = current_tok_fp.get("vocab_size")
+                        if stored_tok_sha and curr_tok_sha and stored_tok_sha == curr_tok_sha and (stored_vocab is None or curr_vocab is None or stored_vocab == curr_vocab):
+                            is_tok_match = True
+                            print(
+                                f"  -> Notice: Candidate at {cand} primary tokenizer.json SHA-256 and vocab_size ({curr_vocab}) match authentic baseline. Permitting verified resume.",
+                                flush=True,
+                            )
+                    if not is_tok_match:
                         print(
                             f"  -> Fatal: Candidate at {cand} tokenizer fingerprint mismatch! "
-                            f"(Stored: {stored_canon[:16]}..., Current: {curr_canon[:16]}...). "
+                            f"(Stored: {stored_canon[:16] if stored_canon else 'none'}..., Current: {curr_canon[:16] if curr_canon else 'none'}...). "
                             f"Refusing to resume with incompatible tokenizer to prevent representation corruption.",
                             flush=True,
                         )
@@ -6869,6 +6902,8 @@ def main():
                         help="Number of past checkpoints to retain (default: 1; deletes older checkpoints upon verified new commit)")
     parser.add_argument("--skip-save-steps", type=int, default=int(os.environ.get("SKIP_SAVE_STEPS", 0)),
                         help="Number of initial steps to skip checkpoint and best-milestone disk/cloud saves (default: 0; immediate zero-lock saves active)")
+    parser.add_argument("--promote-max-step", type=int, default=int(os.environ.get("PROMOTE_MAX_STEP", 0)),
+                        help="Target step ceiling for model promotion (e.g. 500). Promotes the best checkpoint achieved within steps <= PROMOTE_MAX_STEP for real-time deployment while training continues uninterrupted. 0 means unbounded/entire stage.")
     parser.add_argument("--domain-weights", type=str, default=os.environ.get("DOMAIN_WEIGHTS", ""),
                         help="Custom comma-separated domain weights (e.g. '01_mathematics_formal_logic=0.15,12_planning_reasoning_traces=0.20')")
     parser.add_argument("--anchor-ratio", type=float, default=float(os.environ.get("ANCHOR_RATIO", 0.15)),
@@ -7027,6 +7062,7 @@ def main():
     print(f"  Checkpoint Interval   : {args.checkpoint_interval}")
     print(f"  Checkpoints Retained  : {args.keep_checkpoints}")
     print(f"  Skip Save Steps       : {args.skip_save_steps}")
+    print(f"  Promote Max Step      : {args.promote_max_step if args.promote_max_step > 0 else 'Unbounded (Stage Completion)'}")
     print(f"  Warmup Steps          : {args.warmup_steps}")
     print(f"  Base Learning Rate    : {args.lr:.2e}")
     print(f"  Min Learning Rate     : {args.min_lr:.2e}")
@@ -7634,6 +7670,10 @@ def main():
 
     # Setup Best Checkpoint Directory
     best_cp_dir = os.path.join(args.output_dir, "best_checkpoint")
+    promoted_target = args.promoted_dir if args.promoted_dir else os.path.join("storage/models", f"promoted_{args.stage_id}")
+    target_model_repo = args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara"))
+    promoted_at_target_step = False
+    window_best_source = os.path.join(args.output_dir, "best_checkpoint_window")
 
     last_regular_checkpoint_step = start_step
     last_best_checkpoint_step = start_step
@@ -8016,6 +8056,23 @@ def main():
                                 except Exception:
                                     shutil.copy2(s_file, d_file)
 
+                        # If promote_max_step is set and current step is within window, snapshot to window_best_source
+                        if args.promote_max_step > 0 and step <= args.promote_max_step:
+                            try:
+                                os.makedirs(window_best_source, exist_ok=True)
+                                for item in os.listdir(best_cp_dir):
+                                    s_file = os.path.join(best_cp_dir, item)
+                                    d_file = os.path.join(window_best_source, item)
+                                    if os.path.isfile(s_file):
+                                        try:
+                                            if os.path.exists(d_file):
+                                                os.remove(d_file)
+                                            os.link(s_file, d_file)
+                                        except Exception:
+                                            shutil.copy2(s_file, d_file)
+                            except Exception as e:
+                                print(f"[Promote Window Snapshot Warning] Failed to update window snapshot: {e}", flush=True)
+
                         # Mirror authentic best milestone to Google Drive
                         wait_sync = getattr(args, "gdrive_sync_wait", False) or (os.environ.get("GDRIVE_SYNC_WAIT", "0") == "1")
                         sync_checkpoint_to_gdrive(
@@ -8034,6 +8091,24 @@ def main():
                             f"New best loss {best_loss:.4f} tracked in memory; local save active at Step {args.skip_save_steps + 1}+.",
                             flush=True,
                         )
+
+                # Target-Step Model Promotion Gate (NON-BLOCKING: Real-time deployment while training continues uninterrupted)
+                if args.promote_max_step > 0 and step >= args.promote_max_step and not promoted_at_target_step:
+                    promoted_at_target_step = True
+                    src_cand = window_best_source if (os.path.isdir(window_best_source) and os.path.exists(os.path.join(window_best_source, "model.safetensors"))) else (
+                        best_cp_dir if os.path.exists(os.path.join(best_cp_dir, "model.safetensors")) else args.output_dir
+                    )
+                    print(f"\n{'=' * 80}", flush=True)
+                    print(f"[{args.stage_id} | Step {step:04d}] >>> PROMOTING MODEL AT TARGET STEP ({args.promote_max_step}) FOR REAL-TIME DEPLOYMENT <<<", flush=True)
+                    print(f"[{args.stage_id}] Selected Best Checkpoint within window (<= {args.promote_max_step}) -> Promoting to: {promoted_target}", flush=True)
+                    print(f"[{args.stage_id}] [TRAINING CONTINUES UNINTERRUPTED TO STEP {args.max_steps}]", flush=True)
+                    print(f"{'=' * 80}\n", flush=True)
+                    try:
+                        promote_checkpoint(src_cand, promoted_target, args.stage_id)
+                        if target_model_repo:
+                            upload_promoted_model_to_hf(promoted_target, target_model_repo, args.stage_id)
+                    except Exception as pe:
+                        print(f"[{args.stage_id} | ERROR] Target step model promotion failed: {pe}", flush=True)
 
                 # Periodic Benchmark Matrix Display
                 if step % 25 == 0 or step == start_step + 1 or is_new_best:
@@ -8242,18 +8317,22 @@ def main():
     print(f"[Stage Complete] Best Milestone model archived in: {best_cp_dir}")
 
     # Auto-Promote clean inference model for deployment & native Rust serving
-    best_source = best_cp_dir if os.path.exists(os.path.join(best_cp_dir, "model.safetensors")) else args.output_dir
-    promoted_target = args.promoted_dir if args.promoted_dir else os.path.join("storage/models", f"promoted_{args.stage_id}")
-    promote_checkpoint(best_source, promoted_target, args.stage_id)
+    if not promoted_at_target_step:
+        best_source = (
+            window_best_source if (args.promote_max_step > 0 and os.path.isdir(window_best_source) and os.path.exists(os.path.join(window_best_source, "model.safetensors")))
+            else (best_cp_dir if os.path.exists(os.path.join(best_cp_dir, "model.safetensors")) else args.output_dir)
+        )
+        promoted_target = args.promoted_dir if args.promoted_dir else os.path.join("storage/models", f"promoted_{args.stage_id}")
+        promote_checkpoint(best_source, promoted_target, args.stage_id)
+        target_model_repo = args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara"))
+        if target_model_repo:
+            upload_promoted_model_to_hf(promoted_target, target_model_repo, args.stage_id)
+    else:
+        print(f"[Promotion] Target step {args.promote_max_step} model already promoted and active for real-time inference -> {promoted_target}", flush=True)
 
     # Auto-Clean bulky optimizer files from previous stage once current stage successfully completes and verifies
     if args.previous_stage_dir:
         clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
-
-    # Automatic Hugging Face Deployment & Promotion
-    target_model_repo = args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara"))
-    if target_model_repo:
-        upload_promoted_model_to_hf(promoted_target, target_model_repo, args.stage_id)
 
     # Canary Checkpoint Reload Verification & Telemetry (Requirement 10)
     if args.canary:

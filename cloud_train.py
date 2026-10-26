@@ -4924,10 +4924,9 @@ def save_checkpoint(
                 return False
 
             # Step 3: Promote staging -> immutable versioned directory
-            folder_prefix = "best_milestone" if is_best else "checkpoint"
             versioned_dir = os.path.join(
                 parent_dir,
-                f"{folder_prefix}_step_{step:08d}_{int(time.time())}"
+                f"{os.path.basename(output_dir)}.step{step}_{int(time.time())}"
             )
 
             try:

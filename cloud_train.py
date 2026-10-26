@@ -2255,32 +2255,12 @@ def route_dataset_record(rec: Any) -> str:
     # Support optional nested "state_transition" wrapper
     t_obj = rec.get("state_transition") if isinstance(rec.get("state_transition"), dict) else rec
 
-    s_obs = t_obj.get("state_observation") or t_obj.get("state") or t_obj.get("observation")
-    act = t_obj.get("action") or t_obj.get("intervention")
-    ns_obs = t_obj.get("next_state_observation") or t_obj.get("next_state") or t_obj.get("subsequent_state")
-
-    # 1. Genuine environment state transition (direct keys)
-    if (
-        isinstance(s_obs, str) and s_obs.strip()
-        and isinstance(act, str) and act.strip()
-        and isinstance(ns_obs, str) and ns_obs.strip()
-    ):
-        # Validate optional numeric fields
-        reward = t_obj.get("reward")
-        if reward is not None and not isinstance(reward, (int, float)):
-            return "invalid"
-        confidence = t_obj.get("confidence")
-        if confidence is not None:
-            if not isinstance(confidence, (int, float)) or confidence < 0.0 or confidence > 1.0:
-                return "invalid"
+    # 1. Genuine environment state transition via unified extractor
+    if extract_state_transition(rec) is not None:
         return "transition"
 
     if any(k in t_obj for k in ("state_observation", "next_state_observation")):
         return "invalid"
-
-    # 1b. Genuine transition semantics extracted from curriculum or environment dynamics
-    if extract_state_transition(rec) is not None:
-        return "transition"
 
     # 2. Knowledge graph / relational facts pathway
     knowledge_keys = ("subject", "predicate", "relation", "triples", "entities", "ontology_node", "world_fact")
@@ -2394,6 +2374,27 @@ class WorldModelTransitionDataset(IterableDataset):
         self.max_seq_len = max_seq_len
         self.max_samples = max_samples
 
+    def _encode_transition(self, s_obs: str, act: str, ns_obs: str) -> Optional[Tuple[torch.Tensor, torch.Tensor]]:
+        """Encodes state transition into prompt-target sequence with prompt masked in labels."""
+        prompt_text = f"[STATE] {s_obs} [ACTION] {act} [NEXT_STATE] "
+        target_text = f"{ns_obs} [EOS]"
+        prompt_tokens = list(self.tokenizer.encode(prompt_text))
+        target_tokens = list(self.tokenizer.encode(target_text))
+        if not target_tokens:
+            return None
+        if len(prompt_tokens) >= self.max_seq_len - 4:
+            prompt_tokens = prompt_tokens[-(self.max_seq_len // 2):]
+        full_ids = (prompt_tokens + target_tokens)[:self.max_seq_len]
+        if len(full_ids) < 4:
+            return None
+        input_ids = torch.tensor(full_ids, dtype=torch.long)
+        labels = input_ids.clone()
+        mask_len = min(len(prompt_tokens), len(full_ids))
+        labels[:mask_len] = -100
+        if not (labels != -100).any():
+            return None
+        return input_ids, labels
+
     def __iter__(self):
         emitted = 0
         for fp in self.file_paths:
@@ -2415,24 +2416,10 @@ class WorldModelTransitionDataset(IterableDataset):
                             t = extract_state_transition(row)
                             if not t:
                                 continue
-                            s_obs, act, ns_obs = t
-                            prompt_text = f"[STATE] {s_obs} [ACTION] {act} [NEXT_STATE] "
-                            target_text = f"{ns_obs} [EOS]"
-                            prompt_tokens = list(self.tokenizer.encode(prompt_text))
-                            target_tokens = list(self.tokenizer.encode(target_text))
-                            if not target_tokens:
+                            encoded = self._encode_transition(*t)
+                            if encoded is None:
                                 continue
-                            if len(prompt_tokens) >= self.max_seq_len - 4:
-                                prompt_tokens = prompt_tokens[-(self.max_seq_len // 2):]
-                            full_ids = (prompt_tokens + target_tokens)[:self.max_seq_len]
-                            if len(full_ids) < 4:
-                                continue
-                            input_ids = torch.tensor(full_ids, dtype=torch.long)
-                            labels = input_ids.clone()
-                            mask_len = min(len(prompt_tokens), len(full_ids))
-                            labels[:mask_len] = -100
-                            if not (labels != -100).any():
-                                continue
+                            input_ids, labels = encoded
                             yield TaraDomainBatchItem(input_ids, labels, os.path.basename(fp), emitted, 0, 0, True, domain="08_commonsense_world_model")
                             emitted += 1
                             if 0 < self.max_samples <= emitted:
@@ -2457,24 +2444,10 @@ class WorldModelTransitionDataset(IterableDataset):
                             t = extract_state_transition(rec)
                             if not t:
                                 continue
-                            s_obs, act, ns_obs = t
-                            prompt_text = f"[STATE] {s_obs} [ACTION] {act} [NEXT_STATE] "
-                            target_text = f"{ns_obs} [EOS]"
-                            prompt_tokens = list(self.tokenizer.encode(prompt_text))
-                            target_tokens = list(self.tokenizer.encode(target_text))
-                            if not target_tokens:
+                            encoded = self._encode_transition(*t)
+                            if encoded is None:
                                 continue
-                            if len(prompt_tokens) >= self.max_seq_len - 4:
-                                prompt_tokens = prompt_tokens[-(self.max_seq_len // 2):]
-                            full_ids = (prompt_tokens + target_tokens)[:self.max_seq_len]
-                            if len(full_ids) < 4:
-                                continue
-                            input_ids = torch.tensor(full_ids, dtype=torch.long)
-                            labels = input_ids.clone()
-                            mask_len = min(len(prompt_tokens), len(full_ids))
-                            labels[:mask_len] = -100
-                            if not (labels != -100).any():
-                                continue
+                            input_ids, labels = encoded
                             yield TaraDomainBatchItem(input_ids, labels, os.path.basename(fp), line_idx, 0, 0, True, domain="08_commonsense_world_model")
                             emitted += 1
                             if 0 < self.max_samples <= emitted:
@@ -5584,6 +5557,45 @@ def _cleanup_old_versioned_checkpoints(
                 print(f"[Checkpoint Retention Notice] Could not remove {dir_path}", flush=True)
 
 
+
+def extract_data_cursor_from_state(s_data: dict) -> dict:
+    """Extract and normalize data cursor from checkpoint_state.json dictionary."""
+    cursor = s_data.get("data_cursor")
+    if not cursor:
+        cursor = {
+            "active_shard": s_data.get("active_shard"),
+            "active_shard_line_offset": s_data.get("active_shard_offset", 0),
+            "active_shard_byte_offset": s_data.get("active_shard_byte_offset", 0),
+            "active_chunk_idx": s_data.get("active_chunk_idx", 0),
+            "total_samples_trained": s_data.get("total_samples_trained", s_data.get("total_completed_records", 0)),
+            "samples_consumed": s_data.get("samples_consumed", s_data.get("total_completed_records", 0)),
+            "completed_shards": s_data.get("completed_shards", []),
+            "domain_cursors": s_data.get("domain_cursors", {}),
+            "scheduler_deficits": s_data.get("scheduler_deficits", {}),
+            "anchor_buffer": s_data.get("anchor_buffer") or s_data.get("anchor_buffer_state"),
+            "anchor_buffer_state": s_data.get("anchor_buffer_state") or s_data.get("anchor_buffer"),
+        }
+    else:
+        cursor = dict(cursor)
+        if "active_shard_byte_offset" not in cursor:
+            cursor["active_shard_byte_offset"] = s_data.get("active_shard_byte_offset", 0)
+        if "active_chunk_idx" not in cursor:
+            cursor["active_chunk_idx"] = s_data.get("active_chunk_idx", 0)
+        if "total_samples_trained" not in cursor:
+            cursor["total_samples_trained"] = s_data.get("total_samples_trained", s_data.get("total_completed_records", 0))
+        if "samples_consumed" not in cursor:
+            cursor["samples_consumed"] = s_data.get("samples_consumed", cursor["total_samples_trained"])
+        if "domain_cursors" not in cursor and "domain_cursors" in s_data:
+            cursor["domain_cursors"] = s_data["domain_cursors"]
+        if "scheduler_deficits" not in cursor and "scheduler_deficits" in s_data:
+            cursor["scheduler_deficits"] = s_data["scheduler_deficits"]
+        if "anchor_buffer" not in cursor:
+            cursor["anchor_buffer"] = s_data.get("anchor_buffer") or s_data.get("anchor_buffer_state")
+        if "anchor_buffer_state" not in cursor:
+            cursor["anchor_buffer_state"] = cursor.get("anchor_buffer")
+    return cursor
+
+
 def try_resume_from_checkpoint(
     checkpoint_dir: str,
     model: nn.Module,
@@ -5917,18 +5929,6 @@ def try_resume_from_checkpoint(
             c_loss = float(s_data.get("loss", float("inf")))
             c_best_loss = float(s_data.get("best_loss", c_loss))
 
-            # Verify optimizer state step alignment if optimizer state exists
-            if has_cand_opt:
-                try:
-                    opt_data = torch.load(cand_opt, map_location="cpu")
-                    opt_step = opt_data.get("step")
-                    del opt_data
-                    if opt_step is not None and opt_step != c_step:
-                        print(f"  -> Notice: Candidate at {cand} has desynchronized optimizer step ({opt_step} != {c_step}). Skipping.")
-                        continue
-                except Exception as opt_err:
-                    print(f"  -> Notice: Candidate at {cand} could not load optimizer: {opt_err}. Continuing with model-only recovery.")
-
             cand_type_str = "complete" if has_cand_opt else "model-only"
             print(f"  -> Found valid {cand_type_str} candidate at {cand} (Step: {c_step}, Loss: {c_loss:.4f}) [VERIFIED HEALTHY]")
             if c_step > best_cand_step or (c_step == best_cand_step and has_cand_opt and not best_cand_has_opt):
@@ -5937,142 +5937,9 @@ def try_resume_from_checkpoint(
                 best_cand_epoch = int(s_data.get("epoch", 0))
                 best_cand_loss = c_best_loss
                 best_cand_dir = cand
-                best_cand_cursor = s_data.get("data_cursor")
-                if not best_cand_cursor:
-                    best_cand_cursor = {
-                        "active_shard": s_data.get("active_shard"),
-                        "active_shard_line_offset": s_data.get("active_shard_offset", 0),
-                        "active_shard_byte_offset": s_data.get("active_shard_byte_offset", 0),
-                        "active_chunk_idx": s_data.get("active_chunk_idx", 0),
-                        "total_samples_trained": s_data.get("total_samples_trained", s_data.get("total_completed_records", 0)),
-                        "samples_consumed": s_data.get("samples_consumed", s_data.get("total_completed_records", 0)),
-                        "completed_shards": s_data.get("completed_shards", []),
-                        "domain_cursors": s_data.get("domain_cursors", {}),
-                        "scheduler_deficits": s_data.get("scheduler_deficits", {}),
-                        "anchor_buffer": s_data.get("anchor_buffer") or s_data.get("anchor_buffer_state"),
-                        "anchor_buffer_state": s_data.get("anchor_buffer_state") or s_data.get("anchor_buffer"),
-                    }
-                else:
-                    if "active_shard_byte_offset" not in best_cand_cursor:
-                        best_cand_cursor["active_shard_byte_offset"] = s_data.get("active_shard_byte_offset", 0)
-                    if "active_chunk_idx" not in best_cand_cursor:
-                        best_cand_cursor["active_chunk_idx"] = s_data.get("active_chunk_idx", 0)
-                    if "total_samples_trained" not in best_cand_cursor:
-                        best_cand_cursor["total_samples_trained"] = s_data.get("total_samples_trained", s_data.get("total_completed_records", 0))
-                    if "samples_consumed" not in best_cand_cursor:
-                        best_cand_cursor["samples_consumed"] = s_data.get("samples_consumed", best_cand_cursor["total_samples_trained"])
-                    if "domain_cursors" not in best_cand_cursor and "domain_cursors" in s_data:
-                        best_cand_cursor["domain_cursors"] = s_data["domain_cursors"]
-                    if "scheduler_deficits" not in best_cand_cursor and "scheduler_deficits" in s_data:
-                        best_cand_cursor["scheduler_deficits"] = s_data["scheduler_deficits"]
-                    if "anchor_buffer" not in best_cand_cursor:
-                        if "anchor_buffer" in s_data:
-                            best_cand_cursor["anchor_buffer"] = s_data["anchor_buffer"]
-                        elif "anchor_buffer_state" in s_data:
-                            best_cand_cursor["anchor_buffer"] = s_data["anchor_buffer_state"]
-                    if "anchor_buffer_state" not in best_cand_cursor:
-                        best_cand_cursor["anchor_buffer_state"] = best_cand_cursor.get("anchor_buffer")
+                best_cand_cursor = extract_data_cursor_from_state(s_data)
         except Exception as e:
             print(f"  -> Notice: Could not parse candidate {cand}: {e}")
-
-    # Fallback Graceful Recovery:
-    # If no complete candidate with optimizer_state.pt was found, inspect verified model milestones
-    # (e.g. best_checkpoint or output_dir without optimizer_state.pt) to recover model weights,
-    # step, and exact data cursor rather than discarding progress and starting from Step 0.
-    # Note: inference-only best_checkpoint is strictly skipped when checkpoint_dir is best_checkpoint itself
-    # or when allow_milestone_fallback is disabled.
-    is_direct_best_dir = os.path.basename(os.path.normpath(checkpoint_dir)) == "best_checkpoint"
-    if allow_milestone_fallback and not is_direct_best_dir and (best_cand_dir is None or best_cand_step < 0):
-        fallback_candidates = [
-            os.path.join(checkpoint_dir, "best_checkpoint"),
-            checkpoint_dir,
-        ]
-        if gdrive_root:
-            canonical_gdrive = resolve_gdrive_stage_dir(checkpoint_dir, expected_stage_id)
-            if canonical_gdrive:
-                fallback_candidates.append(os.path.join(canonical_gdrive, "best_checkpoint"))
-                fallback_candidates.append(canonical_gdrive)
-            if expected_stage_id:
-                fallback_candidates.append(os.path.join(gdrive_root, expected_stage_id, "best_checkpoint"))
-                fallback_candidates.append(os.path.join(gdrive_root, expected_stage_id))
-            fallback_candidates.append(os.path.join(gdrive_root, output_dir_basename, "best_checkpoint"))
-            fallback_candidates.append(os.path.join(gdrive_root, output_dir_basename))
-
-        for cand in fallback_candidates:
-            if not os.path.isdir(cand):
-                continue
-            cand_state = os.path.join(cand, "checkpoint_state.json")
-            cand_model = os.path.join(cand, "model.safetensors")
-            if not (os.path.exists(cand_state) and os.path.exists(cand_model) and os.path.getsize(cand_model) > 0):
-                continue
-            if not verify_checkpoint_integrity(cand, require_optimizer=False, require_completed=False):
-                continue
-            try:
-                with open(cand_state, "r", encoding="utf-8") as f:
-                    s_data = json.load(f)
-                cand_stage = s_data.get("stage_id", "")
-                if expected_stage_id and cand_stage and cand_stage != expected_stage_id:
-                    continue
-                if current_tok_fp is not None:
-                    stored_tok_fp = s_data.get("tokenizer_fingerprint")
-                    if stored_tok_fp is not None:
-                        stored_canon = stored_tok_fp.get("canonical_fingerprint")
-                        curr_canon = current_tok_fp.get("canonical_fingerprint")
-                        is_tok_match = False
-                        if stored_canon and curr_canon and stored_canon == curr_canon:
-                            is_tok_match = True
-                        else:
-                            stored_tok_sha = stored_tok_fp.get("tokenizer_file_sha256")
-                            curr_tok_sha = current_tok_fp.get("tokenizer_file_sha256")
-                            stored_vocab = stored_tok_fp.get("vocab_size")
-                            curr_vocab = current_tok_fp.get("vocab_size")
-                            if stored_tok_sha and curr_tok_sha and stored_tok_sha == curr_tok_sha and (stored_vocab is None or curr_vocab is None or stored_vocab == curr_vocab):
-                                is_tok_match = True
-                        if not is_tok_match:
-                            continue
-                c_step = int(s_data.get("step", 0))
-                if c_step > best_cand_step:
-                    best_cand_step = c_step
-                    best_cand_epoch = int(s_data.get("epoch", 0))
-                    best_cand_loss = float(s_data.get("best_loss", s_data.get("loss", float("inf"))))
-                    best_cand_dir = cand
-                    best_cand_cursor = s_data.get("data_cursor")
-                    if not best_cand_cursor:
-                        best_cand_cursor = {
-                            "active_shard": s_data.get("active_shard"),
-                            "active_shard_line_offset": s_data.get("active_shard_offset", 0),
-                            "active_shard_byte_offset": s_data.get("active_shard_byte_offset", 0),
-                            "active_chunk_idx": s_data.get("active_chunk_idx", 0),
-                            "total_samples_trained": s_data.get("total_samples_trained", s_data.get("total_completed_records", 0)),
-                            "samples_consumed": s_data.get("samples_consumed", s_data.get("total_completed_records", 0)),
-                            "completed_shards": s_data.get("completed_shards", []),
-                            "domain_cursors": s_data.get("domain_cursors", {}),
-                            "scheduler_deficits": s_data.get("scheduler_deficits", {}),
-                            "anchor_buffer": s_data.get("anchor_buffer") or s_data.get("anchor_buffer_state"),
-                            "anchor_buffer_state": s_data.get("anchor_buffer_state") or s_data.get("anchor_buffer"),
-                        }
-                    else:
-                        if "active_shard_byte_offset" not in best_cand_cursor:
-                            best_cand_cursor["active_shard_byte_offset"] = s_data.get("active_shard_byte_offset", 0)
-                        if "active_chunk_idx" not in best_cand_cursor:
-                            best_cand_cursor["active_chunk_idx"] = s_data.get("active_chunk_idx", 0)
-                        if "total_samples_trained" not in best_cand_cursor:
-                            best_cand_cursor["total_samples_trained"] = s_data.get("total_samples_trained", s_data.get("total_completed_records", 0))
-                        if "samples_consumed" not in best_cand_cursor:
-                            best_cand_cursor["samples_consumed"] = s_data.get("samples_consumed", best_cand_cursor["total_samples_trained"])
-                        if "domain_cursors" not in best_cand_cursor and "domain_cursors" in s_data:
-                            best_cand_cursor["domain_cursors"] = s_data["domain_cursors"]
-                        if "scheduler_deficits" not in best_cand_cursor and "scheduler_deficits" in s_data:
-                            best_cand_cursor["scheduler_deficits"] = s_data["scheduler_deficits"]
-                        if "anchor_buffer" not in best_cand_cursor:
-                            if "anchor_buffer" in s_data:
-                                best_cand_cursor["anchor_buffer"] = s_data["anchor_buffer"]
-                            elif "anchor_buffer_state" in s_data:
-                                best_cand_cursor["anchor_buffer"] = s_data["anchor_buffer_state"]
-                        if "anchor_buffer_state" not in best_cand_cursor:
-                            best_cand_cursor["anchor_buffer_state"] = best_cand_cursor.get("anchor_buffer")
-            except Exception as fb_err:
-                print(f"  -> Notice: Could not parse fallback candidate {cand}: {fb_err}")
 
     if best_cand_dir is None or best_cand_step < 0:
         print("[Resume Discovery] No valid complete previous checkpoints found. Starting fresh from Step 0.")
@@ -6119,7 +5986,12 @@ def try_resume_from_checkpoint(
             d = os.path.join(checkpoint_dir, fname)
             if os.path.exists(s) and os.path.abspath(s) != os.path.abspath(d):
                 try:
-                    shutil.copy2(s, d)
+                    try:
+                        if os.path.exists(d):
+                            os.remove(d)
+                        os.link(s, d)
+                    except (OSError, AttributeError):
+                        shutil.copy2(s, d)
                 except Exception:
                     pass
 
@@ -6886,32 +6758,7 @@ def main():
     # 5. Build Model (Parameters remain in FP32; AMP autocast evaluates in FP16/BF16)
     model = TaraForCausalLM(config, gradient_checkpointing=args.gradient_checkpointing).to(device=device, dtype=model_dtype)
 
-    # Detect if resumable checkpoint already exists in output_dir or Google Drive
-    has_resumable_ckpt = False
-    if args.resume:
-        check_dirs = [args.output_dir]
-        gdrive_root = _resolve_gdrive_root()
-        if gdrive_root:
-            gdrive_stage = resolve_gdrive_stage_dir(args.output_dir, args.stage_id)
-            if gdrive_stage:
-                check_dirs.append(gdrive_stage)
-            if args.stage_id:
-                check_dirs.append(os.path.join(gdrive_root, args.stage_id))
-        for cdir in check_dirs:
-            if not os.path.isdir(cdir):
-                continue
-            for cand in [cdir, os.path.join(cdir, "best_checkpoint")]:
-                mf = os.path.join(cand, "model.safetensors")
-                sf = os.path.join(cand, "checkpoint_state.json")
-                if os.path.isfile(mf) and os.path.getsize(mf) > 100_000_000 and os.path.isfile(sf):
-                    has_resumable_ckpt = True
-                    break
-            if has_resumable_ckpt:
-                break
-
-    if has_resumable_ckpt:
-        print("[Model] Resumable checkpoint detected; skipping redundant candidate weights load to save RAM and time.", flush=True)
-    else:
+    if not args.resume:
         load_candidate_weights(model, args.model_dir)
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -7149,14 +6996,11 @@ def main():
         world_model = TaraWorldModel(wm_config, gradient_checkpointing=args.gradient_checkpointing).to(
             device=device, dtype=model_dtype
         )
-        if has_resumable_ckpt:
-            print("[Joint World Model] Resumable checkpoint detected; skipping redundant candidate world model load.", flush=True)
-            wm_loaded = True
-        else:
+        if not args.resume:
             wm_loaded = load_candidate_weights(world_model, args.world_model_dir)
+            print(f"[Joint World Model] Weights initialized from {args.world_model_dir} (restored: {wm_loaded})")
         wm_trainable_params = sum(p.numel() for p in world_model.parameters() if p.requires_grad)
         print(f"[Joint World Model] Total trainable parameters: {wm_trainable_params:,} ({wm_trainable_params * 4 / 1e6:.1f} MB in FP32 master storage)")
-        print(f"[Joint World Model] Weights initialized from {args.world_model_dir} (restored: {wm_loaded})")
 
         # Dedicated optimizer for World Model (separate parameters, moments, and state)
         if use_8bit:
@@ -7379,6 +7223,11 @@ def main():
             print(f"  Completed Shards in Ledger    : {len(shard_ledger.completed_shards)} shards ({shard_ledger.get_total_completed_records():,} records)", flush=True)
             print("  Status                        : 100% DETERMINISTIC ZERO DUPLICATE RESUMPTION GUARANTEED", flush=True)
             print("=" * 80, flush=True)
+        else:
+            print("[Model] No prior checkpoint resumed; seeding model from candidate base weights.", flush=True)
+            load_candidate_weights(model, args.model_dir)
+            if world_model is not None:
+                load_candidate_weights(world_model, args.world_model_dir)
 
     # 9. Instantiate Streaming Dataset & DataLoader with Multi-Domain DRR Scheduler
     resume_chunk_idx = resumed_cursor.get("active_chunk_idx", 0) if resumed_cursor else 0

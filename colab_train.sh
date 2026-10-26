@@ -35,36 +35,40 @@ export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export MALLOC_TRIM_THRESHOLD_=65536
 export TARA_MAX_MEMORY_MB="${TARA_MAX_MEMORY_MB:-}"
 
-# Dynamically resolve max sequence length without static arbitrary caps
+# Dynamically resolve max sequence length bounded by hardware headroom and model architecture
 if [ -z "${TARA_MAX_SEQ_LEN:-}" ]; then
-    RESOLVED_SEQ_LEN=""
+    MODEL_MAX_POS=4096
     for cfg in "storage/models/tara_candidate_v1/config.json" "storage/models/tara_base/config.json" "config.json"; do
         if [ -f "$cfg" ]; then
-            RESOLVED_SEQ_LEN=$(python3 -c "import json; d=json.load(open('$cfg')); print(d.get('max_position_embeddings', ''))" 2>/dev/null || true)
-            if [ -n "$RESOLVED_SEQ_LEN" ] && [ "$RESOLVED_SEQ_LEN" -gt 0 ] 2>/dev/null; then
+            RESOLVED_POS=$(python3 -c "import json; d=json.load(open('$cfg')); print(d.get('max_position_embeddings', ''))" 2>/dev/null || true)
+            if [ -n "$RESOLVED_POS" ] && [ "$RESOLVED_POS" -gt 0 ] 2>/dev/null; then
+                MODEL_MAX_POS="$RESOLVED_POS"
                 break
             fi
         fi
     done
-    if [ -n "$RESOLVED_SEQ_LEN" ] && [ "$RESOLVED_SEQ_LEN" -gt 0 ] 2>/dev/null; then
-        export TARA_MAX_SEQ_LEN="$RESOLVED_SEQ_LEN"
-        echo "[DYNAMIC CONFIG] Resolved TARA_MAX_SEQ_LEN=$TARA_MAX_SEQ_LEN from model configuration"
-    else
-        # Dynamic hardware-headroom derivation
-        if command -v nvidia-smi >/dev/null 2>&1; then
-            GPU_MEM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 || echo "0")
-            if [ "$GPU_MEM_MB" -ge 30000 ] 2>/dev/null; then
-                export TARA_MAX_SEQ_LEN="4096"
-            elif [ "$GPU_MEM_MB" -ge 15000 ] 2>/dev/null; then
-                export TARA_MAX_SEQ_LEN="2048"
-            else
-                export TARA_MAX_SEQ_LEN="1024"
-            fi
+
+    # Dynamic hardware-headroom derivation
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        GPU_MEM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 || echo "0")
+        if [ "$GPU_MEM_MB" -ge 30000 ] 2>/dev/null; then
+            HW_SAFE_LEN=4096
+        elif [ "$GPU_MEM_MB" -ge 14000 ] 2>/dev/null; then
+            HW_SAFE_LEN=2048
         else
-            export TARA_MAX_SEQ_LEN="1024"
+            HW_SAFE_LEN=1024
         fi
-        echo "[DYNAMIC CONFIG] Assigned TARA_MAX_SEQ_LEN=$TARA_MAX_SEQ_LEN based on hardware memory headroom"
+    else
+        HW_SAFE_LEN=1024
     fi
+
+    # Assign minimum of model capacity and hardware safe length
+    if [ "$MODEL_MAX_POS" -lt "$HW_SAFE_LEN" ]; then
+        export TARA_MAX_SEQ_LEN="$MODEL_MAX_POS"
+    else
+        export TARA_MAX_SEQ_LEN="$HW_SAFE_LEN"
+    fi
+    echo "[DYNAMIC CONFIG] Assigned TARA_MAX_SEQ_LEN=$TARA_MAX_SEQ_LEN (Hardware headroom: ${GPU_MEM_MB:-CPU} MB, Model capacity: $MODEL_MAX_POS)"
 else
     echo "[DYNAMIC CONFIG] Using user-specified TARA_MAX_SEQ_LEN=$TARA_MAX_SEQ_LEN"
 fi
@@ -155,8 +159,20 @@ if [ "$CANARY_MODE" = "1" ] || [ "${1:-}" = "--canary" ]; then
     GRAD_ACCUM=4
     STAGE_MAX_STEPS=15
 else
-    TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-2}"
-    GRAD_ACCUM="${GRAD_ACCUM:-8}"
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        GPU_MEM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 || echo "0")
+        if [ "$GPU_MEM_MB" -ge 30000 ] 2>/dev/null; then
+            TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-2}"
+            GRAD_ACCUM="${GRAD_ACCUM:-8}"
+        else
+            # For GPUs <= 16GB (Tesla T4), micro-batch=1 avoids OOM while grad_accum=16 preserves effective batch size 16
+            TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-1}"
+            GRAD_ACCUM="${GRAD_ACCUM:-16}"
+        fi
+    else
+        TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-1}"
+        GRAD_ACCUM="${GRAD_ACCUM:-8}"
+    fi
     STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-0}"
 fi
 

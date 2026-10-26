@@ -47,6 +47,7 @@ if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, IterableDataset
 
 # Optional imports with friendly fallback
@@ -633,22 +634,54 @@ class TaraForCausalLM(nn.Module):
             inputs_embeds = embeds
 
         hidden_states = self.model(inputs_embeds=inputs_embeds)
-        logits = self.lm_head(hidden_states)
 
         total_loss = None
         ce_loss = None
         aux_loss = None
+        logits = None
         if labels is not None:
             # Shift for causal next-token prediction
-            shift_logits = logits[..., :-1, :].contiguous()
+            shift_hidden = hidden_states[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
-            loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
-            ce_loss = loss_fn(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+
+            # Memory-Efficient Chunked Cross-Entropy Loss to eliminate CUDA OOM
+            # Instead of materializing full [B, S, V] logits (over 6.5 GB for 100k vocab),
+            # compute CE loss in small token chunks.
+            flat_hidden = shift_hidden.view(-1, shift_hidden.size(-1))
+            flat_labels = shift_labels.view(-1)
+            valid_mask = (flat_labels != -100)
+            total_valid = valid_mask.sum()
+
+            if total_valid > 0:
+                loss_sum = torch.tensor(0.0, device=flat_hidden.device, dtype=torch.float32)
+                chunk_sz = 256
+                for chunk_start in range(0, flat_hidden.size(0), chunk_sz):
+                    chunk_end = min(chunk_start + chunk_sz, flat_hidden.size(0))
+                    c_mask = valid_mask[chunk_start:chunk_end]
+                    if not c_mask.any():
+                        continue
+                    c_h = flat_hidden[chunk_start:chunk_end][c_mask]
+                    c_l = flat_labels[chunk_start:chunk_end][c_mask]
+                    c_logits = self.lm_head(c_h)
+                    c_loss = F.cross_entropy(c_logits.float(), c_l, reduction="sum")
+                    loss_sum = loss_sum + c_loss
+                ce_loss = loss_sum / total_valid.clamp(min=1)
+            else:
+                ce_loss = torch.tensor(0.0, device=flat_hidden.device, requires_grad=True)
 
             # Auxiliary representation health regularizer: penalize representation collapse
             hidden_var = hidden_states.var(dim=-1).mean()
             aux_loss = 0.005 * torch.relu(1.0 - hidden_var)
             total_loss = ce_loss + aux_loss
+
+            # In training mode with large batches, omit full logits to save 3+ GB VRAM.
+            # In eval mode or small test runs (<= 128 tokens), compute full logits.
+            if not self.training or flat_hidden.size(0) <= 128:
+                logits = self.lm_head(hidden_states)
+            else:
+                logits = None
+        else:
+            logits = self.lm_head(hidden_states)
 
         return CausalLMOutput(logits, total_loss, ce_loss, aux_loss)
 

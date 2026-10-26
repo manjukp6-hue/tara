@@ -860,8 +860,8 @@ else
     echo "[STEP 7 SKIPPED] Python trainer has already completed unified pretraining and Joint World Model co-training."
 fi
 
-# 8. Checkpoint Preservation to Google Drive (Separated into distinct subdirectories)
-if [ -d "/content/drive/MyDrive" ]; then
+# 8. Checkpoint Preservation to Google Drive (Rust Manual Trainer Checkpoints)
+if [ "$TRAINER_MODE" = "rust" ] && [ -d "/content/drive/MyDrive" ]; then
     echo "------------------------------------------------------------------------------"
     echo "[GDRIVE BACKUP] Syncing World Model & Joint checkpoints to Google Drive..."
     mkdir -p "$GDRIVE_CHECKPOINT_DIR/world_joint"
@@ -869,13 +869,12 @@ if [ -d "/content/drive/MyDrive" ]; then
         cp -r manual_training/checkpoints/* "$GDRIVE_CHECKPOINT_DIR/world_joint/"
     fi
     echo "[GDRIVE BACKUP] All Neural and World Model checkpoints archived in: $GDRIVE_CHECKPOINT_DIR"
-else
-    echo "[GDRIVE NOTICE] /content/drive/MyDrive not mounted. Checkpoints saved locally in Colab."
 fi
 
-# 9. Automatic Hugging Face Model Promotion & Upload (Subfolder Isolated)
+# 9. Automatic Hugging Face Model Promotion & Upload (Native Rust Trainer Only - Python Trainer uploads directly)
 HF_TARGET_REPO="${HF_REPO:-${HF_MODEL_REPO:-manjukp6/tara}}"
-if [ -n "${HF_TOKEN:-}" ] && [ -n "${HF_TARGET_REPO:-}" ]; then
+if [ "$TRAINER_MODE" = "rust" ] || [ "${FORCE_SH_HF_UPLOAD:-0}" = "1" ]; then
+  if [ -n "${HF_TOKEN:-}" ] && [ -n "${HF_TARGET_REPO:-}" ]; then
     echo "------------------------------------------------------------------------------"
     echo "[HUGGING FACE SYNC] Uploading trained model safetensors to '$HF_TARGET_REPO'..."
 
@@ -956,9 +955,10 @@ if token and os.path.exists(local_dir):
         fi
     fi
     echo "[HUGGING FACE SYNC] All artifacts successfully deployed to https://huggingface.co/$HF_TARGET_REPO"
-else
+  else
     echo "------------------------------------------------------------------------------"
     echo "[HUGGING FACE NOTICE] HF_TOKEN or HF_REPO not set. Skipping auto-push to Hugging Face."
+  fi
 fi
 
 echo "=============================================================================="

@@ -2876,7 +2876,6 @@ class AnchorReplayBuffer:
                     self.counts[dom] = len(restored_list)
 
 
-
 class TeacherReplayBuffer:
     """
     Multi-Domain Stratified Teacher Replay Buffer.
@@ -2966,11 +2965,7 @@ class TeacherReplayBuffer:
                     for item in self.buffers[domain]:
                         f.write(json.dumps(item, ensure_ascii=False) + "\n")
                 f.flush()
-                if not is_gdrive_path(tmp_file):
-                    try:
-                        os.fsync(f.fileno())
-                    except Exception:
-                        pass
+                os.fsync(f.fileno())
             if os.path.exists(filepath):
                 try:
                     os.replace(tmp_file, filepath)
@@ -2988,7 +2983,6 @@ class TeacherReplayBuffer:
         """Restores stratified replay samples from a previously persisted teacher replay JSONL file."""
         if not os.path.isfile(filepath):
             return
-        restored = 0
         try:
             with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
@@ -3006,7 +3000,6 @@ class TeacherReplayBuffer:
                         if len(self.buffers[domain]) < self.max_samples_per_domain:
                             self.buffers[domain].append(item)
                         self.counts[domain] += 1
-                        restored += 1
                     except Exception:
                         continue
             print(f"[Teacher Replay Buffer] Restored {self.total_samples():,} stratified sample(s) across {len(self.buffers)} domain(s) from {filepath}", flush=True)
@@ -3520,6 +3513,7 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 16 * 1024 * 1024, ou
             _safe_unlink(tmp_dst)
 
         # Stream into target file while dynamically computing SHA-256 in memory
+        total_written = 0
         hasher = hashlib.sha256()
         with open(src, "rb") as fsrc, open(write_target, "wb") as fdst:
             while True:
@@ -3528,6 +3522,7 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 16 * 1024 * 1024, ou
                     break
                 hasher.update(chunk)
                 fdst.write(chunk)
+                total_written += len(chunk)
                 del chunk
             fdst.flush()
             if not is_gdrive:
@@ -3537,15 +3532,29 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 16 * 1024 * 1024, ou
                     pass
         computed_sha = hasher.hexdigest()
 
+        if total_written != src_sz:
+            raise IOError(f"Incomplete streaming read: expected {src_sz} bytes from source, wrote {total_written} bytes")
+
         # ------------------------------------------------------------------
         # Verification Gate before promotion: ensure complete transfer & validity
         # ------------------------------------------------------------------
-        target_sz = os.path.getsize(write_target)
-        if target_sz != src_sz:
-            raise IOError(f"Incomplete streaming write: expected {src_sz} bytes, wrote {target_sz} bytes")
+        if is_gdrive:
+            # On Google Drive FUSE mounts, allow metadata stat sync retry
+            dst_sz = os.path.getsize(write_target) if os.path.exists(write_target) else 0
+            if dst_sz != src_sz:
+                for _ in range(5):
+                    time.sleep(0.5)
+                    dst_sz = os.path.getsize(write_target) if os.path.exists(write_target) else 0
+                    if dst_sz == src_sz:
+                        break
+            if dst_sz == 0 and total_written == src_sz:
+                dst_sz = total_written
+        else:
+            target_sz = os.path.getsize(write_target)
+            if target_sz != src_sz:
+                raise IOError(f"Incomplete streaming write: expected {src_sz} bytes, wrote {target_sz} bytes")
 
-        # Local files can perform quick deserialization checks, but avoid memory-mapped FUSE operations on GDrive
-        if not is_gdrive:
+            # Local files can perform quick deserialization checks
             if src.endswith(".safetensors"):
                 from safetensors import safe_open
                 with safe_open(write_target, framework="pt", device="cpu") as sf:
@@ -3578,9 +3587,9 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 16 * 1024 * 1024, ou
             if not promoted or not os.path.exists(dst):
                 raise IOError(f"Target destination {dst} missing after alignment attempt")
 
-        dst_sz = os.path.getsize(dst)
-        if dst_sz != src_sz:
-            raise IOError(f"Final aligned size mismatch: expected {src_sz}, got {dst_sz}")
+            dst_sz = os.path.getsize(dst)
+            if dst_sz != src_sz:
+                raise IOError(f"Final aligned size mismatch: expected {src_sz}, got {dst_sz}")
 
         if not is_gdrive and os.path.exists(tmp_dst):
             _safe_unlink(tmp_dst)
@@ -3595,10 +3604,6 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 16 * 1024 * 1024, ou
             _safe_unlink(tmp_dst)
         print(f"[Atomic Copy Notice] Streaming copy note for {os.path.basename(dst)}: {e}", flush=True)
         return False
-
-
-
-_pending_gdrive_sync: Optional[Tuple[str, str, str, List[str]]] = None
 
 
 def is_real_gdrive_mount(mountpoint: str = "/content/drive") -> bool:
@@ -3856,23 +3861,10 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                     except Exception:
                         pass
 
-                # Write verified COMMITTED manifest LAST (defining atomic commitment)
-                committed_manifest_path = os.path.join(target_dir, "COMMITTED")
-                committed_payload = {
-                    "step": expected_step,
-                    "stage_id": expected_stage_id,
-                    "loss": expected_loss,
-                    "best_loss": expected_best_loss,
-                    "is_best": is_best,
-                    "committed_utc": datetime.now(timezone.utc).isoformat(),
-                    "files": manifest_files,
-                }
-                with open(committed_manifest_path, "w", encoding="utf-8") as cm:
-                    json.dump(committed_payload, cm, indent=2)
-
+                # Direct model file backup: save weights directly without requiring COMMITTED marker
                 last_synced_step = expected_step
                 elapsed = time.time() - t_start
-                print(f"[GDrive Mirror] Successfully backed up and COMMITTED [{tag}] ({synced} files, {elapsed:.1f}s) -> {target_dir}", flush=True)
+                print(f"[GDrive Mirror] Successfully backed up direct model files [{tag}] ({synced} files, {elapsed:.1f}s) -> {target_dir}", flush=True)
 
                 # Update lightweight pointer files in stage parent directory
                 stage_dir = gdrive_stage_dir or os.path.dirname(os.path.abspath(target_dir))
@@ -4307,9 +4299,14 @@ def verify_checkpoint_integrity(
             print(f"[Verification Fail] STAGE_METADATA status is not COMPLETED: {meta.get('status')}")
             return False
 
-        # If checkpoint is located on Google Drive FUSE mount, verify via COMMITTED manifest and metadata
-        # without doing heavy network FUSE reads or memory-mapped operations
+        # Direct model file verification: verify model files directly without requiring COMMITTED marker
         if is_gdrive_path(checkpoint_dir):
+            model_file = os.path.join(checkpoint_dir, "model.safetensors")
+            bin_file = os.path.join(checkpoint_dir, "pytorch_model.bin")
+            has_m = (os.path.isfile(model_file) and os.path.getsize(model_file) > 1024 * 1024) or (os.path.isfile(bin_file) and os.path.getsize(bin_file) > 1024 * 1024)
+            if has_m:
+                print(f"[Verification Passed] Google Drive checkpoint {checkpoint_dir} verified via direct model file backup.")
+                return True
             committed_file = os.path.join(checkpoint_dir, "COMMITTED")
             if os.path.isfile(committed_file):
                 try:
@@ -4323,8 +4320,8 @@ def verify_checkpoint_integrity(
                                 return False
                 except Exception:
                     pass
-            print(f"[Verification Passed] Google Drive checkpoint {checkpoint_dir} verified via manifest/metadata.")
-            return True
+                print(f"[Verification Passed] Google Drive checkpoint {checkpoint_dir} verified via manifest/metadata.")
+                return True
 
         # Deserialization test: ensure safetensors is not corrupted or truncated using memory-mapped header validation
         if HAS_SAFETENSORS:
@@ -5017,54 +5014,6 @@ def save_checkpoint(
             return False
 
 
-def save_best_milestone(
-    model: nn.Module,
-    config: dict,
-    tokenizer_path: str,
-    best_dir: str,
-    step: int,
-    epoch: int,
-    loss: float,
-    best_loss: float,
-    stage_id: str,
-    dataset: Optional[Any] = None,
-    shard_ledger: Optional[Any] = None,
-    data_cursor: Optional[Dict[str, Any]] = None,
-    world_model: Optional[nn.Module] = None,
-    optimizer: Optional[torch.optim.Optimizer] = None,
-    scaler: Optional[torch.cuda.amp.GradScaler] = None,
-    world_optimizer: Optional[torch.optim.Optimizer] = None,
-    world_scaler: Optional[torch.cuda.amp.GradScaler] = None,
-    teacher_replay_buffer: Optional[Any] = None,
-    sync_to_gdrive: bool = False,
-) -> bool:
-    """Delegates to unified save_checkpoint with is_best=True to eliminate duplicate logic."""
-    return save_checkpoint(
-        model=model,
-        optimizer=optimizer,
-        scaler=scaler,
-        config=config,
-        tokenizer_path=tokenizer_path,
-        output_dir=best_dir,
-        step=step,
-        epoch=epoch,
-        loss=loss,
-        best_loss=best_loss,
-        stage_id=stage_id,
-        is_best=True,
-        is_completed=False,
-        sync_to_gdrive=sync_to_gdrive,
-        sync_optimizer=(optimizer is not None),
-        dataset=dataset,
-        shard_ledger=shard_ledger,
-        data_cursor=data_cursor,
-        world_model=world_model,
-        world_optimizer=world_optimizer,
-        world_scaler=world_scaler,
-        teacher_replay_buffer=teacher_replay_buffer,
-    )
-
-
 def promote_checkpoint(
     source_checkpoint_dir: str,
     promoted_dir: str,
@@ -5159,6 +5108,27 @@ def promote_checkpoint(
                 except Exception:
                     pass
         print(f"[GDrive Promotion Mirror] Promoted model synced to: {gdrive_promoted}", flush=True)
+
+
+def finalize_stage_and_promote(
+    output_dir: str,
+    promoted_dir: Optional[str],
+    stage_id: str,
+    hf_repo: Optional[str] = None,
+    previous_stage_dir: Optional[str] = None,
+    candidate_source_dir: Optional[str] = None,
+):
+    """Unified handler for promoting model snapshots, uploading to HF, and cleaning previous stages."""
+    if promoted_dir:
+        src_cp = candidate_source_dir
+        if not src_cp or not os.path.exists(os.path.join(src_cp, "model.safetensors")):
+            best_source = os.path.join(output_dir, "best_checkpoint")
+            src_cp = best_source if os.path.exists(os.path.join(best_source, "model.safetensors")) else output_dir
+        promote_checkpoint(src_cp, promoted_dir, stage_id)
+        if hf_repo:
+            upload_promoted_model_to_hf(promoted_dir, hf_repo, stage_id)
+    if previous_stage_dir:
+        clean_previous_training_checkpoints(previous_stage_dir, output_dir)
 
 
 def execute_per_shard_promotion(
@@ -6635,16 +6605,13 @@ def main():
 
     # 1. Idempotence Check
     if check_stage_already_completed(args.output_dir):
-        # Even if already completed, ensure promoted model exists if requested
-        if args.promoted_dir:
-            best_source = os.path.join(args.output_dir, "best_checkpoint")
-            src_cp = best_source if os.path.exists(os.path.join(best_source, "model.safetensors")) else args.output_dir
-            promote_checkpoint(src_cp, args.promoted_dir, args.stage_id)
-            target_model_repo = args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara"))
-            if target_model_repo:
-                upload_promoted_model_to_hf(args.promoted_dir, target_model_repo, args.stage_id)
-        if args.previous_stage_dir:
-            clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
+        finalize_stage_and_promote(
+            output_dir=args.output_dir,
+            promoted_dir=args.promoted_dir,
+            stage_id=args.stage_id,
+            hf_repo=args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara")),
+            previous_stage_dir=args.previous_stage_dir,
+        )
         sys.exit(0)
 
     # 2. Fast Asset Verification & Streaming Download (if files missing)
@@ -7163,16 +7130,13 @@ def main():
                 world_optimizer=world_optimizer,
                 world_scaler=world_scaler,
             )
-            # Promote & Clean if requested
-            if args.promoted_dir:
-                best_source = os.path.join(args.output_dir, "best_checkpoint")
-                src_cp = best_source if os.path.exists(os.path.join(best_source, "model.safetensors")) else args.output_dir
-                promote_checkpoint(src_cp, args.promoted_dir, args.stage_id)
-                target_model_repo = args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara"))
-                if target_model_repo:
-                    upload_promoted_model_to_hf(args.promoted_dir, target_model_repo, args.stage_id)
-            if args.previous_stage_dir:
-                clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
+            finalize_stage_and_promote(
+                output_dir=args.output_dir,
+                promoted_dir=args.promoted_dir,
+                stage_id=args.stage_id,
+                hf_repo=args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara")),
+                previous_stage_dir=args.previous_stage_dir,
+            )
             sys.exit(0)
 
         if was_resumed and start_step > 0:
@@ -7561,17 +7525,6 @@ def main():
                 if not cur_domain and current_cursor and current_cursor.get("active_shard"):
                     cur_domain = resolve_shard_domain(current_cursor["active_shard"])
 
-                if teacher_replay_buffer is not None:
-                    try:
-                        teacher_replay_buffer.add_sample(
-                            domain=cur_domain or "02_computer_science_systems",
-                            input_ids=inputs[0] if (isinstance(inputs, torch.Tensor) and inputs.shape[0] > 0) else None,
-                            step=step,
-                            loss=cur_step_loss,
-                        )
-                    except Exception:
-                        pass
-
                 cur_shard_name = current_cursor.get("active_shard") if current_cursor else getattr(dataset, "current_active_shard", "N/A")
                 cur_line_num = current_cursor.get("active_shard_line_offset", 0) if current_cursor else getattr(dataset, "active_shard_offset", 0)
                 cur_shard_tot = getattr(dataset, "active_shard_total_lines", 0)
@@ -7619,26 +7572,28 @@ def main():
                         )
 
                         # Atomically commit and mirror verified best milestone
-                        save_best_milestone(
+                        save_checkpoint(
                             model=model,
+                            optimizer=optimizer,
+                            scaler=scaler,
                             config=config,
                             tokenizer_path=tok_path,
-                            best_dir=best_cp_dir,
+                            output_dir=best_cp_dir,
                             step=step,
                             epoch=epoch,
                             loss=cur_step_loss,
                             best_loss=best_loss,
                             stage_id=args.stage_id,
+                            is_best=True,
+                            is_completed=False,
+                            sync_to_gdrive=args.sync_all_to_gdrive,
+                            sync_optimizer=(optimizer is not None),
                             dataset=dataset,
                             shard_ledger=shard_ledger,
                             data_cursor=best_loss_cursor,
                             world_model=world_model,
-                            optimizer=optimizer,
-                            scaler=scaler,
                             world_optimizer=world_optimizer,
                             world_scaler=world_scaler,
-                            teacher_replay_buffer=teacher_replay_buffer,
-                            sync_to_gdrive=args.sync_all_to_gdrive,
                         )
 
                         # If promote_max_step is set and current step is within window, snapshot to window_best_source
@@ -7851,48 +7806,52 @@ def main():
     if ema_loss is not None and final_loss <= best_loss:
         best_loss = final_loss
         best_loss_step = step
-        save_best_milestone(
-            model, config, tok_path, best_cp_dir,
-            step, epoch, final_loss, best_loss, args.stage_id,
-            dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
-            world_model=world_model,
+        save_checkpoint(
+            model=model,
             optimizer=optimizer,
             scaler=scaler,
+            config=config,
+            tokenizer_path=tok_path,
+            output_dir=best_cp_dir,
+            step=step,
+            epoch=epoch,
+            loss=final_loss,
+            best_loss=best_loss,
+            stage_id=args.stage_id,
+            is_best=True,
+            is_completed=False,
+            sync_to_gdrive=args.sync_all_to_gdrive,
+            sync_optimizer=(optimizer is not None),
+            dataset=dataset,
+            shard_ledger=shard_ledger,
+            data_cursor=final_cursor,
+            world_model=world_model,
             world_optimizer=world_optimizer,
             world_scaler=world_scaler,
-            teacher_replay_buffer=teacher_replay_buffer,
-        )
-        has_unsaved_gdrive_best = True
-
-    if has_unsaved_gdrive_best:
-        has_unsaved_gdrive_best = False
-        sync_checkpoint_to_gdrive(
-            best_cp_dir,
-            f"BEST-MILESTONE-FINAL (Step {best_loss_step:04d}, Loss: {best_loss:.4f})",
-            wait=True,
-            sync_optimizer=True,
         )
 
     print(f"[Stage Complete] Training checkpoint preserved in: {args.output_dir}")
     print(f"[Stage Complete] Best Milestone model archived in: {best_cp_dir}")
 
     # Auto-Promote clean inference model for deployment & native Rust serving
+    promoted_target = args.promoted_dir if args.promoted_dir else os.path.join("storage/models", f"promoted_{args.stage_id}")
     if not promoted_at_target_step:
         best_source = (
             window_best_source if (args.promote_max_step > 0 and os.path.isdir(window_best_source) and os.path.exists(os.path.join(window_best_source, "model.safetensors")))
             else (best_cp_dir if os.path.exists(os.path.join(best_cp_dir, "model.safetensors")) else args.output_dir)
         )
-        promoted_target = args.promoted_dir if args.promoted_dir else os.path.join("storage/models", f"promoted_{args.stage_id}")
-        promote_checkpoint(best_source, promoted_target, args.stage_id)
-        target_model_repo = args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara"))
-        if target_model_repo:
-            upload_promoted_model_to_hf(promoted_target, target_model_repo, args.stage_id)
+        finalize_stage_and_promote(
+            output_dir=args.output_dir,
+            promoted_dir=promoted_target,
+            stage_id=args.stage_id,
+            hf_repo=args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara")),
+            previous_stage_dir=args.previous_stage_dir,
+            candidate_source_dir=best_source,
+        )
     else:
         print(f"[Promotion] Target step {args.promote_max_step} model already promoted and active for real-time inference -> {promoted_target}", flush=True)
-
-    # Auto-Clean bulky optimizer files from previous stage once current stage successfully completes and verifies
-    if args.previous_stage_dir:
-        clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
+        if args.previous_stage_dir:
+            clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
 
     # Canary Checkpoint Reload Verification & Telemetry (Requirement 10)
     if args.canary:

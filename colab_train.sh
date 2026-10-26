@@ -407,25 +407,72 @@ def get_step(dir_path):
     return -1
 
 def is_valid_model(mpath):
-    if os.path.isfile(mpath) and os.path.getsize(mpath) > 100000000:
-        try:
-            import safetensors
-            with safetensors.safe_open(mpath, framework='pt', device='cpu') as sf:
-                return len(sf.keys()) > 0
-        except Exception:
+    if not mpath or not os.path.isfile(mpath):
+        return False
+    try:
+        sz = os.path.getsize(mpath)
+        if sz <= 100000000:
             return False
-    return False
+        # If on Google Drive FUSE mount, avoid mmap / safe_open (causes FUSE OSError / bus error)
+        if '/content/drive' in mpath or 'TARA_CHECKPOINTS' in mpath:
+            with open(mpath, 'rb') as f:
+                hdr = f.read(8)
+                return len(hdr) == 8
+        # On local ext4 filesystem, full safetensors key verification
+        import safetensors
+        with safetensors.safe_open(mpath, framework='pt', device='cpu') as sf:
+            return len(sf.keys()) > 0
+    except Exception:
+        return False
+
+def heal_upload_temp_files(dir_path):
+    if not dir_path or not os.path.isdir(dir_path):
+        return
+    try:
+        for fname in os.listdir(dir_path):
+            fpath = os.path.join(dir_path, fname)
+            if not os.path.isfile(fpath):
+                continue
+            for target in ('model.safetensors', 'optimizer_state.pt', 'world_model.safetensors'):
+                if fname.startswith(f'{target}.upload_temp_'):
+                    target_path = os.path.join(dir_path, target)
+                    if not os.path.exists(target_path):
+                        try:
+                            sz = os.path.getsize(fpath)
+                            if sz > 10000000:
+                                print(f'  -> [Auto-Heal] Recovered {target} from {fname} ({sz / (1024*1024):.1f} MB)...', flush=True)
+                                os.rename(fpath, target_path)
+                        except Exception as he:
+                            print(f'  -> [Auto-Heal Warning] Failed to recover {target}: {he}', flush=True)
+    except Exception:
+        pass
 
 if os.path.isdir(src):
     os.makedirs(dst, exist_ok=True)
     local_step = max(get_step(dst), get_step(os.path.join(dst, 'best_checkpoint')))
     local_has_model = is_valid_model(os.path.join(dst, 'model.safetensors')) or is_valid_model(os.path.join(dst, 'best_checkpoint', 'model.safetensors'))
 
-    src_top_step = get_step(src)
-    best_src = os.path.join(src, 'best_checkpoint')
-    src_best_step = get_step(best_src)
+    # Auto-heal any interrupted uploads before evaluation
+    heal_upload_temp_files(src)
+    heal_upload_temp_files(os.path.join(src, 'best_checkpoint'))
 
-    # 1. Resolve authentic best_checkpoint from best_checkpoint.json if present on GDrive
+    gdrive_max_step = -1
+    top_src_dir = None
+    if is_valid_model(os.path.join(src, 'model.safetensors')):
+        src_top_step = get_step(src)
+        top_src_dir = src
+        gdrive_max_step = max(gdrive_max_step, src_top_step)
+    else:
+        src_top_step = -1
+
+    src_best_step = -1
+    best_src = None
+    if is_valid_model(os.path.join(src, 'best_checkpoint', 'model.safetensors')):
+        src_best_step = get_step(os.path.join(src, 'best_checkpoint'))
+        best_src = os.path.join(src, 'best_checkpoint')
+        gdrive_max_step = max(gdrive_max_step, src_best_step)
+
+    # 1. Resolve authentic best_checkpoint from best_checkpoint.json if present on GDrive and valid
     best_ptr_file = os.path.join(src, 'best_checkpoint.json')
     if os.path.isfile(best_ptr_file):
         try:
@@ -433,19 +480,25 @@ if os.path.isdir(src):
                 bp_data = json.load(f)
             vdir = bp_data.get('versioned_dir')
             if vdir and os.path.isdir(vdir):
-                v_step = get_step(vdir)
-                if v_step > src_best_step:
-                    src_best_step = v_step
-                    best_src = vdir
+                heal_upload_temp_files(vdir)
+                if is_valid_model(os.path.join(vdir, 'model.safetensors')):
+                    v_step = get_step(vdir)
+                    if v_step > src_best_step:
+                        src_best_step = v_step
+                        best_src = vdir
+                        gdrive_max_step = max(gdrive_max_step, src_best_step)
         except Exception:
             pass
 
     # 2. Check all subdirectories on Google Drive to discover true highest step and newest best milestone
-    gdrive_max_step = max(src_top_step, src_best_step)
-    top_src_dir = src
+    # CRITICAL: ONLY consider directories that ACTUALLY contain a valid, verified model weights file!
     for item in os.listdir(src):
         sub = os.path.join(src, item)
         if os.path.isdir(sub):
+            heal_upload_temp_files(sub)
+            if not is_valid_model(os.path.join(sub, 'model.safetensors')):
+                # Incomplete directory without model weights — skip it!
+                continue
             s_step = get_step(sub)
             if s_step > gdrive_max_step:
                 gdrive_max_step = s_step
@@ -459,8 +512,8 @@ if os.path.isdir(src):
     # 0. Check if Google Drive source has authentic model or checkpoint
     src_has_model = (
         is_valid_model(os.path.join(src, 'model.safetensors')) or
-        is_valid_model(os.path.join(best_src, 'model.safetensors')) or
-        (top_src_dir != src and is_valid_model(os.path.join(top_src_dir, 'model.safetensors')))
+        (best_src is not None and is_valid_model(os.path.join(best_src, 'model.safetensors'))) or
+        (top_src_dir is not None and top_src_dir != src and is_valid_model(os.path.join(top_src_dir, 'model.safetensors')))
     )
     if not src_has_model and gdrive_max_step < 0:
         print(f'[RESUME SYNC] Directory {os.path.basename(src)} contains no valid model or checkpoint. Skipping.', flush=True)
@@ -473,11 +526,9 @@ if os.path.isdir(src):
 
     if should_restore:
         best_dst = os.path.join(dst, 'best_checkpoint')
-        best_model = os.path.join(best_src, 'model.safetensors')
-        best_is_valid = is_valid_model(best_model)
 
         # 1. Restore authentic best_checkpoint subfolder from Google Drive
-        if os.path.isdir(best_src) and best_is_valid:
+        if best_src and os.path.isdir(best_src) and is_valid_model(os.path.join(best_src, 'model.safetensors')):
             os.makedirs(best_dst, exist_ok=True)
             for f in os.listdir(best_src):
                 sf = os.path.join(best_src, f)
@@ -488,35 +539,33 @@ if os.path.isdir(src):
                         print(f'  -> Restoring best_checkpoint/{f} (Step {src_best_step})...', flush=True)
                         shutil.copy2(sf, df)
 
-        # 2. Restore top-level checkpoint from top_src_dir (the highest step directory)
-        source_for_root = top_src_dir if (top_src_dir != src and os.path.isdir(top_src_dir)) else (best_src if best_is_valid else src)
-        source_step = get_step(source_for_root)
-        source_has_valid_model = is_valid_model(os.path.join(source_for_root, 'model.safetensors'))
-        if source_has_valid_model and (source_step > local_step or not local_has_model):
-            print(f'  -> Promoting authentic checkpoint (Step {source_step}) from {os.path.basename(source_for_root)} to local stage root...', flush=True)
-            for f in ('model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt', 'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'COMMITTED'):
-                sf = os.path.join(source_for_root, f)
-                if os.path.isfile(sf):
-                    shutil.copy2(sf, os.path.join(dst, f))
+        # 2. Restore top-level checkpoint from top_src_dir or best_src (the highest step directory)
+        source_for_root = top_src_dir if (top_src_dir and top_src_dir != src and os.path.isdir(top_src_dir) and is_valid_model(os.path.join(top_src_dir, 'model.safetensors'))) else (
+            best_src if (best_src and is_valid_model(os.path.join(best_src, 'model.safetensors'))) else (
+                src if is_valid_model(os.path.join(src, 'model.safetensors')) else None
+            )
+        )
+        if source_for_root:
+            source_step = get_step(source_for_root)
+            source_has_valid_model = is_valid_model(os.path.join(source_for_root, 'model.safetensors'))
+            if source_has_valid_model and (source_step > local_step or not local_has_model):
+                print(f'  -> Promoting authentic checkpoint (Step {source_step}) from {os.path.basename(source_for_root)} to local stage root...', flush=True)
+                for f in ('model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt', 'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'COMMITTED'):
+                    sf = os.path.join(source_for_root, f)
+                    if os.path.isfile(sf):
+                        shutil.copy2(sf, os.path.join(dst, f))
 
-        # 3. Purge obsolete older milestones and legacy folders from Google Drive
-        if gdrive_max_step > 0:
-            for item in os.listdir(src):
-                sub = os.path.join(src, item)
-                if not os.path.isdir(sub):
-                    continue
-                s_step = get_step(sub)
-                if item == 'best_checkpoint' and s_step < gdrive_max_step:
-                    print(f'  -> [GDRIVE CLEANUP] Purging obsolete legacy best_checkpoint on Google Drive (Step {s_step} < {gdrive_max_step})...', flush=True)
-                    shutil.rmtree(sub, ignore_errors=True)
-                elif item.startswith('best_milestone_step_') and s_step < gdrive_max_step and sub != best_src and sub != top_src_dir:
-                    print(f'  -> [GDRIVE CLEANUP] Purging superseded best milestone on Google Drive: {item} (Step {s_step} < {gdrive_max_step})...', flush=True)
-                    shutil.rmtree(sub, ignore_errors=True)
-                elif (item.startswith('checkpoint_step_') or '.step' in item) and s_step < gdrive_max_step and sub != top_src_dir:
-                    print(f'  -> [GDRIVE CLEANUP] Purging superseded regular checkpoint on Google Drive: {item} (Step {s_step} < {gdrive_max_step})...', flush=True)
-                    shutil.rmtree(sub, ignore_errors=True)
+        # 3. Also restore versioned directories into parent active checkpoints dir for seamless resume
+        for item in os.listdir(src):
+            s_item = os.path.join(src, item)
+            if os.path.isdir(s_item) and (item.startswith('best_milestone_step_') or item.startswith('checkpoint_step_') or '.step' in item):
+                if is_valid_model(os.path.join(s_item, 'model.safetensors')):
+                    d_item = os.path.join(parent_dst, item)
+                    if not os.path.exists(d_item):
+                        print(f'  -> Restoring versioned checkpoint directory: {item}...', flush=True)
+                        shutil.copytree(s_item, d_item)
 
-        # 4. Clean local parent checkpoints directory of any obsolete versioned remnants
+        # 4. Clean local parent checkpoints directory of obsolete versioned remnants
         if os.path.isdir(parent_dst) and gdrive_max_step > 0:
             for item in os.listdir(parent_dst):
                 sub = os.path.join(parent_dst, item)
@@ -540,7 +589,7 @@ mkdir -p storage/models/tara_world_model
 FOUND_RESTORED_MODEL=0
 for cp_dir in "$ACTIVE_CP_DIR"/*; do
     if [ -d "$cp_dir" ]; then
-        for cand in "$cp_dir" "$cp_dir/best_checkpoint"; do
+        for cand in "$cp_dir" "$cp_dir/best_checkpoint" "$cp_dir"/best_milestone_* "$cp_dir"/checkpoint_step_*; do
             if [ -f "$cand/model.safetensors" ] && [ -f "$cand/config.json" ]; then
                 CAND_SIZE=$(wc -c < "$cand/model.safetensors" 2>/dev/null || echo 0)
                 if [ "$CAND_SIZE" -gt 100000000 ]; then
@@ -557,6 +606,29 @@ for cp_dir in "$ACTIVE_CP_DIR"/*; do
         done
     fi
 done
+
+# If local restore did not find candidate model, search Google Drive directly to prevent redundant HF downloads
+if [ "$FOUND_RESTORED_MODEL" -eq 0 ] && [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
+    echo "[RESUME SEED] Checking Google Drive directly for model weights to bypass HF download..."
+    for g_stage in "$GDRIVE_CHECKPOINT_DIR"/*; do
+        if [ -d "$g_stage" ]; then
+            for g_cand in "$g_stage/best_checkpoint" "$g_stage"/best_milestone_* "$g_stage"; do
+                if [ -f "$g_cand/model.safetensors" ] && [ -f "$g_cand/config.json" ]; then
+                    G_SIZE=$(wc -c < "$g_cand/model.safetensors" 2>/dev/null || echo 0)
+                    if [ "$G_SIZE" -gt 100000000 ]; then
+                        echo "[RESUME SEED] Found verified model weights on Google Drive: $g_cand (seeding tara_candidate_v1 to bypass HF download)..."
+                        cp "$g_cand/config.json" storage/models/tara_candidate_v1/ 2>/dev/null || true
+                        [ -f "$g_cand/tokenizer.json" ] && cp "$g_cand/tokenizer.json" storage/models/tara_candidate_v1/ 2>/dev/null || true
+                        [ -f "$g_cand/tokenizer_config.json" ] && cp "$g_cand/tokenizer_config.json" storage/models/tara_candidate_v1/ 2>/dev/null || true
+                        cp "$g_cand/model.safetensors" storage/models/tara_candidate_v1/model.safetensors 2>/dev/null || true
+                        FOUND_RESTORED_MODEL=1
+                        break 2
+                    fi
+                fi
+            done
+        fi
+    done
+fi
 
 # Check if restored world model exists
 for cp_dir in "$ACTIVE_CP_DIR"/*; do

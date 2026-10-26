@@ -2997,7 +2997,11 @@ class TeacherReplayBuffer:
                     for item in self.buffers[domain]:
                         f.write(json.dumps(item, ensure_ascii=False) + "\n")
                 f.flush()
-                os.fsync(f.fileno())
+                if not is_gdrive_path(tmp_file):
+                    try:
+                        os.fsync(f.fileno())
+                    except Exception:
+                        pass
             if os.path.exists(filepath):
                 try:
                     os.replace(tmp_file, filepath)
@@ -3539,13 +3543,16 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 16 * 1024 * 1024, ou
 
     # Non-hidden staging temp file with .upload_temp at the end of the filename (DriveFS compatible)
     tmp_dst = os.path.join(dst_dir, f"{os.path.basename(dst)}.upload_temp_{os.getpid()}_{int(time.time())}")
+    is_gdrive = is_gdrive_path(dst)
+    # On Google Drive FUSE mounts, write directly to dst to avoid FUSE rename failures and lingering .upload_temp artifacts
+    write_target = dst if is_gdrive else tmp_dst
     try:
-        if os.path.exists(tmp_dst):
+        if not is_gdrive and os.path.exists(tmp_dst):
             _safe_unlink(tmp_dst)
 
-        # Stream into temporary staging file while dynamically computing SHA-256 in memory
+        # Stream into target file while dynamically computing SHA-256 in memory
         hasher = hashlib.sha256()
-        with open(src, "rb") as fsrc, open(tmp_dst, "wb") as fdst:
+        with open(src, "rb") as fsrc, open(write_target, "wb") as fdst:
             while True:
                 chunk = fsrc.read(chunk_size)
                 if not chunk:
@@ -3554,70 +3561,59 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 16 * 1024 * 1024, ou
                 fdst.write(chunk)
                 del chunk
             fdst.flush()
-            try:
-                os.fsync(fdst.fileno())
-            except Exception:
-                pass
+            if not is_gdrive:
+                try:
+                    os.fsync(fdst.fileno())
+                except Exception:
+                    pass
         computed_sha = hasher.hexdigest()
 
         # ------------------------------------------------------------------
         # Verification Gate before promotion: ensure complete transfer & validity
         # ------------------------------------------------------------------
-        tmp_sz = os.path.getsize(tmp_dst)
-        if tmp_sz != src_sz:
-            raise IOError(f"Incomplete streaming write: expected {src_sz} bytes, wrote {tmp_sz} bytes")
+        target_sz = os.path.getsize(write_target)
+        if target_sz != src_sz:
+            raise IOError(f"Incomplete streaming write: expected {src_sz} bytes, wrote {target_sz} bytes")
 
         # Local files can perform quick deserialization checks, but avoid memory-mapped FUSE operations on GDrive
-        if not is_gdrive_path(tmp_dst):
+        if not is_gdrive:
             if src.endswith(".safetensors"):
                 from safetensors import safe_open
-                with safe_open(tmp_dst, framework="pt", device="cpu") as sf:
+                with safe_open(write_target, framework="pt", device="cpu") as sf:
                     if not sf.keys():
                         raise IOError("Staged safetensors file contains 0 keys")
             if src.endswith(".json"):
-                with open(tmp_dst, "r", encoding="utf-8") as jf:
+                with open(write_target, "r", encoding="utf-8") as jf:
                     json.load(jf)
 
-        # ------------------------------------------------------------------
-        # Promotion: Delete old file explicitly, then align new verified file
-        # ------------------------------------------------------------------
-        if os.path.exists(dst):
-            for _ in range(3):
-                try:
-                    os.remove(dst)
-                    break
-                except Exception:
-                    time.sleep(0.1)
+            # Promotion for local files: atomic replacement from tmp_dst to dst
+            if os.path.exists(dst):
+                for _ in range(3):
+                    try:
+                        os.remove(dst)
+                        break
+                    except Exception:
+                        time.sleep(0.1)
 
-        # Align new verified file to target destination
-        promoted = False
-        try:
-            os.rename(tmp_dst, dst)
-            promoted = True
-        except OSError:
+            promoted = False
             try:
                 os.replace(tmp_dst, dst)
                 promoted = True
             except OSError:
                 try:
-                    shutil.move(tmp_dst, dst)
+                    os.rename(tmp_dst, dst)
                     promoted = True
-                except Exception:
-                    try:
-                        shutil.copy2(tmp_dst, dst)
-                        _safe_unlink(tmp_dst)
-                        promoted = True
-                    except Exception as cp_err:
-                        raise IOError(f"Failed to align staged file to {dst}: {cp_err}")
+                except Exception as cp_err:
+                    raise IOError(f"Failed to align staged file to {dst}: {cp_err}")
 
-        if not promoted or not os.path.exists(dst):
-            raise IOError(f"Target destination {dst} missing after alignment attempt")
+            if not promoted or not os.path.exists(dst):
+                raise IOError(f"Target destination {dst} missing after alignment attempt")
 
         dst_sz = os.path.getsize(dst)
         if dst_sz != src_sz:
             raise IOError(f"Final aligned size mismatch: expected {src_sz}, got {dst_sz}")
 
-        if os.path.exists(tmp_dst):
+        if not is_gdrive and os.path.exists(tmp_dst):
             _safe_unlink(tmp_dst)
 
         if out_sha is not None:
@@ -3626,7 +3622,7 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 16 * 1024 * 1024, ou
 
         return True
     except Exception as e:
-        if os.path.exists(tmp_dst):
+        if not is_gdrive and os.path.exists(tmp_dst):
             _safe_unlink(tmp_dst)
         print(f"[Atomic Copy Notice] Streaming copy note for {os.path.basename(dst)}: {e}", flush=True)
         return False
@@ -4152,11 +4148,35 @@ def validate_checkpoint_runtime_compatibility(checkpoint_state: dict) -> None:
         )
 
 
-def compute_file_sha256(filepath: str, chunk_size: int = 4 * 1024 * 1024) -> str:
+def compute_file_sha256(filepath: str, chunk_size: int = 16 * 1024 * 1024) -> str:
     """
-    Dynamically computes the SHA-256 hash of a file using streaming chunks
-    to avoid memory spikes and strictly comply with dynamic hash verification policies.
+    Dynamically computes the SHA-256 hash of a file.
+    Uses memory mapping (mmap) on local files for zero-copy, OpenSSL C-level hardware
+    accelerated hashing directly from RAM/page-cache, falling back to large streaming
+    chunks (16MB) on FUSE or when mmap is unavailable.
     """
+    if not filepath or not os.path.exists(filepath):
+        return ""
+    try:
+        sz = os.path.getsize(filepath)
+    except Exception:
+        sz = 0
+    if sz == 0:
+        return hashlib.sha256(b"").hexdigest()
+
+    # Fast path: zero-copy mmap for local files (avoids FUSE mounts which fail or deadlock on mmap)
+    if not is_gdrive_path(filepath):
+        try:
+            import mmap
+            hasher = hashlib.sha256()
+            with open(filepath, "rb") as f:
+                with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                    hasher.update(mm)
+            return hasher.hexdigest()
+        except Exception:
+            pass
+
+    # Streaming chunk path (optimized 16MB buffer)
     hasher = hashlib.sha256()
     with open(filepath, "rb") as f:
         while True:
@@ -4164,6 +4184,7 @@ def compute_file_sha256(filepath: str, chunk_size: int = 4 * 1024 * 1024) -> str
             if not chunk:
                 break
             hasher.update(chunk)
+            del chunk
     return hasher.hexdigest()
 
 
@@ -7764,6 +7785,7 @@ def main():
     ema_loss = None
     ema_world_loss = None
     t0 = time.time()
+    step_last_time = time.time()
 
     for epoch in range(start_epoch, args.epochs):
         optimizer.zero_grad(set_to_none=True)
@@ -8203,6 +8225,9 @@ def main():
                         teacher_replay_buffer=teacher_replay_buffer,
                     )
 
+                # Reset step timer after all checkpoint I/O, verification, and promotion
+                # so that checkpoint disk/network serialization is not conflated with GPU step speed
+                step_last_time = time.time()
 
                 if step >= args.max_steps:
                     break

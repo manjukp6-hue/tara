@@ -6819,7 +6819,7 @@ def main():
     discovered_shards = []
 
     VALID_EXTS = (".parquet", ".jsonl", ".txt", ".csv", ".tsv", ".gz")
-    SKIP_SUBSTRINGS = ("eval.yaml", "minif2f_lean4_test", "minif2f_lean4_valid", ".gitattributes", "readme.md", ".yaml", ".yml")
+    SKIP_SUBSTRINGS = ("eval.yaml", "minif2f_lean4_test", "minif2f_lean4_valid", ".gitattributes", "readme.md", ".yaml", ".yml", "indiccorp_v2")
 
     local_files = []
     if os.path.isdir(args.dataset_dir):

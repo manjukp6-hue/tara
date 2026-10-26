@@ -7429,6 +7429,8 @@ def main():
     accum_world_loss = 0.0
     ema_loss = None
     ema_world_loss = None
+    grad_norm_val = 0.0
+    w_grad_norm_val = 0.0
     t0 = time.time()
     step_last_time = time.time()
 
@@ -7542,9 +7544,7 @@ def main():
                             break
 
                 if not is_step_skipped:
-                    if world_model is not None and world_optimizer is not None:
-                        world_scaler.step(world_optimizer)
-                        world_scaler.update()
+                    if world_optimizer is not None:
                         world_optimizer.zero_grad(set_to_none=True)
                     optimizer.zero_grad(set_to_none=True)
                     step += 1
@@ -7640,6 +7640,7 @@ def main():
                 domain_tag = f"Domain: [{cur_domain}] " if cur_domain else ""
                 anchor_tag = f"{CLR_YELLOW}[ANCHOR REPLAY]{CLR_RESET} " if cur_is_anchor else ""
                 wm_log = f" | WM Loss: {cur_step_world:.4f} (EMA: {ema_world_loss:.4f}) | Joint: {cur_joint_loss:.4f}" if world_model is not None else ""
+                grad_norm_str = f"GradNorm: {grad_norm_val:.2f} (WM: {w_grad_norm_val:.2f})" if world_model is not None else f"GradNorm: {grad_norm_val:.2f}"
                 print(
                     f"[{args.stage_id} | Step {step:04d}/{args.max_steps}] "
                     f"{domain_tag}{anchor_tag}"
@@ -7648,7 +7649,7 @@ def main():
                     f"BPB: {bpb_clr}{bpb:.2f} b/B{CLR_RESET} | "
                     f"Standing: {loss_clr}{loss_status} {loss_tag}{CLR_RESET} | "
                     f"LR: {cur_lr:.2e} | "
-                    f"GradNorm: {grad_norm:.2f} | "
+                    f"{grad_norm_str} | "
                     f"Speed: {step_speed:.0f} tok/s ({step_duration:.2f}s) | "
                     f"{shard_line_log}"
                     f"Samples: {total_samples_trained:,} | "

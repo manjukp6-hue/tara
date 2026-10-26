@@ -420,7 +420,7 @@ if os.path.isdir(src):
     # Check versioned directories on GDrive under src or parent
     for item in os.listdir(src):
         sub = os.path.join(src, item)
-        if os.path.isdir(sub) and '.step' in item:
+        if os.path.isdir(sub) and ('.step' in item or '_step_' in item or 'step_' in item):
             gdrive_max_step = max(gdrive_max_step, get_step(sub))
 
     print(f'[RESUME SYNC] Step comparison: Local={local_step} (has_model={local_has_model}) vs Google Drive={gdrive_max_step} (top={src_top_step}, best={src_best_step})', flush=True)
@@ -470,10 +470,10 @@ if os.path.isdir(src):
                     if os.path.isfile(cand_f) and not os.path.exists(os.path.join(dst, f)):
                         shutil.copy2(cand_f, os.path.join(dst, f))
 
-        # 4. Restore any versioned subdirectories (.step*) into parent active checkpoints dir
+        # 4. Restore any versioned subdirectories into parent active checkpoints dir
         for item in os.listdir(src):
             s_item = os.path.join(src, item)
-            if os.path.isdir(s_item) and '.step' in item:
+            if os.path.isdir(s_item) and ('.step' in item or '_step_' in item or 'step_' in item):
                 d_item = os.path.join(parent_dst, item)
                 if not os.path.exists(d_item):
                     print(f'  -> Restoring versioned checkpoint directory: {item}...', flush=True)

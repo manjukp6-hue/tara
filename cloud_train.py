@@ -6296,7 +6296,17 @@ def try_resume_from_checkpoint(
                     if stored_tok_fp is not None:
                         stored_canon = stored_tok_fp.get("canonical_fingerprint")
                         curr_canon = current_tok_fp.get("canonical_fingerprint")
-                        if stored_canon and curr_canon and stored_canon != curr_canon:
+                        is_tok_match = False
+                        if stored_canon and curr_canon and stored_canon == curr_canon:
+                            is_tok_match = True
+                        else:
+                            stored_tok_sha = stored_tok_fp.get("tokenizer_file_sha256")
+                            curr_tok_sha = current_tok_fp.get("tokenizer_file_sha256")
+                            stored_vocab = stored_tok_fp.get("vocab_size")
+                            curr_vocab = current_tok_fp.get("vocab_size")
+                            if stored_tok_sha and curr_tok_sha and stored_tok_sha == curr_tok_sha and (stored_vocab is None or curr_vocab is None or stored_vocab == curr_vocab):
+                                is_tok_match = True
+                        if not is_tok_match:
                             continue
                 c_step = int(s_data.get("step", 0))
                 if c_step > best_cand_step:

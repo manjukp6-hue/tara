@@ -1655,6 +1655,14 @@ class TaraStreamingJsonlDataset(IterableDataset):
     ):
         ext = os.path.splitext(actual_fp)[1].lower()
 
+        def should_skip_record(current_idx: int) -> bool:
+            if is_resume_target:
+                if current_idx < target_resume_line:
+                    return True
+                if current_idx == target_resume_line and target_resume_chunk == 0:
+                    return True
+            return False
+
         # Check for Git-LFS pointer stub
         try:
             with open(actual_fp, "rb") as check_f:
@@ -1678,11 +1686,8 @@ class TaraStreamingJsonlDataset(IterableDataset):
                     for r in range(n_rows):
                         current_idx = line_idx
                         line_idx += 1
-                        if is_resume_target:
-                            if current_idx < target_resume_line:
-                                continue
-                            if current_idx == target_resume_line and target_resume_chunk == 0:
-                                continue
+                        if should_skip_record(current_idx):
+                            continue
                         row = {k: df[k][r] for k in keys}
                         yield current_idx, (current_idx + 1) * 1024, row
                 return
@@ -1699,11 +1704,8 @@ class TaraStreamingJsonlDataset(IterableDataset):
                     for gline in gf:
                         current_idx = line_idx
                         line_idx += 1
-                        if is_resume_target:
-                            if current_idx < target_resume_line:
-                                continue
-                            if current_idx == target_resume_line and target_resume_chunk == 0:
-                                continue
+                        if should_skip_record(current_idx):
+                            continue
                         gline = gline.strip()
                         if not gline:
                             continue
@@ -1733,11 +1735,8 @@ class TaraStreamingJsonlDataset(IterableDataset):
                         if len(row_cells) >= 3 and row_cells[1].endswith((".wav", ".mp3", ".flac")):
                             current_idx = line_idx
                             line_idx += 1
-                            if is_resume_target:
-                                if current_idx < target_resume_line:
-                                    continue
-                                if current_idx == target_resume_line and target_resume_chunk == 0:
-                                    continue
+                            if should_skip_record(current_idx):
+                                continue
                             yield current_idx, (current_idx + 1) * 1024, {"transcription": row_cells[2]}
                             continue
 
@@ -1747,11 +1746,8 @@ class TaraStreamingJsonlDataset(IterableDataset):
 
                         current_idx = line_idx
                         line_idx += 1
-                        if is_resume_target:
-                            if current_idx < target_resume_line:
-                                continue
-                            if current_idx == target_resume_line and target_resume_chunk == 0:
-                                continue
+                        if should_skip_record(current_idx):
+                            continue
                         row_dict = {header_row[i]: row_cells[i] for i in range(min(len(header_row), len(row_cells)))}
                         yield current_idx, (current_idx + 1) * 1024, row_dict
                 return
@@ -4366,8 +4362,20 @@ def verify_checkpoint_integrity(
                     print(f"[Verification Fail] Safetensors file has 0 keys: {checkpoint_dir}")
                     return False
         if require_optimizer and os.path.exists(os.path.join(checkpoint_dir, "optimizer_state.pt")):
-            test_opt = torch.load(os.path.join(checkpoint_dir, "optimizer_state.pt"), map_location="cpu")
-            del test_opt
+            opt_path = os.path.join(checkpoint_dir, "optimizer_state.pt")
+            if os.path.getsize(opt_path) <= 1024 * 1024:
+                print(f"[Verification Fail] Optimizer state file too small: {opt_path}")
+                return False
+            import zipfile
+            if zipfile.is_zipfile(opt_path):
+                try:
+                    with zipfile.ZipFile(opt_path, "r") as zf:
+                        if zf.testzip() is not None:
+                            print(f"[Verification Fail] Corrupt zip archive in {opt_path}")
+                            return False
+                except Exception as ze:
+                    print(f"[Verification Fail] Optimizer zip check error in {opt_path}: {ze}")
+                    return False
 
         # Dynamic SHA-256 verification: if recorded in metadata, verify against authentic file on disk
         recorded_sha = s_data.get("model_weights_sha256") or meta.get("model_weights_sha256")
@@ -4587,396 +4595,18 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
         print(f"[DISK HYGIENE Notice] Disk check notice: {e}", flush=True)
 
 
-def save_best_milestone(
-    model: nn.Module,
-    config: dict,
-    tokenizer_path: str,
-    best_dir: str,
-    step: int,
-    epoch: int,
-    loss: float,
-    best_loss: float,
-    stage_id: str,
-    dataset: Optional[Any] = None,
-    shard_ledger: Optional[Any] = None,
-    data_cursor: Optional[Dict[str, Any]] = None,
-    world_model: Optional[nn.Module] = None,
-    optimizer: Optional[torch.optim.Optimizer] = None,
-    scaler: Optional[torch.cuda.amp.GradScaler] = None,
-    world_optimizer: Optional[torch.optim.Optimizer] = None,
-    world_scaler: Optional[torch.cuda.amp.GradScaler] = None,
-    teacher_replay_buffer: Optional[Any] = None,
-) -> bool:
-    """
-    Saves a clean, compact BEST MILESTONE checkpoint using atomic verified commit:
-    - Never deletes or overwrites existing best model before saving & verifying the new one.
-    - Saves all assets to an isolated versioned staging directory.
-    - Verifies integrity, model keys, and dynamic SHA-256 before touching active milestone.
-    - Atomically promotes staging directory to best_dir with rollback safety.
-    - Preserves optimizer state and RNG states if provided for 100% crash-proof recovery.
-    - Preserves exact data cursor so fallback resumption retains shard and line offsets.
-    - Auto-persists stratified teacher replay buffer across all canonical domains.
-    """
-    with _checkpoint_write_lock:
-        _reclaim_emergency_disk_space(min_free_gb=10.0)
-        parent_dir = os.path.dirname(os.path.abspath(best_dir)) or "."
-        os.makedirs(parent_dir, exist_ok=True)
-        staging_dir = os.path.join(parent_dir, f".staging_best_step_{step}_{int(time.time())}")
-        os.makedirs(staging_dir, exist_ok=True)
-
-        try:
-            # 1. config.json
-            with open(os.path.join(staging_dir, "config.json"), "w", encoding="utf-8") as f:
-                json.dump(config, f, indent=2)
-
-            # 2. tokenizer.json and auxiliary config files
-            if tokenizer_path and os.path.exists(tokenizer_path):
-                tok_dst = os.path.join(staging_dir, "tokenizer.json")
-                if os.path.abspath(tokenizer_path) != os.path.abspath(tok_dst):
-                    shutil.copy2(tokenizer_path, tok_dst)
-                src_tok_dir = os.path.dirname(os.path.abspath(tokenizer_path))
-                for aux_name in ("tokenizer_config.json", "special_tokens_map.json"):
-                    src_aux = os.path.join(src_tok_dir, aux_name)
-                    if os.path.isfile(src_aux):
-                        shutil.copy2(src_aux, os.path.join(staging_dir, aux_name))
-
-            # 2b. teacher_replay_buffer.jsonl (stratified domain exemplars for continual learning)
-            if teacher_replay_buffer is not None and hasattr(teacher_replay_buffer, "save_to_jsonl"):
-                teacher_replay_buffer.save_to_jsonl(os.path.join(staging_dir, "teacher_replay_buffer.jsonl"))
-
-            tok_fingerprint = compute_tokenizer_fingerprint(
-                tokenizer_path=tokenizer_path,
-                tokenizer=None,
-            )
-
-            # 3. model.safetensors
-            target_model = os.path.join(staging_dir, "model.safetensors")
-            existing_model = os.path.join(parent_dir, "model.safetensors")
-            existing_state_file = os.path.join(parent_dir, "checkpoint_state.json")
-            existing_is_current_step = False
-            existing_st = None
-            if os.path.isfile(existing_model) and os.path.getsize(existing_model) > 1024 * 1024 and os.path.isfile(existing_state_file):
-                try:
-                    with open(existing_state_file, "r", encoding="utf-8") as f_st:
-                        existing_st = json.load(f_st)
-                    if existing_st.get("step") == step:
-                        existing_is_current_step = True
-                except Exception:
-                    existing_is_current_step = False
-
-            if existing_is_current_step:
-                try:
-                    os.link(existing_model, target_model)
-                except Exception:
-                    _stream_copy_file(existing_model, target_model)
-            else:
-                state_dict = {k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}
-                if HAS_SAFETENSORS:
-                    save_file(state_dict, target_model)
-                else:
-                    torch.save(state_dict, os.path.join(staging_dir, "pytorch_model.bin"))
-                del state_dict
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-
-            actual_model_path = target_model if HAS_SAFETENSORS else os.path.join(staging_dir, "pytorch_model.bin")
-            if existing_is_current_step and existing_st and existing_st.get("model_weights_sha256"):
-                weights_sha256 = existing_st.get("model_weights_sha256")
-            else:
-                weights_sha256 = compute_file_sha256(actual_model_path) if os.path.exists(actual_model_path) else None
-            if weights_sha256:
-                print(f"[Best Checkpoint Dynamic SHA-256] {os.path.basename(actual_model_path)} -> {weights_sha256}", flush=True)
-
-            # 3b. world_model.safetensors (if joint training)
-            world_weights_sha256 = None
-            if world_model is not None:
-                wm_target = os.path.join(staging_dir, "world_model.safetensors")
-                existing_wm = os.path.join(parent_dir, "world_model.safetensors")
-                if existing_is_current_step and os.path.isfile(existing_wm) and os.path.getsize(existing_wm) > 1024 * 1024:
-                    try:
-                        os.link(existing_wm, wm_target)
-                    except Exception:
-                        _stream_copy_file(existing_wm, wm_target)
-                else:
-                    wm_sd = {k: v.detach().to("cpu", copy=True) for k, v in world_model.state_dict().items()}
-                    if HAS_SAFETENSORS:
-                        save_file(wm_sd, wm_target)
-                    else:
-                        torch.save(wm_sd, os.path.join(staging_dir, "pytorch_world_model.bin"))
-                    del wm_sd
-                    gc.collect()
-                actual_wm_target = wm_target if HAS_SAFETENSORS else os.path.join(staging_dir, "pytorch_world_model.bin")
-                if existing_is_current_step and existing_st and existing_st.get("world_model_weights_sha256"):
-                    world_weights_sha256 = existing_st.get("world_model_weights_sha256")
-                else:
-                    world_weights_sha256 = compute_file_sha256(actual_wm_target) if os.path.exists(actual_wm_target) else None
-
-            # 3c. optimizer_state.pt (for 100% full recovery without momentum loss)
-            if optimizer is not None:
-                opt_sd = optimizer.state_dict()
-                cpu_opt_state = {}
-                for k, v in opt_sd.items():
-                    if k == "state":
-                        cpu_opt_state[k] = {}
-                        for pid, pdata in v.items():
-                            cpu_opt_state[k][pid] = {
-                                sk: sv.cpu() if isinstance(sv, torch.Tensor) else sv
-                                for sk, sv in pdata.items()
-                            }
-                    else:
-                        cpu_opt_state[k] = v
-                del opt_sd
-                scaler_state = scaler.state_dict() if scaler else None
-
-                torch_rng = torch.get_rng_state()
-                cuda_rng = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
-                py_rng = random.getstate()
-
-                opt_save_dict = {
-                    "optimizer": cpu_opt_state,
-                    "scaler": scaler_state,
-                    "step": step,
-                    "best_loss": best_loss,
-                    "torch_rng": torch_rng,
-                    "cuda_rng": cuda_rng,
-                    "py_rng": py_rng,
-                }
-                if world_optimizer is not None:
-                    w_opt_sd = world_optimizer.state_dict()
-                    w_cpu_opt_state = {}
-                    for k, v in w_opt_sd.items():
-                        if k == "state":
-                            w_cpu_opt_state[k] = {}
-                            for pid, pdata in v.items():
-                                w_cpu_opt_state[k][pid] = {
-                                    sk: sv.cpu() if isinstance(sv, torch.Tensor) else sv
-                                    for sk, sv in pdata.items()
-                                }
-                        else:
-                            w_cpu_opt_state[k] = v
-                    opt_save_dict["world_optimizer"] = w_cpu_opt_state
-                    opt_save_dict["world_scaler"] = world_scaler.state_dict() if world_scaler else None
-
-                torch.save(
-                    opt_save_dict,
-                    os.path.join(staging_dir, "optimizer_state.pt"),
-                )
-                del cpu_opt_state, scaler_state
-                gc.collect()
-
-            # 4. Continuation state with exact data cursor
-            if data_cursor is None:
-                active_shard = getattr(dataset, "current_active_shard", getattr(dataset, "active_shard_name", None)) if dataset else None
-                active_offset = getattr(dataset, "active_shard_offset", 0) if dataset else 0
-                active_byte_offset = getattr(dataset, "active_shard_byte_offset", 0) if dataset else 0
-                active_chunk_idx = getattr(dataset, "active_chunk_idx", 0) if dataset else 0
-                completed_shards = list(shard_ledger.completed_shards) if shard_ledger else []
-                completed_records = shard_ledger.get_total_completed_records() if shard_ledger else 0
-                samples_consumed = completed_records
-                data_cursor = {
-                    "active_shard": active_shard,
-                    "active_shard_line_offset": active_offset,
-                    "active_shard_byte_offset": active_byte_offset,
-                    "active_chunk_idx": active_chunk_idx,
-                    "total_samples_trained": completed_records,
-                    "samples_consumed": samples_consumed,
-                    "completed_shards": completed_shards,
-                }
-            else:
-                active_shard = data_cursor.get("active_shard")
-                active_offset = data_cursor.get("active_shard_line_offset", 0)
-                active_byte_offset = data_cursor.get("active_shard_byte_offset", 0)
-                active_chunk_idx = data_cursor.get("active_chunk_idx", 0)
-                completed_shards = data_cursor.get("completed_shards", list(shard_ledger.completed_shards) if shard_ledger else [])
-                completed_records = data_cursor.get("total_samples_trained", 0)
-                samples_consumed = data_cursor.get("samples_consumed", completed_records)
-
-            domain_cursors = None
-            anchor_buffer_state = None
-            scheduler_deficits = None
-
-            if data_cursor and data_cursor.get("domain_cursors"):
-                domain_cursors = data_cursor["domain_cursors"]
-            elif hasattr(dataset, "get_state"):
-                ds_st = dataset.get_state()
-                domain_cursors = ds_st.get("domain_cursors")
-                anchor_buffer_state = ds_st.get("anchor_buffer") or ds_st.get("anchor_buffer_state")
-            elif shard_ledger and hasattr(shard_ledger, "domain_cursors"):
-                domain_cursors = shard_ledger.domain_cursors
-
-            if not anchor_buffer_state and hasattr(dataset, "get_state"):
-                ds_st = dataset.get_state()
-                anchor_buffer_state = ds_st.get("anchor_buffer") or ds_st.get("anchor_buffer_state")
-            if not anchor_buffer_state and data_cursor and "anchor_buffer" in data_cursor:
-                anchor_buffer_state = data_cursor["anchor_buffer"]
-            elif not anchor_buffer_state and data_cursor and "anchor_buffer_state" in data_cursor:
-                anchor_buffer_state = data_cursor["anchor_buffer_state"]
-
-            if data_cursor and data_cursor.get("scheduler_deficits"):
-                scheduler_deficits = data_cursor["scheduler_deficits"]
-            elif hasattr(dataset, "get_state"):
-                scheduler_deficits = dataset.get_state().get("scheduler_deficits")
-            elif hasattr(dataset, "deficits"):
-                scheduler_deficits = getattr(dataset, "deficits", None)
-
-            if domain_cursors:
-                data_cursor["domain_cursors"] = domain_cursors
-            if anchor_buffer_state:
-                data_cursor["anchor_buffer"] = anchor_buffer_state
-                data_cursor["anchor_buffer_state"] = anchor_buffer_state
-            if scheduler_deficits:
-                data_cursor["scheduler_deficits"] = scheduler_deficits
-
-            state = {
-                "step": step,
-                "epoch": epoch,
-                "loss": loss,
-                "best_loss": best_loss,
-                "stage_id": stage_id,
-                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                "is_best": True,
-                "is_completed": False,
-                "model_weights_sha256": weights_sha256,
-                "world_model_weights_sha256": world_weights_sha256,
-                "joint_world_model": world_model is not None,
-                "tokenizer_fingerprint": tok_fingerprint,
-                "data_cursor": data_cursor,
-                "domain_cursors": domain_cursors or {},
-                "scheduler_deficits": scheduler_deficits or {},
-                "anchor_buffer": anchor_buffer_state,
-                "anchor_buffer_state": anchor_buffer_state,
-                "active_shard": active_shard,
-                "active_shard_offset": active_offset,
-                "active_shard_line_offset": active_offset,
-                "active_shard_byte_offset": active_byte_offset,
-                "active_chunk_idx": active_chunk_idx,
-                "completed_shards": completed_shards,
-                "total_completed_records": completed_records,
-                "total_samples_trained": completed_records,
-                "samples_consumed": samples_consumed,
-            }
-            with open(os.path.join(staging_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
-                json.dump(state, f, indent=2)
-
-            # 5. STAGE_METADATA.json
-            meta = {
-                "stage_id": stage_id,
-                "status": "IN_PROGRESS",
-                "step": step,
-                "loss": loss,
-                "best_loss": best_loss,
-                "perplexity": math.exp(min(loss, 20.0)),
-                "is_best": True,
-                "model_weights_sha256": weights_sha256,
-                "tokenizer_fingerprint": tok_fingerprint,
-            }
-            with open(os.path.join(staging_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
-                json.dump(meta, f, indent=2)
-
-            # 6. Verify staged milestone BEFORE touching active best_dir
-            is_valid = verify_checkpoint_integrity(staging_dir, require_optimizer=False, require_completed=False, precomputed_model_sha=weights_sha256)
-            if not is_valid:
-                print(f"[Safety Protection] Staged best checkpoint at {staging_dir} failed verification! Preserving existing best checkpoint.", flush=True)
-                shutil.rmtree(staging_dir, ignore_errors=True)
-                return False
-
-            # 7. Atomic commit: swap staging into best_dir with rollback backup
-            backup_dir = os.path.join(parent_dir, f".bak_best_{int(time.time())}")
-            if os.path.exists(best_dir):
-                try:
-                    os.rename(best_dir, backup_dir)
-                except Exception as b_err:
-                    print(f"[Best Checkpoint Notice] Direct rename fallback: {b_err}", flush=True)
-                    backup_dir = None
-
-            try:
-                if not os.path.exists(best_dir):
-                    try:
-                        os.rename(staging_dir, best_dir)
-                    except Exception:
-                        os.makedirs(best_dir, exist_ok=True)
-                        for item in os.listdir(staging_dir):
-                            s_src = os.path.join(staging_dir, item)
-                            s_dst = os.path.join(best_dir, item)
-                            if os.path.isdir(s_src):
-                                if os.path.exists(s_dst):
-                                    _safe_rmtree(s_dst)
-                                shutil.copytree(s_src, s_dst)
-                            else:
-                                if os.path.exists(s_dst):
-                                    _safe_unlink(s_dst)
-                                try:
-                                    os.link(s_src, s_dst)
-                                except OSError:
-                                    _stream_copy_file(s_src, s_dst)
-                        _safe_rmtree(staging_dir)
-                else:
-                    for item in os.listdir(staging_dir):
-                        s_src = os.path.join(staging_dir, item)
-                        s_dst = os.path.join(best_dir, item)
-                        if os.path.isdir(s_src):
-                            if os.path.exists(s_dst):
-                                _safe_rmtree(s_dst)
-                            shutil.copytree(s_src, s_dst)
-                        else:
-                            if os.path.exists(s_dst):
-                                _safe_unlink(s_dst)
-                            try:
-                                os.link(s_src, s_dst)
-                            except OSError:
-                                _stream_copy_file(s_src, s_dst)
-                    _safe_rmtree(staging_dir)
-
-                if backup_dir and os.path.exists(backup_dir):
-                    _safe_rmtree(backup_dir)
-            except Exception as commit_err:
-                print(f"[Best Checkpoint Fatal] Promotion failed: {commit_err}. Rolling back to backup.", flush=True)
-                if backup_dir and os.path.exists(backup_dir):
-                    if os.path.exists(best_dir):
-                        _safe_rmtree(best_dir)
-                    try:
-                        os.rename(backup_dir, best_dir)
-                    except Exception:
-                        pass
-                if os.path.exists(staging_dir):
-                    _safe_rmtree(staging_dir)
-                return False
-
-            print(f"[Best Checkpoint] Atomically committed verified best milestone (Loss: {best_loss:.4f}, Step {step}) -> {best_dir}", flush=True)
-
-            # Write COMMITTED marker so that recovery code can unambiguously
-            # distinguish a fully-committed best checkpoint from an incomplete
-            # or partially-written staging directory.  Without this marker,
-            # a crash mid-promotion leaves a partial best_dir that could be
-            # mistaken for a valid inference artifact.
-            committed_marker = os.path.join(best_dir, "COMMITTED")
-            try:
-                with open(committed_marker, "w", encoding="utf-8") as _cm:
-                    json.dump({"step": step, "is_best": True, "committed_utc": datetime.now(timezone.utc).isoformat()}, _cm)
-            except Exception as marker_err:
-                print(f"[Best Checkpoint Notice] Could not write COMMITTED marker: {marker_err}", flush=True)
-
-            return True
-        except Exception as e:
-            print(f"[Best Checkpoint Failure] Error saving best milestone: {e}", flush=True)
-            if os.path.exists(staging_dir):
-                shutil.rmtree(staging_dir, ignore_errors=True)
-            return False
-
-
 def save_checkpoint(
     model: nn.Module,
-    optimizer: torch.optim.Optimizer,
-    scaler: torch.cuda.amp.GradScaler,
-    config: dict,
-    tokenizer_path: str,
-    output_dir: str,
-    step: int,
-    epoch: int,
-    loss: float,
-    best_loss: float,
-    stage_id: str,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    scaler: Optional[torch.cuda.amp.GradScaler] = None,
+    config: Optional[dict] = None,
+    tokenizer_path: Optional[str] = None,
+    output_dir: str = "",
+    step: int = 0,
+    epoch: int = 0,
+    loss: float = 0.0,
+    best_loss: float = 0.0,
+    stage_id: str = "",
     is_best: bool = False,
     is_completed: bool = False,
     sync_to_gdrive: bool = False,
@@ -4991,28 +4621,11 @@ def save_checkpoint(
     world_scaler: Optional[torch.cuda.amp.GradScaler] = None,
     per_shard_promotion: bool = False,
     teacher_replay_buffer: Optional[Any] = None,
-):
+) -> bool:
     """
-    Crash-safe, versioned checkpoint protocol (Task A):
-
-    1. Reclaim emergency disk space if low.
-    2. Write all checkpoint artifacts into a unique, isolated staging directory
-       (never directly into output_dir).  An incomplete staging directory is
-       never promoted and is harmless to the prior committed checkpoint.
-    3. Verify every required artifact in the staging directory before touching
-       the active output_dir.
-    4. Promote the verified staging directory to a versioned immutable location
-       (output_dir.step_<N>_<ts>) and write a latest-checkpoint pointer
-       (latest_checkpoint.json) only after verification passes.
-    5. Update the shard ledger only AFTER a verified checkpoint is committed
-       (checkpoint is the authoritative continuation state).
-    6. Retain the previous versioned checkpoint on disk; do not delete it until
-       the new checkpoint is confirmed durable.
-    7. Sync to Google Drive after local commit.
-
-    Google Drive / FUSE semantics: staging directories whose COMMITTED marker is
-    absent are ignored on recovery.  An incomplete upload can never be mistaken
-    for a valid committed checkpoint.
+    Unified Crash-Safe Checkpoint Engine:
+    Handles regular training checkpoints, completed stage models, and best milestone snapshots
+    with atomic verified staging, optimizer preservation, and background Google Drive sync.
     """
     tag = "BEST MILESTONE" if is_best else ("COMPLETED" if is_completed else f"STEP {step}")
     print(f"[Checkpoint] Snapshotting [{tag}] checkpoint at Step {step}...", flush=True)
@@ -5027,11 +4640,6 @@ def save_checkpoint(
         t0 = time.time()
         os.makedirs(output_dir, exist_ok=True)
 
-        # ----------------------------------------------------------------
-        # Step 1: Write all artifacts into an isolated staging directory.
-        # The staging directory name encodes step and a wall-clock timestamp
-        # so it is always unique even if the process crashes mid-write.
-        # ----------------------------------------------------------------
         parent_dir = os.path.dirname(os.path.abspath(output_dir)) or "."
         staging_dir = os.path.join(
             parent_dir,
@@ -5041,8 +4649,9 @@ def save_checkpoint(
 
         try:
             # 1. config.json
-            with open(os.path.join(staging_dir, "config.json"), "w", encoding="utf-8") as f:
-                json.dump(config, f, indent=2)
+            if config:
+                with open(os.path.join(staging_dir, "config.json"), "w", encoding="utf-8") as f:
+                    json.dump(config, f, indent=2)
 
             # 2. tokenizer.json and auxiliary config files
             if tokenizer_path and os.path.exists(tokenizer_path):
@@ -5055,7 +4664,7 @@ def save_checkpoint(
                     if os.path.isfile(src_aux):
                         shutil.copy2(src_aux, os.path.join(staging_dir, aux_name))
 
-            # 2b. teacher_replay_buffer.jsonl (if provided)
+            # 2b. teacher_replay_buffer.jsonl (stratified exemplars)
             if teacher_replay_buffer is not None and hasattr(teacher_replay_buffer, "save_to_jsonl"):
                 teacher_replay_buffer.save_to_jsonl(os.path.join(staging_dir, "teacher_replay_buffer.jsonl"))
 
@@ -5073,7 +4682,7 @@ def save_checkpoint(
             del state_dict
             gc.collect()
 
-            # 3b. world_model.safetensors (if joint training active)
+            # 3b. world_model.safetensors (if joint training)
             world_weights_sha256 = None
             if world_model is not None:
                 wm_sd = {k: v.detach().to("cpu", copy=True) for k, v in world_model.state_dict().items()}
@@ -5172,8 +4781,6 @@ def save_checkpoint(
                 "world_model_weights_sha256": world_weights_sha256,
                 "joint_world_model": world_model is not None,
                 "tokenizer_fingerprint": tok_fingerprint,
-                # Runtime provenance tag: allows the native Rust training runtime to detect
-                # Python-originated checkpoints and refuse incompatible optimizer-state exchange.
                 "written_by_runtime": "python",
                 "data_cursor": data_cursor,
                 "domain_cursors": domain_cursors or {},
@@ -5194,9 +4801,9 @@ def save_checkpoint(
             with open(os.path.join(staging_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
                 json.dump(continuation_state, f, indent=2)
 
-            # 5. Optimizer state (only for training checkpoints, strictly excluded from pure best milestone)
-            if not is_best or is_completed:
-                opt_sd = optimizer.state_dict() if optimizer else {}
+            # 5. Optimizer state (saved whenever optimizer is provided)
+            if optimizer is not None:
+                opt_sd = optimizer.state_dict()
                 cpu_opt_state = {}
                 for k, v in opt_sd.items():
                     if k == "state":
@@ -5211,7 +4818,6 @@ def save_checkpoint(
                 del opt_sd
                 scaler_state = scaler.state_dict() if scaler else None
 
-                # RNG states for exact deterministic resumption
                 torch_rng = torch.get_rng_state()
                 cuda_rng = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
                 py_rng = random.getstate()
@@ -5267,14 +4873,10 @@ def save_checkpoint(
             elapsed_write = time.time() - t0
             print(f"[Checkpoint] Staged [{tag}] artifacts ({elapsed_write:.1f}s) -> {staging_dir}", flush=True)
 
-            # ----------------------------------------------------------------
-            # Step 2: Verify ALL required artifacts in staging BEFORE touching
-            # output_dir.  A failed verification abandons staging and leaves
-            # the existing output_dir intact.
-            # ----------------------------------------------------------------
+            # Step 2: Verify staged artifacts
             is_valid = verify_checkpoint_integrity(
                 staging_dir,
-                require_optimizer=(not is_best and not is_completed),
+                require_optimizer=(optimizer is not None and not is_best),
                 require_completed=is_completed,
                 precomputed_model_sha=weights_sha256,
             )
@@ -5285,37 +4887,27 @@ def save_checkpoint(
                     flush=True,
                 )
                 _safe_rmtree(staging_dir)
-                return
+                return False
 
-            # ----------------------------------------------------------------
-            # Step 3: Promote staging -> immutable versioned directory, then
-            # write latest_checkpoint.json pointer atomically.
-            # A prior versioned checkpoint is retained until this pointer is
-            # updated, guaranteeing the last valid committed checkpoint is
-            # always recoverable.
-            # ----------------------------------------------------------------
+            # Step 3: Promote staging -> immutable versioned directory
+            folder_prefix = "best_milestone" if is_best else "checkpoint"
             versioned_dir = os.path.join(
                 parent_dir,
-                f"{os.path.basename(output_dir)}.step{step}_{int(time.time())}"
+                f"{folder_prefix}_step_{step:08d}_{int(time.time())}"
             )
 
-            # Rename staging to versioned (atomic on POSIX; best-effort on FUSE/Windows)
             try:
                 os.rename(staging_dir, versioned_dir)
             except Exception:
                 shutil.copytree(staging_dir, versioned_dir)
                 _safe_rmtree(staging_dir)
 
-            # Sync output_dir to point to latest versioned content:
-            # Hardlink files from versioned_dir into output_dir (instant 0ms on the same local filesystem).
-            # Falls back to _stream_copy_file only if os.link raises an OSError (e.g. cross-filesystem boundary).
-            # This preserves backward compatibility for all callers that reference output_dir without redundant 5GB disk writes.
+            # Align active output_dir to latest versioned content
             os.makedirs(output_dir, exist_ok=True)
             for fname in os.listdir(versioned_dir):
                 src = os.path.join(versioned_dir, fname)
                 dst = os.path.join(output_dir, fname)
                 if os.path.isfile(src):
-                    # Unlink pre-existing dst to avoid DriveFS creating duplicate clone files: (1), (2)
                     if os.path.exists(dst):
                         try:
                             os.remove(dst)
@@ -5326,16 +4918,24 @@ def save_checkpoint(
                     except OSError:
                         _stream_copy_file(src, dst)
 
-            # Write COMMITTED marker inside versioned_dir so recovery can
-            # distinguish a fully promoted checkpoint from an incomplete staging dir.
             committed_marker = os.path.join(versioned_dir, "COMMITTED")
             with open(committed_marker, "w", encoding="utf-8") as f:
-                json.dump({"step": step, "committed_utc": datetime.now(timezone.utc).isoformat()}, f)
+                json.dump({"step": step, "is_best": is_best, "committed_utc": datetime.now(timezone.utc).isoformat()}, f)
 
-            # Publish latest-checkpoint pointer ONLY after versioned dir is fully committed.
-            # Do NOT publish pointer when is_best=True because latest_checkpoint.json is reserved
-            # strictly for full training-resumable checkpoints (with optimizer state).
-            if not is_best:
+            # Pointer updates
+            if is_best:
+                best_ptr = os.path.join(parent_dir, "best_checkpoint.json")
+                try:
+                    with open(best_ptr, "w", encoding="utf-8") as bf:
+                        json.dump({
+                            "step": step,
+                            "loss": loss,
+                            "versioned_dir": versioned_dir,
+                            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                        }, bf, indent=2)
+                except Exception:
+                    pass
+            else:
                 latest_ptr_path = os.path.join(output_dir, "latest_checkpoint.json")
                 legacy_ptr_path = os.path.join(parent_dir, "latest_checkpoint.json")
                 tmp_dir = tempfile.gettempdir()
@@ -5363,11 +4963,7 @@ def save_checkpoint(
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-            # ----------------------------------------------------------------
-            # Step 4: SYNCHRONIZE SHARD LEDGER — only AFTER the checkpoint is
-            # durably committed.  The ledger must never claim a completion that
-            # is ahead of the durable model checkpoint.
-            # ----------------------------------------------------------------
+            # Step 4: Shard ledger update
             if shard_ledger and data_cursor:
                 shard_tot = getattr(dataset, "active_shard_total_lines", 0) if dataset else getattr(shard_ledger, "active_shard_total_lines", 0)
                 if shard_tot <= 0 and active_total_lines > 0:
@@ -5381,10 +4977,7 @@ def save_checkpoint(
                     shard_total_lines=shard_tot,
                 )
 
-            # ----------------------------------------------------------------
-            # Step 5: Commit any pending shard completions that were waiting
-            # for a durable checkpoint.  Evict managed cache files only now.
-            # ----------------------------------------------------------------
+            # Step 5: Shard completions
             if dataset is not None and shard_ledger is not None:
                 pending = list(getattr(dataset, "_pending_shard_completions", {}).keys())
                 for pending_shard in pending:
@@ -5406,10 +4999,10 @@ def save_checkpoint(
                             stage_id=stage_id,
                         )
 
-            # Step 6: Clean temp artifacts from output_dir
+            # Step 6: Clean stale temp artifacts
             clean_stale_checkpoint_artifacts(output_dir, is_best=is_best)
 
-            # Step 7: Mirror verified checkpoint to Google Drive in background (from immutable versioned_dir)
+            # Step 7: Mirror verified checkpoint to Google Drive in background
             if sync_to_gdrive:
                 sync_checkpoint_to_gdrive(
                     output_dir=output_dir,
@@ -5422,14 +5015,9 @@ def save_checkpoint(
                     loss=loss,
                 )
             else:
-                print(f"[GDrive Mirror] Skipped cloud sync for [{tag}] (Google Drive preserves best model only).", flush=True)
+                print(f"[GDrive Mirror] Skipped cloud sync for [{tag}] (sync_to_gdrive is False).", flush=True)
 
-            # ----------------------------------------------------------------
-            # Step 8: Apply checkpoint retention policy — keep the most
-            # recent versioned checkpoint directories; delete older ones only
-            # AFTER the new checkpoint is confirmed durable. Protected dirs
-            # include versioned_dir and any active/pending GDrive sync dir.
-            # ----------------------------------------------------------------
+            # Step 8: Retention cleanup
             _cleanup_old_versioned_checkpoints(
                 parent_dir,
                 os.path.basename(output_dir),
@@ -5438,11 +5026,61 @@ def save_checkpoint(
                 protected_dirs=[versioned_dir] if versioned_dir else None,
             )
 
+            return True
+
         except Exception as e:
             print(f"[Checkpoint Failure] Error during checkpoint save: {e}", flush=True)
             if os.path.exists(staging_dir):
                 _safe_rmtree(staging_dir)
-            return
+            return False
+
+
+def save_best_milestone(
+    model: nn.Module,
+    config: dict,
+    tokenizer_path: str,
+    best_dir: str,
+    step: int,
+    epoch: int,
+    loss: float,
+    best_loss: float,
+    stage_id: str,
+    dataset: Optional[Any] = None,
+    shard_ledger: Optional[Any] = None,
+    data_cursor: Optional[Dict[str, Any]] = None,
+    world_model: Optional[nn.Module] = None,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    scaler: Optional[torch.cuda.amp.GradScaler] = None,
+    world_optimizer: Optional[torch.optim.Optimizer] = None,
+    world_scaler: Optional[torch.cuda.amp.GradScaler] = None,
+    teacher_replay_buffer: Optional[Any] = None,
+    sync_to_gdrive: bool = False,
+) -> bool:
+    """Delegates to unified save_checkpoint with is_best=True to eliminate duplicate logic."""
+    return save_checkpoint(
+        model=model,
+        optimizer=optimizer,
+        scaler=scaler,
+        config=config,
+        tokenizer_path=tokenizer_path,
+        output_dir=best_dir,
+        step=step,
+        epoch=epoch,
+        loss=loss,
+        best_loss=best_loss,
+        stage_id=stage_id,
+        is_best=True,
+        is_completed=False,
+        sync_to_gdrive=sync_to_gdrive,
+        sync_optimizer=(optimizer is not None),
+        dataset=dataset,
+        shard_ledger=shard_ledger,
+        data_cursor=data_cursor,
+        world_model=world_model,
+        world_optimizer=world_optimizer,
+        world_scaler=world_scaler,
+        teacher_replay_buffer=teacher_replay_buffer,
+    )
 
 
 def promote_checkpoint(
@@ -8113,33 +7751,28 @@ def main():
                             flush=True,
                         )
 
-                        # Immediately write authentic best weights of this exact step to local disk without delay
+                        # Atomically commit and mirror verified best milestone
                         save_best_milestone(
-                            model, config, tok_path, best_cp_dir,
-                            step, epoch, cur_step_loss, best_loss, args.stage_id,
-                            dataset=dataset, shard_ledger=shard_ledger, data_cursor=best_loss_cursor,
+                            model=model,
+                            config=config,
+                            tokenizer_path=tok_path,
+                            best_dir=best_cp_dir,
+                            step=step,
+                            epoch=epoch,
+                            loss=cur_step_loss,
+                            best_loss=best_loss,
+                            stage_id=args.stage_id,
+                            dataset=dataset,
+                            shard_ledger=shard_ledger,
+                            data_cursor=best_loss_cursor,
                             world_model=world_model,
                             optimizer=optimizer,
                             scaler=scaler,
                             world_optimizer=world_optimizer,
                             world_scaler=world_scaler,
                             teacher_replay_buffer=teacher_replay_buffer,
+                            sync_to_gdrive=args.sync_all_to_gdrive,
                         )
-
-                        # Snapshot best milestone to an immutable sync staging directory so background copy never collides with active training
-                        best_sync_snapshot = os.path.join(
-                            os.path.dirname(os.path.abspath(best_cp_dir)),
-                            f"sync_snap_best_step_{step}_{int(time.time())}"
-                        )
-                        os.makedirs(best_sync_snapshot, exist_ok=True)
-                        for item in os.listdir(best_cp_dir):
-                            s_file = os.path.join(best_cp_dir, item)
-                            d_file = os.path.join(best_sync_snapshot, item)
-                            if os.path.isfile(s_file):
-                                try:
-                                    os.link(s_file, d_file)
-                                except Exception:
-                                    shutil.copy2(s_file, d_file)
 
                         # If promote_max_step is set and current step is within window, snapshot to window_best_source
                         if args.promote_max_step > 0 and step <= args.promote_max_step:
@@ -8157,19 +7790,6 @@ def main():
                                             shutil.copy2(s_file, d_file)
                             except Exception as e:
                                 print(f"[Promote Window Snapshot Warning] Failed to update window snapshot: {e}", flush=True)
-
-                        # Mirror authentic best milestone to Google Drive
-                        wait_sync = getattr(args, "gdrive_sync_wait", False) or (os.environ.get("GDRIVE_SYNC_WAIT", "0") == "1")
-                        sync_checkpoint_to_gdrive(
-                            best_cp_dir,
-                            f"BEST-MILESTONE (Step {step:04d}, Loss: {best_loss:.4f})",
-                            wait=wait_sync,
-                            sync_optimizer=True,
-                            source_dir=best_sync_snapshot,
-                            step=step,
-                            is_best=True,
-                            loss=cur_step_loss,
-                        )
                     else:
                         print(
                             f"[{args.stage_id} | Step {step:04d}] [Skip-Save Active (<= {args.skip_save_steps})] "

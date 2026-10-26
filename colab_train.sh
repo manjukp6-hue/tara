@@ -386,7 +386,6 @@ import os, shutil, json
 
 src = '$GDRIVE_STAGE'
 dst = '$LOCAL_STAGE'
-parent_dst = '$ACTIVE_CP_DIR'
 
 canonical = {
     'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json',
@@ -413,12 +412,11 @@ def is_valid_model(mpath):
         sz = os.path.getsize(mpath)
         if sz <= 100000000:
             return False
-        # If on Google Drive FUSE mount, avoid mmap / safe_open (causes FUSE OSError / bus error)
+        # Avoid mmap / safe_open on Google Drive FUSE to prevent OS bus error or freezing
         if '/content/drive' in mpath or 'TARA_CHECKPOINTS' in mpath:
             with open(mpath, 'rb') as f:
                 hdr = f.read(8)
                 return len(hdr) == 8
-        # On local ext4 filesystem, full safetensors key verification
         import safetensors
         with safetensors.safe_open(mpath, framework='pt', device='cpu') as sf:
             return len(sf.keys()) > 0
@@ -449,202 +447,115 @@ def heal_upload_temp_files(dir_path):
 
 if os.path.isdir(src):
     os.makedirs(dst, exist_ok=True)
-    local_step = max(get_step(dst), get_step(os.path.join(dst, 'best_checkpoint')))
-    local_has_model = is_valid_model(os.path.join(dst, 'model.safetensors')) or is_valid_model(os.path.join(dst, 'best_checkpoint', 'model.safetensors'))
-
-    # Auto-heal any interrupted uploads before evaluation
     heal_upload_temp_files(src)
     heal_upload_temp_files(os.path.join(src, 'best_checkpoint'))
 
-    gdrive_max_step = -1
-    top_src_dir = None
+    local_step = max(get_step(dst), get_step(os.path.join(dst, 'best_checkpoint')))
+    local_has_model = is_valid_model(os.path.join(dst, 'model.safetensors')) or is_valid_model(os.path.join(dst, 'best_checkpoint', 'model.safetensors'))
+
+    # Discover single highest verified checkpoint on Google Drive
+    candidates = []
+
+    # 1. Pointers
+    for ptr_name in ('best_checkpoint.json', 'latest_checkpoint.json'):
+        ptr_file = os.path.join(src, ptr_name)
+        if os.path.isfile(ptr_file):
+            try:
+                with open(ptr_file, 'r', encoding='utf-8') as f:
+                    pdata = json.load(f)
+                vdir = pdata.get('versioned_dir')
+                if vdir and os.path.isdir(vdir):
+                    heal_upload_temp_files(vdir)
+                    if is_valid_model(os.path.join(vdir, 'model.safetensors')):
+                        candidates.append((get_step(vdir), vdir))
+            except Exception:
+                pass
+
+    # 2. Stage root & best_checkpoint
     if is_valid_model(os.path.join(src, 'model.safetensors')):
-        src_top_step = get_step(src)
-        top_src_dir = src
-        gdrive_max_step = max(gdrive_max_step, src_top_step)
-    else:
-        src_top_step = -1
+        candidates.append((get_step(src), src))
+    bc_dir = os.path.join(src, 'best_checkpoint')
+    if is_valid_model(os.path.join(bc_dir, 'model.safetensors')):
+        candidates.append((get_step(bc_dir), bc_dir))
 
-    src_best_step = -1
-    best_src = None
-    if is_valid_model(os.path.join(src, 'best_checkpoint', 'model.safetensors')):
-        src_best_step = get_step(os.path.join(src, 'best_checkpoint'))
-        best_src = os.path.join(src, 'best_checkpoint')
-        gdrive_max_step = max(gdrive_max_step, src_best_step)
-
-    # 1. Resolve authentic best_checkpoint from best_checkpoint.json if present on GDrive and valid
-    best_ptr_file = os.path.join(src, 'best_checkpoint.json')
-    if os.path.isfile(best_ptr_file):
-        try:
-            with open(best_ptr_file, 'r', encoding='utf-8') as f:
-                bp_data = json.load(f)
-            vdir = bp_data.get('versioned_dir')
-            if vdir and os.path.isdir(vdir):
-                heal_upload_temp_files(vdir)
-                if is_valid_model(os.path.join(vdir, 'model.safetensors')):
-                    v_step = get_step(vdir)
-                    if v_step > src_best_step:
-                        src_best_step = v_step
-                        best_src = vdir
-                        gdrive_max_step = max(gdrive_max_step, src_best_step)
-        except Exception:
-            pass
-
-    # 2. Check all subdirectories on Google Drive to discover true highest step and newest best milestone
-    # CRITICAL: ONLY consider directories that ACTUALLY contain a valid, verified model weights file!
+    # 3. Subdirectories (only valid ones)
     for item in os.listdir(src):
         sub = os.path.join(src, item)
-        if os.path.isdir(sub):
+        if os.path.isdir(sub) and sub not in (bc_dir,):
             heal_upload_temp_files(sub)
-            if not is_valid_model(os.path.join(sub, 'model.safetensors')):
-                # Incomplete directory without model weights — skip it!
-                continue
-            s_step = get_step(sub)
-            if s_step > gdrive_max_step:
-                gdrive_max_step = s_step
-                top_src_dir = sub
-            if (item.startswith('best_milestone') or 'best' in item.lower()) and s_step > src_best_step:
-                src_best_step = s_step
-                best_src = sub
+            if is_valid_model(os.path.join(sub, 'model.safetensors')):
+                candidates.append((get_step(sub), sub))
 
-    print(f'[RESUME SYNC] Step comparison: Local={local_step} (has_model={local_has_model}) vs Google Drive={gdrive_max_step} (top={src_top_step}, best={src_best_step})', flush=True)
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    best_src_step, best_src_dir = candidates[0] if candidates else (-1, None)
 
-    # 0. Check if Google Drive source has authentic model or checkpoint
-    src_has_model = (
-        is_valid_model(os.path.join(src, 'model.safetensors')) or
-        (best_src is not None and is_valid_model(os.path.join(best_src, 'model.safetensors'))) or
-        (top_src_dir is not None and top_src_dir != src and is_valid_model(os.path.join(top_src_dir, 'model.safetensors')))
-    )
-    if not src_has_model and gdrive_max_step < 0:
-        print(f'[RESUME SYNC] Directory {os.path.basename(src)} contains no valid model or checkpoint. Skipping.', flush=True)
-        import sys; sys.exit(0)
+    print(f'[RESUME SYNC] Step comparison: Local={local_step} (has_model={local_has_model}) vs Google Drive={best_src_step} (dir={os.path.basename(best_src_dir) if best_src_dir else \"None\"})', flush=True)
 
-    # Only restore from GDrive if GDrive has a valid checkpoint and (local has no valid model OR GDrive has a strictly higher step)
-    should_restore = (gdrive_max_step >= 0 or src_has_model) and (
-        (not local_has_model) or (gdrive_max_step > local_step and gdrive_max_step >= 0)
-    )
+    if best_src_dir and (best_src_step > local_step or not local_has_model):
+        print(f'  -> Single-Pass Restore: Copying verified Step {best_src_step} checkpoint from {os.path.basename(best_src_dir)} to {dst}...', flush=True)
+        for f in os.listdir(best_src_dir):
+            if f in canonical:
+                sf = os.path.join(best_src_dir, f)
+                if os.path.isfile(sf):
+                    shutil.copy2(sf, os.path.join(dst, f))
+        
+        # Link or mirror best_checkpoint locally without duplicate bandwidth
+        local_best = os.path.join(dst, 'best_checkpoint')
+        os.makedirs(local_best, exist_ok=True)
+        for f in os.listdir(dst):
+            if f in canonical:
+                src_f = os.path.join(dst, f)
+                dst_f = os.path.join(local_best, f)
+                if os.path.isfile(src_f) and not os.path.exists(dst_f):
+                    try:
+                        os.link(src_f, dst_f)
+                    except Exception:
+                        shutil.copy2(src_f, dst_f)
 
-    if should_restore:
-        best_dst = os.path.join(dst, 'best_checkpoint')
-
-        # 1. Restore authentic best_checkpoint subfolder from Google Drive
-        if best_src and os.path.isdir(best_src) and is_valid_model(os.path.join(best_src, 'model.safetensors')):
-            os.makedirs(best_dst, exist_ok=True)
-            for f in os.listdir(best_src):
-                sf = os.path.join(best_src, f)
-                if os.path.isfile(sf) and f in canonical:
-                    df = os.path.join(best_dst, f)
-                    min_sz = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
-                    if not os.path.exists(df) or os.path.getsize(df) < min_sz or src_best_step > local_step:
-                        print(f'  -> Restoring best_checkpoint/{f} (Step {src_best_step})...', flush=True)
-                        shutil.copy2(sf, df)
-
-        # 2. Restore top-level checkpoint from top_src_dir or best_src (the highest step directory)
-        source_for_root = top_src_dir if (top_src_dir and top_src_dir != src and os.path.isdir(top_src_dir) and is_valid_model(os.path.join(top_src_dir, 'model.safetensors'))) else (
-            best_src if (best_src and is_valid_model(os.path.join(best_src, 'model.safetensors'))) else (
-                src if is_valid_model(os.path.join(src, 'model.safetensors')) else None
-            )
-        )
-        if source_for_root:
-            source_step = get_step(source_for_root)
-            source_has_valid_model = is_valid_model(os.path.join(source_for_root, 'model.safetensors'))
-            if source_has_valid_model and (source_step > local_step or not local_has_model):
-                print(f'  -> Promoting authentic checkpoint (Step {source_step}) from {os.path.basename(source_for_root)} to local stage root...', flush=True)
-                for f in ('model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt', 'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'COMMITTED'):
-                    sf = os.path.join(source_for_root, f)
-                    if os.path.isfile(sf):
-                        shutil.copy2(sf, os.path.join(dst, f))
-
-        # 3. Also restore versioned directories into parent active checkpoints dir for seamless resume
-        for item in os.listdir(src):
-            s_item = os.path.join(src, item)
-            if os.path.isdir(s_item) and (item.startswith('best_milestone_step_') or item.startswith('checkpoint_step_') or '.step' in item):
-                if is_valid_model(os.path.join(s_item, 'model.safetensors')):
-                    d_item = os.path.join(parent_dst, item)
-                    if not os.path.exists(d_item):
-                        print(f'  -> Restoring versioned checkpoint directory: {item}...', flush=True)
-                        shutil.copytree(s_item, d_item)
-
-        # 4. Clean local parent checkpoints directory of obsolete versioned remnants
-        if os.path.isdir(parent_dst) and gdrive_max_step > 0:
-            for item in os.listdir(parent_dst):
-                sub = os.path.join(parent_dst, item)
-                if os.path.isdir(sub) and (item.startswith('best_milestone_step_') or item.startswith('checkpoint_step_') or '.step' in item):
-                    s_step = get_step(sub)
-                    if s_step < gdrive_max_step and s_step >= 0:
-                        print(f'  -> [LOCAL CLEANUP] Purging obsolete local versioned checkpoint: {item} (Step {s_step} < {gdrive_max_step})...', flush=True)
-                        shutil.rmtree(sub, ignore_errors=True)
-
-        print('[RESUME SYNC] Checkpoint mirror restore complete.', flush=True)
+        print('[RESUME SYNC] Single-pass checkpoint mirror restore complete.', flush=True)
     else:
-        print(f'[RESUME SYNC] Local checkpoint is up to date (Step {local_step}); skipping restore.', flush=True)
+        if local_has_model and local_step >= best_src_step:
+            print(f'[RESUME SYNC] Local checkpoint is up to date (Step {local_step}); skipping restore.', flush=True)
+        else:
+            print(f'[RESUME SYNC] Directory {os.path.basename(src)} contains no valid model weights. Skipping.', flush=True)
 " 2>/dev/null || true
     done
 fi
 
-# Populate candidate model directory from restored checkpoints to avoid redundant HF downloads
+# Zero-copy candidate model & world model seeding from restored local checkpoints
 mkdir -p storage/models/tara_candidate_v1
 mkdir -p storage/models/tara_world_model
 
 FOUND_RESTORED_MODEL=0
-for cp_dir in "$ACTIVE_CP_DIR"/*; do
-    if [ -d "$cp_dir" ]; then
-        for cand in "$cp_dir" "$cp_dir/best_checkpoint" "$cp_dir"/best_milestone_* "$cp_dir"/checkpoint_step_*; do
-            if [ -f "$cand/model.safetensors" ] && [ -f "$cand/config.json" ]; then
-                CAND_SIZE=$(wc -c < "$cand/model.safetensors" 2>/dev/null || echo 0)
-                if [ "$CAND_SIZE" -gt 100000000 ]; then
-                    python3 -c "import safetensors; sf=safetensors.safe_open('$cand/model.safetensors', framework='pt', device='cpu'); assert len(sf.keys()) > 0" 2>/dev/null || continue
-                    echo "[RESUME SEED] Populating tara_candidate_v1 from restored checkpoint: $cand"
-                    cp -u "$cand/config.json" storage/models/tara_candidate_v1/ 2>/dev/null || cp "$cand/config.json" storage/models/tara_candidate_v1/
-                    [ -f "$cand/tokenizer.json" ] && (cp -u "$cand/tokenizer.json" storage/models/tara_candidate_v1/ 2>/dev/null || cp "$cand/tokenizer.json" storage/models/tara_candidate_v1/)
-                    [ -f "$cand/tokenizer_config.json" ] && (cp -u "$cand/tokenizer_config.json" storage/models/tara_candidate_v1/ 2>/dev/null || cp "$cand/tokenizer_config.json" storage/models/tara_candidate_v1/)
-                    cp -u "$cand/model.safetensors" storage/models/tara_candidate_v1/ 2>/dev/null || cp "$cand/model.safetensors" storage/models/tara_candidate_v1/
-                    FOUND_RESTORED_MODEL=1
-                    break 2
-                fi
+for cand_file in "$ACTIVE_CP_DIR"/*/"model.safetensors" "$ACTIVE_CP_DIR"/*/*/"model.safetensors"; do
+    if [ -f "$cand_file" ]; then
+        cand_dir="$(dirname "$cand_file")"
+        if [ -f "$cand_dir/config.json" ]; then
+            CAND_SIZE=$(wc -c < "$cand_file" 2>/dev/null || echo 0)
+            if [ "$CAND_SIZE" -gt 100000000 ]; then
+                echo "[RESUME SEED] Seeding candidate neural model from restored checkpoint: $cand_dir"
+                cp "$cand_dir/config.json" storage/models/tara_candidate_v1/ 2>/dev/null || true
+                [ -f "$cand_dir/tokenizer.json" ] && cp "$cand_dir/tokenizer.json" storage/models/tara_candidate_v1/ 2>/dev/null || true
+                [ -f "$cand_dir/tokenizer_config.json" ] && cp "$cand_dir/tokenizer_config.json" storage/models/tara_candidate_v1/ 2>/dev/null || true
+                # Use hardlink or symlink to eliminate duplicate 4.2 GB copy
+                ln -sf "$(readlink -f "$cand_file")" storage/models/tara_candidate_v1/model.safetensors 2>/dev/null || cp "$cand_file" storage/models/tara_candidate_v1/model.safetensors
+                FOUND_RESTORED_MODEL=1
+                break
             fi
-        done
+        fi
     fi
 done
 
-# If local restore did not find candidate model, search Google Drive directly to prevent redundant HF downloads
-if [ "$FOUND_RESTORED_MODEL" -eq 0 ] && [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
-    echo "[RESUME SEED] Checking Google Drive directly for model weights to bypass HF download..."
-    for g_stage in "$GDRIVE_CHECKPOINT_DIR"/*; do
-        if [ -d "$g_stage" ]; then
-            for g_cand in "$g_stage/best_checkpoint" "$g_stage"/best_milestone_* "$g_stage"; do
-                if [ -f "$g_cand/model.safetensors" ] && [ -f "$g_cand/config.json" ]; then
-                    G_SIZE=$(wc -c < "$g_cand/model.safetensors" 2>/dev/null || echo 0)
-                    if [ "$G_SIZE" -gt 100000000 ]; then
-                        echo "[RESUME SEED] Found verified model weights on Google Drive: $g_cand (seeding tara_candidate_v1 to bypass HF download)..."
-                        cp "$g_cand/config.json" storage/models/tara_candidate_v1/ 2>/dev/null || true
-                        [ -f "$g_cand/tokenizer.json" ] && cp "$g_cand/tokenizer.json" storage/models/tara_candidate_v1/ 2>/dev/null || true
-                        [ -f "$g_cand/tokenizer_config.json" ] && cp "$g_cand/tokenizer_config.json" storage/models/tara_candidate_v1/ 2>/dev/null || true
-                        cp "$g_cand/model.safetensors" storage/models/tara_candidate_v1/model.safetensors 2>/dev/null || true
-                        FOUND_RESTORED_MODEL=1
-                        break 2
-                    fi
-                fi
-            done
+for wm_file in "$ACTIVE_CP_DIR"/*/"world_model.safetensors" "$ACTIVE_CP_DIR"/*/*/"world_model.safetensors"; do
+    if [ -f "$wm_file" ]; then
+        wm_dir="$(dirname "$wm_file")"
+        WM_SIZE=$(wc -c < "$wm_file" 2>/dev/null || echo 0)
+        if [ "$WM_SIZE" -gt 10000000 ]; then
+            echo "[RESUME SEED] Seeding candidate world model from restored checkpoint: $wm_dir"
+            [ -f "$wm_dir/config.json" ] && cp "$wm_dir/config.json" storage/models/tara_world_model/ 2>/dev/null || true
+            ln -sf "$(readlink -f "$wm_file")" storage/models/tara_world_model/world_model.safetensors 2>/dev/null || cp "$wm_file" storage/models/tara_world_model/world_model.safetensors
+            break
         fi
-    done
-fi
-
-# Check if restored world model exists
-for cp_dir in "$ACTIVE_CP_DIR"/*; do
-    if [ -d "$cp_dir" ]; then
-        for cand in "$cp_dir" "$cp_dir/best_checkpoint"; do
-            if [ -f "$cand/world_model.safetensors" ]; then
-                CAND_WM_SIZE=$(wc -c < "$cand/world_model.safetensors" 2>/dev/null || echo 0)
-                if [ "$CAND_WM_SIZE" -gt 10000000 ]; then
-                    python3 -c "import safetensors; sf=safetensors.safe_open('$cand/world_model.safetensors', framework='pt', device='cpu'); assert len(sf.keys()) > 0" 2>/dev/null || continue
-                    echo "[RESUME SEED] Populating tara_world_model from restored checkpoint: $cand"
-                    cp -u "$cand/world_model.safetensors" storage/models/tara_world_model/ 2>/dev/null || cp "$cand/world_model.safetensors" storage/models/tara_world_model/
-                    [ -f "$cand/config.json" ] && (cp -u "$cand/config.json" storage/models/tara_world_model/ 2>/dev/null || cp "$cand/config.json" storage/models/tara_world_model/)
-                    break 2
-                fi
-            fi
-        done
     fi
 done
 
@@ -741,64 +652,50 @@ if [ -e "${LOOSE_SHARDS[0]:-}" ]; then
 fi
 shopt -u nullglob
 
-# Verify Neural Model Candidate weights exist on disk
-LOCAL_MODEL_COUNT=$(find storage/models/tara_candidate_v1 -maxdepth 1 -name "*.safetensors" 2>/dev/null | wc -l)
+# Helper function for downloading and verifying model assets from Hugging Face
+ingest_model_asset() {
+    local model_name="$1"        # e.g. "neural_model_v1" or "world_model_v1"
+    local target_dir="$2"        # e.g. "storage/models/tara_candidate_v1" or "storage/models/tara_world_model"
+    local log_tag="$3"           # e.g. "Candidate Neural Model" or "World Model"
+    local repo_source="${HF_MODEL_REPO:-${HF_REPO:-manjukp6/tara}}"
 
-if [ "${SKIP_HF_DOWNLOAD:-0}" = "1" ] || [ "$LOCAL_MODEL_COUNT" -ge 1 ]; then
-    echo "=== [MODEL INGESTION: SKIPPED] Candidate Neural Model already present ($LOCAL_MODEL_COUNT shard(s) in storage/models/tara_candidate_v1). Zero downloads needed! ==="
-else
-    echo "=== [MODEL INGESTION: STREAMING NEURAL MODEL V1 FROM HUGGING FACE] ==="
-    echo "[HF DOWNLOAD] Downloading neural_model_v1/* from https://huggingface.co/$HF_MODEL_SOURCE..."
-    if download_hf "$HF_MODEL_SOURCE" "model" "neural_model_v1/*" "storage/models/tara_candidate_v1"; then
-        if [ -d "storage/models/tara_candidate_v1/neural_model_v1" ]; then
+    local local_count
+    local_count=$(find "$target_dir" -maxdepth 1 -name "*.safetensors" 2>/dev/null | wc -l)
+
+    if [ "${SKIP_HF_DOWNLOAD:-0}" = "1" ] || [ "$local_count" -ge 1 ]; then
+        echo "=== [MODEL INGESTION: SKIPPED] $log_tag already present ($local_count shard(s) in $target_dir). Zero downloads needed! ==="
+        return 0
+    fi
+
+    echo "=== [MODEL INGESTION: STREAMING $log_tag FROM HUGGING FACE] ==="
+    echo "[HF DOWNLOAD] Downloading $model_name/* from https://huggingface.co/$repo_source..."
+    if download_hf "$repo_source" "model" "$model_name/*" "$target_dir"; then
+        if [ -d "$target_dir/$model_name" ]; then
             shopt -s nullglob
-            mv storage/models/tara_candidate_v1/neural_model_v1/* storage/models/tara_candidate_v1/
+            mv "$target_dir/$model_name"/* "$target_dir/"
             shopt -u nullglob
-            rmdir storage/models/tara_candidate_v1/neural_model_v1
+            rmdir "$target_dir/$model_name"
         fi
-        rm -rf /root/.cache/huggingface ~/.cache/huggingface "storage/models/tara_candidate_v1/.cache" 2>/dev/null || true
-        CHECK_SHARDS=(storage/models/tara_candidate_v1/*.safetensors)
-        if [ -e "${CHECK_SHARDS[0]:-}" ]; then
-            echo "Neural Model V1 Ingestion from Hugging Face Verified!"
+        rm -rf /root/.cache/huggingface ~/.cache/huggingface "$target_dir/.cache" 2>/dev/null || true
+        shopt -s nullglob
+        local check_shards=("$target_dir"/*.safetensors)
+        shopt -u nullglob
+        if [ -e "${check_shards[0]:-}" ]; then
+            echo "$log_tag Ingestion from Hugging Face Verified!"
+            return 0
         else
-            echo "=== [ERROR: NO SAFETENSORS SHARDS FOUND IN DOWNLOADED REPO] ==="
+            echo "=== [ERROR: NO SAFETENSORS SHARDS FOUND IN DOWNLOADED REPO ($target_dir)] ==="
             exit 1
         fi
     else
-        echo "=== [ERROR: COULD NOT DOWNLOAD NEURAL MODEL V1 FROM HUGGING FACE] ==="
-        echo "Please ensure HF_TOKEN is exported with read access to https://huggingface.co/$HF_MODEL_SOURCE"
+        echo "=== [ERROR: COULD NOT DOWNLOAD $log_tag FROM HUGGING FACE] ==="
+        echo "Please ensure HF_TOKEN is exported with read access to https://huggingface.co/$repo_source"
         exit 1
     fi
-fi
+}
 
-# Verify World Model weights exist on disk
-LOCAL_WORLD_COUNT=$(find storage/models/tara_world_model -maxdepth 1 -name "*.safetensors" 2>/dev/null | wc -l)
-
-if [ "${SKIP_HF_DOWNLOAD:-0}" = "1" ] || [ "$LOCAL_WORLD_COUNT" -ge 1 ]; then
-    echo "=== [WORLD MODEL INGESTION: SKIPPED] World Model already present ($LOCAL_WORLD_COUNT shard(s) in storage/models/tara_world_model). Zero downloads needed! ==="
-else
-    echo "=== [MODEL INGESTION: STREAMING WORLD MODEL V1 FROM HUGGING FACE] ==="
-    echo "[HF DOWNLOAD] Downloading world_model_v1/* from https://huggingface.co/$HF_MODEL_SOURCE..."
-    if download_hf "$HF_MODEL_SOURCE" "model" "world_model_v1/*" "storage/models/tara_world_model"; then
-        if [ -d "storage/models/tara_world_model/world_model_v1" ]; then
-            shopt -s nullglob
-            mv storage/models/tara_world_model/world_model_v1/* storage/models/tara_world_model/
-            shopt -u nullglob
-            rmdir storage/models/tara_world_model/world_model_v1
-        fi
-        CHECK_WORLD=(storage/models/tara_world_model/*.safetensors)
-        if [ -e "${CHECK_WORLD[0]:-}" ]; then
-            echo "World Model V1 Ingestion from Hugging Face Verified!"
-        else
-            echo "=== [ERROR: NO WORLD MODEL SAFETENSORS SHARDS FOUND IN DOWNLOADED REPO] ==="
-            exit 1
-        fi
-    else
-        echo "=== [ERROR: COULD NOT DOWNLOAD WORLD MODEL V1 FROM HUGGING FACE] ==="
-        echo "Please ensure HF_TOKEN is exported with read access to https://huggingface.co/$HF_MODEL_SOURCE"
-        exit 1
-    fi
-fi
+ingest_model_asset "neural_model_v1" "storage/models/tara_candidate_v1" "Candidate Neural Model"
+ingest_model_asset "world_model_v1" "storage/models/tara_world_model" "World Model"
 
 # 5. Mandatory Pre-Training Verification, Deep De-duplication & Tokenizer Gate
 if [ ! -f "./target/release/tara_pretraining_gate" ] || [ ! -f "./target/release/manual_trainer" ]; then

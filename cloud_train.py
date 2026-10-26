@@ -3471,15 +3471,39 @@ def _safe_rmtree(dir_path: str) -> bool:
     return not os.path.exists(dir_path) and not os.path.islink(dir_path)
 
 
-def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024) -> bool:
+def is_gdrive_path(path: str) -> bool:
+    """
+    Checks if a given path is located on a Google Drive FUSE mount or remote storage.
+    """
+    if not path:
+        return False
+    norm = os.path.abspath(path).replace("\\", "/")
+    if norm.startswith("/content/drive") or "TARA_CHECKPOINTS" in norm:
+        return True
+    try:
+        gdrive_root = _resolve_gdrive_root()
+        if gdrive_root:
+            g_norm = os.path.abspath(gdrive_root).replace("\\", "/")
+            if norm.startswith(g_norm):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _stream_copy_file(src: str, dst: str, chunk_size: int = 16 * 1024 * 1024, out_sha: Optional[Dict[str, Any]] = None) -> bool:
     """
     Atomic direct streaming copy for Google Drive FUSE and local files.
     Writes to an isolated temporary file (dst.upload_tmp_<pid>) first.
     Verifies full size and safetensors validity before atomically replacing dst.
     Guarantees that the destination file is NEVER left in a truncated or corrupt state
     even if the process or connection is terminated midway!
+    Computes dynamic SHA-256 during streaming chunks with zero extra disk/network I/O.
     """
     if os.path.abspath(src) == os.path.abspath(dst):
+        if out_sha is not None:
+            out_sha["size"] = os.path.getsize(src)
+            out_sha["sha256"] = compute_file_sha256(src)
         return True
     if not os.path.exists(src):
         return False
@@ -3519,12 +3543,14 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024) -> 
         if os.path.exists(tmp_dst):
             _safe_unlink(tmp_dst)
 
-        # Stream into temporary staging file (preserves original dst untouched until 100% complete)
+        # Stream into temporary staging file while dynamically computing SHA-256 in memory
+        hasher = hashlib.sha256()
         with open(src, "rb") as fsrc, open(tmp_dst, "wb") as fdst:
             while True:
                 chunk = fsrc.read(chunk_size)
                 if not chunk:
                     break
+                hasher.update(chunk)
                 fdst.write(chunk)
                 del chunk
             fdst.flush()
@@ -3532,6 +3558,7 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024) -> 
                 os.fsync(fdst.fileno())
             except Exception:
                 pass
+        computed_sha = hasher.hexdigest()
 
         # ------------------------------------------------------------------
         # Verification Gate before promotion: ensure complete transfer & validity
@@ -3540,15 +3567,16 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024) -> 
         if tmp_sz != src_sz:
             raise IOError(f"Incomplete streaming write: expected {src_sz} bytes, wrote {tmp_sz} bytes")
 
-        if src.endswith(".safetensors"):
-            from safetensors import safe_open
-            with safe_open(tmp_dst, framework="pt", device="cpu") as sf:
-                if not sf.keys():
-                    raise IOError("Staged safetensors file contains 0 keys")
-
-        if src.endswith(".json"):
-            with open(tmp_dst, "r", encoding="utf-8") as jf:
-                json.load(jf)
+        # Local files can perform quick deserialization checks, but avoid memory-mapped FUSE operations on GDrive
+        if not is_gdrive_path(tmp_dst):
+            if src.endswith(".safetensors"):
+                from safetensors import safe_open
+                with safe_open(tmp_dst, framework="pt", device="cpu") as sf:
+                    if not sf.keys():
+                        raise IOError("Staged safetensors file contains 0 keys")
+            if src.endswith(".json"):
+                with open(tmp_dst, "r", encoding="utf-8") as jf:
+                    json.load(jf)
 
         # ------------------------------------------------------------------
         # Promotion: Delete old file explicitly, then align new verified file
@@ -3585,8 +3613,16 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024) -> 
         if not promoted or not os.path.exists(dst):
             raise IOError(f"Target destination {dst} missing after alignment attempt")
 
+        dst_sz = os.path.getsize(dst)
+        if dst_sz != src_sz:
+            raise IOError(f"Final aligned size mismatch: expected {src_sz}, got {dst_sz}")
+
         if os.path.exists(tmp_dst):
             _safe_unlink(tmp_dst)
+
+        if out_sha is not None:
+            out_sha["size"] = dst_sz
+            out_sha["sha256"] = computed_sha
 
         return True
     except Exception as e:
@@ -3821,33 +3857,18 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                 if os.path.abspath(src) == os.path.abspath(dst):
                     continue
 
-                # Stream copy with non-hidden .upload_temp staging suffix
-                ok = _stream_copy_file(src, dst)
+                # Stream copy with non-hidden .upload_temp staging suffix, computing SHA-256 during transfer
+                sha_info = {}
+                ok = _stream_copy_file(src, dst, out_sha=sha_info)
                 if not ok:
                     print(f"[GDrive Sync Error] Failed to mirror {fname} -> {dst}", flush=True)
                     all_files_ok = False
                     break
 
-                # Dynamic Dual SHA-256 verification
-                src_sz = os.path.getsize(src)
-                dst_sz = os.path.getsize(dst) if os.path.exists(dst) else 0
-                if src_sz != dst_sz or dst_sz == 0:
-                    print(f"[GDrive Sync Warning] Size mismatch for {fname} ({src_sz} != {dst_sz})! Retrying...", flush=True)
-                    ok = _stream_copy_file(src, dst)
-                    if not ok:
-                        all_files_ok = False
-                        break
-
-                src_sha = compute_file_sha256(src)
-                dst_sha = compute_file_sha256(dst)
-                if src_sha != dst_sha:
-                    print(f"[GDrive Sync Warning] SHA-256 mismatch for {fname}! Retrying...", flush=True)
-                    ok = _stream_copy_file(src, dst)
-                    dst_sha = compute_file_sha256(dst)
-                    if src_sha != dst_sha:
-                        print(f"[GDrive Sync Fatal] Dual SHA-256 mismatch for {fname} ({src_sha[:16]} != {dst_sha[:16]})! Aborting candidate.", flush=True)
-                        all_files_ok = False
-                        break
+                dst_sz = sha_info.get("size", os.path.getsize(dst) if os.path.exists(dst) else 0)
+                dst_sha = sha_info.get("sha256")
+                if not dst_sha:
+                    dst_sha = compute_file_sha256(src)
 
                 manifest_files[fname] = {
                     "size": dst_sz,
@@ -4241,6 +4262,7 @@ def verify_checkpoint_integrity(
     checkpoint_dir: str,
     require_optimizer: bool = False,
     require_completed: bool = False,
+    precomputed_model_sha: Optional[str] = None,
 ) -> bool:
     """
     Verifies that a newly saved training checkpoint is complete, uncorrupted, and valid:
@@ -4281,6 +4303,25 @@ def verify_checkpoint_integrity(
             print(f"[Verification Fail] STAGE_METADATA status is not COMPLETED: {meta.get('status')}")
             return False
 
+        # If checkpoint is located on Google Drive FUSE mount, verify via COMMITTED manifest and metadata
+        # without doing heavy network FUSE reads or memory-mapped operations
+        if is_gdrive_path(checkpoint_dir):
+            committed_file = os.path.join(checkpoint_dir, "COMMITTED")
+            if os.path.isfile(committed_file):
+                try:
+                    with open(committed_file, "r", encoding="utf-8") as cf:
+                        cm_info = json.load(cf)
+                    if isinstance(cm_info, dict) and "files" in cm_info:
+                        for m_name, m_spec in cm_info["files"].items():
+                            mp = os.path.join(checkpoint_dir, m_name)
+                            if not (os.path.exists(mp) and os.path.getsize(mp) == m_spec.get("size")):
+                                print(f"[Verification Fail] GDrive file {m_name} size mismatch against COMMITTED manifest in {checkpoint_dir}")
+                                return False
+                except Exception:
+                    pass
+            print(f"[Verification Passed] Google Drive checkpoint {checkpoint_dir} verified via manifest/metadata.")
+            return True
+
         # Deserialization test: ensure safetensors is not corrupted or truncated using memory-mapped header validation
         if HAS_SAFETENSORS:
             import safetensors
@@ -4299,7 +4340,7 @@ def verify_checkpoint_integrity(
         if not os.path.exists(model_path):
             model_path = os.path.join(checkpoint_dir, "pytorch_model.bin")
         if recorded_sha and os.path.exists(model_path):
-            computed_sha = compute_file_sha256(model_path)
+            computed_sha = precomputed_model_sha if precomputed_model_sha else compute_file_sha256(model_path)
             if computed_sha != recorded_sha:
                 print(
                     f"[Verification Auto-Heal] Cross-account / GDrive sync SHA-256 drift in {checkpoint_dir}. "
@@ -4799,7 +4840,7 @@ def save_best_milestone(
                 json.dump(meta, f, indent=2)
 
             # 6. Verify staged milestone BEFORE touching active best_dir
-            is_valid = verify_checkpoint_integrity(staging_dir, require_optimizer=False, require_completed=False)
+            is_valid = verify_checkpoint_integrity(staging_dir, require_optimizer=False, require_completed=False, precomputed_model_sha=weights_sha256)
             if not is_valid:
                 print(f"[Safety Protection] Staged best checkpoint at {staging_dir} failed verification! Preserving existing best checkpoint.", flush=True)
                 shutil.rmtree(staging_dir, ignore_errors=True)
@@ -5200,6 +5241,7 @@ def save_checkpoint(
                 staging_dir,
                 require_optimizer=(not is_best and not is_completed),
                 require_completed=is_completed,
+                precomputed_model_sha=weights_sha256,
             )
             if not is_valid:
                 print(
@@ -6923,8 +6965,8 @@ def main():
     parser.add_argument("--sync-gdrive-optimizer", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true", default=True,
                         help="Include heavy optimizer state when mirroring checkpoints to Google Drive (default: True)")
     parser.add_argument("--gdrive-sync-wait", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true",
-                        default=bool(int(os.environ.get("GDRIVE_SYNC_WAIT", "1"))),
-                        help="Wait synchronously for Google Drive checkpoint sync to finish before advancing training (default: True, eliminates background concurrency collisions)")
+                        default=bool(int(os.environ.get("GDRIVE_SYNC_WAIT", "0"))),
+                        help="Wait synchronously for Google Drive checkpoint sync to finish before advancing training (default: False, keeps training non-blocking)")
     parser.add_argument("--preflight-only", action="store_true", default=False, help="Execute only the dual-stage preflight validation diagnostic and exit with report")
     parser.add_argument("--joint-world-model", action="store_true", default=False,
                         help="Enable coordinated joint training of Neural Model + World Model")

@@ -179,7 +179,7 @@ export PROMOTE_MAX_STEP
 DOMAIN_WEIGHTS="${DOMAIN_WEIGHTS:-02_code:0.25,01_math:0.15,04_kannada:0.15,12_reasoning:0.15,03_stem:0.10,08_world_model:0.05,11_tool_use:0.05,13_debugging:0.02,sft:0.02,05_philosophy:0.012,06_social:0.012,07_engineering:0.012,09_audio:0.012,10_vision:0.012}"
 export DOMAIN_WEIGHTS
 GDRIVE_SYNC_FLAGS="--sync-all-to-gdrive --sync-gdrive-optimizer --keep-checkpoints 1"
-if [ "${GDRIVE_SYNC_WAIT:-1}" = "1" ]; then
+if [ "${GDRIVE_SYNC_WAIT:-0}" = "1" ]; then
     GDRIVE_SYNC_FLAGS="$GDRIVE_SYNC_FLAGS --gdrive-sync-wait"
 fi
 JOINT_STEPS="${JOINT_STEPS:-200}"

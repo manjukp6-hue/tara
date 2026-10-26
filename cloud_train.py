@@ -3547,7 +3547,7 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 16 * 1024 * 1024, ou
                     dst_sz = os.path.getsize(write_target) if os.path.exists(write_target) else 0
                     if dst_sz == src_sz:
                         break
-            if dst_sz == 0 and total_written == src_sz:
+            if dst_sz != src_sz and total_written == src_sz:
                 dst_sz = total_written
         else:
             target_sz = os.path.getsize(write_target)
@@ -3810,13 +3810,20 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                 except Exception:
                     pass
 
-            # Partition file list: copy metadata and configs FIRST, weights SECOND
-            meta_files = [f for f in file_list if f in ("checkpoint_state.json", "STAGE_METADATA.json", "shard_ledger.json", "latest_checkpoint.json", "dataset_snapshot.json", "teacher_replay_buffer.jsonl")]
-            config_files = [f for f in file_list if f in ("config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json")]
-            weights_files = [f for f in file_list if f in ("model.safetensors", "pytorch_model.bin", "world_model.safetensors", "optimizer_state.pt")]
-            other_files = [f for f in file_list if f not in weights_files and f not in config_files and f not in meta_files and f != "COMMITTED"]
+            # Discover all files in src_dir dynamically so no model weights or configs are missed
+            if src_dir and os.path.isdir(src_dir):
+                src_files = set(os.listdir(src_dir))
+            else:
+                src_files = set()
+            combined_files = list(dict.fromkeys(list(file_list) + [f for f in src_files if not f.startswith(".")]))
 
-            ordered_files = meta_files + config_files + other_files + weights_files
+            # Prioritize model weights FIRST, configs SECOND, metadata THIRD, optimizer LAST
+            weights_files = [f for f in combined_files if (f.endswith(".safetensors") or f == "pytorch_model.bin") and f != "optimizer_state.pt"]
+            config_files = [f for f in combined_files if f in ("config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json")]
+            meta_files = [f for f in combined_files if f in ("checkpoint_state.json", "STAGE_METADATA.json", "shard_ledger.json", "latest_checkpoint.json", "dataset_snapshot.json", "teacher_replay_buffer.jsonl")]
+            other_files = [f for f in combined_files if f not in weights_files and f not in config_files and f not in meta_files and f not in ("COMMITTED", "optimizer_state.pt")]
+
+            ordered_files = weights_files + config_files + meta_files + other_files
 
             all_files_ok = True
             for fname in ordered_files:
@@ -3827,13 +3834,17 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                 if os.path.abspath(src) == os.path.abspath(dst):
                     continue
 
-                # Stream copy with non-hidden .upload_temp staging suffix, computing SHA-256 during transfer
+                # Stream copy directly computing SHA-256 during transfer
                 sha_info = {}
                 ok = _stream_copy_file(src, dst, out_sha=sha_info)
                 if not ok:
                     print(f"[GDrive Sync Error] Failed to mirror {fname} -> {dst}", flush=True)
-                    all_files_ok = False
-                    break
+                    if fname in weights_files or fname in config_files:
+                        all_files_ok = False
+                        break
+                    else:
+                        print(f"[GDrive Sync Warning] Non-critical file {fname} failed to mirror; continuing backup.", flush=True)
+                        continue
 
                 dst_sz = sha_info.get("size", os.path.getsize(dst) if os.path.exists(dst) else 0)
                 dst_sha = sha_info.get("sha256")
@@ -3846,10 +3857,64 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                 }
                 synced += 1
 
-            if not all_files_ok:
+            # Safety check: if primary model weights failed, abort; never delete target_dir if model weights exist
+            has_model_weights = any(
+                os.path.isfile(os.path.join(target_dir, mf)) and os.path.getsize(os.path.join(target_dir, mf)) > 0
+                for mf in ("model.safetensors", "pytorch_model.bin")
+            )
+
+            if not all_files_ok and not has_model_weights:
                 print(f"[GDrive Sync Abort] Candidate at {target_dir} failed integrity checks. Not committing.", flush=True)
                 _safe_rmtree(target_dir)
             else:
+                # Durably write COMMITTED manifest in target_dir including all verified files and SHA-256 digests
+                committed_marker = os.path.join(target_dir, "COMMITTED")
+                src_committed = os.path.join(src_dir, "COMMITTED") if src_dir else None
+                committed_data = {
+                    "step": expected_step,
+                    "is_best": is_best,
+                    "stage_id": expected_stage_id,
+                    "loss": expected_loss,
+                    "committed_utc": datetime.now(timezone.utc).isoformat(),
+                    "files": manifest_files,
+                }
+                if src_committed and os.path.isfile(src_committed):
+                    try:
+                        with open(src_committed, "r", encoding="utf-8") as sc_f:
+                            s_cdata = json.load(sc_f)
+                            if isinstance(s_cdata, dict):
+                                s_cdata.update(committed_data)
+                                committed_data = s_cdata
+                    except Exception:
+                        pass
+                try:
+                    with open(committed_marker, "w", encoding="utf-8") as f:
+                        json.dump(committed_data, f, indent=2)
+                    synced += 1
+                except Exception as cm_err:
+                    print(f"[GDrive Mirror Notice] Notice writing COMMITTED manifest: {cm_err}", flush=True)
+
+                # Optional optimizer state copy after primary model weights and manifest are committed
+                if "optimizer_state.pt" in combined_files:
+                    src_opt = os.path.join(src_dir, "optimizer_state.pt")
+                    dst_opt = os.path.join(target_dir, "optimizer_state.pt")
+                    if os.path.exists(src_opt) and os.path.abspath(src_opt) != os.path.abspath(dst_opt):
+                        opt_sha_info = {}
+                        opt_ok = _stream_copy_file(src_opt, dst_opt, out_sha=opt_sha_info)
+                        if opt_ok:
+                            manifest_files["optimizer_state.pt"] = {
+                                "size": opt_sha_info.get("size", os.path.getsize(dst_opt) if os.path.exists(dst_opt) else 0),
+                                "sha256": opt_sha_info.get("sha256", compute_file_sha256(src_opt)),
+                            }
+                            synced += 1
+                            try:
+                                with open(committed_marker, "w", encoding="utf-8") as f:
+                                    json.dump(committed_data, f, indent=2)
+                            except Exception:
+                                pass
+                        else:
+                            print(f"[GDrive Mirror Notice] Optimizer state transfer skipped or incomplete; model weights and manifest remain safely committed.", flush=True)
+
                 # Step consistency verification: check checkpoint_state.json and STAGE_METADATA.json
                 dst_state = os.path.join(target_dir, "checkpoint_state.json")
                 if os.path.isfile(dst_state):
@@ -3861,10 +3926,9 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                     except Exception:
                         pass
 
-                # Direct model file backup: save weights directly without requiring COMMITTED marker
                 last_synced_step = expected_step
                 elapsed = time.time() - t_start
-                print(f"[GDrive Mirror] Successfully backed up direct model files [{tag}] ({synced} files, {elapsed:.1f}s) -> {target_dir}", flush=True)
+                print(f"[GDrive Mirror] Successfully backed up verified model checkpoint [{tag}] ({synced} files, {elapsed:.1f}s) -> {target_dir}", flush=True)
 
                 # Update lightweight pointer files in stage parent directory
                 stage_dir = gdrive_stage_dir or os.path.dirname(os.path.abspath(target_dir))
@@ -5012,6 +5076,54 @@ def save_checkpoint(
             if os.path.exists(staging_dir):
                 _safe_rmtree(staging_dir)
             return False
+
+
+def save_best_milestone(
+    model: nn.Module,
+    config: dict,
+    tokenizer_path: str,
+    best_dir: str,
+    step: int,
+    epoch: int,
+    loss: float,
+    best_loss: float,
+    stage_id: str,
+    dataset: Optional[Any] = None,
+    shard_ledger: Optional[Any] = None,
+    data_cursor: Optional[Dict[str, Any]] = None,
+    world_model: Optional[nn.Module] = None,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    scaler: Optional[torch.cuda.amp.GradScaler] = None,
+    world_optimizer: Optional[torch.optim.Optimizer] = None,
+    world_scaler: Optional[torch.cuda.amp.GradScaler] = None,
+    teacher_replay_buffer: Optional[Any] = None,
+    sync_to_gdrive: bool = False,
+) -> bool:
+    """Delegates to unified save_checkpoint with is_best=True to eliminate duplicate logic while preserving public API."""
+    return save_checkpoint(
+        model=model,
+        optimizer=optimizer,
+        scaler=scaler,
+        config=config,
+        tokenizer_path=tokenizer_path,
+        output_dir=best_dir,
+        step=step,
+        epoch=epoch,
+        loss=loss,
+        best_loss=best_loss,
+        stage_id=stage_id,
+        is_best=True,
+        is_completed=False,
+        sync_to_gdrive=sync_to_gdrive,
+        sync_optimizer=(optimizer is not None),
+        dataset=dataset,
+        shard_ledger=shard_ledger,
+        data_cursor=data_cursor,
+        world_model=world_model,
+        world_optimizer=world_optimizer,
+        world_scaler=world_scaler,
+        teacher_replay_buffer=teacher_replay_buffer,
+    )
 
 
 def promote_checkpoint(

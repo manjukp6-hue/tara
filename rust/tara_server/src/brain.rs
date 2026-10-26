@@ -1409,7 +1409,7 @@ impl TaraBrain {
     pub fn embed_feature_vector(&self, text: &str) -> Vec<f32> {
         let dim = self.config.cognitive.fast_weights_dimension.max(1);
         if let (Ok(model_guard), Ok(tok_guard)) = (self.model.read(), self.tokenizer.read()) {
-            if let (Some(ref model), Some(ref tok)) = (model_guard.as_ref(), tok_guard.as_ref()) {
+            if let (Some(model), Some(tok)) = (model_guard.as_ref(), tok_guard.as_ref()) {
                 let token_ids = tok.encode(text);
                 if !token_ids.is_empty() {
                     let hidden = model.forward_hidden(&token_ids);

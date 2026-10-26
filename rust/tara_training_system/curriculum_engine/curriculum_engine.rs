@@ -13,10 +13,32 @@
 //! 6. Continuous Update: Incorporates newly arrived datasets without restarting training milestones.
 //! 7. Zero Hardcoded Limits: Dynamic stage counts, parameter-driven thresholds.
 
-use crate::dataset_engine::{DatasetEngine, NeuralRecord, TargetModel, WorldModelRecord};
+use crate::dataset_engine::{
+    DatasetEngine, NeuralRecord, StateTransitionRecord, TargetModel, WorldModelRecord,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
+
+/// Cognitive tracks for AGI reasoning streams.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AgiCognitiveTrack {
+    FormalLogic,
+    CausalTransitions,
+    SelfCorrection,
+    ToolAgency,
+}
+
+impl AgiCognitiveTrack {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AgiCognitiveTrack::FormalLogic => "formal_logic",
+            AgiCognitiveTrack::CausalTransitions => "causal_transitions",
+            AgiCognitiveTrack::SelfCorrection => "self_correction",
+            AgiCognitiveTrack::ToolAgency => "tool_agency",
+        }
+    }
+}
 
 /// Dynamic curriculum stage definition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -85,6 +107,8 @@ pub struct CurriculumBatch {
     pub model_type: TargetModel,
     pub neural_samples: Vec<NeuralRecord>,
     pub world_samples: Vec<WorldModelRecord>,
+    #[serde(default)]
+    pub transition_samples: Vec<StateTransitionRecord>,
 }
 
 /// Summary report returned after curriculum update.
@@ -96,6 +120,8 @@ pub struct CurriculumReport {
     pub world_records_count: usize,
     pub world_stages_count: usize,
     pub world_active_stage: usize,
+    #[serde(default)]
+    pub transition_records_count: usize,
     pub duration_ms: u64,
 }
 
@@ -125,6 +151,7 @@ pub struct CurriculumEngine {
     pub config: CurriculumConfig,
     neural_curriculum: Arc<RwLock<NeuralCurriculum>>,
     world_curriculum: Arc<RwLock<WorldModelCurriculum>>,
+    transition_records: Arc<RwLock<Vec<StateTransitionRecord>>>,
 }
 
 impl CurriculumEngine {
@@ -133,6 +160,7 @@ impl CurriculumEngine {
             config,
             neural_curriculum: Arc::new(RwLock::new(NeuralCurriculum::default())),
             world_curriculum: Arc::new(RwLock::new(WorldModelCurriculum::default())),
+            transition_records: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -143,6 +171,16 @@ impl CurriculumEngine {
 
         let raw_neural = dataset_engine.get_training_ready_neural();
         let raw_world = dataset_engine.get_training_ready_world();
+        let raw_transitions = dataset_engine.get_training_ready_transitions();
+
+        let transition_count = {
+            let mut tr = self
+                .transition_records
+                .write()
+                .unwrap_or_else(|p| p.into_inner());
+            *tr = raw_transitions;
+            tr.len()
+        };
 
         // 1. Auto-Order and Partition Neural Curriculum
         let (ordered_neural, neural_stages, avg_diff) = self.build_neural_curriculum(raw_neural);
@@ -190,6 +228,7 @@ impl CurriculumEngine {
             world_records_count: world_count,
             world_stages_count: world_stages_len,
             world_active_stage: world_active,
+            transition_records_count: transition_count,
             duration_ms,
         }
     }
@@ -328,6 +367,7 @@ impl CurriculumEngine {
                     model_type: TargetModel::NeuralModel,
                     neural_samples: samples,
                     world_samples: Vec::new(),
+                    transition_samples: Vec::new(),
                 }
             }
             TargetModel::WorldModel => {
@@ -336,12 +376,22 @@ impl CurriculumEngine {
                     .read()
                     .unwrap_or_else(|p| p.into_inner());
                 let (stage_idx, stage_name, samples) = self.sample_world_batch(&curr, bsz);
+                let tr_store = self
+                    .transition_records
+                    .read()
+                    .unwrap_or_else(|p| p.into_inner());
+                let trans_samples = if !tr_store.is_empty() {
+                    tr_store.iter().take(bsz).cloned().collect()
+                } else {
+                    Vec::new()
+                };
                 CurriculumBatch {
                     stage_index: stage_idx,
                     stage_name,
                     model_type: TargetModel::WorldModel,
                     neural_samples: Vec::new(),
                     world_samples: samples,
+                    transition_samples: trans_samples,
                 }
             }
             TargetModel::Both => {
@@ -353,17 +403,114 @@ impl CurriculumEngine {
                     .world_curriculum
                     .read()
                     .unwrap_or_else(|p| p.into_inner());
+                let tr_store = self
+                    .transition_records
+                    .read()
+                    .unwrap_or_else(|p| p.into_inner());
                 let half_bsz = (bsz / 2).max(1);
                 let (n_stage, n_name, n_samples) = self.sample_neural_batch(&n_curr, half_bsz);
                 let (_, _, w_samples) = self.sample_world_batch(&w_curr, half_bsz);
+                let trans_samples = if !tr_store.is_empty() {
+                    tr_store.iter().take(half_bsz).cloned().collect()
+                } else {
+                    Vec::new()
+                };
                 CurriculumBatch {
                     stage_index: n_stage,
                     stage_name: n_name,
                     model_type: TargetModel::Both,
                     neural_samples: n_samples,
                     world_samples: w_samples,
+                    transition_samples: trans_samples,
                 }
             }
+        }
+    }
+
+    /// Stratified AGI multi-track batch sampling:
+    /// - 35% Formal Logic & Symbolic Reasoning
+    /// - 30% Causal State Transitions ((s, a, s', r))
+    /// - 20% Metacognitive Self-Correction & Debugging
+    /// - 15% Tool Agency & World Model Knowledge Triples
+    pub fn sample_agi_multitrack_batch(&self, batch_size: usize) -> CurriculumBatch {
+        let bsz = batch_size.max(4);
+        let n_logic = ((bsz as f32 * 0.35).round() as usize).max(1);
+        let n_trans = ((bsz as f32 * 0.30).round() as usize).max(1);
+        let n_corr = ((bsz as f32 * 0.20).round() as usize).max(1);
+        let n_world = bsz.saturating_sub(n_logic + n_trans + n_corr).max(1);
+
+        let n_curr = self
+            .neural_curriculum
+            .read()
+            .unwrap_or_else(|p| p.into_inner());
+        let w_curr = self
+            .world_curriculum
+            .read()
+            .unwrap_or_else(|p| p.into_inner());
+        let tr_store = self
+            .transition_records
+            .read()
+            .unwrap_or_else(|p| p.into_inner());
+
+        let mut logic_samples = Vec::new();
+        let mut corr_samples = Vec::new();
+        let mut other_neural = Vec::new();
+
+        for r in &n_curr.ordered_records {
+            if r.domain.contains("logic")
+                || r.prompt.contains("logic")
+                || r.prompt.contains("proof")
+            {
+                if logic_samples.len() < n_logic {
+                    logic_samples.push(r.clone());
+                }
+            } else if r.domain.contains("correction")
+                || r.prompt.contains("error")
+                || r.prompt.contains("fix")
+            {
+                if corr_samples.len() < n_corr {
+                    corr_samples.push(r.clone());
+                }
+            } else if other_neural.len() < (n_logic + n_corr) {
+                other_neural.push(r.clone());
+            }
+        }
+
+        while logic_samples.len() < n_logic && !other_neural.is_empty() {
+            let next_item = other_neural[logic_samples.len() % other_neural.len()].clone();
+            logic_samples.push(next_item);
+        }
+        while corr_samples.len() < n_corr && !other_neural.is_empty() {
+            let next_item = other_neural[corr_samples.len() % other_neural.len()].clone();
+            corr_samples.push(next_item);
+        }
+
+        let mut combined_neural = logic_samples;
+        combined_neural.extend(corr_samples);
+
+        let (_, _, world_samples) = self.sample_world_batch(&w_curr, n_world);
+
+        let mut transition_samples = Vec::new();
+        if !tr_store.is_empty() {
+            for i in 0..n_trans {
+                transition_samples.push(tr_store[i % tr_store.len()].clone());
+            }
+        }
+
+        let (stage_idx, stage_name) = if !n_curr.stages.is_empty() {
+            let s_idx = n_curr.active_stage_index.min(n_curr.stages.len() - 1);
+            (s_idx, n_curr.stages[s_idx].name.clone())
+        } else {
+            (0, "AgiStratifiedStream".to_string())
+        };
+
+        CurriculumBatch {
+            stage_index: stage_idx,
+            stage_name,
+            model_type: TargetModel::Both,
+            neural_samples: combined_neural,
+            world_samples,
+            transition_samples,
         }
     }
 

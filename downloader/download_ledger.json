@@ -1,31 +1,49 @@
 {
-  "records": {
-    "D:\\taracore_datasets\\downloaded\\d4rl_pointmaze_large_v2_main_data.hdf5": {
-      "source_url": "https://rail.eecs.berkeley.edu/datasets/offline_rl/gym_mujoco_v2/pointmaze_large_v2/main_data.hdf5",
-      "license_proof_url": "https://github.com/Farama-Foundation/D4RL/blob/master/LICENSE",
-      "license": "CC-BY-4.0",
-      "sha256": "7ee930174761268a85d6b655421a1500181e12afe00d2649df766df7bc5ddead",
-      "timestamp_epoch_secs": 1792745519,
-      "file_size_bytes": 239183968,
-      "status": "verified"
-    },
-    "D:\\taracore_datasets\\downloaded\\moli_go2_expert_100\\archives\\go2-push-raw.tar.gz": {
-      "source_url": "https://huggingface.co/datasets/moli-robotics/go2-expert-100",
-      "license_proof_url": "https://huggingface.co/datasets/moli-robotics/go2-expert-100/blob/main/LICENSE",
-      "license": "CC-BY-4.0",
-      "sha256": "6e0debd22de548e792e9eb5d6f0313df56f76a853d7a32eb1ad97aba1d86ed8b",
-      "timestamp_epoch_secs": 1792745534,
-      "file_size_bytes": 73545300,
-      "status": "verified"
-    },
-    "D:\\taracore_datasets\\downloaded\\moli_go2_expert_100\\archives\\go2-recontact-raw.tar.gz": {
-      "source_url": "https://huggingface.co/datasets/moli-robotics/go2-expert-100",
-      "license_proof_url": "https://huggingface.co/datasets/moli-robotics/go2-expert-100/blob/main/LICENSE",
-      "license": "CC-BY-4.0",
-      "sha256": "a2d210bc1f4fb9a9cefddd1544766d164a891046247ab0e26f2ebc8725d25030",
-      "timestamp_epoch_secs": 1792745584,
-      "file_size_bytes": 383259543,
-      "status": "verified"
-    }
-  }
+    "records":  {
+                    "D:\\taracore_datasets\\downloaded\\d4rl_pointmaze_large_v2_main_data.hdf5":  {
+                                                                                                      "source_url":  "https://rail.eecs.berkeley.edu/datasets/offline_rl/gym_mujoco_v2/pointmaze_large_v2/main_data.hdf5",
+                                                                                                      "license_proof_url":  "https://github.com/Farama-Foundation/D4RL/blob/master/LICENSE",
+                                                                                                      "license":  "CC-BY-4.0",
+                                                                                                      "sha256":  "7ee930174761268a85d6b655421a1500181e12afe00d2649df766df7bc5ddead",
+                                                                                                      "timestamp_epoch_secs":  1792745519,
+                                                                                                      "file_size_bytes":  239183968,
+                                                                                                      "status":  "verified"
+                                                                                                  },
+                    "D:\\taracore_datasets\\downloaded\\moli_go2_expert_100\\archives\\go2-push-raw.tar.gz":  {
+                                                                                                                  "source_url":  "https://huggingface.co/datasets/moli-robotics/go2-expert-100",
+                                                                                                                  "license_proof_url":  "https://huggingface.co/datasets/moli-robotics/go2-expert-100/blob/main/LICENSE",
+                                                                                                                  "license":  "CC-BY-4.0",
+                                                                                                                  "sha256":  "6e0debd22de548e792e9eb5d6f0313df56f76a853d7a32eb1ad97aba1d86ed8b",
+                                                                                                                  "timestamp_epoch_secs":  1792745534,
+                                                                                                                  "file_size_bytes":  73545300,
+                                                                                                                  "status":  "verified"
+                                                                                                              },
+                    "D:\\taracore_datasets\\downloaded\\moli_go2_expert_100\\archives\\go2-recontact-raw.tar.gz":  {
+                                                                                                                       "source_url":  "https://huggingface.co/datasets/moli-robotics/go2-expert-100",
+                                                                                                                       "license_proof_url":  "https://huggingface.co/datasets/moli-robotics/go2-expert-100/blob/main/LICENSE",
+                                                                                                                       "license":  "CC-BY-4.0",
+                                                                                                                       "sha256":  "a2d210bc1f4fb9a9cefddd1544766d164a891046247ab0e26f2ebc8725d25030",
+                                                                                                                       "timestamp_epoch_secs":  1792745584,
+                                                                                                                       "file_size_bytes":  383259543,
+                                                                                                                       "status":  "verified"
+                                                                                                                   },
+                    "D:\\taracore_datasets\\downloaded\\world_v1\\shard_00001.jsonl":  {
+                                                                                           "source_url":  "https://huggingface.co/datasets/moli-robotics/go2-expert-100",
+                                                                                           "license_proof_url":  "https://huggingface.co/datasets/moli-robotics/go2-expert-100/blob/main/LICENSE",
+                                                                                           "license":  "CC-BY-4.0",
+                                                                                           "sha256":  "32d5f8915607c2d4603496aac9293d1ebb00f1e1b63a4f53ae5e4ec183e6d7bf",
+                                                                                           "timestamp_epoch_secs":  1792758404,
+                                                                                           "file_size_bytes":  524401462,
+                                                                                           "status":  "verified"
+                                                                                       },
+                    "D:\\taracore_datasets\\downloaded\\world_v1\\shard_00002.jsonl":  {
+                                                                                           "source_url":  "https://huggingface.co/datasets/moli-robotics/go2-expert-100",
+                                                                                           "license_proof_url":  "https://huggingface.co/datasets/moli-robotics/go2-expert-100/blob/main/LICENSE",
+                                                                                           "license":  "CC-BY-4.0",
+                                                                                           "sha256":  "1c82c27adcf2ff1ab32d79d1bd14e8acf2b7efe1d74b980efa92171746fcc3fa",
+                                                                                           "timestamp_epoch_secs":  1792758404,
+                                                                                           "file_size_bytes":  253251317,
+                                                                                           "status":  "verified"
+                                                                                       }
+                }
 }

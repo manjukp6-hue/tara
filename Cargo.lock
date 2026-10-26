@@ -1359,11 +1359,13 @@ dependencies = [
  "parquet",
  "rand",
  "rayon",
+ "regex",
  "serde",
  "serde_json",
  "sha2",
  "tara_core",
  "tara_hd",
+ "tara_lora",
  "tara_security",
  "thiserror",
 ]
@@ -1377,7 +1379,16 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "tara_lora",
  "thiserror",
+]
+
+[[package]]
+name = "tara_lora"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

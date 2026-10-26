@@ -482,7 +482,8 @@ mod tests {
 
     #[test]
     fn test_experiential_12_stage_cycle() {
-        let temp_dir = std::env::temp_dir().join("tara_test_exp_learning");
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_test_exp_learning_{}", uuid::Uuid::new_v4()));
         let repo_root = temp_dir.to_str().unwrap();
 
         let engine = ExperientialLearningEngine::new(repo_root);
@@ -511,7 +512,8 @@ mod tests {
 
     #[test]
     fn test_experiential_safety_block() {
-        let temp_dir = std::env::temp_dir().join("tara_test_exp_safety");
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_test_exp_safety_{}", uuid::Uuid::new_v4()));
         let repo_root = temp_dir.to_str().unwrap();
 
         let engine = ExperientialLearningEngine::new(repo_root);

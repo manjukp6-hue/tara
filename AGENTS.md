@@ -712,3 +712,20 @@ Before creating any new file, function, module, or component:
 4. Create something new only when existing code cannot support the requirement.
 5. Prove that need from the live source before creating it.
 6. After changes, verify that no duplicate or broken references were introduced.
+
+---
+
+## RULE — END-TO-END MODEL TENSOR, TOKENIZER & PRODUCTION ENGINE INTEGRITY
+
+1. **End-to-End Tensor Dimension Parity**:
+   - Whenever vocabulary size or token definitions are modified or expanded (e.g. adding byte-fallback tokens, special tokens, or vocabulary mining):
+     * `tokenizer.json` dense mapping must be verified.
+     * `config.json` `vocab_size` must match.
+     * **Model Weights SafeTensors Invariant**: The actual on-disk weight tensors (`model.embed_tokens.weight` and `lm_head.weight`) MUST be verified to match `[vocab_size, hidden_dim]` in their physical SafeTensors shards.
+     * Tokenizer tasks are strictly prohibited from declaring completion or self-certifying victory without explicitly verifying tensor shape parity against on-disk model checkpoint weights.
+
+2. **Production-Grade Tokenization Standards**:
+   - Production tokenizers must utilize linear-time $O(N)$ data structures (such as compact Trie or Radix prefix search) rather than naive quadratic $O(N \cdot M)$ substring hashing loops.
+   - Pre-tokenization regex boundaries must preserve word, punctuation, and numeric segmentation.
+   - Batch encoding must support parallel execution across CPU worker threads via Rayon.
+

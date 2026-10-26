@@ -34,12 +34,59 @@ export TARA_CLOUD_TRAINING="1"
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export MALLOC_TRIM_THRESHOLD_=65536
 export TARA_MAX_MEMORY_MB="${TARA_MAX_MEMORY_MB:-}"
-export TARA_MAX_SEQ_LEN="${TARA_MAX_SEQ_LEN:-128}"
+
+# Dynamically resolve max sequence length without static arbitrary caps
+if [ -z "${TARA_MAX_SEQ_LEN:-}" ]; then
+    RESOLVED_SEQ_LEN=""
+    for cfg in "storage/models/tara_candidate_v1/config.json" "storage/models/tara_base/config.json" "config.json"; do
+        if [ -f "$cfg" ]; then
+            RESOLVED_SEQ_LEN=$(python3 -c "import json; d=json.load(open('$cfg')); print(d.get('max_position_embeddings', ''))" 2>/dev/null || true)
+            if [ -n "$RESOLVED_SEQ_LEN" ] && [ "$RESOLVED_SEQ_LEN" -gt 0 ] 2>/dev/null; then
+                break
+            fi
+        fi
+    done
+    if [ -n "$RESOLVED_SEQ_LEN" ] && [ "$RESOLVED_SEQ_LEN" -gt 0 ] 2>/dev/null; then
+        export TARA_MAX_SEQ_LEN="$RESOLVED_SEQ_LEN"
+        echo "[DYNAMIC CONFIG] Resolved TARA_MAX_SEQ_LEN=$TARA_MAX_SEQ_LEN from model configuration"
+    else
+        # Dynamic hardware-headroom derivation
+        if command -v nvidia-smi >/dev/null 2>&1; then
+            GPU_MEM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 || echo "0")
+            if [ "$GPU_MEM_MB" -ge 30000 ] 2>/dev/null; then
+                export TARA_MAX_SEQ_LEN="4096"
+            elif [ "$GPU_MEM_MB" -ge 15000 ] 2>/dev/null; then
+                export TARA_MAX_SEQ_LEN="2048"
+            else
+                export TARA_MAX_SEQ_LEN="1024"
+            fi
+        else
+            export TARA_MAX_SEQ_LEN="1024"
+        fi
+        echo "[DYNAMIC CONFIG] Assigned TARA_MAX_SEQ_LEN=$TARA_MAX_SEQ_LEN based on hardware memory headroom"
+    fi
+else
+    echo "[DYNAMIC CONFIG] Using user-specified TARA_MAX_SEQ_LEN=$TARA_MAX_SEQ_LEN"
+fi
+
+# Dynamically resolve RoPE base frequency if not explicitly provided
+if [ -z "${TARA_ROPE_THETA:-}" ]; then
+    for cfg in "storage/models/tara_candidate_v1/config.json" "storage/models/tara_base/config.json" "config.json"; do
+        if [ -f "$cfg" ]; then
+            RESOLVED_THETA=$(python3 -c "import json; d=json.load(open('$cfg')); print(d.get('rope_theta', ''))" 2>/dev/null || true)
+            if [ -n "$RESOLVED_THETA" ]; then
+                export TARA_ROPE_THETA="$RESOLVED_THETA"
+                echo "[DYNAMIC CONFIG] Resolved TARA_ROPE_THETA=$TARA_ROPE_THETA from model configuration"
+                break
+            fi
+        fi
+    done
+fi
 export TARA_MAX_VAL_SAMPLES="${TARA_MAX_VAL_SAMPLES:-5}"
 export TARA_SKIP_PREFLIGHT_VAL="${TARA_SKIP_PREFLIGHT_VAL:-1}"
 export GDRIVE_CHECKPOINT_DIR="${GDRIVE_CHECKPOINT_DIR:-/content/drive/MyDrive/TARA_CHECKPOINTS}"
-export HF_DATASET_REPO="${HF_DATASET_REPO:-${HF_MODEL_REPO:-${HF_REPO:-manjukp6/tara}}}"
-export HF_MODEL_REPO="${HF_MODEL_REPO:-${HF_DATASET_REPO}}"
+export HF_DATASET_REPO="${HF_DATASET_REPO:-manjukp6/tara_dataset_v1}"
+export HF_MODEL_REPO="${HF_MODEL_REPO:-manjukp6/tara}"
 export HF_REPO="${HF_REPO:-${HF_MODEL_REPO}}"
 
 # Resolve and validate HF_TOKEN from environment or Google Colab userdata secrets
@@ -128,8 +175,10 @@ if [ "$GRADIENT_CHECKPOINTING" = "1" ]; then
     GRAD_CHECKPOINT_FLAG="--gradient-checkpointing"
 fi
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-500}"
-SKIP_SAVE_STEPS="${SKIP_SAVE_STEPS:-1000}"
+SKIP_SAVE_STEPS="${SKIP_SAVE_STEPS:-0}"
 export SKIP_SAVE_STEPS
+DOMAIN_WEIGHTS="${DOMAIN_WEIGHTS:-02_code:0.25,01_math:0.15,04_kannada:0.15,12_reasoning:0.15,03_stem:0.10,08_world_model:0.05,11_tool_use:0.05,13_debugging:0.02,sft:0.02,05_philosophy:0.012,06_social:0.012,07_engineering:0.012,09_audio:0.012,10_vision:0.012}"
+export DOMAIN_WEIGHTS
 GDRIVE_SYNC_FLAGS="--sync-all-to-gdrive --sync-gdrive-optimizer --keep-checkpoints 1"
 JOINT_STEPS="${JOINT_STEPS:-200}"
 MAIN_DS_DIR="storage/datasets/main_dataset_v2"
@@ -340,8 +389,9 @@ src = '$GDRIVE_STAGE'
 dst = '$LOCAL_STAGE'
 canonical = {
     'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json',
-    'model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt',
-    'shard_ledger.json', 'latest_checkpoint.json', 'dataset_snapshot.json', 'COMMITTED'
+    'model.safetensors', 'world_model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json',
+    'optimizer_state.pt', 'shard_ledger.json', 'latest_checkpoint.json', 'dataset_snapshot.json',
+    'teacher_replay_buffer.jsonl', 'COMMITTED'
 }
 if os.path.isdir(src):
     os.makedirs(dst, exist_ok=True)
@@ -472,20 +522,20 @@ MAIN_DS_DIR="storage/datasets/main_dataset_v2"
 mkdir -p "$MAIN_DS_DIR"
 LOCAL_DS_COUNT=$(find "$MAIN_DS_DIR" -maxdepth 1 \( -name "*.jsonl" -o -name "*.parquet" \) 2>/dev/null | wc -l)
 
-if [ "${SKIP_HF_DOWNLOAD:-0}" = "1" ] || [ "$LOCAL_DS_COUNT" -ge 1 ] || [ "$FOUND_RESUME_LEDGER" -eq 1 ]; then
-    echo "=== [DATASET INGESTION: SKIPPED] Dataset or resume ledger active (Local count: $LOCAL_DS_COUNT, Resume ledger: $FOUND_RESUME_LEDGER). Letting Python JIT stream only required active shards! ==="
+if [ "$TRAINER_MODE" = "python" ] || [ "${SKIP_HF_DOWNLOAD:-0}" = "1" ] || [ "$LOCAL_DS_COUNT" -ge 1 ] || [ "$FOUND_RESUME_LEDGER" -eq 1 ]; then
+    echo "=== [DATASET INGESTION: SKIPPED] Python JIT streaming or resume ledger active. ==="
 else
     echo "=== [DATASET INGESTION: STREAMING PRETRAINING SHARDS] ==="
-    HF_DATASET_SOURCE="${HF_DATASET_REPO:-${HF_REPO:-manjukp6/tara}}"
+    HF_DATASET_SOURCE="${HF_DATASET_REPO:-${HF_REPO:-manjukp6/tara_dataset_v1}}"
     if [ -n "$HF_DATASET_SOURCE" ]; then
         DATASET_SHARDS_PATTERN="${DATASET_SHARDS_PATTERN:-}"
         if [ -z "$DATASET_SHARDS_PATTERN" ]; then
             if [ "${DOWNLOAD_ALL_SHARDS:-0}" = "1" ]; then
                 DATASET_SHARDS_PATTERN="v2/*"
-            elif [ "${STAGE_MAX_STEPS:-1000}" -le 2000 ]; then
+            elif [ "${STAGE_MAX_STEPS:-1000}" -gt 0 ] && [ "${STAGE_MAX_STEPS:-1000}" -le 2000 ]; then
                 DATASET_SHARDS_PATTERN="v2/*shard_000*"
                 echo "[DATASET] Step count is ${STAGE_MAX_STEPS:-1000} (requires ~$(( ${STAGE_MAX_STEPS:-1000} * ${TRAIN_BATCH_SIZE:-2} * ${GRAD_ACCUM:-8} )) samples). Streaming single shard ('$DATASET_SHARDS_PATTERN' ~700,000 samples) to save 26 GB bandwidth and 10 minutes..."
-            elif [ "${STAGE_MAX_STEPS:-1000}" -le 5000 ]; then
+            elif [ "${STAGE_MAX_STEPS:-1000}" -gt 0 ] && [ "${STAGE_MAX_STEPS:-1000}" -le 5000 ]; then
                 DATASET_SHARDS_PATTERN="v2/*shard_00*"
                 echo "[DATASET] Step count is ${STAGE_MAX_STEPS:-1000}. Streaming initial shards ('$DATASET_SHARDS_PATTERN')..."
             else
@@ -516,7 +566,7 @@ if [ "${DOWNLOAD_V1_NOW:-0}" = "1" ]; then
         echo "=== [DATASET V1: SKIPPED] Main Dataset V1 already present ($LOCAL_V1_COUNT shard(s)). Skipping download! ==="
     else
         echo "=== [DATASET INGESTION: STREAMING MAIN DATASET V1 (STAGE 4) SHARDS] ==="
-        HF_DATASET_SOURCE="${HF_DATASET_REPO:-${HF_REPO:-manjukp6/tara}}"
+        HF_DATASET_SOURCE="${HF_DATASET_REPO:-${HF_REPO:-manjukp6/tara_dataset_v1}}"
         if [ -n "$HF_DATASET_SOURCE" ]; then
             if download_hf "$HF_DATASET_SOURCE" "dataset" "v1/*" "$SCALE_DS_DIR"; then
                 if [ -d "$SCALE_DS_DIR/v1" ]; then
@@ -661,108 +711,54 @@ TRAINER_MODE="${TRAINER_MODE:-python}"
 echo "=== [AUTONOMOUS CLOUD TRAINING PIPELINE (MODE: $TRAINER_MODE)] ==="
 
 if [ "$TRAINER_MODE" = "python" ]; then
-    echo "[TRAINER] Launching High-Throughput PyTorch Cloud GPU Multi-Stage Pipeline..."
+    echo "[TRAINER] Launching Unified Stage 1 Cloud GPU Pipeline on all dataset domains & Joint World Model..."
 
-    # Stage 0: Foundational Pretraining
+    # Preserve any existing checkpoint or promoted weights from previous training
+    STAGE1_INPUT="storage/models/tara_candidate_v1"
+    PREV_STAGE_ARG=""
+    if [ -d "$ACTIVE_CP_DIR/stage1_unified" ] && [ -f "$ACTIVE_CP_DIR/stage1_unified/model.safetensors" ]; then
+        STAGE1_INPUT="$ACTIVE_CP_DIR/stage1_unified"
+    elif [ -d "$ACTIVE_CP_DIR/stage0_pretraining" ] && [ -f "$ACTIVE_CP_DIR/stage0_pretraining/model.safetensors" ]; then
+        STAGE1_INPUT="$ACTIVE_CP_DIR/stage0_pretraining"
+        PREV_STAGE_ARG="--previous-stage-dir $ACTIVE_CP_DIR/stage0_pretraining"
+    elif [ -d "$PROMOTED_BASE/stage0_pretraining" ] && [ -f "$PROMOTED_BASE/stage0_pretraining/model.safetensors" ]; then
+        STAGE1_INPUT="$PROMOTED_BASE/stage0_pretraining"
+    fi
+
+    # Unified Stage 1: Full-Curriculum Continuous Pretraining & Joint World Model Co-Training
+    WORLD_DS_ARG=""
+    if [ -d "$MAIN_DS_DIR/08_commonsense_world_model" ]; then
+        WORLD_DS_ARG="--world-dataset-dir $MAIN_DS_DIR/08_commonsense_world_model"
+    elif [ -f "storage/datasets/curriculum/agi_causal_transitions.jsonl" ]; then
+        WORLD_DS_ARG="--world-dataset-dir storage/datasets/curriculum/agi_causal_transitions.jsonl"
+    fi
+
     python3 cloud_train.py \
-        --stage-id "stage0_pretraining" \
-        --stage-name "Stage 0: Foundational Pretraining" \
-        --model-dir storage/models/tara_candidate_v1 \
+        --stage-id "stage1_unified" \
+        --stage-name "Stage 1: Unified Continuous Pretraining & World Model Co-Training" \
+        --model-dir "$STAGE1_INPUT" \
         --dataset-dir "$MAIN_DS_DIR" \
-        --dataset-prefix "v2" \
-        --output-dir "$ACTIVE_CP_DIR/stage0_pretraining" \
-        --promoted-dir "$PROMOTED_BASE/stage0_pretraining" \
+        --dataset-prefix "" \
+        --output-dir "$ACTIVE_CP_DIR/stage1_unified" \
+        --promoted-dir "$PROMOTED_BASE/stage1_unified" \
+        $PREV_STAGE_ARG \
         --max-steps "$STAGE_MAX_STEPS" \
         --batch-size "$TRAIN_BATCH_SIZE" \
         --grad-accum "$GRAD_ACCUM" \
         --max-seq-len "$TARA_MAX_SEQ_LEN" \
         --checkpoint-interval "$CHECKPOINT_INTERVAL" \
-        --hf-repo "$HF_MODEL_REPO" \
+        --skip-save-steps "$SKIP_SAVE_STEPS" \
+        --domain-weights "$DOMAIN_WEIGHTS" \
+        --hf-repo "$HF_DATASET_REPO" \
+        --hf-dataset-repo "$HF_DATASET_REPO" \
+        --hf-model-repo "$HF_MODEL_REPO" \
+        --joint-world-model \
+        --world-model-dir storage/models/tara_world_model \
+        $WORLD_DS_ARG \
         $GDRIVE_SYNC_FLAGS \
         $CANARY_EXTRA_ARGS \
         $FULL_DATASET_EXTRA \
         $GRAD_CHECKPOINT_FLAG
-
-    # In canary validation mode, stop after stage 0 verification to report telemetry
-    if [ -n "$CANARY_EXTRA_ARGS" ]; then
-        echo "=============================================================================="
-        echo "  [CANARY VALIDATION RUN FINISHED & TELEMETRY RECORDED]"
-        echo "=============================================================================="
-        exit 0
-    fi
-
-
-    STAGE0_OUT="$ACTIVE_CP_DIR/stage0_pretraining"
-    if [ -d "$ACTIVE_CP_DIR/stage0_pretraining/best_checkpoint" ]; then
-        STAGE0_OUT="$ACTIVE_CP_DIR/stage0_pretraining/best_checkpoint"
-    fi
-
-    # Stage 1: Academic & Skills Curriculum
-    CURRICULUM_DS="storage/datasets/curriculum"
-    if [ ! -d "$CURRICULUM_DS" ] || [ -z "$(ls -A "$CURRICULUM_DS" 2>/dev/null)" ]; then
-        CURRICULUM_DS="$MAIN_DS_DIR"
-    fi
-
-    STAGE0_MODEL_INPUT="$STAGE0_OUT"
-    if [ -d "$PROMOTED_BASE/stage0_pretraining" ] && [ -f "$PROMOTED_BASE/stage0_pretraining/model.safetensors" ]; then
-        STAGE0_MODEL_INPUT="$PROMOTED_BASE/stage0_pretraining"
-    fi
-
-    python3 cloud_train.py \
-        --stage-id "stage1_curriculum" \
-        --stage-name "Stage 1: Academic & Skills Curriculum" \
-        --model-dir "$STAGE0_MODEL_INPUT" \
-        --dataset-dir "$CURRICULUM_DS" \
-        --dataset-prefix "curriculum" \
-        --output-dir "$ACTIVE_CP_DIR/stage1_curriculum" \
-        --promoted-dir "$PROMOTED_BASE/stage1_curriculum" \
-        --previous-stage-dir "$ACTIVE_CP_DIR/stage0_pretraining" \
-        --max-steps "$STAGE_MAX_STEPS" \
-        --batch-size "$TRAIN_BATCH_SIZE" \
-        --grad-accum "$GRAD_ACCUM" \
-        --max-seq-len "$TARA_MAX_SEQ_LEN" \
-        --checkpoint-interval "$CHECKPOINT_INTERVAL" \
-        --hf-repo "$HF_MODEL_REPO" \
-        $GDRIVE_SYNC_FLAGS \
-        $FULL_DATASET_EXTRA \
-        $GRAD_CHECKPOINT_FLAG
-
-    # Extensible Loop for Continual Expansion (Stages 2..N)
-    STAGE_IDX=2
-    while true; do
-        NEXT_DS="storage/datasets/stage${STAGE_IDX}"
-        if [ ! -d "$NEXT_DS" ] || [ -z "$(ls -A "$NEXT_DS" 2>/dev/null)" ]; then
-            break
-        fi
-
-        PREV_STAGE_IDX=$((STAGE_IDX - 1))
-        PREV_MODEL_INPUT="$ACTIVE_CP_DIR/stage${PREV_STAGE_IDX}"
-        if [ -d "$PROMOTED_BASE/stage${PREV_STAGE_IDX}" ] && [ -f "$PROMOTED_BASE/stage${PREV_STAGE_IDX}/model.safetensors" ]; then
-            PREV_MODEL_INPUT="$PROMOTED_BASE/stage${PREV_STAGE_IDX}"
-        fi
-
-        echo "=== [AUTONOMOUS CLOUD TRAINING PIPELINE: LAUNCHING STAGE $STAGE_IDX] ==="
-        python3 cloud_train.py \
-            --stage-id "stage${STAGE_IDX}" \
-            --stage-name "Stage ${STAGE_IDX}: Continual Knowledge Expansion" \
-            --model-dir "$PREV_MODEL_INPUT" \
-            --dataset-dir "$NEXT_DS" \
-            --dataset-prefix "stage${STAGE_IDX}" \
-            --output-dir "$ACTIVE_CP_DIR/stage${STAGE_IDX}" \
-            --promoted-dir "$PROMOTED_BASE/stage${STAGE_IDX}" \
-            --previous-stage-dir "$ACTIVE_CP_DIR/stage${PREV_STAGE_IDX}" \
-            --max-steps "$STAGE_MAX_STEPS" \
-            --batch-size "$TRAIN_BATCH_SIZE" \
-            --grad-accum "$GRAD_ACCUM" \
-            --max-seq-len "$TARA_MAX_SEQ_LEN" \
-            --checkpoint-interval "$CHECKPOINT_INTERVAL" \
-            --hf-repo "$HF_MODEL_REPO" \
-            $GDRIVE_SYNC_FLAGS \
-            $FULL_DATASET_EXTRA \
-            $GRAD_CHECKPOINT_FLAG
-
-        STAGE_IDX=$((STAGE_IDX + 1))
-    done
 
     PIPELINE_EXIT=$?
 else
@@ -797,19 +793,23 @@ fi
 
 echo "Autonomous Multi-Stage Training Pipeline Completed Successfully!"
 
-# 7. Execute Neural & World Model Joint Co-Training
-if [ ! -f "./target/release/manual_trainer" ]; then
-    echo "[BUILD] Compiling TARA Manual Trainer..."
-    cargo build --release --bin manual_trainer
-fi
-echo "=== [WORLD MODEL & NEURAL JOINT CO-TRAINING ($JOINT_STEPS STEPS, BATCH $TRAIN_BATCH_SIZE)] ==="
-./target/release/manual_trainer \
-    --mode both \
-    --steps "$JOINT_STEPS" \
-    --batch-size "$TRAIN_BATCH_SIZE" \
-    --dataset "$MAIN_DS_DIR"
+# 7. Execute Neural & World Model Joint Co-Training (Rust or Explicit Override Only)
+if [ "$TRAINER_MODE" = "rust" ] || [ "${RUN_MANUAL_TRAINER:-0}" = "1" ]; then
+    if [ ! -f "./target/release/manual_trainer" ]; then
+        echo "[BUILD] Compiling TARA Manual Trainer..."
+        cargo build --release --bin manual_trainer
+    fi
+    echo "=== [WORLD MODEL & NEURAL JOINT CO-TRAINING ($JOINT_STEPS STEPS, BATCH $TRAIN_BATCH_SIZE)] ==="
+    ./target/release/manual_trainer \
+        --mode both \
+        --steps "$JOINT_STEPS" \
+        --batch-size "$TRAIN_BATCH_SIZE" \
+        --dataset "$MAIN_DS_DIR"
 
-echo "Neural & World Model Joint Training Completed Successfully!"
+    echo "Neural & World Model Joint Training Completed Successfully!"
+else
+    echo "[STEP 7 SKIPPED] Python trainer has already completed unified pretraining and Joint World Model co-training."
+fi
 
 # 8. Checkpoint Preservation to Google Drive (Separated into distinct subdirectories)
 if [ -d "/content/drive/MyDrive" ]; then

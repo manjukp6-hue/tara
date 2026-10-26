@@ -142,17 +142,23 @@ impl<'a> CborDecoder<'a> {
             }
             25 => {
                 let slice = self.read_exact(2)?;
-                let bytes: [u8; 2] = slice.try_into().unwrap();
+                let bytes: [u8; 2] = slice
+                    .try_into()
+                    .map_err(|_| "Failed to convert 2-byte slice for CBOR argument".to_string())?;
                 Ok(u16::from_be_bytes(bytes) as u64)
             }
             26 => {
                 let slice = self.read_exact(4)?;
-                let bytes: [u8; 4] = slice.try_into().unwrap();
+                let bytes: [u8; 4] = slice
+                    .try_into()
+                    .map_err(|_| "Failed to convert 4-byte slice for CBOR argument".to_string())?;
                 Ok(u32::from_be_bytes(bytes) as u64)
             }
             27 => {
                 let slice = self.read_exact(8)?;
-                let bytes: [u8; 8] = slice.try_into().unwrap();
+                let bytes: [u8; 8] = slice
+                    .try_into()
+                    .map_err(|_| "Failed to convert 8-byte slice for CBOR argument".to_string())?;
                 Ok(u64::from_be_bytes(bytes))
             }
             _ => Err(format!("Unsupported CBOR additional information: {}", ai)),

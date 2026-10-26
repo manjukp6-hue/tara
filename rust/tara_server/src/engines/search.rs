@@ -222,9 +222,13 @@ impl OnlineSearchEngine {
             .set_write_timeout(Some(Duration::from_secs(5)))
             .map_err(|e| e.to_string())?;
 
+        let user_agent = std::env::var("TARA_CRAWLER_USER_AGENT").unwrap_or_else(|_| {
+            "TaraBot/1.0 (Native Rust Academic Crawler; +https://github.com/tara-foundation/tara)"
+                .to_string()
+        });
         let request = format!(
-            "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: TaraBot/1.0 (Native Rust Academic Crawler; +https://github.com/manjukp6-hue/tara)\r\nConnection: close\r\nAccept: text/html,application/json\r\n\r\n",
-            full_path, host
+            "GET {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: {}\r\nConnection: close\r\nAccept: text/html,application/json\r\n\r\n",
+            full_path, host, user_agent
         );
 
         stream

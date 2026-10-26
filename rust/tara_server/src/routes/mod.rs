@@ -1,5 +1,5 @@
 //! All route handlers for the TARA HTTP API.
-//! Implements every endpoint from Python server.py register_* functions.
+//! Implements native HTTP API endpoint handlers.
 
 pub mod bridge;
 pub use bridge::*;
@@ -1078,7 +1078,7 @@ route_handler!(
         let online = brain.bridge.probe_worker();
         json!({
             "status": "SUCCESS",
-            "python_worker_online": online,
+            "worker_online": online,
             "bridge": brain.bridge.get_telemetry()
         })
     }

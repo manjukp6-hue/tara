@@ -11,13 +11,14 @@ use tara_standalone_downloader::{DownloaderService, LicenseEvaluator};
 fn print_usage(prog_name: &str) {
     println!("Standalone Dataset Downloader — Operational Tool");
     println!("Usage:");
+    println!("  {} --download <url> --file-name <name> --license <license> [--proof <proof_url>] [--dir <output_dir>]", prog_name);
     println!("  {} --verify --file <path> --url <source_url> --license <license> --proof <proof_url> [--dir <output_dir>]", prog_name);
     println!("  {} --ledger [--dir <output_dir>]", prog_name);
     println!("  {} --check-license <license_id>", prog_name);
     println!("  {} --shard-all --input-dir <dir> --output-dir <dir> [--max-mb <mb>]", prog_name);
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         print_usage(&args[0]);
@@ -26,6 +27,7 @@ fn main() {
 
     let mut mode = String::new();
     let mut file_path = String::new();
+    let mut file_name = String::new();
     let mut source_url = String::new();
     let mut license_id = String::new();
     let mut proof_url = String::new();
@@ -36,6 +38,19 @@ fn main() {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "--download" => {
+                mode = "download".to_string();
+                if i + 1 < args.len() && !args[i + 1].starts_with("--") {
+                    source_url = args[i + 1].clone();
+                    i += 1;
+                }
+            }
+            "--file-name" => {
+                if i + 1 < args.len() {
+                    file_name = args[i + 1].clone();
+                    i += 1;
+                }
+            }
             "--shard-all" => {
                 mode = "shard-all".to_string();
             }
@@ -72,9 +87,12 @@ fn main() {
                     i += 1;
                 }
             }
-            "--file" => {
+            "--file" | "--output" => {
                 if i + 1 < args.len() {
                     file_path = args[i + 1].clone();
+                    if file_name.is_empty() {
+                        file_name = args[i + 1].clone();
+                    }
                     i += 1;
                 }
             }
@@ -109,6 +127,13 @@ fn main() {
             _ => {}
         }
         i += 1;
+    }
+
+    if file_name.is_empty() && !file_path.is_empty() {
+        file_name = file_path.clone();
+    }
+    if file_path.is_empty() && !file_name.is_empty() {
+        file_path = file_name.clone();
     }
 
     match mode.as_str() {
@@ -159,8 +184,23 @@ fn main() {
             );
 
             let max_bytes = max_mb * 1024 * 1024;
-            // Shard index starts at 3 because shard_00000 to shard_00002 already exist
-            let mut shard_idx = 3;
+            // Dynamically discover highest existing shard index in out_dir to avoid hardcoding or gaps
+            let mut shard_idx = 0;
+            if let Ok(entries) = std::fs::read_dir(&out_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
+                        if file_name.starts_with("shard_") && file_name.ends_with(".jsonl") {
+                            let stem = &file_name[6..file_name.len() - 6];
+                            if let Ok(idx) = stem.parse::<usize>() {
+                                if idx >= shard_idx {
+                                    shard_idx = idx + 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             let mut current_bytes = 0;
             let mut total_records = 0;
             let mut current_file: Option<std::fs::File> = None;
@@ -243,8 +283,8 @@ fn main() {
 
                         if let Some(ref mut out_f) = current_file {
                             let bytes = line.as_bytes();
-                            let _ = out_f.write_all(bytes);
-                            let _ = out_f.write_all(b"\n");
+                            out_f.write_all(bytes)?;
+                            out_f.write_all(b"\n")?;
                             current_bytes += bytes.len() as u64 + 1;
                             total_records += 1;
                         }
@@ -255,6 +295,39 @@ fn main() {
             println!("All Parquet files converted and sharded successfully!");
             println!("Total additional records written: {}", total_records);
             println!("Final shard index reached: {}", shard_idx);
+        }
+        "download" => {
+            if source_url.is_empty() || file_name.is_empty() || license_id.is_empty() {
+                eprintln!("Error: --download <URL>, --file-name <NAME>, and --license <LICENSE> are required for download.");
+                process::exit(1);
+            }
+            let mut service = match DownloaderService::new(output_dir) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Failed to initialize downloader service: {}", e);
+                    process::exit(1);
+                }
+            };
+            println!("Downloading from {} to {} ...", source_url, file_name);
+            match service.download_and_register_asset(
+                &source_url,
+                &file_name,
+                &license_id,
+                &proof_url,
+            ) {
+                Ok(rec) => {
+                    println!("Asset downloaded, verified, and registered successfully!");
+                    println!("File: {}", file_name);
+                    println!("SHA-256: {}", rec.sha256);
+                    println!("Bytes: {}", rec.file_size_bytes);
+                    println!("License: {}", rec.license);
+                    println!("Status: {}", rec.status);
+                }
+                Err(e) => {
+                    eprintln!("Download failed: {}", e);
+                    process::exit(1);
+                }
+            }
         }
         "check-license" => {
             if license_id.is_empty() {
@@ -326,4 +399,6 @@ fn main() {
             process::exit(1);
         }
     }
+
+    Ok(())
 }

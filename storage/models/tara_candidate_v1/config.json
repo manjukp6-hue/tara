@@ -1,15 +1,16 @@
 {
-  "vocab_size": 100000,
+  "vocab_size": 100256,
   "hidden_size": 2048,
   "intermediate_size": 5632,
-  "num_hidden_layers": 13,
-  "num_attention_heads": 64,
-  "num_key_value_heads": 16,
-  "head_dim": 32,
+  "num_hidden_layers": 16,
+  "num_attention_heads": 32,
+  "num_key_value_heads": 8,
+  "head_dim": 64,
   "max_position_embeddings": 4096,
   "rope_theta": 500000.0,
   "rms_norm_eps": 0.00001,
   "initializer_range": 0.02,
   "version": "2.0.0",
-  "model_type": "tara"
+  "model_type": "tara",
+  "tie_word_embeddings": true
 }

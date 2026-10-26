@@ -13,3 +13,4 @@ thiserror = "1.0"
 log = "0.4"
 rayon = "1.10"
 half = { version = "2.3", features = ["std"] }
+tara_lora = { path = "../tara_lora" }

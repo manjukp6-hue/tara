@@ -3,5 +3,5 @@
   "model_max_length": 4096,
   "padding_side": "right",
   "tokenizer_class": "TaraTokenizer",
-  "vocab_size": 100000
+  "vocab_size": 100256
 }

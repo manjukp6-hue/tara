@@ -19,7 +19,7 @@ fn print_usage() {
     println!("  tara_hf_downloader [OPTIONS]");
     println!();
     println!("Options:");
-    println!("  --repo <repo_id>       Repository ID (e.g. manjukp6/tara)");
+    println!("  --repo <repo_id>       Repository ID (e.g. tara-ai/tara)");
     println!("  --repo-type <type>     Repository type: 'model' or 'dataset' (default: model)");
     println!("  --prefix <prefix>      Remote folder prefix / pattern (e.g. 'v2', 'v1', 'neural_model_v1')");
     println!("  --dest <dir>           Destination local directory (default: current directory)");

@@ -305,22 +305,20 @@ pub fn discover_text_sequences_in_dir(
         if c_path.exists() && c_path.is_file() {
             let f = File::open(c_path)?;
             let reader = BufReader::new(f);
-            for line_res in reader.lines() {
-                if let Ok(line) = line_res {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
-                        if let Some(t) = val
-                            .get("output")
-                            .or_else(|| val.get("text"))
-                            .or_else(|| val.get("input"))
-                            .and_then(Value::as_str)
-                        {
-                            if !t.trim().is_empty() {
-                                texts.push(t.to_string());
-                            }
+            for line in reader.lines().map_while(Result::ok) {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
+                    if let Some(t) = val
+                        .get("output")
+                        .or_else(|| val.get("text"))
+                        .or_else(|| val.get("input"))
+                        .and_then(Value::as_str)
+                    {
+                        if !t.trim().is_empty() {
+                            texts.push(t.to_string());
                         }
                     }
                 }
@@ -341,24 +339,22 @@ pub fn discover_text_sequences_in_dir(
                             if ext == "jsonl" {
                                 if let Ok(f) = File::open(&p) {
                                     let reader = BufReader::new(f);
-                                    for line_res in reader.lines() {
-                                        if let Ok(line) = line_res {
-                                            let trimmed = line.trim();
-                                            if trimmed.is_empty() {
-                                                continue;
-                                            }
-                                            if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
-                                                if let Some(t) = val
-                                                    .get("text")
-                                                    .or_else(|| val.get("output"))
-                                                    .or_else(|| val.get("prompt"))
-                                                    .and_then(Value::as_str)
-                                                {
-                                                    if !t.trim().is_empty() {
-                                                        texts.push(t.to_string());
-                                                        if texts.len() >= 1000 {
-                                                            return Ok(texts);
-                                                        }
+                                    for line in reader.lines().map_while(Result::ok) {
+                                        let trimmed = line.trim();
+                                        if trimmed.is_empty() {
+                                            continue;
+                                        }
+                                        if let Ok(val) = serde_json::from_str::<Value>(trimmed) {
+                                            if let Some(t) = val
+                                                .get("text")
+                                                .or_else(|| val.get("output"))
+                                                .or_else(|| val.get("prompt"))
+                                                .and_then(Value::as_str)
+                                            {
+                                                if !t.trim().is_empty() {
+                                                    texts.push(t.to_string());
+                                                    if texts.len() >= 1000 {
+                                                        return Ok(texts);
                                                     }
                                                 }
                                             }
@@ -392,9 +388,9 @@ fn compute_causal_step(
     let mut total_loss = 0.0f32;
     let mut valid_targets = 0usize;
 
-    for pos in eff_target_start..seq_len {
+    for (pos, &token) in tokens.iter().enumerate().skip(eff_target_start) {
         let pred_idx = pos - 1;
-        let target = tokens[pos] as usize;
+        let target = token as usize;
         if target < vs {
             let logit_start = pred_idx * vs;
             let logits_slice = &logits[logit_start..logit_start + vs];
@@ -881,16 +877,18 @@ mod tests {
         hidden_size: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
         fs::create_dir_all(dir)?;
-        let mut cfg = TaraConfig::default();
-        cfg.vocab_size = vocab_size;
-        cfg.hidden_size = hidden_size;
-        cfg.intermediate_size = hidden_size * 2;
-        cfg.num_hidden_layers = 1;
-        cfg.num_attention_heads = 2;
-        cfg.num_key_value_heads = 2;
-        cfg.head_dim = hidden_size / 2;
-        cfg.max_position_embeddings = 64;
-        cfg.tie_word_embeddings = Some(false);
+        let cfg = TaraConfig {
+            vocab_size,
+            hidden_size,
+            intermediate_size: hidden_size * 2,
+            num_hidden_layers: 1,
+            num_attention_heads: 2,
+            num_key_value_heads: 2,
+            head_dim: hidden_size / 2,
+            max_position_embeddings: 64,
+            tie_word_embeddings: Some(false),
+            ..Default::default()
+        };
         fs::write(dir.join("config.json"), serde_json::to_string(&cfg)?)?;
 
         let mut vocab = serde_json::Map::new();

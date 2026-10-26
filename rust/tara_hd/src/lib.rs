@@ -16,7 +16,7 @@ pub use channel::ComputeChannel;
 pub use device::{ComputeDevice, CpuDevice, CudaDevice, CustomDevice, TpuDevice};
 pub use discovery::DiscoveredInventory;
 pub use event::{CancellationToken, MemoryFlowGovernor, StreamEvent};
-pub use lora::{LoraAdapterSet, LoraConfig, LoraLayer};
+pub use lora::{DynamicAdapterHub, LoraAdapterSet, LoraConfig, LoraLayer, LoraMode};
 pub use memory_governor::{
     MemoryExecutionMode, MemoryGovernor, ModelMemoryBudget, PlacementDecision,
 };

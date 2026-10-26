@@ -18,10 +18,63 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct LicenseEvaluator;
 
 impl LicenseEvaluator {
-    /// Evaluates if a given license identifier satisfies commercial use,
+    /// Evaluates if an individual license identifier token is an approved permissive license.
+    fn is_single_license_permissive(token: &str) -> bool {
+        let clean = token
+            .trim()
+            .trim_matches(|c| c == '(' || c == ')' || c == '[' || c == ']' || c == '"' || c == '\'');
+        let clean = clean.trim();
+        if clean.is_empty() {
+            return false;
+        }
+
+        matches!(
+            clean,
+            "MIT"
+                | "MIT-0"
+                | "APACHE-2.0"
+                | "APACHE 2.0"
+                | "APACHE-1.1"
+                | "APACHE 1.1"
+                | "APACHE-1.0"
+                | "APACHE 1.0"
+                | "APACHE"
+                | "BSD-2-CLAUSE"
+                | "BSD 2-CLAUSE"
+                | "BSD-3-CLAUSE"
+                | "BSD 3-CLAUSE"
+                | "BSD-3-CLAUSE-CLEAR"
+                | "0BSD"
+                | "CC-BY-4.0"
+                | "CC BY 4.0"
+                | "CC-BY-3.0"
+                | "CC BY 3.0"
+                | "CC-BY-2.0"
+                | "CC BY 2.0"
+                | "CC-BY-1.0"
+                | "CC BY 1.0"
+                | "CC0-1.0"
+                | "CC0 1.0"
+                | "CC0"
+                | "UNLICENSE"
+                | "THE UNLICENSE"
+                | "ISC"
+                | "ZLIB"
+                | "PUBLIC DOMAIN"
+                | "PUBLIC-DOMAIN"
+                | "WTFPL"
+                | "BSL-1.0"
+                | "POSTGRESQL"
+        )
+    }
+
+    /// Evaluates if a given license identifier (or composite expression) satisfies commercial use,
     /// modification, redistribution, and training rights with zero restrictions.
     pub fn is_permissive_compliant(license_id: &str) -> bool {
         let normalized = license_id.trim().to_uppercase();
+        if normalized.is_empty() {
+            return false;
+        }
 
         // Immediate rejection for forbidden non-commercial, no-derivatives, or copyleft constraints
         let forbidden_substrings = [
@@ -37,6 +90,9 @@ impl LicenseEvaluator {
             "AGPL",
             "LGPL",
             "CC-BY-SA",
+            "PROPRIETARY",
+            "UNKNOWN",
+            "COMMERCIAL-LIMITATION",
         ];
 
         for forbidden in &forbidden_substrings {
@@ -45,21 +101,34 @@ impl LicenseEvaluator {
             }
         }
 
-        // Permissive approved license designations
-        matches!(
-            normalized.as_str(),
-            "MIT"
-                | "APACHE-2.0"
-                | "APACHE 2.0"
-                | "BSD-2-CLAUSE"
-                | "BSD-3-CLAUSE"
-                | "CC-BY-4.0"
-                | "CC BY 4.0"
-                | "CC0-1.0"
-                | "CC0"
-                | "UNLICENSE"
-                | "ISC"
-        )
+        // Fast-path check for single approved license designation
+        if Self::is_single_license_permissive(&normalized) {
+            return true;
+        }
+
+        // Composite/multi-license evaluation: split on common conjunctions and delimiters
+        let mut canonical_expr = normalized.replace(['/', '|', ',', '\\'], ";");
+
+
+        while let Some(idx) = canonical_expr.find(" OR ") {
+            canonical_expr.replace_range(idx..idx + 4, ";");
+        }
+        while let Some(idx) = canonical_expr.find(" AND ") {
+            canonical_expr.replace_range(idx..idx + 5, ";");
+        }
+
+        let components: Vec<&str> = canonical_expr
+            .split(';')
+            .map(|part| part.trim())
+            .filter(|part| !part.is_empty())
+            .collect();
+
+        if components.is_empty() {
+            return false;
+        }
+
+        // Every constituent license in the composite expression must be permissive compliant
+        components.iter().all(|part| Self::is_single_license_permissive(part))
     }
 }
 
@@ -239,6 +308,110 @@ impl DownloaderService {
 
         Ok(record)
     }
+
+    /// Streams an asset over native HTTP/HTTPS with dynamic on-the-fly SHA-256 computation,
+    /// verifies license compliance, and registers the asset in the operational provenance ledger.
+    pub fn download_and_register_asset(
+        &mut self,
+        source_url: &str,
+        file_name: &str,
+        license_id: &str,
+        license_proof_url: &str,
+    ) -> Result<ProvenanceRecord, String> {
+        // Enforce commercial license rights
+        if !LicenseEvaluator::is_permissive_compliant(license_id) {
+            return Err(format!(
+                "License '{}' rejected: does not meet unconditional commercial rights and permissive gating requirements",
+                license_id
+            ));
+        }
+
+        let dest_path = self.target_dir.join(file_name);
+
+        // Dynamic repeat skipping: check if destination file already exists and matches ledger
+        if dest_path.exists() {
+            if let Ok(existing_sha) = Self::compute_dynamic_sha256(&dest_path) {
+                if self.ledger.has_verified_entry(file_name, &existing_sha) {
+                    if let Some(record) = self.ledger.records.get(file_name) {
+                        return Ok(record.clone());
+                    }
+                }
+            }
+        }
+
+        // Stream download into a temporary file
+        let temp_path = self.target_dir.join(format!("{}.download.tmp", file_name));
+        let mut temp_file = File::create(&temp_path)
+            .map_err(|e| format!("Failed to create temporary download file {:?}: {}", temp_path, e))?;
+
+        let response = ureq::get(source_url)
+            .call()
+            .map_err(|e| format!("HTTP request failed for {}: {}", source_url, e))?;
+
+        let mut reader = response.into_reader();
+        let mut hasher = Sha256::new();
+        let mut buffer = [0u8; 65536];
+        let mut total_bytes: u64 = 0;
+
+        loop {
+            let bytes_read = match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) => {
+                    let _ = fs::remove_file(&temp_path);
+                    return Err(format!("Error while streaming response from {}: {}", source_url, e));
+                }
+            };
+            hasher.update(&buffer[..bytes_read]);
+            if let Err(e) = temp_file.write_all(&buffer[..bytes_read]) {
+                let _ = fs::remove_file(&temp_path);
+                return Err(format!("Failed to write to temporary file {:?}: {}", temp_path, e));
+            }
+            total_bytes += bytes_read as u64;
+        }
+
+        if let Err(e) = temp_file.flush() {
+            let _ = fs::remove_file(&temp_path);
+            return Err(format!("Failed to flush temporary file {:?}: {}", temp_path, e));
+        }
+        drop(temp_file);
+
+        let dynamic_sha = hex_encode(hasher.finalize());
+
+        // Atomically replace destination file with verified downloaded content
+        if dest_path.exists() {
+            let _ = fs::remove_file(&dest_path);
+        }
+        if let Err(e) = fs::rename(&temp_path, &dest_path) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(format!(
+                "Failed to finalize downloaded file {:?} -> {:?}: {}",
+                temp_path, dest_path, e
+            ));
+        }
+
+        let epoch_now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let record = ProvenanceRecord {
+            source_url: source_url.to_string(),
+            license_proof_url: license_proof_url.to_string(),
+            license: license_id.to_string(),
+            sha256: dynamic_sha,
+            timestamp_epoch_secs: epoch_now,
+            file_size_bytes: total_bytes,
+            status: "verified".to_string(),
+        };
+
+        self.ledger.record_asset(file_name.to_string(), record.clone());
+        self.ledger
+            .save_to_file(&self.ledger_path)
+            .map_err(|e| format!("Failed to persist operational ledger: {}", e))?;
+
+        Ok(record)
+    }
 }
 
 #[cfg(test)]
@@ -251,6 +424,30 @@ mod tests {
         assert!(LicenseEvaluator::is_permissive_compliant("Apache-2.0"));
         assert!(LicenseEvaluator::is_permissive_compliant("BSD-3-Clause"));
         assert!(LicenseEvaluator::is_permissive_compliant("CC0-1.0"));
+    }
+
+    #[test]
+    fn test_composite_license_evaluation() {
+        // Multi-license with slash
+        assert!(LicenseEvaluator::is_permissive_compliant("mit / apache-2.0 / bsd-2-clause"));
+        assert!(LicenseEvaluator::is_permissive_compliant("mit / apache-2.0 / bsd-2-clause / unlicense / bsd-3-clause / cc0-1.0"));
+        // Multi-license with OR and parentheses
+        assert!(LicenseEvaluator::is_permissive_compliant("MIT OR Apache-2.0"));
+        assert!(LicenseEvaluator::is_permissive_compliant("(MIT OR Apache-2.0)"));
+        // Multi-license with AND
+        assert!(LicenseEvaluator::is_permissive_compliant("MIT AND BSD-3-Clause"));
+        // Permissive additional variants
+        assert!(LicenseEvaluator::is_permissive_compliant("0BSD"));
+        assert!(LicenseEvaluator::is_permissive_compliant("Zlib"));
+        assert!(LicenseEvaluator::is_permissive_compliant("ISC"));
+        assert!(LicenseEvaluator::is_permissive_compliant("BSD-3-Clause-Clear"));
+
+        // Reject forbidden licenses in composite
+        assert!(!LicenseEvaluator::is_permissive_compliant("MIT / GPL-3.0"));
+        assert!(!LicenseEvaluator::is_permissive_compliant("Apache-2.0 OR CC-BY-NC-4.0"));
+        assert!(!LicenseEvaluator::is_permissive_compliant("MIT AND LGPL-2.1"));
+        assert!(!LicenseEvaluator::is_permissive_compliant("Proprietary"));
+        assert!(!LicenseEvaluator::is_permissive_compliant(""));
     }
 
     #[test]
@@ -285,6 +482,70 @@ mod tests {
 
         let is_recorded = service.ledger().has_verified_entry("sample_dataset.jsonl", &record.sha256);
         assert!(is_recorded);
+
+        // Cleanup test directory
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_streaming_download_and_dynamic_sha256() {
+        use std::net::TcpListener;
+        use std::thread;
+
+        // Bind local loopback listener
+        let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind loopback test server");
+        let port = listener.local_addr().unwrap().port();
+
+        let payload = b"{\"sample_id\": 101, \"domain\": \"algorithms\"}\n";
+        let payload_len = payload.len();
+
+        let server_thread = thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut req_buf = [0u8; 1024];
+                let _ = stream.read(&mut req_buf);
+                let response_headers = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    payload_len
+                );
+                let _ = stream.write_all(response_headers.as_bytes());
+                let _ = stream.write_all(payload);
+                let _ = stream.flush();
+            }
+        });
+
+        let temp_dir = std::env::temp_dir().join(format!("tara_dl_stream_test_{}", std::process::id()));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let mut service = DownloaderService::new(Some(temp_dir.clone())).unwrap();
+        let test_url = format!("http://127.0.0.1:{}/dataset_test.jsonl", port);
+        let result = service.download_and_register_asset(
+            &test_url,
+            "dataset_test.jsonl",
+            "MIT / Apache-2.0",
+            "http://example.com/license",
+        );
+
+        server_thread.join().expect("Server thread join failed");
+
+        assert!(result.is_ok(), "Streaming download failed: {:?}", result.err());
+        let record = result.unwrap();
+        assert_eq!(record.status, "verified");
+        assert_eq!(record.file_size_bytes, payload_len as u64);
+        assert!(!record.sha256.is_empty());
+
+        // Verify file on disk matches downloaded payload
+        let downloaded_bytes = fs::read(temp_dir.join("dataset_test.jsonl")).unwrap();
+        assert_eq!(downloaded_bytes, payload);
+
+        // Verify repeat skipping returns cached entry without re-downloading
+        let repeat_result = service.download_and_register_asset(
+            &test_url,
+            "dataset_test.jsonl",
+            "MIT / Apache-2.0",
+            "http://example.com/license",
+        );
+        assert!(repeat_result.is_ok());
+        assert_eq!(repeat_result.unwrap().sha256, record.sha256);
 
         // Cleanup test directory
         let _ = fs::remove_dir_all(&temp_dir);

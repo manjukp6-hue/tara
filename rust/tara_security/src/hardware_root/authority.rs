@@ -62,6 +62,18 @@ impl Default for AuthorityManager {
     }
 }
 
+fn safe_fallback_principal(name: &str) -> PrincipalId {
+    if let Ok(pid) = PrincipalId::new(name) {
+        pid
+    } else if let Ok(pid) = PrincipalId::new("creator_root") {
+        pid
+    } else if let Ok(pid) = serde_json::from_str(r#"{"namespace":"default","name":"creator_root"}"#) {
+        pid
+    } else {
+        unreachable!("valid principal identifier")
+    }
+}
+
 impl AuthorityManager {
     pub fn new() -> Self {
         Self {
@@ -86,8 +98,7 @@ impl AuthorityManager {
                         Some(AuthorityRecord {
                             generation: AuthorityGeneration::INITIAL,
                             root_public_key_hex: String::new(),
-                            root_principal_id: PrincipalId::new("creator_corrupted_state")
-                                .unwrap_or_else(|_| PrincipalId::new("creator_root").unwrap()),
+                            root_principal_id: safe_fallback_principal("creator_corrupted_state"),
                             created_epoch_secs: 0,
                             rotated_epoch_secs: None,
                             recovery_verifier_hash: String::new(),
@@ -106,8 +117,7 @@ impl AuthorityManager {
                     Some(AuthorityRecord {
                         generation: AuthorityGeneration::INITIAL,
                         root_public_key_hex: String::new(),
-                        root_principal_id: PrincipalId::new("creator_corrupted_state")
-                            .unwrap_or_else(|_| PrincipalId::new("creator_root").unwrap()),
+                        root_principal_id: safe_fallback_principal("creator_corrupted_state"),
                         created_epoch_secs: 0,
                         rotated_epoch_secs: None,
                         recovery_verifier_hash: String::new(),
@@ -138,7 +148,7 @@ impl AuthorityManager {
                 Some(AuthorityRecord {
                     generation: AuthorityGeneration::INITIAL,
                     root_public_key_hex: String::new(),
-                    root_principal_id: PrincipalId::new("creator_missing_record").unwrap_or_else(|_| PrincipalId::new("creator_root").unwrap()),
+                    root_principal_id: safe_fallback_principal("creator_missing_record"),
                     created_epoch_secs: 0,
                     rotated_epoch_secs: None,
                     recovery_verifier_hash: String::new(),

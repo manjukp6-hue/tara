@@ -1,5 +1,5 @@
 //! Complete TARA server: HTTP routing, authentication, rate limiting, and request dispatch.
-//! Ports Python server.py fully using tiny_http.
+//! Native Rust HTTP API serving, session routing, and dynamic security policy enforcement.
 
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
@@ -683,11 +683,20 @@ fn url_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn read_body(req: &mut Request) -> Result<Vec<u8>, String> {
-    const MAX_BODY_BYTES: usize = 1_048_576;
+/// Maximum allowable request body size in bytes.
+/// Defaults to 16 MiB, dynamically configurable via `TARA_MAX_BODY_BYTES`.
+pub fn max_request_body_bytes() -> usize {
+    std::env::var("TARA_MAX_BODY_BYTES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or(16 * 1024 * 1024)
+}
+
+fn read_body(req: &mut Request, max_body_bytes: usize) -> Result<Vec<u8>, String> {
     if let Some(len) = req.body_length() {
-        if len > MAX_BODY_BYTES {
-            return Err(format!("Request body exceeds {} bytes", MAX_BODY_BYTES));
+        if len > max_body_bytes {
+            return Err(format!("Request body exceeds {} bytes", max_body_bytes));
         }
         let mut buf = vec![0u8; len];
         req.as_reader()
@@ -697,11 +706,11 @@ fn read_body(req: &mut Request) -> Result<Vec<u8>, String> {
     } else {
         let mut buf = Vec::new();
         req.as_reader()
-            .take((MAX_BODY_BYTES + 1) as u64)
+            .take((max_body_bytes + 1) as u64)
             .read_to_end(&mut buf)
             .map_err(|e| format!("Failed to read request body: {e}"))?;
-        if buf.len() > MAX_BODY_BYTES {
-            return Err(format!("Request body exceeds {} bytes", MAX_BODY_BYTES));
+        if buf.len() > max_body_bytes {
+            return Err(format!("Request body exceeds {} bytes", max_body_bytes));
         }
         Ok(buf)
     }
@@ -727,10 +736,71 @@ fn html_response(status: u16, body: &str) -> Response<Cursor<Vec<u8>>> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Main server dispatch loop
+// Main server dispatch loop & multi-threaded worker pool
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Run the TARA HTTP server forever.
+/// Determines whether an incoming request is a high-priority operational request
+/// (e.g., health check, ping, preflight, status) that must never be blocked by long-running neural generations.
+pub fn is_priority_request(method: &str, url: &str) -> bool {
+    let path = url.split('?').next().unwrap_or("/");
+    let path = path.trim_end_matches('/');
+    let path = if path.is_empty() { "/" } else { path };
+    method == "OPTIONS"
+        || matches!(
+            path,
+            "/" | "/health"
+                | "/ping"
+                | "/api/v1/system/health"
+                | "/api/v1/health"
+                | "/api/v1/status"
+                | "/api/v1/system/status"
+        )
+}
+
+/// Runtime configuration options for the TARA HTTP server.
+#[derive(Debug, Clone)]
+pub struct ServerOptions {
+    pub host: String,
+    pub port: u16,
+    pub max_body_bytes: usize,
+    pub worker_threads: usize,
+    pub queue_capacity: usize,
+}
+
+impl Default for ServerOptions {
+    fn default() -> Self {
+        Self::new("127.0.0.1", 8765)
+    }
+}
+
+impl ServerOptions {
+    pub fn new(host: &str, port: u16) -> Self {
+        let workers = std::env::var("TARA_SERVER_WORKERS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&c| c > 0)
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map(|n| (n.get() * 2).clamp(4, 64))
+                    .unwrap_or(8)
+            });
+        let queue_cap = std::env::var("TARA_SERVER_QUEUE_CAPACITY")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&c| c > 0)
+            .unwrap_or_else(|| workers.saturating_mul(16).max(64));
+
+        Self {
+            host: host.to_string(),
+            port,
+            max_body_bytes: max_request_body_bytes(),
+            worker_threads: workers,
+            queue_capacity: queue_cap,
+        }
+    }
+}
+
+/// Run the TARA HTTP server forever using default dynamic ServerOptions.
 pub fn run_server(
     host: &str,
     port: u16,
@@ -740,565 +810,683 @@ pub fn run_server(
     api_keys: Arc<HashMap<String, String>>,
     web_sessions: Arc<WebSessionStore>,
 ) {
-    let addr = format!("{}:{}", host, port);
+    run_server_with_options(
+        brain,
+        router,
+        rate_limiter,
+        api_keys,
+        web_sessions,
+        ServerOptions::new(host, port),
+    );
+}
+
+/// Run the TARA HTTP server with bounded multi-threading and dynamic options.
+pub fn run_server_with_options(
+    brain: Arc<crate::brain::TaraBrain>,
+    router: Arc<ApiRouter>,
+    rate_limiter: Arc<SlidingWindowRateLimiter>,
+    api_keys: Arc<HashMap<String, String>>,
+    web_sessions: Arc<WebSessionStore>,
+    options: ServerOptions,
+) {
+    let addr = format!("{}:{}", options.host, options.port);
     let server = match Server::http(&addr) {
         Ok(s) => s,
         Err(e) => {
-            println!("\n[TARA Server] =========================================");
+            eprintln!("\n[TARA Server] =========================================");
             if std::net::TcpStream::connect(&addr).is_ok() {
-                println!(
+                eprintln!(
                     "[TARA Server] TARA server is ALREADY ACTIVE and running on http://{}",
                     addr
                 );
-                println!(
+                eprintln!(
                     "[TARA Server] Existing instance is healthy. No duplicate process needed."
                 );
             } else {
-                println!(
+                eprintln!(
                     "[TARA Server] ERROR: Could not bind to http://{}: {}",
                     addr, e
                 );
-                println!("[TARA Server] Another application may be using this port.");
+                eprintln!("[TARA Server] Another application may be using this port.");
             }
-            println!("[TARA Server] =========================================");
-            #[cfg(target_os = "windows")]
-            {
-                println!("\nPress Enter to exit this window...");
-                let mut buf = String::new();
-                let _ = std::io::stdin().read_line(&mut buf);
-            }
+            eprintln!("[TARA Server] =========================================");
             return;
         }
     };
-    println!("[TARA Server] Running on http://{}", addr);
+    println!(
+        "[TARA Server] Running on http://{} with {} worker threads (queue capacity: {})",
+        addr, options.worker_threads, options.queue_capacity
+    );
 
-    for mut request in server.incoming_requests() {
-        let brain_ref = brain.clone();
-        let router_ref = router.clone();
-        let rl_ref = rate_limiter.clone();
-        let api_keys_ref = api_keys.clone();
-        let ws_ref = web_sessions.clone();
+    // Multi-threaded bounded worker pool
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Request>(options.queue_capacity);
+    let rx = Arc::new(Mutex::new(rx));
 
-        // Rate limit
-        let client_ip = request
-            .remote_addr()
-            .map(|a| a.ip().to_string())
-            .unwrap_or_else(|| "127.0.0.1".to_string());
+    for worker_id in 0..options.worker_threads {
+        let rx_clone = Arc::clone(&rx);
+        let brain_clone = Arc::clone(&brain);
+        let router_clone = Arc::clone(&router);
+        let rl_clone = Arc::clone(&rate_limiter);
+        let api_keys_clone = Arc::clone(&api_keys);
+        let ws_clone = Arc::clone(&web_sessions);
+        let max_body = options.max_body_bytes;
 
-        let (allowed, retry_after) = rl_ref.is_allowed(&client_ip);
-        if !allowed {
-            let resp = json_response(
-                429,
-                &json!({
-                    "status": "ERROR",
-                    "error": "Too Many Requests: Rate limit exceeded.",
-                    "retry_after": retry_after
-                }),
-            );
-            let _ = request.respond(resp);
-            continue;
-        }
-
-        let method = request.method().as_str().to_uppercase();
-        let full_url = request.url().to_string();
-        if full_url.len() > MAX_URL_LENGTH {
-            let resp = json_response(
-                414,
-                &json!({
-                    "status": "ERROR",
-                    "error": "URI Too Long: URL exceeds maximum allowed length"
-                }),
-            );
-            let _ = request.respond(resp);
-            continue;
-        }
-
-        let path = full_url.split('?').next().unwrap_or("/").to_string();
-        let path = path.trim_end_matches('/');
-        let path = if path.is_empty() { "/" } else { path };
-
-        let headers = parse_headers(&request);
-        let origin = headers.get("origin").cloned().unwrap_or_default();
-
-        // CORS preflight
-        if method == "OPTIONS" {
-            let mut resp = Response::empty(204);
-            for h in cors_headers(&origin) {
-                resp.add_header(h);
-            }
-            let _ = request.respond(resp);
-            continue;
-        }
-
-        // UI routes: issue or inherit authenticated web session cookie (no query string token leakage)
-        if method == "GET" && (path == "/" || path == "/chat" || path == "/index.html") {
-            let auth_token = headers
-                .get("authorization")
-                .and_then(|h| {
-                    h.strip_prefix("Bearer ")
-                        .or_else(|| h.strip_prefix("bearer "))
-                })
-                .map(|s| s.trim().to_string());
-
-            let creator_cookie_token = headers.get("cookie").and_then(|c| {
-                c.split(';')
-                    .find(|s| {
-                        let t = s.trim();
-                        t.starts_with("tara_creator_session=") || t.starts_with("tara_session=")
-                    })
-                    .and_then(|s| s.trim().split('=').nth(1).map(|v| v.to_string()))
-            });
-
-            let candidate_creator_token = auth_token.or(creator_cookie_token);
-
-            let token_opt = if let Some(cand) = candidate_creator_token {
-                if let Some(sess) = brain_ref.creator_auth_service.verify_session(&cand) {
-                    let creator_id = sess
-                        .get("creator_id")
-                        .cloned()
-                        .unwrap_or_else(|| "ROOT_OPERATOR".to_string());
-                    ws_ref.register(&cand, &format!("creator:{}", creator_id));
-                    Some(cand)
-                } else {
-                    None
-                }
-            } else {
-                headers
-                    .get("cookie")
-                    .and_then(|c| {
-                        c.split(';')
-                            .find(|s| s.trim().starts_with("tara_web_session="))
-                            .map(|s| s.trim()[17..].to_string())
-                    })
-                    .filter(|existing_cookie| ws_ref.verify(existing_cookie).is_some())
-            };
-
-            let token = token_opt.unwrap_or_default();
-            let html = crate::routes::render_chat_ui(&token);
-            let mut resp = html_response(200, &html);
-            if !token.is_empty() {
-                let is_secure = headers
-                    .get("x-forwarded-proto")
-                    .map(|v| v == "https")
-                    .unwrap_or(false);
-                let secure_flag = if is_secure { "; Secure" } else { "" };
-                if let Ok(cookie_hdr) = Header::from_bytes(
-                    "Set-Cookie",
-                    format!(
-                        "tara_web_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age=3600{}",
-                        token, secure_flag
-                    ),
-                ) {
-                    resp.add_header(cookie_hdr);
-                }
-            }
-            for h in cors_headers(&origin) {
-                resp.add_header(h);
-            }
-            let _ = request.respond(resp);
-            continue;
-        }
-
-        // Preserve endpoint-list resource with mandatory authentication.
-        if method == "GET" && path == "/endpoints.txt" {
-            if let Err(e) = authenticate_request(
-                &headers,
-                &api_keys_ref,
-                &brain_ref,
-                &ws_ref,
-                &method,
-                path,
-                &client_ip,
-            ) {
-                let resp = json_response(401, &json!({"status":"ERROR","error":e}));
-                let _ = request.respond(resp);
-                continue;
-            }
-            let repo_root = tara_engine::find_workspace_root()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| ".".into());
-            let endpoint_path = std::path::Path::new(&repo_root).join("endpoints.txt");
-            let response = match std::fs::read(&endpoint_path) {
-                Ok(contents) => Response::from_data(contents)
-                    .with_status_code(200)
-                    .with_header(
-                        Header::from_bytes("Content-Type", "text/plain; charset=utf-8").unwrap(),
-                    )
-                    .with_header(Header::from_bytes("X-Content-Type-Options", "nosniff").unwrap()),
-                Err(_) => json_response(
-                    404,
-                    &json!({"status":"NOT_FOUND","error":"Endpoint list is unavailable"}),
-                ),
-            };
-            let _ = request.respond(response);
-            continue;
-        }
-
-        // Route matching
-        match router_ref.match_route(&method, path) {
-            None => {
-                let status = if router_ref.has_path(path) {
-                    405u16
-                } else {
-                    404u16
-                };
-                let err_msg = if status == 405 {
-                    format!("Method {} not allowed for '{}'", method, path)
-                } else {
-                    format!("Endpoint '{}' not found", path)
-                };
-                let resp = json_response(status, &json!({"status":"ERROR","error":err_msg}));
-                let _ = request.respond(resp);
-            }
-            Some((handler, required_auth, required_role)) => {
-                let actor = if required_auth {
-                    match authenticate_request(
-                        &headers,
-                        &api_keys_ref,
-                        &brain_ref,
-                        &ws_ref,
-                        &method,
-                        path,
-                        &client_ip,
-                    ) {
-                        Ok(a) => a,
-                        Err(e) => {
-                            let resp = json_response(401, &json!({"status":"ERROR","error":e}));
-                            let _ = request.respond(resp);
-                            continue;
-                        }
-                    }
-                } else {
-                    "anonymous".to_string()
-                };
-
-                // ─────────────────────────────────────────────────────────────
-                // Centralized Dynamic Policy Evaluation (Pillar 2: Zero-Trust)
-                // ─────────────────────────────────────────────────────────────
-                let now_epoch = crate::now_secs();
-                let current_gen = brain_ref
-                    .authority_manager
-                    .current_generation()
-                    .unwrap_or(tara_security::primitives::AuthorityGeneration::INITIAL);
-
-                let is_creator_actor = actor.starts_with("creator:") || actor == "ROOT_OPERATOR";
-                let (role_obj, assurance_obj) = if is_creator_actor {
-                    (
-                        tara_security::primitives::PrincipalRole::creator(),
-                        tara_security::primitives::AssuranceLevel::CREATOR_ROOT,
-                    )
-                } else if actor.starts_with("api_key:admin")
-                    || actor == "admin"
-                    || actor == "system"
-                    || actor == "root"
-                    || actor.starts_with("api_key:ROOT_OPERATOR")
-                    || actor.starts_with("api_key:operator")
-                    || actor.starts_with("api_key:creator")
-                {
-                    (
-                        tara_security::primitives::PrincipalRole::operator(),
-                        tara_security::primitives::AssuranceLevel::STANDARD_TOKEN,
-                    )
-                } else if actor.starts_with("worker:") || actor.starts_with("tok_") {
-                    (
-                        tara_security::primitives::PrincipalRole::worker(),
-                        tara_security::primitives::AssuranceLevel::STANDARD_TOKEN,
-                    )
-                } else if actor == "anonymous" {
-                    (
-                        tara_security::primitives::PrincipalRole::new("anonymous").unwrap(),
-                        tara_security::primitives::AssuranceLevel::ANONYMOUS,
-                    )
-                } else {
-                    (
-                        tara_security::primitives::PrincipalRole::user(),
-                        tara_security::primitives::AssuranceLevel::STANDARD_TOKEN,
-                    )
-                };
-
-                let cookie_token = headers.get("cookie").and_then(|c| {
-                    c.split(';')
-                        .find(|s| s.trim().starts_with("tara_web_session="))
-                        .and_then(|s| s.trim().strip_prefix("tara_web_session="))
-                        .map(|s| s.trim().to_string())
-                });
-
-                let session_token = if actor.starts_with("api_key:") {
-                    headers
-                        .get("x-session-id")
-                        .or_else(|| headers.get("x-session-token"))
-                        .cloned()
-                } else {
-                    headers
-                        .get("authorization")
-                        .and_then(|h| {
-                            h.strip_prefix("Bearer ")
-                                .or_else(|| h.strip_prefix("bearer "))
-                        })
-                        .map(|s| s.trim().to_string())
-                        .or_else(|| cookie_token.clone())
-                };
-
-                let safe_actor_id = actor
-                    .chars()
-                    .map(|c| {
-                        if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-                            c
-                        } else {
-                            '_'
-                        }
-                    })
-                    .collect::<String>();
-                let pid = if let Some((ns, nm)) = actor.split_once(':') {
-                    let safe_ns = ns
-                        .chars()
-                        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
-                        .collect::<String>();
-                    let safe_nm = nm
-                        .chars()
-                        .filter(|c| {
-                            c.is_ascii_alphanumeric()
-                                || *c == '_'
-                                || *c == '-'
-                                || *c == '@'
-                                || *c == '.'
-                        })
-                        .collect::<String>();
-                    tara_security::primitives::PrincipalId::with_namespace(&safe_ns, &safe_nm)
-                        .unwrap_or_else(|_| {
-                            tara_security::primitives::PrincipalId::new(format!(
-                                "actor_{}",
-                                safe_actor_id
-                            ))
-                            .unwrap_or_else(|_| {
-                                tara_security::primitives::PrincipalId::new("actor_fallback")
-                                    .unwrap()
-                            })
-                        })
-                } else {
-                    tara_security::primitives::PrincipalId::new(format!("actor_{}", safe_actor_id))
-                        .unwrap_or_else(|_| {
-                            tara_security::primitives::PrincipalId::new("actor_fallback").unwrap()
-                        })
-                };
-
-                let principal = if is_creator_actor {
-                    let tok = session_token.as_deref().unwrap_or("");
-                    match brain_ref
-                        .creator_auth_service
-                        .mint_verified_creator_principal(tok, current_gen)
-                    {
-                        Ok(p) => {
-                            let _ = brain_ref
-                                .centralized_session_manager
-                                .ensure_session_registered(tok, &p, current_gen, now_epoch);
-                            p
-                        }
-                        Err(e) => {
-                            let resp = json_response(
-                                401,
-                                &json!({
-                                    "status": "UNAUTHORIZED",
-                                    "error": format!("Creator session verification failed: {}", e)
-                                }),
-                            );
-                            let _ = request.respond(resp);
-                            continue;
-                        }
-                    }
-                } else {
-                    let mut principal_claims = HashMap::new();
-                    if let Some(ref s_id) = session_token {
-                        principal_claims.insert(
-                            "session_id".to_string(),
-                            serde_json::Value::String(s_id.clone()),
-                        );
-                    }
-                    match tara_security::primitives::VerifiedPrincipal::construct_verified(
-                        pid,
-                        role_obj,
-                        assurance_obj,
-                        None,
-                        current_gen,
-                        now_epoch,
-                        principal_claims,
-                    ) {
-                        Ok(p) => {
-                            if let Some(ref s_id) = session_token {
-                                let _ = brain_ref
-                                    .centralized_session_manager
-                                    .ensure_session_registered(s_id, &p, current_gen, now_epoch);
-                            }
-                            p
-                        }
-                        Err(e) => {
-                            let resp = json_response(
-                                403,
-                                &json!({
-                                    "status": "FORBIDDEN",
-                                    "error": format!("Security identity construction rejected: {}", e)
-                                }),
-                            );
-                            let _ = request.respond(resp);
-                            continue;
-                        }
-                    }
-                };
-
-                // Role check
-                if let Some(ref req_role) = required_role {
-                    let req_lower = req_role.to_lowercase();
-                    let has_role = match req_lower.as_str() {
-                        "admin" | "operator" => {
-                            let allowed_actors =
-                                ["admin", "root", "system", "ROOT_OPERATOR", "OPERATOR_ROOT"];
-                            allowed_actors.contains(&actor.as_str())
-                                || actor.starts_with("creator:")
-                                || actor == "ROOT_OPERATOR"
-                                || actor.starts_with("api_key:admin")
-                                || actor.starts_with("api_key:ROOT_OPERATOR")
-                                || actor.starts_with("api_key:operator")
-                        }
-                        "creator" => actor.starts_with("creator:") || actor == "ROOT_OPERATOR",
-                        "worker" => {
-                            actor.starts_with("worker:")
-                                || actor == "system"
-                                || actor.starts_with("creator:")
-                                || actor == "ROOT_OPERATOR"
-                        }
-                        _ => {
-                            actor.starts_with("creator:")
-                                || actor == "ROOT_OPERATOR"
-                                || actor.starts_with("api_key:admin")
-                                || actor.starts_with("api_key:ROOT_OPERATOR")
-                                || actor == "admin"
+        let thread_name = format!("tara-http-worker-{worker_id}");
+        if let Err(e) = std::thread::Builder::new()
+            .name(thread_name)
+            .spawn(move || {
+                loop {
+                    let req = {
+                        let lock = match rx_clone.lock() {
+                            Ok(guard) => guard,
+                            Err(_) => break,
+                        };
+                        match lock.recv() {
+                            Ok(req) => req,
+                            Err(_) => break, // Channel closed
                         }
                     };
-                    if !has_role {
+                    process_single_request(
+                        req,
+                        &brain_clone,
+                        &router_clone,
+                        &rl_clone,
+                        &api_keys_clone,
+                        &ws_clone,
+                        max_body,
+                    );
+                }
+            })
+        {
+            eprintln!("[TARA Server] Warning: Failed to spawn HTTP worker thread {worker_id}: {e}");
+        }
+    }
+
+    for request in server.incoming_requests() {
+        let method = request.method().as_str().to_uppercase();
+        let full_url = request.url().to_string();
+
+        if is_priority_request(&method, &full_url) {
+            // Priority requests (health checks, ping, preflight): enqueue if room,
+            // or immediately dispatch via dedicated fast thread to ensure zero blocking
+            match tx.try_send(request) {
+                Ok(()) => {}
+                Err(std::sync::mpsc::TrySendError::Full(req)) => {
+                    let brain_clone = Arc::clone(&brain);
+                    let router_clone = Arc::clone(&router);
+                    let rl_clone = Arc::clone(&rate_limiter);
+                    let api_keys_clone = Arc::clone(&api_keys);
+                    let ws_clone = Arc::clone(&web_sessions);
+                    let max_body = options.max_body_bytes;
+                    std::thread::spawn(move || {
+                        process_single_request(
+                            req,
+                            &brain_clone,
+                            &router_clone,
+                            &rl_clone,
+                            &api_keys_clone,
+                            &ws_clone,
+                            max_body,
+                        );
+                    });
+                }
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
+            }
+        } else {
+            // General requests: try enqueuing into the bounded worker channel
+            match tx.try_send(request) {
+                Ok(()) => {}
+                Err(std::sync::mpsc::TrySendError::Full(req)) => {
+                    let resp = json_response(
+                        503,
+                        &json!({
+                            "status": "ERROR",
+                            "error": "ServerBusy: Worker pool request queue is currently saturated. Please retry shortly."
+                        }),
+                    );
+                    let _ = req.respond(resp);
+                }
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
+            }
+        }
+    }
+}
+
+fn process_single_request(
+    mut request: Request,
+    brain: &Arc<crate::brain::TaraBrain>,
+    router: &Arc<ApiRouter>,
+    rate_limiter: &Arc<SlidingWindowRateLimiter>,
+    api_keys: &Arc<HashMap<String, String>>,
+    web_sessions: &Arc<WebSessionStore>,
+    max_body_bytes: usize,
+) {
+    let brain_ref = brain;
+    let router_ref = router;
+    let rl_ref = rate_limiter;
+    let api_keys_ref = api_keys;
+    let ws_ref = web_sessions;
+
+    // Rate limit
+    let client_ip = request
+        .remote_addr()
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+
+    let (allowed, retry_after) = rl_ref.is_allowed(&client_ip);
+    if !allowed {
+        let resp = json_response(
+            429,
+            &json!({
+                "status": "ERROR",
+                "error": "Too Many Requests: Rate limit exceeded.",
+                "retry_after": retry_after
+            }),
+        );
+        let _ = request.respond(resp);
+        return;
+    }
+
+    let method = request.method().as_str().to_uppercase();
+    let full_url = request.url().to_string();
+    if full_url.len() > MAX_URL_LENGTH {
+        let resp = json_response(
+            414,
+            &json!({
+                "status": "ERROR",
+                "error": "URI Too Long: URL exceeds maximum allowed length"
+            }),
+        );
+        let _ = request.respond(resp);
+        return;
+    }
+
+    let path = full_url.split('?').next().unwrap_or("/").to_string();
+    let path = path.trim_end_matches('/');
+    let path = if path.is_empty() { "/" } else { path };
+
+    let headers = parse_headers(&request);
+    let origin = headers.get("origin").cloned().unwrap_or_default();
+
+    // CORS preflight
+    if method == "OPTIONS" {
+        let mut resp = Response::empty(204);
+        for h in cors_headers(&origin) {
+            resp.add_header(h);
+        }
+        let _ = request.respond(resp);
+        return;
+    }
+
+    // UI routes: issue or inherit authenticated web session cookie (no query string token leakage)
+    if method == "GET" && (path == "/" || path == "/chat" || path == "/index.html") {
+        let auth_token = headers
+            .get("authorization")
+            .and_then(|h| {
+                h.strip_prefix("Bearer ")
+                    .or_else(|| h.strip_prefix("bearer "))
+            })
+            .map(|s| s.trim().to_string());
+
+        let creator_cookie_token = headers.get("cookie").and_then(|c| {
+            c.split(';')
+                .find(|s| {
+                    let t = s.trim();
+                    t.starts_with("tara_creator_session=") || t.starts_with("tara_session=")
+                })
+                .and_then(|s| s.trim().split('=').nth(1).map(|v| v.to_string()))
+        });
+
+        let candidate_creator_token = auth_token.or(creator_cookie_token);
+
+        let token_opt = if let Some(cand) = candidate_creator_token {
+            if let Some(sess) = brain_ref.creator_auth_service.verify_session(&cand) {
+                let creator_id = sess
+                    .get("creator_id")
+                    .cloned()
+                    .unwrap_or_else(|| "ROOT_OPERATOR".to_string());
+                ws_ref.register(&cand, &format!("creator:{}", creator_id));
+                Some(cand)
+            } else {
+                None
+            }
+        } else {
+            headers
+                .get("cookie")
+                .and_then(|c| {
+                    c.split(';')
+                        .find(|s| s.trim().starts_with("tara_web_session="))
+                        .map(|s| s.trim()[17..].to_string())
+                })
+                .filter(|existing_cookie| ws_ref.verify(existing_cookie).is_some())
+        };
+
+        let token = token_opt.unwrap_or_default();
+        let html = crate::routes::render_chat_ui(&token);
+        let mut resp = html_response(200, &html);
+        if !token.is_empty() {
+            let is_secure = headers
+                .get("x-forwarded-proto")
+                .map(|v| v == "https")
+                .unwrap_or(false);
+            let secure_flag = if is_secure { "; Secure" } else { "" };
+            if let Ok(cookie_hdr) = Header::from_bytes(
+                "Set-Cookie",
+                format!(
+                    "tara_web_session={}; Path=/; HttpOnly; SameSite=Strict; Max-Age=3600{}",
+                    token, secure_flag
+                ),
+            ) {
+                resp.add_header(cookie_hdr);
+            }
+        }
+        for h in cors_headers(&origin) {
+            resp.add_header(h);
+        }
+        let _ = request.respond(resp);
+        return;
+    }
+
+    // Preserve endpoint-list resource with mandatory authentication.
+    if method == "GET" && path == "/endpoints.txt" {
+        if let Err(e) = authenticate_request(
+            &headers,
+            api_keys_ref,
+            brain_ref,
+            ws_ref,
+            &method,
+            path,
+            &client_ip,
+        ) {
+            let resp = json_response(401, &json!({"status":"ERROR","error":e}));
+            let _ = request.respond(resp);
+            return;
+        }
+        let repo_root = tara_engine::find_workspace_root()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".into());
+        let endpoint_path = std::path::Path::new(&repo_root).join("endpoints.txt");
+        let response = match std::fs::read(&endpoint_path) {
+            Ok(contents) => Response::from_data(contents)
+                .with_status_code(200)
+                .with_header(
+                    Header::from_bytes("Content-Type", "text/plain; charset=utf-8").unwrap(),
+                )
+                .with_header(Header::from_bytes("X-Content-Type-Options", "nosniff").unwrap()),
+            Err(_) => json_response(
+                404,
+                &json!({"status":"NOT_FOUND","error":"Endpoint list is unavailable"}),
+            ),
+        };
+        let _ = request.respond(response);
+        return;
+    }
+
+    // Route matching
+    match router_ref.match_route(&method, path) {
+        None => {
+            let status = if router_ref.has_path(path) {
+                405u16
+            } else {
+                404u16
+            };
+            let err_msg = if status == 405 {
+                format!("Method {} not allowed for '{}'", method, path)
+            } else {
+                format!("Endpoint '{}' not found", path)
+            };
+            let resp = json_response(status, &json!({"status":"ERROR","error":err_msg}));
+            let _ = request.respond(resp);
+        }
+        Some((handler, required_auth, required_role)) => {
+            let actor = if required_auth {
+                match authenticate_request(
+                    &headers,
+                    api_keys_ref,
+                    brain_ref,
+                    ws_ref,
+                    &method,
+                    path,
+                    &client_ip,
+                ) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        let resp = json_response(401, &json!({"status":"ERROR","error":e}));
+                        let _ = request.respond(resp);
+                        return;
+                    }
+                }
+            } else {
+                "anonymous".to_string()
+            };
+
+            // Centralized Dynamic Policy Evaluation (Zero-Trust)
+            let now_epoch = crate::now_secs();
+            let current_gen = brain_ref
+                .authority_manager
+                .current_generation()
+                .unwrap_or(tara_security::primitives::AuthorityGeneration::INITIAL);
+
+            let is_creator_actor = actor.starts_with("creator:") || actor == "ROOT_OPERATOR";
+            let (role_obj, assurance_obj) = if is_creator_actor {
+                (
+                    tara_security::primitives::PrincipalRole::creator(),
+                    tara_security::primitives::AssuranceLevel::CREATOR_ROOT,
+                )
+            } else if actor.starts_with("api_key:admin")
+                || actor == "admin"
+                || actor == "system"
+                || actor == "root"
+                || actor.starts_with("api_key:ROOT_OPERATOR")
+                || actor.starts_with("api_key:operator")
+                || actor.starts_with("api_key:creator")
+            {
+                (
+                    tara_security::primitives::PrincipalRole::operator(),
+                    tara_security::primitives::AssuranceLevel::STANDARD_TOKEN,
+                )
+            } else if actor.starts_with("worker:") || actor.starts_with("tok_") {
+                (
+                    tara_security::primitives::PrincipalRole::worker(),
+                    tara_security::primitives::AssuranceLevel::STANDARD_TOKEN,
+                )
+            } else if actor == "anonymous" {
+                (
+                    tara_security::primitives::PrincipalRole::new("anonymous").unwrap(),
+                    tara_security::primitives::AssuranceLevel::ANONYMOUS,
+                )
+            } else {
+                (
+                    tara_security::primitives::PrincipalRole::user(),
+                    tara_security::primitives::AssuranceLevel::STANDARD_TOKEN,
+                )
+            };
+
+            let cookie_token = headers.get("cookie").and_then(|c| {
+                c.split(';')
+                    .find(|s| s.trim().starts_with("tara_web_session="))
+                    .and_then(|s| s.trim().strip_prefix("tara_web_session="))
+                    .map(|s| s.trim().to_string())
+            });
+
+            let session_token = if actor.starts_with("api_key:") {
+                headers
+                    .get("x-session-id")
+                    .or_else(|| headers.get("x-session-token"))
+                    .cloned()
+            } else {
+                headers
+                    .get("authorization")
+                    .and_then(|h| {
+                        h.strip_prefix("Bearer ")
+                            .or_else(|| h.strip_prefix("bearer "))
+                    })
+                    .map(|s| s.trim().to_string())
+                    .or_else(|| cookie_token.clone())
+            };
+
+            let safe_actor_id = actor
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect::<String>();
+            let pid = if let Some((ns, nm)) = actor.split_once(':') {
+                let safe_ns = ns
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+                    .collect::<String>();
+                let safe_nm = nm
+                    .chars()
+                    .filter(|c| {
+                        c.is_ascii_alphanumeric()
+                            || *c == '_'
+                            || *c == '-'
+                            || *c == '@'
+                            || *c == '.'
+                    })
+                    .collect::<String>();
+                tara_security::primitives::PrincipalId::with_namespace(&safe_ns, &safe_nm)
+                    .unwrap_or_else(|_| {
+                        tara_security::primitives::PrincipalId::new(format!(
+                            "actor_{}",
+                            safe_actor_id
+                        ))
+                        .unwrap_or_else(|_| {
+                            tara_security::primitives::PrincipalId::new("actor_fallback")
+                                .unwrap()
+                        })
+                    })
+            } else {
+                tara_security::primitives::PrincipalId::new(format!("actor_{}", safe_actor_id))
+                    .unwrap_or_else(|_| {
+                        tara_security::primitives::PrincipalId::new("actor_fallback").unwrap()
+                    })
+            };
+
+            let principal = if is_creator_actor {
+                let tok = session_token.as_deref().unwrap_or("");
+                match brain_ref
+                    .creator_auth_service
+                    .mint_verified_creator_principal(tok, current_gen)
+                {
+                    Ok(p) => {
+                        let _ = brain_ref
+                            .centralized_session_manager
+                            .ensure_session_registered(tok, &p, current_gen, now_epoch);
+                        p
+                    }
+                    Err(e) => {
                         let resp = json_response(
-                            403,
+                            401,
                             &json!({
-                                "status": "ERROR",
-                                "error": format!("Forbidden: actor '{}' lacks required role '{}'", actor, req_role)
+                                "status": "UNAUTHORIZED",
+                                "error": format!("Creator session verification failed: {}", e)
                             }),
                         );
                         let _ = request.respond(resp);
-                        continue;
+                        return;
                     }
                 }
-
-                // Parse body for POST/PUT/PATCH
-                let query_params = parse_query(&full_url);
-                let body = if matches!(method.as_str(), "POST" | "PUT" | "PATCH") {
-                    let raw = match read_body(&mut request) {
-                        Ok(raw) => raw,
-                        Err(e) => {
-                            let status = if e.contains("exceeds") { 413 } else { 400 };
-                            let _ = request.respond(json_response(
-                                status,
-                                &json!({"status":"ERROR","error":e}),
-                            ));
-                            continue;
+            } else {
+                let mut principal_claims = HashMap::new();
+                if let Some(ref s_id) = session_token {
+                    principal_claims.insert(
+                        "session_id".to_string(),
+                        serde_json::Value::String(s_id.clone()),
+                    );
+                }
+                match tara_security::primitives::VerifiedPrincipal::construct_verified(
+                    pid,
+                    role_obj,
+                    assurance_obj,
+                    None,
+                    current_gen,
+                    now_epoch,
+                    principal_claims,
+                ) {
+                    Ok(p) => {
+                        if let Some(ref s_id) = session_token {
+                            let _ = brain_ref
+                                .centralized_session_manager
+                                .ensure_session_registered(s_id, &p, current_gen, now_epoch);
                         }
-                    };
-                    if raw.is_empty() {
-                        json!({})
-                    } else {
-                        match serde_json::from_slice(&raw) {
-                            Ok(body) => body,
-                            Err(e) => {
-                                let _ = request.respond(json_response(400, &json!({"status":"ERROR","error":format!("Malformed JSON body: {e}")})));
-                                continue;
-                            }
-                        }
+                        p
                     }
-                } else {
-                    // For GET, convert query params to a JSON body for handlers
-                    let mut qmap = serde_json::Map::new();
-                    for (k, vals) in &query_params {
-                        if vals.len() == 1 {
-                            qmap.insert(k.clone(), json!(vals[0]));
-                        } else {
-                            qmap.insert(k.clone(), json!(vals));
-                        }
-                    }
-                    json!(qmap)
-                };
-
-                let route_req = RouteRequest {
-                    method: method.clone(),
-                    path: path.to_string(),
-                    query_params,
-                    body,
-                    headers: headers.clone(),
-                    client_ip: client_ip.clone(),
-                    actor: Some(actor),
-                };
-
-                let sec_action = tara_security::primitives::SecurityAction::new("http", &method)
-                    .unwrap_or_else(|_| tara_security::primitives::SecurityAction::execute_task());
-                let sec_resource =
-                    tara_security::primitives::SecurityResource::custom("route", path)
-                        .unwrap_or(tara_security::primitives::SecurityResource::SystemVault);
-                let sec_context =
-                    tara_security::primitives::SecurityContext::new(&client_ip, now_epoch);
-
-                // Synchronize unified subsystem lockdown state
-                let _ = brain_ref.is_system_locked_down();
-
-                let op_req = tara_security::broker::OperationRequest {
-                    principal: principal.clone(),
-                    action: sec_action.clone(),
-                    resource: sec_resource.clone(),
-                    context: sec_context.clone(),
-                    session_id: session_token.clone(),
-                };
-
-                // Centralized Enforcement Gateway: Operation executes strictly inside authorized callback
-                let brain_clone = brain_ref.clone();
-                let exec_result = brain_ref
-                    .enforcement_gateway
-                    .evaluate_and_enforce(op_req, |_p, _r| {
-                        Ok(handler.handle(&route_req, &brain_clone))
-                    });
-
-                let result = match exec_result {
-                    Ok(res) => res,
-                    Err(denial) => {
+                    Err(e) => {
                         let resp = json_response(
                             403,
                             &json!({
                                 "status": "FORBIDDEN",
-                                "error": format!("PolicyAuthorizationDenied: {}", denial)
+                                "error": format!("Security identity construction rejected: {}", e)
                             }),
                         );
                         let _ = request.respond(resp);
-                        continue; // Main Security denial strictly prevents handler execution!
+                        return;
+                    }
+                }
+            };
+
+            // Role check
+            if let Some(ref req_role) = required_role {
+                let req_lower = req_role.to_lowercase();
+                let has_role = match req_lower.as_str() {
+                    "admin" | "operator" => {
+                        let allowed_actors =
+                            ["admin", "root", "system", "ROOT_OPERATOR", "OPERATOR_ROOT"];
+                        allowed_actors.contains(&actor.as_str())
+                            || actor.starts_with("creator:")
+                            || actor == "ROOT_OPERATOR"
+                            || actor.starts_with("api_key:admin")
+                            || actor.starts_with("api_key:ROOT_OPERATOR")
+                            || actor.starts_with("api_key:operator")
+                    }
+                    "creator" => actor.starts_with("creator:") || actor == "ROOT_OPERATOR",
+                    "worker" => {
+                        actor.starts_with("worker:")
+                            || actor == "system"
+                            || actor.starts_with("creator:")
+                            || actor == "ROOT_OPERATOR"
+                    }
+                    _ => {
+                        actor.starts_with("creator:")
+                            || actor == "ROOT_OPERATOR"
+                            || actor.starts_with("api_key:admin")
+                            || actor.starts_with("api_key:ROOT_OPERATOR")
+                            || actor == "admin"
                     }
                 };
-
-                let _ = brain_ref.centralized_audit_logger.log_event(
-                    principal.id().clone(),
-                    sec_action,
-                    sec_resource,
-                    "ROUTE_HANDLER_COMPLETED",
-                    current_gen,
-                    now_epoch,
-                );
-                let status = match result.get("status").and_then(Value::as_str) {
-                    Some("UNHEALTHY") => 503,
-                    Some("UNAUTHORIZED" | "AUTHENTICATION_FAILED") => 401,
-                    Some("FORBIDDEN" | "AUTHORITY_LOCKED") => 403,
-                    Some("NOT_FOUND") => 404,
-                    Some("ERROR" | "REJECTED" | "FAILED" | "CREATOR_SETUP_REQUIRED") => 400,
-                    _ => 200,
-                };
-                let mut resp = json_response(status, &result);
-                for h in cors_headers(&origin) {
-                    resp.add_header(h);
+                if !has_role {
+                    let resp = json_response(
+                        403,
+                        &json!({
+                            "status": "ERROR",
+                            "error": format!("Forbidden: actor '{}' lacks required role '{}'", actor, req_role)
+                        }),
+                    );
+                    let _ = request.respond(resp);
+                    return;
                 }
-                let _ = request.respond(resp);
             }
+
+            // Parse body for POST/PUT/PATCH
+            let query_params = parse_query(&full_url);
+            let body = if matches!(method.as_str(), "POST" | "PUT" | "PATCH") {
+                let raw = match read_body(&mut request, max_body_bytes) {
+                    Ok(raw) => raw,
+                    Err(e) => {
+                        let status = if e.contains("exceeds") { 413 } else { 400 };
+                        let _ = request.respond(json_response(
+                            status,
+                            &json!({"status":"ERROR","error":e}),
+                        ));
+                        return;
+                    }
+                };
+                if raw.is_empty() {
+                    json!({})
+                } else {
+                    match serde_json::from_slice(&raw) {
+                        Ok(body) => body,
+                        Err(e) => {
+                            let _ = request.respond(json_response(
+                                400,
+                                &json!({"status":"ERROR","error":format!("Malformed JSON body: {e}")}),
+                            ));
+                            return;
+                        }
+                    }
+                }
+            } else {
+                // For GET, convert query params to a JSON body for handlers
+                let mut qmap = serde_json::Map::new();
+                for (k, vals) in &query_params {
+                    if vals.len() == 1 {
+                        qmap.insert(k.clone(), json!(vals[0]));
+                    } else {
+                        qmap.insert(k.clone(), json!(vals));
+                    }
+                }
+                json!(qmap)
+            };
+
+            let route_req = RouteRequest {
+                method: method.clone(),
+                path: path.to_string(),
+                query_params,
+                body,
+                headers: headers.clone(),
+                client_ip: client_ip.clone(),
+                actor: Some(actor),
+            };
+
+            let sec_action = tara_security::primitives::SecurityAction::new("http", &method)
+                .unwrap_or_else(|_| tara_security::primitives::SecurityAction::execute_task());
+            let sec_resource =
+                tara_security::primitives::SecurityResource::custom("route", path)
+                    .unwrap_or(tara_security::primitives::SecurityResource::SystemVault);
+            let sec_context =
+                tara_security::primitives::SecurityContext::new(&client_ip, now_epoch);
+
+            // Synchronize unified subsystem lockdown state
+            let _ = brain_ref.is_system_locked_down();
+
+            let op_req = tara_security::broker::OperationRequest {
+                principal: principal.clone(),
+                action: sec_action.clone(),
+                resource: sec_resource.clone(),
+                context: sec_context.clone(),
+                session_id: session_token.clone(),
+            };
+
+            // Centralized Enforcement Gateway: Operation executes strictly inside authorized callback
+            let brain_clone = Arc::clone(brain_ref);
+            let exec_result = brain_ref
+                .enforcement_gateway
+                .evaluate_and_enforce(op_req, |_p, _r| {
+                    Ok(handler.handle(&route_req, &brain_clone))
+                });
+
+            let result = match exec_result {
+                Ok(res) => res,
+                Err(denial) => {
+                    let resp = json_response(
+                        403,
+                        &json!({
+                            "status": "FORBIDDEN",
+                            "error": format!("PolicyAuthorizationDenied: {}", denial)
+                        }),
+                    );
+                    let _ = request.respond(resp);
+                    return; // Main Security denial strictly prevents handler execution!
+                }
+            };
+
+            let _ = brain_ref.centralized_audit_logger.log_event(
+                principal.id().clone(),
+                sec_action,
+                sec_resource,
+                "ROUTE_HANDLER_COMPLETED",
+                current_gen,
+                now_epoch,
+            );
+            let status = match result.get("status").and_then(Value::as_str) {
+                Some("UNHEALTHY") => 503,
+                Some("UNAUTHORIZED" | "AUTHENTICATION_FAILED") => 401,
+                Some("FORBIDDEN" | "AUTHORITY_LOCKED") => 403,
+                Some("NOT_FOUND") => 404,
+                Some("ERROR" | "REJECTED" | "FAILED" | "CREATOR_SETUP_REQUIRED") => 400,
+                _ => 200,
+            };
+            let mut resp = json_response(status, &result);
+            for h in cors_headers(&origin) {
+                resp.add_header(h);
+            }
+            let _ = request.respond(resp);
         }
     }
 }
@@ -2097,5 +2285,49 @@ mod tests {
             "127.0.0.1",
         );
         assert_eq!(res_lower.unwrap(), "api_key:operator:bob");
+    }
+
+    #[test]
+    fn test_max_request_body_bytes_and_dynamic_limit() {
+        // Default when env unset
+        std::env::remove_var("TARA_MAX_BODY_BYTES");
+        let default_bytes = max_request_body_bytes();
+        assert_eq!(default_bytes, 16 * 1024 * 1024);
+
+        // Explicit env configuration
+        std::env::set_var("TARA_MAX_BODY_BYTES", "4194304"); // 4 MiB
+        let configured = max_request_body_bytes();
+        assert_eq!(configured, 4 * 1024 * 1024);
+        std::env::remove_var("TARA_MAX_BODY_BYTES");
+    }
+
+    #[test]
+    fn test_server_options_defaults_and_env() {
+        let opts = ServerOptions::default();
+        assert!(opts.worker_threads >= 4);
+        assert!(opts.queue_capacity >= 64);
+        assert_eq!(opts.max_body_bytes, 16 * 1024 * 1024);
+
+        std::env::set_var("TARA_SERVER_WORKERS", "12");
+        std::env::set_var("TARA_SERVER_QUEUE_CAPACITY", "256");
+        let custom_opts = ServerOptions::default();
+        assert_eq!(custom_opts.worker_threads, 12);
+        assert_eq!(custom_opts.queue_capacity, 256);
+        std::env::remove_var("TARA_SERVER_WORKERS");
+        std::env::remove_var("TARA_SERVER_QUEUE_CAPACITY");
+    }
+
+    #[test]
+    fn test_is_priority_request_fast_path() {
+        assert!(is_priority_request("GET", "/health"));
+        assert!(is_priority_request("GET", "/ping"));
+        assert!(is_priority_request("GET", "/api/v1/system/health"));
+        assert!(is_priority_request("GET", "/api/v1/system/status"));
+        assert!(is_priority_request("GET", "/"));
+        assert!(is_priority_request("OPTIONS", "/api/v1/brain/chat"));
+
+        assert!(!is_priority_request("POST", "/api/v1/brain/chat"));
+        assert!(!is_priority_request("POST", "/api/v1/engines/execute"));
+        assert!(!is_priority_request("GET", "/api/v1/knowledge/search"));
     }
 }

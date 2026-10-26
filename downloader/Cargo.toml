@@ -16,3 +16,7 @@ hex = "0.4"
 parquet = { version = "53.0", default-features = false, features = ["arrow", "snap"] }
 arrow = { version = "53.0", default-features = false, features = ["json"] }
 arrow-json = "53.0"
+ureq = { version = "2.9", default-features = false, features = ["native-tls"] }
+
+
+

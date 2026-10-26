@@ -621,7 +621,7 @@ impl DatasetEngine {
 
             // 2. Extract knowledge graph world records if knowledge fields are present,
             // or if classified as WorldModel and not already handled as a state transition
-            let has_knowledge_fields = rec.as_object().map_or(false, |obj| {
+            let has_knowledge_fields = rec.as_object().is_some_and(|obj| {
                 obj.contains_key("subject")
                     || obj.contains_key("predicate")
                     || obj.contains_key("relation")
@@ -631,7 +631,7 @@ impl DatasetEngine {
                     || obj.contains_key("world_fact")
             });
 
-            let has_neural_fields = rec.as_object().map_or(false, |obj| {
+            let has_neural_fields = rec.as_object().is_some_and(|obj| {
                 obj.contains_key("prompt")
                     || obj.contains_key("instruction")
                     || obj.contains_key("input")

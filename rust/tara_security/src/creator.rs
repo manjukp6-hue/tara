@@ -276,7 +276,16 @@ impl AuthorityLifecycleManager {
                     )
                 }
             };
-            let sig = Signature::from_bytes(sig_bytes.as_slice().try_into().unwrap());
+            let sig_arr: [u8; 64] = match sig_bytes.as_slice().try_into() {
+                Ok(arr) => arr,
+                Err(_) => {
+                    return (
+                        AuthorityState::AuthorityLocked,
+                        "Invalid Ed25519 signature length".into(),
+                    );
+                }
+            };
+            let sig = Signature::from_bytes(&sig_arr);
 
             let payload_to_verify = format!(
                 "SEAL:2:{}:{}:{}",
@@ -369,7 +378,9 @@ impl AuthorityLifecycleManager {
         if signing_key_bytes.len() != 32 {
             return Err("Invalid signing key length".into());
         }
-        let arr: [u8; 32] = signing_key_bytes.try_into().unwrap();
+        let arr: [u8; 32] = signing_key_bytes
+            .try_into()
+            .map_err(|_| "Failed to convert 32-byte signing key".to_string())?;
         let sk = SigningKey::from_bytes(&arr);
         self.seal_authority_state(&sk)?;
         self.set_in_initialization(false);
@@ -525,7 +536,9 @@ impl CreatorIdentity {
         if bytes.len() != 32 {
             return Err("Public key must be exactly 32 bytes (64 hex chars)".into());
         }
-        let arr: [u8; 32] = bytes[..32].try_into().unwrap();
+        let arr: [u8; 32] = bytes[..32]
+            .try_into()
+            .map_err(|_| "Failed to convert 32-byte public key".to_string())?;
         VerifyingKey::from_bytes(&arr)
             .map_err(|e| format!("Invalid Ed25519 public key curve point: {:?}", e))?;
         Ok(arr)
@@ -1714,13 +1727,16 @@ impl CreatorAuthService {
 
         self.qr_challenges
             .lock()
-            .unwrap()
+            .unwrap_or_else(|p| p.into_inner())
             .insert(challenge_id.clone(), (nonce.clone(), Instant::now()));
         json!({ "challenge_id": challenge_id, "nonce": nonce, "expires_in": 300 })
     }
 
     pub fn get_qr_status(&self, challenge_id: &str) -> Value {
-        let challenges = self.qr_challenges.lock().unwrap();
+        let challenges = self
+            .qr_challenges
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         if let Some((_, created_at)) = challenges.get(challenge_id) {
             if created_at.elapsed() < Duration::from_secs(300) {
                 return json!({ "status": "PENDING", "challenge_id": challenge_id });
@@ -1737,7 +1753,10 @@ impl CreatorAuthService {
         identity_mgr: &crate::devices::IdentityManager,
         client_ip: &str,
     ) -> Value {
-        let mut challenges = self.qr_challenges.lock().unwrap();
+        let mut challenges = self
+            .qr_challenges
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let (nonce, created_at) = match challenges.remove(challenge_id) {
             Some(c) => c,
             None => return json!({ "status": "ERROR", "error": "Challenge expired or not found." }),
@@ -1983,16 +2002,17 @@ impl CreatorAuthService {
                     if let Some(registry) = centralized_device_registry {
                         if let Ok(dev_id) = crate::primitives::DeviceId::new(&rec.device_id) {
                             if let Ok(pub_bytes) = hex::decode(&rec.device_public_key) {
-                                let zero_rec = crate::zero_trust::DeviceEnrollmentRecord {
-                                    device_id: dev_id,
-                                    enrolled_public_key: pub_bytes,
-                                    bound_principal_id: crate::primitives::PrincipalId::new(
-                                        "creator_root_operator",
-                                    )
-                                    .unwrap(),
-                                    is_revoked: false,
-                                };
-                                let _ = registry.enroll_device(zero_rec);
+                                if let Ok(bound_principal_id) =
+                                    crate::primitives::PrincipalId::new("creator_root_operator")
+                                {
+                                    let zero_rec = crate::zero_trust::DeviceEnrollmentRecord {
+                                        device_id: dev_id,
+                                        enrolled_public_key: pub_bytes,
+                                        bound_principal_id,
+                                        is_revoked: false,
+                                    };
+                                    let _ = registry.enroll_device(zero_rec);
+                                }
                             }
                         }
                     }

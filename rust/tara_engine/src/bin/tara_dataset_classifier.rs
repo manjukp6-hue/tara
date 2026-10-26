@@ -128,7 +128,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for entry in entries.flatten() {
                 let p = entry.path();
                 if p.is_file() && p.extension().map(|e| e == "jsonl").unwrap_or(false) {
-                    let fname = p.file_name().unwrap().to_string_lossy();
+                    let fname = p.file_name().unwrap_or_default().to_string_lossy();
                     if fname.contains("deepctrl") {
                         println!("   [AUDIT SKIP] Quarantined unverified shard: {}", fname);
                         continue;
@@ -157,7 +157,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         total_pre_bytes += size;
         println!(
             "   - {:<48} {:>10.2} MB",
-            shard.file_name().unwrap().to_string_lossy(),
+            shard.file_name().unwrap_or_default().to_string_lossy(),
             size as f64 / 1_048_576.0
         );
     }
@@ -189,7 +189,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut duplicates_skipped = 0;
 
     for (file_idx, shard_path) in input_shards.iter().enumerate() {
-        let shard_name = shard_path.file_name().unwrap().to_string_lossy();
+        let shard_name = shard_path.file_name().unwrap_or_default().to_string_lossy();
         let file = File::open(shard_path)?;
         let reader = BufReader::with_capacity(4 * 1024 * 1024, file);
 

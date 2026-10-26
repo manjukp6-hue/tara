@@ -2031,9 +2031,11 @@ mod tests {
 
     #[test]
     fn test_world_model_neural_training_pathway_and_isolation() {
-        let mut cfg = ManualTrainingConfig::default();
-        cfg.world_model_source_dir = Some("storage/models/tara_world_model".to_string());
-        cfg.training_mode = "both".to_string();
+        let mut cfg = ManualTrainingConfig {
+            world_model_source_dir: Some("storage/models/tara_world_model".to_string()),
+            training_mode: "both".to_string(),
+            ..Default::default()
+        };
 
         // Valid configuration with isolated neural and world model paths passes validation
         assert!(validate_manual_config(&cfg).is_ok());

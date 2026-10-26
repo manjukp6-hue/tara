@@ -4,6 +4,7 @@ members = [
     "rust/tara_core",
     "rust/tara_engine",
     "rust/tara_hd",
+    "rust/tara_lora",
     "rust/tara_security",
     "rust/tara_server",
 ]
@@ -27,5 +28,6 @@ opt-level = 2
 
 [profile.dev.package."*"]
 opt-level = 3
+debug-assertions = false
 
 

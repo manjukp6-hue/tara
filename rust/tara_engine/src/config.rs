@@ -54,6 +54,7 @@ pub struct TaraConfig {
     pub max_position_embeddings: usize,
 
     /// Base frequency for Rotary Position Embeddings.
+    #[serde(default = "default_rope_theta")]
     pub rope_theta: f64,
 
     /// Epsilon for RMSNorm numerical stability.
@@ -73,6 +74,18 @@ pub struct TaraConfig {
     pub tie_word_embeddings: Option<bool>,
 }
 
+/// Dynamically resolves the base frequency for Rotary Position Embeddings.
+/// Prioritises dynamic runtime environment configuration before falling back to
+/// canonical base frequency matching the model architecture configuration.
+fn default_rope_theta() -> f64 {
+    std::env::var("TARA_ROPE_THETA")
+        .or_else(|_| std::env::var("ROPE_THETA"))
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|&v| v > 0.0 && v.is_finite())
+        .unwrap_or(500_000.0)
+}
+
 impl Default for TaraConfig {
     fn default() -> Self {
         Self {
@@ -84,7 +97,7 @@ impl Default for TaraConfig {
             num_key_value_heads: 2,
             head_dim: 16,
             max_position_embeddings: 2048,
-            rope_theta: 1_000_000.0,
+            rope_theta: default_rope_theta(),
             rms_norm_eps: 1e-5,
             initializer_range: 0.02,
             version: "1.0.0".to_string(),
@@ -270,5 +283,45 @@ mod tests {
         assert_eq!(cfg.vocab_size, decoded.vocab_size);
         assert_eq!(cfg.hidden_size, decoded.hidden_size);
         assert_eq!(cfg.num_hidden_layers, decoded.num_hidden_layers);
+        assert_eq!(cfg.rope_theta, decoded.rope_theta);
+    }
+
+    #[test]
+    fn test_dynamic_rope_theta_resolution() {
+        let raw_json_missing_theta = r#"{
+            "vocab_size": 344,
+            "hidden_size": 64,
+            "intermediate_size": 128,
+            "num_hidden_layers": 2,
+            "num_attention_heads": 4,
+            "num_key_value_heads": 2,
+            "head_dim": 16,
+            "max_position_embeddings": 2048,
+            "rms_norm_eps": 0.00001,
+            "initializer_range": 0.02,
+            "version": "1.0.0",
+            "model_type": "tara"
+        }"#;
+        let decoded: TaraConfig = serde_json::from_str(raw_json_missing_theta).unwrap();
+        assert!(decoded.rope_theta > 0.0 && decoded.rope_theta.is_finite());
+        assert_eq!(decoded.rope_theta, default_rope_theta());
+
+        let raw_json_explicit_theta = r#"{
+            "vocab_size": 344,
+            "hidden_size": 64,
+            "intermediate_size": 128,
+            "num_hidden_layers": 2,
+            "num_attention_heads": 4,
+            "num_key_value_heads": 2,
+            "head_dim": 16,
+            "max_position_embeddings": 2048,
+            "rope_theta": 750000.0,
+            "rms_norm_eps": 0.00001,
+            "initializer_range": 0.02,
+            "version": "1.0.0",
+            "model_type": "tara"
+        }"#;
+        let decoded_explicit: TaraConfig = serde_json::from_str(raw_json_explicit_theta).unwrap();
+        assert_eq!(decoded_explicit.rope_theta, 750_000.0);
     }
 }

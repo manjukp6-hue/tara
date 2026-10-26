@@ -137,7 +137,10 @@ impl AttestationRegistry {
     pub fn register_verifier(&mut self, verifier: Box<dyn AttestationFormatVerifier>) {
         let name = verifier.format_name().to_string();
         self.known_formats.insert(verifier.format_name());
-        let mut map = self.supported_verifiers.write().unwrap();
+        let mut map = match self.supported_verifiers.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         map.insert(name, verifier);
     }
 
@@ -146,7 +149,10 @@ impl AttestationRegistry {
     }
 
     pub fn is_supported_format(&self, format: &str) -> bool {
-        let map = self.supported_verifiers.read().unwrap();
+        let map = match self.supported_verifiers.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         map.contains_key(format)
     }
 
@@ -854,7 +860,9 @@ pub fn verify_x5c_chain(
         return Err("Certificate chain cannot be empty".into());
     }
 
-    let root_cert = x5c.last().unwrap();
+    let root_cert = x5c
+        .last()
+        .ok_or_else(|| "Certificate chain cannot be empty".to_string())?;
     if !trust_store.contains_root(root_cert) {
         return Err("AttestationRejected: Certificate chain does not anchor to a trusted root in AttestationTrustStore (untrusted root chain)".into());
     }
@@ -1193,7 +1201,10 @@ impl TpmsAttest {
         if cursor + 4 > bytes.len() {
             return Err("Unexpected EOF reading TPM magic".into());
         }
-        let magic = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap());
+        let magic_bytes: [u8; 4] = bytes[cursor..cursor + 4]
+            .try_into()
+            .map_err(|_| "Failed to convert TPM magic bytes".to_string())?;
+        let magic = u32::from_be_bytes(magic_bytes);
         cursor += 4;
         if magic != Self::TPM_GENERATED_VALUE {
             return Err(format!("TPM certInfo magic 0x{:08X} != 0xFF544347", magic));
@@ -1202,13 +1213,19 @@ impl TpmsAttest {
         if cursor + 2 > bytes.len() {
             return Err("Unexpected EOF reading TPM structure type".into());
         }
-        let type_ = u16::from_be_bytes(bytes[cursor..cursor + 2].try_into().unwrap());
+        let type_bytes: [u8; 2] = bytes[cursor..cursor + 2]
+            .try_into()
+            .map_err(|_| "Failed to convert TPM structure type bytes".to_string())?;
+        let type_ = u16::from_be_bytes(type_bytes);
         cursor += 2;
 
         if cursor + 2 > bytes.len() {
             return Err("Unexpected EOF reading qualifiedSigner size".into());
         }
-        let qs_len = u16::from_be_bytes(bytes[cursor..cursor + 2].try_into().unwrap()) as usize;
+        let qs_len_bytes: [u8; 2] = bytes[cursor..cursor + 2]
+            .try_into()
+            .map_err(|_| "Failed to convert qualifiedSigner size bytes".to_string())?;
+        let qs_len = u16::from_be_bytes(qs_len_bytes) as usize;
         cursor += 2;
         if cursor + qs_len > bytes.len() {
             return Err("Unexpected EOF reading qualifiedSigner payload".into());
@@ -1219,7 +1236,10 @@ impl TpmsAttest {
         if cursor + 2 > bytes.len() {
             return Err("Unexpected EOF reading extraData size".into());
         }
-        let ed_len = u16::from_be_bytes(bytes[cursor..cursor + 2].try_into().unwrap()) as usize;
+        let ed_len_bytes: [u8; 2] = bytes[cursor..cursor + 2]
+            .try_into()
+            .map_err(|_| "Failed to convert extraData size bytes".to_string())?;
+        let ed_len = u16::from_be_bytes(ed_len_bytes) as usize;
         cursor += 2;
         if cursor + ed_len > bytes.len() {
             return Err("Unexpected EOF reading extraData payload".into());
@@ -1230,11 +1250,20 @@ impl TpmsAttest {
         if cursor + 17 > bytes.len() {
             return Err("Unexpected EOF reading clockInfo".into());
         }
-        let clock = u64::from_be_bytes(bytes[cursor..cursor + 8].try_into().unwrap());
+        let clock_bytes: [u8; 8] = bytes[cursor..cursor + 8]
+            .try_into()
+            .map_err(|_| "Failed to convert clock bytes".to_string())?;
+        let clock = u64::from_be_bytes(clock_bytes);
         cursor += 8;
-        let reset_count = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap());
+        let reset_bytes: [u8; 4] = bytes[cursor..cursor + 4]
+            .try_into()
+            .map_err(|_| "Failed to convert resetCount bytes".to_string())?;
+        let reset_count = u32::from_be_bytes(reset_bytes);
         cursor += 4;
-        let restart_count = u32::from_be_bytes(bytes[cursor..cursor + 4].try_into().unwrap());
+        let restart_bytes: [u8; 4] = bytes[cursor..cursor + 4]
+            .try_into()
+            .map_err(|_| "Failed to convert restartCount bytes".to_string())?;
+        let restart_count = u32::from_be_bytes(restart_bytes);
         cursor += 4;
         let safe = bytes[cursor];
         cursor += 1;
@@ -1242,7 +1271,10 @@ impl TpmsAttest {
         if cursor + 8 > bytes.len() {
             return Err("Unexpected EOF reading firmwareVersion".into());
         }
-        let firmware_version = u64::from_be_bytes(bytes[cursor..cursor + 8].try_into().unwrap());
+        let fw_bytes: [u8; 8] = bytes[cursor..cursor + 8]
+            .try_into()
+            .map_err(|_| "Failed to convert firmwareVersion bytes".to_string())?;
+        let firmware_version = u64::from_be_bytes(fw_bytes);
         cursor += 8;
 
         let attested_data = bytes[cursor..].to_vec();

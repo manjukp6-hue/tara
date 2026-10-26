@@ -569,6 +569,65 @@ impl TaraForCausalLM {
         (layer_inputs, final_normed, logits)
     }
 
+    /// Forward activations directly from continuous embeddings of shape `[seq_len, hidden_size]`.
+    /// Enables multi-modal inputs (interleaving projected vision patches, audio frames, and token embeddings).
+    pub fn forward_embedded_activations(&self, embeddings: &[f32], seq_len: usize) -> (Vec<Vec<f32>>, Vec<f32>) {
+        if seq_len == 0 || embeddings.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        let hs = self.config.hidden_size;
+        let expected_len = seq_len * hs;
+        if embeddings.len() < expected_len {
+            return (Vec::new(), Vec::new());
+        }
+
+        let mut layer_inputs = Vec::with_capacity(self.layers.len() + 1);
+        layer_inputs.push(embeddings[..expected_len].to_vec());
+
+        for (l, layer) in self.layers.iter().enumerate() {
+            let next_x = layer.forward(&layer_inputs[l], seq_len);
+            layer_inputs.push(next_x);
+        }
+
+        let final_normed = self.norm.forward(layer_inputs.last().unwrap(), seq_len, hs);
+        (layer_inputs, final_normed)
+    }
+
+    /// Full forward pass from continuous embeddings returning activations, final norm, and logits.
+    pub fn forward_embedded_with_cache(
+        &self,
+        embeddings: &[f32],
+        seq_len: usize,
+    ) -> (Vec<Vec<f32>>, Vec<f32>, Vec<f32>) {
+        let (layer_inputs, final_normed) = self.forward_embedded_activations(embeddings, seq_len);
+        if layer_inputs.is_empty() {
+            return (Vec::new(), Vec::new(), Vec::new());
+        }
+        let hs = self.config.hidden_size;
+        let vs = self.config.vocab_size;
+
+        use rayon::prelude::*;
+        let mut logits = vec![0.0f32; seq_len * vs];
+        logits
+            .par_chunks_exact_mut(vs)
+            .enumerate()
+            .for_each(|(t, l_row)| {
+                let h_row = &final_normed[t * hs..(t + 1) * hs];
+                for (v, val) in l_row.iter_mut().enumerate() {
+                    let lm_row = &self.lm_head[v * hs..(v + 1) * hs];
+                    *val = h_row.iter().zip(lm_row.iter()).map(|(&a, &b)| a * b).sum();
+                }
+            });
+
+        (layer_inputs, final_normed, logits)
+    }
+
+    /// Forward pass from continuous embeddings returning logits of shape `[seq_len, vocab_size]`.
+    pub fn forward_embedded(&self, embeddings: &[f32], seq_len: usize) -> Vec<f32> {
+        let (_, _, logits) = self.forward_embedded_with_cache(embeddings, seq_len);
+        logits
+    }
+
     /// Forward pass caching intermediate activations for exact backpropagation routed through TARA-HD channel.
     pub fn forward_activations_channel(
         &self,

@@ -79,6 +79,18 @@ impl VocabBuilder {
         }
     }
 
+    /// Create a new VocabBuilder for building a standalone canonical base vocabulary
+    /// from dataset shards without requiring an existing baseline model.
+    pub fn new_standalone<P: AsRef<Path>>(dataset_dir: P, target_vocab_size: usize) -> Self {
+        Self {
+            dataset_dir: dataset_dir.as_ref().to_path_buf(),
+            base_model_dir: PathBuf::new(),
+            target_vocab_size,
+            min_frequency: 10,
+            max_token_len: 25,
+        }
+    }
+
     /// Set minimum frequency threshold for candidate tokens.
     pub fn with_min_frequency(mut self, min_freq: usize) -> Self {
         self.min_frequency = min_freq;
@@ -142,8 +154,10 @@ impl VocabBuilder {
                     serde_json::from_reader::<_, (Vec<String>, VocabBuildReport)>(file)
                 {
                     let required = self.target_vocab_size.saturating_sub(baseline_vocab_size);
+                    let has_byte_tokens = cached_tokens.iter().any(|t| t == "<0x00>");
                     if cached_tokens.len() == required
                         && cached_report.baseline_vocab_size == baseline_vocab_size
+                        && (required < 256 || has_byte_tokens)
                     {
                         println!("  [VocabBuilder] Loaded {} verified candidate tokens from operational cache '{}'", cached_tokens.len(), cache_path.display());
                         return Ok((cached_tokens, cached_report));
@@ -223,13 +237,64 @@ impl VocabBuilder {
             shard_hashes.insert(shard_name, shard_sha);
         }
 
-        // 3. Mandatory Indic Character Coverage Pass
-        // Add all unique characters not present in baseline to guarantee zero single-char <|unk|>.
-        // Always prioritize Kannada script and numerals, then Devanagari Sanskrit/Hindi,
-        // followed by other unique dataset characters.
-        let mut missing_chars_set: HashSet<char> = HashSet::new();
+        // 3. Priority Tier Candidate Allocation Pass
+        // Allocate candidate tokens in prioritized tiers up to target_vocab_size without static limits:
+        // Tier 1: 256 Raw Byte Fallback Tokens (<0x00> through <0xFF>)
+        // Tier 2: Systematic Kannada Unicode Block (U+0C80..=U+0CFF)
+        // Tier 3: Systematic Devanagari Unicode Block (U+0900..=U+097F)
+        // Tier 4: Canonical Coding Operators, Whitespace, Typography, Math, and Core Keywords
+        // Tier 5: Unique Dataset Characters (sorted by script priority tier)
+        let mut added_tokens: Vec<String> = Vec::new();
+        let max_new_tokens = self.target_vocab_size.saturating_sub(baseline_vocab_size);
 
-        // Collect all missing characters found in the scanned dataset records
+        // Priority 1: 256 Raw Byte Fallback Tokens (<0x00> through <0xFF>)
+        for byte_tok in canonical_byte_tokens() {
+            if added_tokens.len() >= max_new_tokens {
+                break;
+            }
+            if !existing_vocab.contains(&byte_tok) {
+                existing_vocab.insert(byte_tok.clone());
+                added_tokens.push(byte_tok);
+            }
+        }
+
+        // Priority 2: Systematic Kannada Unicode Block (U+0C80..=U+0CFF)
+        for ch in canonical_kannada_chars() {
+            if added_tokens.len() >= max_new_tokens {
+                break;
+            }
+            let s = ch.to_string();
+            if !existing_vocab.contains(&s) && !ch.is_control() && ch != '\0' && !s.trim().is_empty() {
+                existing_vocab.insert(s.clone());
+                added_tokens.push(s);
+            }
+        }
+
+        // Priority 3: Systematic Devanagari Unicode Block (U+0900..=U+097F)
+        for ch in canonical_devanagari_chars() {
+            if added_tokens.len() >= max_new_tokens {
+                break;
+            }
+            let s = ch.to_string();
+            if !existing_vocab.contains(&s) && !ch.is_control() && ch != '\0' && !s.trim().is_empty() {
+                existing_vocab.insert(s.clone());
+                added_tokens.push(s);
+            }
+        }
+
+        // Priority 4: Canonical Coding Operators, Whitespace, Typography, Math, and Core Keywords
+        for sym in canonical_coding_and_symbols() {
+            if added_tokens.len() >= max_new_tokens {
+                break;
+            }
+            if !sym.is_empty() && !existing_vocab.contains(&sym) {
+                existing_vocab.insert(sym.clone());
+                added_tokens.push(sym);
+            }
+        }
+
+        // Priority 5: Dataset Unique Characters (sorted by script priority tier)
+        let mut missing_chars_set: HashSet<char> = HashSet::new();
         for &ch in char_counts.keys() {
             let s = ch.to_string();
             if !existing_vocab.contains(&s)
@@ -241,54 +306,21 @@ impl VocabBuilder {
             }
         }
 
-        // When vocabulary has standard capacity (>= 256), unconditionally ensure
-        // full canonical Kannada (including numerals ೦..೯) and Devanagari (including numerals ०..९)
-        // are included to guarantee zero <|unk|> for Indic literature and numerals.
-        if self.target_vocab_size >= 256 {
-            for ch in canonical_kannada_chars() {
-                let s = ch.to_string();
-                if !existing_vocab.contains(&s) && !s.trim().is_empty() {
-                    missing_chars_set.insert(ch);
-                }
-            }
-            for ch in canonical_devanagari_chars() {
-                let s = ch.to_string();
-                if !existing_vocab.contains(&s) && !s.trim().is_empty() {
-                    missing_chars_set.insert(ch);
-                }
-            }
-        }
-
         let mut missing_chars: Vec<char> = missing_chars_set.into_iter().collect();
-        // Deterministic sort: Kannada first (Tier 0), then Devanagari (Tier 1), then others, then codepoint ASC
         missing_chars.sort_by(|&a, &b| {
             let tier_a = char_script_priority_tier(a);
             let tier_b = char_script_priority_tier(b);
             tier_a.cmp(&tier_b).then_with(|| a.cmp(&b))
         });
 
-        let mut added_tokens: Vec<String> = Vec::new();
-        let slots_for_chars = self.target_vocab_size.saturating_sub(baseline_vocab_size);
-
-        for ch in missing_chars.into_iter().take(slots_for_chars) {
+        for ch in missing_chars {
+            if added_tokens.len() >= max_new_tokens {
+                break;
+            }
             let s = ch.to_string();
-            if !s.trim().is_empty() && !existing_vocab.contains(&s) {
+            if !existing_vocab.contains(&s) {
                 existing_vocab.insert(s.clone());
                 added_tokens.push(s);
-            }
-        }
-
-        // Unconditionally guarantee all canonical coding symbols, operators, indentations, and keywords
-        if self.target_vocab_size >= 256 {
-            let max_slots = self.target_vocab_size.saturating_sub(baseline_vocab_size);
-            for sym in canonical_coding_and_symbols() {
-                if added_tokens.len() >= max_slots {
-                    break;
-                }
-                if !sym.is_empty() && !existing_vocab.contains(&sym) {
-                    existing_vocab.insert(sym.clone());
-                    added_tokens.push(sym);
-                }
             }
         }
         let missing_characters_added = added_tokens.len();
@@ -337,7 +369,6 @@ impl VocabBuilder {
         });
 
         // 5. Select candidates up to target_vocab_size
-        let max_new_tokens = self.target_vocab_size.saturating_sub(baseline_vocab_size);
         for cand in candidates.into_iter() {
             if added_tokens.len() >= max_new_tokens {
                 break;
@@ -381,6 +412,277 @@ impl VocabBuilder {
         }
 
         Ok((added_tokens, report))
+    }
+
+    /// Construct a standalone canonical Indic-first vocabulary directly from dataset shards
+    /// without requiring an existing baseline model or `tokenizer.json`.
+    ///
+    /// The resulting vocabulary contains:
+    /// - Canonical special control tokens (<|pad|>, <|im_start|>, <|im_end|>, <|unk|>, <|bos|>, <|eos|>, cognitive control tokens)
+    /// - All 256 byte fallback tokens (<0x00> through <0xFF>)
+    /// - Full canonical Kannada script and numerals (U+0C80..=U+0CFF)
+    /// - Full canonical Devanagari Sanskrit/Hindi script and numerals (U+0900..=U+097F)
+    /// - Canonical coding operators, indentations, typography, math symbols, and keywords
+    /// - Unique dataset characters
+    /// - Mined subwords ranked by script priority tier up to `self.target_vocab_size`
+    ///
+    /// Returns `(tokenizer_json_string, report)`. The JSON string conforms to the `TaraTokenizer` schema
+    /// and guarantees dense contiguous IDs `0..vocab_size`.
+    pub fn build_canonical_base_vocab(&self) -> Result<(String, VocabBuildReport), VocabBuilderError> {
+        let shards = self.discover_shards()?;
+        if shards.is_empty() {
+            return Err(VocabBuilderError::Config(
+                "No JSONL shards found in dataset directory".into(),
+            ));
+        }
+
+        // Stream all dataset records and collect character and subword frequencies
+        let mut char_counts: HashMap<char, usize> = HashMap::new();
+        let mut token_counts: HashMap<String, usize> = HashMap::new();
+        let mut shard_hashes: HashMap<String, String> = HashMap::new();
+
+        let mut total_records = 0usize;
+        let mut total_chars = 0usize;
+        let mut total_words = 0usize;
+
+        for shard_path in &shards {
+            let shard_name = shard_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("shard")
+                .to_string();
+            let mut hasher = Sha256::new();
+
+            let file = File::open(shard_path)?;
+            let reader = BufReader::with_capacity(128 * 1024, file);
+
+            for line_res in reader.lines() {
+                let line = line_res?;
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                hasher.update(trimmed.as_bytes());
+                hasher.update(b"\n");
+                total_records += 1;
+
+                let val: Value = match serde_json::from_str(trimmed) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+
+                let input = val
+                    .get("input")
+                    .or_else(|| val.get("prompt"))
+                    .or_else(|| val.get("text"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let output = val
+                    .get("output")
+                    .or_else(|| val.get("completion"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+
+                self.accumulate_text(
+                    input,
+                    &mut char_counts,
+                    &mut token_counts,
+                    &mut total_chars,
+                    &mut total_words,
+                );
+                self.accumulate_text(
+                    output,
+                    &mut char_counts,
+                    &mut token_counts,
+                    &mut total_chars,
+                    &mut total_words,
+                );
+            }
+
+            let shard_sha = hex::encode(hasher.finalize());
+            shard_hashes.insert(shard_name, shard_sha);
+        }
+
+        let mut ordered_tokens: Vec<String> = Vec::with_capacity(self.target_vocab_size);
+        let mut existing_vocab: HashSet<String> = HashSet::with_capacity(self.target_vocab_size);
+
+        // 1. Canonical Special Control Tokens
+        for &sp in canonical_special_tokens().iter() {
+            if ordered_tokens.len() >= self.target_vocab_size {
+                break;
+            }
+            let s = sp.to_string();
+            if !existing_vocab.contains(&s) {
+                existing_vocab.insert(s.clone());
+                ordered_tokens.push(s);
+            }
+        }
+
+        // 2. 256 Raw Byte Fallback Tokens (<0x00> through <0xFF>)
+        for byte_tok in canonical_byte_tokens() {
+            if ordered_tokens.len() >= self.target_vocab_size {
+                break;
+            }
+            if !existing_vocab.contains(&byte_tok) {
+                existing_vocab.insert(byte_tok.clone());
+                ordered_tokens.push(byte_tok);
+            }
+        }
+
+        // 3. Complete Kannada Unicode Block (U+0C80..=U+0CFF)
+        for ch in canonical_kannada_chars() {
+            if ordered_tokens.len() >= self.target_vocab_size {
+                break;
+            }
+            let s = ch.to_string();
+            if !existing_vocab.contains(&s) && !ch.is_control() && ch != '\0' && !s.trim().is_empty() {
+                existing_vocab.insert(s.clone());
+                ordered_tokens.push(s);
+            }
+        }
+
+        // 4. Complete Devanagari Unicode Block (U+0900..=U+097F)
+        for ch in canonical_devanagari_chars() {
+            if ordered_tokens.len() >= self.target_vocab_size {
+                break;
+            }
+            let s = ch.to_string();
+            if !existing_vocab.contains(&s) && !ch.is_control() && ch != '\0' && !s.trim().is_empty() {
+                existing_vocab.insert(s.clone());
+                ordered_tokens.push(s);
+            }
+        }
+
+        // 5. Canonical Coding Operators, Whitespace, Typography, Math, and Core Keywords
+        for sym in canonical_coding_and_symbols() {
+            if ordered_tokens.len() >= self.target_vocab_size {
+                break;
+            }
+            if !existing_vocab.contains(&sym) && !sym.is_empty() {
+                existing_vocab.insert(sym.clone());
+                ordered_tokens.push(sym);
+            }
+        }
+
+        // 6. Dataset Unique Characters
+        let mut missing_chars_set: HashSet<char> = HashSet::new();
+        for &ch in char_counts.keys() {
+            let s = ch.to_string();
+            if !existing_vocab.contains(&s)
+                && !ch.is_control()
+                && ch != '\0'
+                && !s.trim().is_empty()
+            {
+                missing_chars_set.insert(ch);
+            }
+        }
+        let mut missing_chars: Vec<char> = missing_chars_set.into_iter().collect();
+        missing_chars.sort_by(|&a, &b| {
+            let tier_a = char_script_priority_tier(a);
+            let tier_b = char_script_priority_tier(b);
+            tier_a.cmp(&tier_b).then_with(|| a.cmp(&b))
+        });
+        for ch in missing_chars {
+            if ordered_tokens.len() >= self.target_vocab_size {
+                break;
+            }
+            let s = ch.to_string();
+            if !existing_vocab.contains(&s) {
+                existing_vocab.insert(s.clone());
+                ordered_tokens.push(s);
+            }
+        }
+        let missing_characters_added = ordered_tokens.len();
+
+        // 7. Subword Candidates ranked by Script Priority Tier
+        struct Candidate {
+            token: String,
+            freq: usize,
+            score: usize,
+            len: usize,
+        }
+        let candidate_subwords_evaluated = token_counts.len();
+        let mut candidates: Vec<Candidate> = Vec::with_capacity(candidate_subwords_evaluated);
+        for (tok, freq) in token_counts {
+            let char_len = tok.chars().count();
+            if freq >= self.min_frequency
+                && !tok.trim().is_empty()
+                && !existing_vocab.contains(&tok)
+                && char_len <= self.max_token_len
+                && char_len > 1
+            {
+                let score = freq.saturating_mul(char_len.saturating_sub(1));
+                candidates.push(Candidate {
+                    token: tok,
+                    freq,
+                    score,
+                    len: char_len,
+                });
+            }
+        }
+        candidates.sort_by(|a, b| {
+            let tier_a = script_priority_tier(&a.token);
+            let tier_b = script_priority_tier(&b.token);
+            tier_a
+                .cmp(&tier_b)
+                .then_with(|| b.score.cmp(&a.score))
+                .then_with(|| b.freq.cmp(&a.freq))
+                .then_with(|| b.len.cmp(&a.len))
+                .then_with(|| a.token.cmp(&b.token))
+        });
+
+        for cand in candidates {
+            if ordered_tokens.len() >= self.target_vocab_size {
+                break;
+            }
+            if !cand.token.trim().is_empty() && !existing_vocab.contains(&cand.token) {
+                existing_vocab.insert(cand.token.clone());
+                ordered_tokens.push(cand.token);
+            }
+        }
+
+        let final_vocab_size = ordered_tokens.len();
+
+        // Construct dense vocab map: token -> id
+        let mut vocab_map = serde_json::Map::with_capacity(final_vocab_size);
+        for (id, tok) in ordered_tokens.iter().enumerate() {
+            vocab_map.insert(tok.clone(), serde_json::json!(id as u32));
+        }
+
+        let root = serde_json::json!({
+            "version": "1.0.0",
+            "model_max_length": 32768,
+            "vocab": vocab_map,
+            "vocab_size": final_vocab_size
+        });
+
+        let json_str = serde_json::to_string_pretty(&root)?;
+
+        // Compute SHA-256
+        let mut vocab_hasher = Sha256::new();
+        for tok in &ordered_tokens {
+            vocab_hasher.update(tok.as_bytes());
+            vocab_hasher.update(b"\n");
+        }
+        let candidate_vocab_sha256 = hex::encode(vocab_hasher.finalize());
+
+        let report = VocabBuildReport {
+            dataset_dir: self.dataset_dir.display().to_string(),
+            total_records_scanned: total_records,
+            total_chars_scanned: total_chars,
+            total_words_scanned: total_words,
+            unique_characters_found: char_counts.len(),
+            missing_characters_added,
+            candidate_subwords_evaluated,
+            baseline_vocab_size: 0,
+            final_vocab_size,
+            added_tokens_count: final_vocab_size,
+            candidate_vocab_sha256,
+            shard_hashes,
+        };
+
+        Ok((json_str, report))
     }
 
     /// Build vocabulary and immediately hand off to `ModelExpansionEngine`
@@ -536,151 +838,51 @@ pub fn is_punctuation_or_delim(ch: char) -> bool {
     is_ascii_punct(ch) || ch == '\u{0964}' || ch == '\u{0965}'
 }
 
-/// Returns all canonical Kannada characters, vowel signs, virama, and Kannada numerals (U+0C80..=U+0CFF).
-pub fn canonical_kannada_chars() -> Vec<char> {
-    let mut chars = Vec::with_capacity(128);
-    // Anusvara and Visarga
-    for cp in 0x0C82..=0x0C83 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    // Independent vowels
-    for cp in 0x0C85..=0x0C8C {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    for cp in 0x0C8E..=0x0C90 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    for cp in 0x0C92..=0x0C94 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    // Consonants
-    for cp in 0x0C95..=0x0CA8 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    for cp in 0x0CAA..=0x0CB3 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    for cp in 0x0CB5..=0x0CB9 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    if let Some(c) = char::from_u32(0x0CBC) {
-        chars.push(c); // Nukta
-    }
-    if let Some(c) = char::from_u32(0x0CBD) {
-        chars.push(c); // Avagraha
-    }
-    if let Some(c) = char::from_u32(0x0CB1) {
-        chars.push(c); // Rra
-    }
-    if let Some(c) = char::from_u32(0x0CDE) {
-        chars.push(c); // Llla / Fa
-    }
-    // Dependent vowel signs and virama
-    for cp in 0x0CBE..=0x0CC4 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    for cp in 0x0CC6..=0x0CC8 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    for cp in 0x0CCA..=0x0CCD {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    for cp in 0x0CD5..=0x0CD6 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    for cp in 0x0CE0..=0x0CE1 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    // Kannada Numerals: ೦, ೧, ೨, ೩, ೪, ೫, ೬, ೭, ೮, ೯ (U+0CE6..=U+0CEF)
-    for cp in 0x0CE6..=0x0CEF {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    chars
+/// Returns all 256 canonical raw byte fallback tokens `<0x00>` through `<0xFF>`.
+pub fn canonical_byte_tokens() -> Vec<String> {
+    (0..=255u8).map(|b| format!("<0x{:02X}>", b)).collect()
 }
 
-/// Returns all canonical Devanagari characters, vowel signs, virama, and numerals for Sanskrit & Hindi (U+0900..=U+097F).
+/// Check if a token string matches the canonical raw byte token format `<0x00>`..`<0xFF>`.
+pub fn is_byte_token(token: &str) -> bool {
+    if token.len() == 6 && token.starts_with("<0x") && token.ends_with('>') {
+        u8::from_str_radix(&token[3..5], 16).is_ok()
+    } else {
+        false
+    }
+}
+
+/// Canonical special tokens recognized by TARA tokenizer.
+pub fn canonical_special_tokens() -> Vec<&'static str> {
+    vec![
+        "<|pad|>",
+        "<|im_start|>",
+        "<|im_end|>",
+        "<|unk|>",
+        "<|bos|>",
+        "<|eos|>",
+        "<|creator_auth|>",
+        "<|tara_rule|>",
+        "<|tara_exec|>",
+        "<|tara_skill|>",
+        "<|tara_memory|>",
+    ]
+}
+
+/// Returns all canonical Kannada characters, vowel signs, virama, and Kannada numerals
+/// by systematically iterating the entire assigned Kannada Unicode block (U+0C80..=U+0CFF).
+pub fn canonical_kannada_chars() -> Vec<char> {
+    (0x0C80u32..=0x0CFFu32)
+        .filter_map(char::from_u32)
+        .collect()
+}
+
+/// Returns all canonical Devanagari characters, vowel signs, virama, and numerals
+/// for Sanskrit & Hindi by systematically iterating the entire Devanagari Unicode block (U+0900..=U+097F).
 pub fn canonical_devanagari_chars() -> Vec<char> {
-    let mut chars = Vec::with_capacity(128);
-    for cp in 0x0901..=0x0903 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    for cp in 0x0904..=0x0914 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    for cp in 0x0915..=0x0939 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    if let Some(c) = char::from_u32(0x093C) {
-        chars.push(c);
-    }
-    if let Some(c) = char::from_u32(0x093D) {
-        chars.push(c);
-    }
-    for cp in 0x093E..=0x094C {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    if let Some(c) = char::from_u32(0x094D) {
-        chars.push(c);
-    }
-    if let Some(c) = char::from_u32(0x0950) {
-        chars.push(c);
-    }
-    for cp in 0x0951..=0x0952 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    for cp in 0x0958..=0x0963 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    for cp in 0x0964..=0x0965 {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    // Devanagari Numerals: ०, १, २, ३, ४, ५, ६, ७, ८, ९ (U+0966..=U+096F)
-    for cp in 0x0966..=0x096F {
-        if let Some(c) = char::from_u32(cp) {
-            chars.push(c);
-        }
-    }
-    chars
+    (0x0900u32..=0x097Fu32)
+        .filter_map(char::from_u32)
+        .collect()
 }
 
 /// Script priority tier for individual characters:
@@ -777,6 +979,10 @@ pub fn is_coding_token(token: &str) -> bool {
             | "/>"
             | "<!--"
             | "-->"
+            | "<?"
+            | "?>"
+            | "${"
+            | "#{"
             | "fn"
             | "let"
             | "mut"
@@ -786,20 +992,31 @@ pub fn is_coding_token(token: &str) -> bool {
             | "enum"
             | "trait"
             | "type"
+            | "match"
+            | "const"
+            | "async"
+            | "await"
+            | "self"
+            | "Self"
             | "def"
             | "class"
             | "import"
             | "from"
             | "return"
-            | "async"
-            | "await"
+            | "yield"
+            | "if"
+            | "else"
+            | "elif"
+            | "while"
+            | "for"
+            | "in"
+            | "loop"
+            | "break"
+            | "continue"
             | "true"
             | "false"
             | "null"
             | "None"
-            | "self"
-            | "Self"
-            | "const"
             | "“"
             | "”"
             | "‘"
@@ -876,6 +1093,217 @@ mod tests {
     use std::io::Write;
 
     #[test]
+    fn test_canonical_byte_tokens_generation() {
+        let byte_tokens = canonical_byte_tokens();
+        assert_eq!(byte_tokens.len(), 256, "Must generate exactly 256 byte tokens");
+        assert_eq!(byte_tokens[0], "<0x00>", "First byte token must be <0x00>");
+        assert_eq!(byte_tokens[255], "<0xFF>", "Last byte token must be <0xFF>");
+
+        let mut seen = HashSet::new();
+        for (i, tok) in byte_tokens.iter().enumerate() {
+            let expected = format!("<0x{:02X}>", i);
+            assert_eq!(tok, &expected, "Byte token index {i} mismatch");
+            assert!(is_byte_token(tok), "is_byte_token must recognize {tok}");
+            assert!(seen.insert(tok.clone()), "Duplicate byte token {tok}");
+        }
+
+        assert!(!is_byte_token("<0x>"));
+        assert!(!is_byte_token("<0x100>"));
+        assert!(!is_byte_token("<0xGG>"));
+        assert!(!is_byte_token("hello"));
+    }
+
+    #[test]
+    fn test_canonical_kannada_unicode_iteration() {
+        let kannada_chars = canonical_kannada_chars();
+        assert_eq!(
+            kannada_chars.len(),
+            128,
+            "Kannada Unicode block U+0C80..=U+0CFF must have 128 scalar values"
+        );
+
+        // Verify independent vowels
+        let vowels = ['ಅ', 'ಆ', 'ಇ', 'ಈ', 'ಉ', 'ಊ', 'ಋ', 'ಎ', 'ಏ', 'ಐ', 'ಒ', 'ಓ', 'ಔ'];
+        for v in vowels {
+            assert!(
+                kannada_chars.contains(&v),
+                "Kannada vowel {v} must be present in canonical set"
+            );
+        }
+
+        // Verify consonants
+        let consonants = [
+            'ಕ', 'ಖ', 'ಗ', 'ಘ', 'ಙ', 'ಚ', 'ಛ', 'ಜ', 'ಝ', 'ಞ', 'ಟ', 'ಠ', 'ಡ', 'ಢ', 'ಣ', 'ತ',
+            'ಥ', 'ದ', 'ಧ', 'ನ', 'ಪ', 'ಫ', 'ಬ', 'ಭ', 'ಮ', 'ಯ', 'ರ', 'ಱ', 'ಲ', 'ವ', 'ಶ', 'ಷ',
+            'ಸ', 'ಹ', 'ಳ', 'ೞ',
+        ];
+        for c in consonants {
+            assert!(
+                kannada_chars.contains(&c),
+                "Kannada consonant {c} must be present in canonical set"
+            );
+        }
+
+        // Verify dependent signs and virama
+        let signs = ['ಾ', 'ಿ', 'ೀ', 'ು', 'ೂ', 'ೃ', 'ೆ', 'ೇ', 'ೈ', 'ೊ', 'ೋ', 'ೌ', '್'];
+        for s in signs {
+            assert!(
+                kannada_chars.contains(&s),
+                "Kannada sign {s} must be present in canonical set"
+            );
+        }
+
+        // Verify special signs: Anusvara, Visarga, Nukta, Avagraha, Siddham
+        assert!(kannada_chars.contains(&'ಂ'), "Anusvara must be present");
+        assert!(kannada_chars.contains(&'ಃ'), "Visarga must be present");
+        assert!(kannada_chars.contains(&'\u{0CBC}'), "Nukta must be present");
+        assert!(kannada_chars.contains(&'\u{0CBD}'), "Avagraha must be present");
+        assert!(kannada_chars.contains(&'\u{0C80}'), "Spacing Candrabindu must be present");
+        assert!(kannada_chars.contains(&'\u{0C81}'), "Candrabindu must be present");
+        assert!(kannada_chars.contains(&'\u{0C84}'), "Siddham must be present");
+        assert!(kannada_chars.contains(&'\u{0CF1}'), "Jihvamuliya must be present");
+        assert!(kannada_chars.contains(&'\u{0CF2}'), "Upadhmaniya must be present");
+        assert!(kannada_chars.contains(&'\u{0CF3}'), "Combining Anusvara must be present");
+
+        // Verify Kannada numerals: ೦, ೧, ೨, ೩, ೪, ೫, ೬, ೭, ೮, ೯ (U+0CE6..=U+0CEF)
+        let numerals = ['೦', '೧', '೨', '೩', '೪', '೫', '೬', '೭', '೮', '೯'];
+        for n in numerals {
+            assert!(
+                kannada_chars.contains(&n),
+                "Kannada numeral {n} must be present in canonical set"
+            );
+        }
+    }
+
+    #[test]
+    fn test_canonical_devanagari_unicode_iteration() {
+        let devanagari_chars = canonical_devanagari_chars();
+        assert_eq!(
+            devanagari_chars.len(),
+            128,
+            "Devanagari Unicode block U+0900..=U+097F must have 128 scalar values"
+        );
+
+        // Verify vowels
+        let vowels = ['अ', 'आ', 'इ', 'ई', 'उ', 'ऊ', 'ऋ', 'ए', 'ऐ', 'ओ', 'औ'];
+        for v in vowels {
+            assert!(
+                devanagari_chars.contains(&v),
+                "Devanagari vowel {v} must be present in canonical set"
+            );
+        }
+
+        // Verify consonants
+        let consonants = [
+            'क', 'ख', 'ग', 'घ', 'ङ', 'च', 'छ', 'ज', 'झ', 'ञ', 'ट', 'ठ', 'ड', 'ढ', 'ण', 'त',
+            'थ', 'द', 'ध', 'न', 'प', 'फ', 'ब', 'भ', 'म', 'य', 'र', 'ल', 'व', 'श', 'ष', 'स',
+            'ह',
+        ];
+        for c in consonants {
+            assert!(
+                devanagari_chars.contains(&c),
+                "Devanagari consonant {c} must be present in canonical set"
+            );
+        }
+
+        // Verify virama, signs, and punctuation
+        assert!(devanagari_chars.contains(&'्'), "Virama must be present");
+        assert!(devanagari_chars.contains(&'ं'), "Anusvara must be present");
+        assert!(devanagari_chars.contains(&'ः'), "Visarga must be present");
+        assert!(devanagari_chars.contains(&'़'), "Nukta must be present");
+        assert!(devanagari_chars.contains(&'ऽ'), "Avagraha must be present");
+        assert!(devanagari_chars.contains(&'।'), "Danda must be present");
+        assert!(devanagari_chars.contains(&'॥'), "Double Danda must be present");
+        assert!(devanagari_chars.contains(&'ॐ'), "Om must be present");
+        assert!(devanagari_chars.contains(&'\u{0900}'), "Inverted Candrabindu must be present");
+
+        // Verify Devanagari numerals: ०, १, २, ३, ४, ५, ६, ७, ८, ९ (U+0966..=U+096F)
+        let numerals = ['०', '१', '२', '३', '४', '५', '६', '७', '८', '९'];
+        for n in numerals {
+            assert!(
+                devanagari_chars.contains(&n),
+                "Devanagari numeral {n} must be present in canonical set"
+            );
+        }
+    }
+
+    #[test]
+    fn test_canonical_coding_and_symbols() {
+        let symbols = canonical_coding_and_symbols();
+        assert!(
+            symbols.iter().any(|s| s == "  "),
+            "2-space indentation must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "    "),
+            "4-space indentation must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "=="),
+            "== operator must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "!="),
+            "!= operator must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "::"),
+            ":: operator must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "->"),
+            "-> operator must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "=>"),
+            "=> operator must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "fn"),
+            "fn keyword must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "let"),
+            "let keyword must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "struct"),
+            "struct keyword must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "async"),
+            "async keyword must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "await"),
+            "await keyword must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "₹"),
+            "Currency symbol ₹ must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "€"),
+            "Currency symbol € must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "±"),
+            "Math symbol ± must be present"
+        );
+        assert!(
+            symbols.iter().any(|s| s == "×"),
+            "Math symbol × must be present"
+        );
+
+        for sym in &symbols {
+            assert!(
+                is_coding_token(sym),
+                "is_coding_token must recognize {sym}"
+            );
+        }
+    }
+
+    #[test]
     fn test_vocab_builder_collects_missing_chars_and_tokens() {
         let temp_dir = std::env::temp_dir().join(format!("tara_vocab_test_{}", std::process::id()));
         let ds_dir = temp_dir.join("dataset");
@@ -934,11 +1362,19 @@ mod tests {
             .unwrap();
         }
 
-        let builder = VocabBuilder::new(&ds_dir, &model_dir, 60).with_min_frequency(5);
+        let builder = VocabBuilder::new(&ds_dir, &model_dir, 700).with_min_frequency(5);
         let (tokens, report) = builder.build_candidate_tokens().unwrap();
 
         assert_eq!(report.baseline_vocab_size, 4);
-        assert!(tokens.len() <= 56); // Up to target 60
+        assert!(tokens.len() <= 696); // Up to target 700 - 4
+        // Verify byte tokens are generated and included
+        assert!(tokens.iter().any(|t| t == "<0x00>"), "<0x00> must be present");
+        assert!(tokens.iter().any(|t| t == "<0xFF>"), "<0xFF> must be present");
+        // Verify Kannada numerals and characters
+        assert!(tokens.iter().any(|t| t == "೦"), "Kannada numeral ೦ must be present");
+        assert!(tokens.iter().any(|t| t == "೧"), "Kannada numeral ೧ must be present");
+        assert!(tokens.iter().any(|t| t == "೯"), "Kannada numeral ೯ must be present");
+        // Verify mined subwords
         assert!(tokens.iter().any(|t| t == "Rust"));
         assert!(tokens.iter().any(|t| t == "async"));
         assert!(tokens.iter().any(|t| t == "ನಮಸ್ಕಾರ"));
@@ -990,8 +1426,7 @@ mod tests {
             .unwrap();
         }
 
-        // Capacity 350 triggers unconditional canonical Indic & Coding coverage (>= 256)
-        let builder = VocabBuilder::new(&ds_dir, &model_dir, 350).with_min_frequency(5);
+        let builder = VocabBuilder::new(&ds_dir, &model_dir, 800).with_min_frequency(5);
         let (tokens, _report) = builder.build_candidate_tokens().unwrap();
 
         // 1. Kannada numerals must be present
@@ -1077,6 +1512,125 @@ mod tests {
                 k_pos,
                 e_pos
             );
+        }
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_build_canonical_base_vocab_parses_cleanly_with_tara_tokenizer() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_standalone_vocab_test_{}", std::process::id()));
+        let ds_dir = temp_dir.join("dataset");
+        fs::create_dir_all(&ds_dir).unwrap();
+
+        let mut shard = File::create(ds_dir.join("corpus.jsonl")).unwrap();
+        for _ in 0..10 {
+            writeln!(
+                shard,
+                "{{\"input\": \"fn main() {{ let x = ೧ + ०; }}\", \"output\": \"ಕನ್ನಡ ಸಾಹಿತ್ಯ ಮತ್ತು संस्कृतम् ೧೨೩ ०१२\"}}"
+            )
+            .unwrap();
+        }
+
+        let builder = VocabBuilder::new_standalone(&ds_dir, 750).with_min_frequency(2);
+        let (json_str, report) = builder.build_canonical_base_vocab().unwrap();
+
+        assert_eq!(report.baseline_vocab_size, 0);
+        assert!(report.final_vocab_size <= 750);
+        assert!(report.final_vocab_size >= 256 + 128 + 128); // Bytes + Kannada + Devanagari
+
+        // Parse with TaraTokenizer - MUST parse cleanly without error
+        let tokenizer = TaraTokenizer::from_json_str(&json_str)
+            .expect("TaraTokenizer must parse generated canonical vocabulary JSON cleanly");
+
+        assert_eq!(tokenizer.vocab_size, report.final_vocab_size);
+
+        // Verify all 256 byte tokens are indexed in byte_to_id
+        for b in 0..=255u8 {
+            assert!(
+                tokenizer.byte_to_id[b as usize].is_some(),
+                "Byte 0x{:02X} must be mapped to token ID",
+                b
+            );
+            let byte_id = tokenizer.byte_to_id[b as usize].unwrap();
+            assert_eq!(tokenizer.id_to_byte.get(&byte_id), Some(&b));
+        }
+
+        // Verify Kannada numerals and characters have valid IDs
+        for ch in ['೦', '೧', '೨', '೩', '೪', '೫', '೬', '೭', '೮', '೯', 'ಕ', 'ಅ'] {
+            let s = ch.to_string();
+            assert!(
+                tokenizer.token_to_id.contains_key(&s),
+                "Kannada char/numeral {s} must be in token_to_id"
+            );
+        }
+
+        // Verify Devanagari numerals and characters have valid IDs
+        for ch in ['०', '१', '२', '३', '४', '५', '६', '७', '८', '९', 'क', 'अ'] {
+            let s = ch.to_string();
+            assert!(
+                tokenizer.token_to_id.contains_key(&s),
+                "Devanagari char/numeral {s} must be in token_to_id"
+            );
+        }
+
+        // Verify coding operators
+        for op in ["::", "->", "==", "fn", "let", "    "] {
+            assert!(
+                tokenizer.token_to_id.contains_key(op),
+                "Coding token {op} must be in token_to_id"
+            );
+        }
+
+        // Verify encode and decode round-trip with zero <|unk|>
+        let test_text = "fn main() { let x = ೧ + ०; } // ಕನ್ನಡ & संस्कृतम्";
+        let encoded_ids = tokenizer.encode(test_text);
+        assert!(
+            !encoded_ids.contains(&tokenizer.unk_id()),
+            "Zero <|unk|> must be emitted for canonical text"
+        );
+        let decoded = tokenizer.decode(&encoded_ids);
+        assert_eq!(
+            decoded, test_text,
+            "Lossless round-trip decode must match original text"
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_dynamic_vocab_sizing_respects_target() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_sizing_test_{}", std::process::id()));
+        let ds_dir = temp_dir.join("dataset");
+        fs::create_dir_all(&ds_dir).unwrap();
+
+        let mut shard = File::create(ds_dir.join("data.jsonl")).unwrap();
+        for _ in 0..5 {
+            writeln!(
+                shard,
+                "{{\"input\": \"a b c d e f g h i j k l m n o p q r s t u v w x y z\", \"output\": \"ಕನ್ನಡ ೦ ೧ ೨\"}}"
+            )
+            .unwrap();
+        }
+
+        // Test with different target sizes
+        for target in [100, 300, 500, 750] {
+            let builder = VocabBuilder::new_standalone(&ds_dir, target).with_min_frequency(2);
+            let (json_str, report) = builder.build_canonical_base_vocab().unwrap();
+
+            assert!(
+                report.final_vocab_size <= target,
+                "Final vocab size {} must not exceed target {}",
+                report.final_vocab_size,
+                target
+            );
+            assert_eq!(report.final_vocab_size, report.added_tokens_count);
+
+            let tokenizer = TaraTokenizer::from_json_str(&json_str)
+                .expect("Dense ID validation must pass for all dynamic targets");
+            assert_eq!(tokenizer.vocab_size, report.final_vocab_size);
         }
 
         let _ = fs::remove_dir_all(&temp_dir);

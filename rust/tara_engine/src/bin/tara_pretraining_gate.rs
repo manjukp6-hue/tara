@@ -509,7 +509,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hf_repo_id = std::env::var("HF_DATASET_REPO")
         .or_else(|_| std::env::var("HF_MODEL_REPO"))
         .or_else(|_| std::env::var("HF_REPO"))
-        .unwrap_or_else(|_| "manjukp6/tara".to_string());
+        .unwrap_or_else(|_| "tara-ai/tara".to_string());
     let hf_token = std::env::var("HF_TOKEN").ok();
     let is_offline = std::env::var("TARA_OFFLINE")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))

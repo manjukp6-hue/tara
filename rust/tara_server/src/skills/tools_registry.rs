@@ -427,14 +427,17 @@ fn tool_hash_verifier(params: serde_json::Value, repo_root: &str) -> serde_json:
         }
     };
 
-    const MAX_HASH_BYTES: u64 = 500 * 1024 * 1024; // 500 MiB limit
-    if meta.len() > MAX_HASH_BYTES {
-        return serde_json::json!({
-            "status": "ERROR",
-            "error": "file_too_large",
-            "detail": "File exceeds maximum verification limit of 500 MiB",
-            "path": path_str
-        });
+    if let Ok(limit_str) = std::env::var("TARA_MAX_HASH_BYTES") {
+        if let Ok(limit) = limit_str.parse::<u64>() {
+            if meta.len() > limit {
+                return serde_json::json!({
+                    "status": "ERROR",
+                    "error": "file_too_large",
+                    "detail": format!("File exceeds configured verification limit of {} bytes", limit),
+                    "path": path_str
+                });
+            }
+        }
     }
 
     let hash = match tara_engine::compute256(&path) {
@@ -697,18 +700,24 @@ mod tests {
 
     #[test]
     fn test_execute_tool_unauthorized_empty_actor() {
-        let registry = ToolRegistry::new(".");
+        let temp_dir = std::env::temp_dir().join(format!("tara_tool_unauth_test_{}", Uuid::new_v4()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let repo_root = temp_dir.to_str().unwrap();
+
+        let registry = ToolRegistry::new(repo_root);
         let res = registry.execute_tool(
             "math_engine",
             serde_json::json!({"operation": "add", "a": 1, "b": 2}),
             "   ",
-            ".",
+            repo_root,
         );
         assert_eq!(res.get("status").and_then(|v| v.as_str()), Some("ERROR"));
         assert_eq!(
             res.get("error").and_then(|v| v.as_str()),
             Some("unauthorized_actor")
         );
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -732,6 +741,28 @@ mod tests {
         let computed = res.get("hash").and_then(|v| v.as_str()).unwrap();
         assert_eq!(computed.len(), 64);
 
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_hash_verifier_dynamic_limit_enforced() {
+        let temp_dir = std::env::temp_dir().join(format!("tara_hash_limit_test_{}", Uuid::new_v4()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let test_file = temp_dir.join("large_data.bin");
+        let _ = fs::write(&test_file, vec![0u8; 1024]); // 1024 bytes
+
+        let repo_root = temp_dir.to_str().unwrap();
+        let registry = ToolRegistry::new(repo_root);
+
+        // Set low limit of 512 bytes
+        std::env::set_var("TARA_MAX_HASH_BYTES", "512");
+        let params = serde_json::json!({ "path": "large_data.bin" });
+        let res = registry.execute_tool("hash_verifier", params, "test_actor", repo_root);
+        assert_eq!(res.get("status").and_then(|v| v.as_str()), Some("ERROR"));
+        assert_eq!(res.get("error").and_then(|v| v.as_str()), Some("file_too_large"));
+
+        // Clean up env
+        std::env::remove_var("TARA_MAX_HASH_BYTES");
         let _ = fs::remove_dir_all(&temp_dir);
     }
 }

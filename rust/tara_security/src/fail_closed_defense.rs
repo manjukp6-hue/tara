@@ -104,8 +104,10 @@ impl TripwireDefenseEngine {
             persistence_path: Some(p),
         };
 
-        if !engine.persistence_path.as_ref().unwrap().exists() {
-            engine.flush_persistent_state()?;
+        if let Some(path) = engine.persistence_path.as_ref() {
+            if !path.exists() {
+                engine.flush_persistent_state()?;
+            }
         }
 
         Ok(engine)

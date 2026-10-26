@@ -47,7 +47,7 @@ fn upload_model_directory(
         let entry = entry?;
         let path = entry.path();
         if path.is_file() {
-            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
             local_files.push((name, path));
         }
     }

@@ -48,7 +48,7 @@ fn run_upload_pipeline(repo_id: &str, token: &str) -> Result<bool, Box<dyn std::
         if path.is_file() {
             if let Some(ext) = path.extension() {
                 if ext == "jsonl" || ext == "json" {
-                    let filename = path.file_name().unwrap().to_string_lossy().to_string();
+                    let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
                     shard_paths.push((filename, path));
                 }
             }

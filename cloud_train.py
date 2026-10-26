@@ -24,6 +24,7 @@ import json
 import math
 import os
 import random
+import re
 import shutil
 import sys
 import tempfile
@@ -76,6 +77,27 @@ class TokenizerOutput:
         return self.ids[idx]
 
 
+SPECIAL_TOKENS = [
+    "<|pad|>",
+    "<|im_start|>",
+    "<|im_end|>",
+    "<|unk|>",
+    "<|creator_auth|>",
+    "<|tara_rule|>",
+    "<|tara_exec|>",
+    "<|tara_skill|>",
+    "<|tara_memory|>",
+    "<|vision_start|>",
+    "<|vision_end|>",
+    "<|audio_start|>",
+    "<|audio_end|>",
+    "[STATE]",
+    "[ACTION]",
+    "[NEXT_STATE]",
+    "[EOS]",
+]
+
+
 class TaraNativeTokenizer:
     """Native Python implementation of TARA's Tokenizer matching rust/tara_engine/src/tokenizer.rs."""
     def __init__(self, vocab_map: Dict[str, int]):
@@ -85,14 +107,45 @@ class TaraNativeTokenizer:
         self.max_token_len = max((len(k) for k in vocab_map.keys()), default=1)
         self.unk_id = vocab_map.get("<|unk|>", vocab_map.get("<unk>", 0))
         self.pad_id = vocab_map.get("<|pad|>", vocab_map.get("<pad>", 0))
-        self.eos_id = vocab_map.get("<|eos|>", vocab_map.get("<eos>", 1))
+        self.eos_id = vocab_map.get("<|eos|>", vocab_map.get("<|im_end|>", vocab_map.get("<eos>", 1)))
+        self.im_start_id = vocab_map.get("<|im_start|>", 1)
+        self.im_end_id = vocab_map.get("<|im_end|>", 2)
+
+        # Pre-populate fast 256 byte lookup tables for <0x00> through <0xFF>
+        self.byte_to_id: List[Optional[int]] = [None] * 256
+        self.id_to_byte: Dict[int, int] = {}
+        for b in range(256):
+            byte_token_upper = f"<0x{b:02X}>"
+            byte_token_lower = f"<0x{b:02x}>"
+            tok_token = f"<tok_{b}>"
+            if byte_token_upper in self.token_to_id:
+                bid = self.token_to_id[byte_token_upper]
+                self.byte_to_id[b] = bid
+                self.id_to_byte[bid] = b
+            elif byte_token_lower in self.token_to_id:
+                bid = self.token_to_id[byte_token_lower]
+                self.byte_to_id[b] = bid
+                self.id_to_byte[bid] = b
+            elif tok_token in self.token_to_id:
+                bid = self.token_to_id[tok_token]
+                self.byte_to_id[b] = bid
+                self.id_to_byte[bid] = b
 
     def get_vocab_size(self) -> int:
         return self.vocab_size
 
     @classmethod
     def from_file(cls, path: str):
-        # 1. Parse vocab map directly from TARA native tokenizer JSON format
+        # 1. Primary: Use Hugging Face C/Rust tokenizer if file adheres to HF format
+        if HAS_TOKENIZERS:
+            try:
+                tok = HFTokenizer.from_file(path)
+                print("[Tokenizer] Ultra-fast native Hugging Face C/Rust tokenizer backend activated!")
+                return tok
+            except Exception:
+                pass
+
+        # 2. Fallback: Parse vocab map directly from TARA native tokenizer JSON format
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -108,38 +161,67 @@ class TaraNativeTokenizer:
         except Exception as err:
             print(f"[Tokenizer Notice] Native JSON load attempt: {err}")
 
-        # 2. Secondary fallback: Use Hugging Face C/Rust tokenizer if file adheres to HF format
-        if HAS_TOKENIZERS:
-            try:
-                tok = HFTokenizer.from_file(path)
-                print("[Tokenizer] Ultra-fast native Hugging Face C/Rust tokenizer backend activated!")
-                return tok
-            except Exception:
-                pass
-
         raise ValueError(f"Could not load valid tokenizer from {path}")
 
-
     def encode(self, text: str) -> TokenizerOutput:
-        ids = []
+        ids: List[int] = []
         n = len(text)
         i = 0
         while i < n:
+            # 1. Special token priority pass
+            matched_special = False
+            for sp in SPECIAL_TOKENS:
+                if text.startswith(sp, i):
+                    if sp in self.token_to_id:
+                        ids.append(self.token_to_id[sp])
+                        i += len(sp)
+                        matched_special = True
+                        break
+            if matched_special:
+                continue
+
+            # 2. Greedy longest-match subword search
             matched = False
-            for length in range(min(self.max_token_len, n - i), 0, -1):
-                sub = text[i:i + length]
+            max_search_len = min(self.max_token_len, n - i)
+            for length in range(max_search_len, 0, -1):
+                sub = text[i : i + length]
                 if sub in self.token_to_id:
-                    ids.append(self.token_to_id[sub])
-                    i += length
-                    matched = True
-                    break
+                    tid = self.token_to_id[sub]
+                    # Byte fallback tokens (<0x..>) are strictly reserved for fallback
+                    if tid not in self.id_to_byte:
+                        ids.append(tid)
+                        i += length
+                        matched = True
+                        break
+
+            # 3. Zero unknown byte fallback
             if not matched:
-                ids.append(self.unk_id)
+                ch = text[i]
                 i += 1
+                ch_bytes = ch.encode("utf-8")
+                if not self.id_to_byte:
+                    ids.append(self.unk_id)
+                else:
+                    for b in ch_bytes:
+                        byte_id = self.byte_to_id[b]
+                        if byte_id is not None:
+                            ids.append(byte_id)
+                        else:
+                            ids.append(self.unk_id)
+
         return TokenizerOutput(ids)
 
     def decode(self, ids: List[int]) -> str:
-        return "".join(self.id_to_token.get(i, "") for i in ids)
+        skip_ids = {self.pad_id, self.im_start_id, self.im_end_id}
+        byte_buf = bytearray()
+        for token_id in ids:
+            if token_id in skip_ids:
+                continue
+            if token_id in self.id_to_byte:
+                byte_buf.append(self.id_to_byte[token_id])
+            elif token_id in self.id_to_token:
+                byte_buf.extend(self.id_to_token[token_id].encode("utf-8"))
+        return byte_buf.decode("utf-8", errors="replace")
 
 
 # =============================================================================
@@ -163,7 +245,29 @@ def rotate_half(x: torch.Tensor) -> torch.Tensor:
     return torch.cat((-x[..., half_dim:], x[..., :half_dim]), dim=-1)
 
 
-def precompute_rope_cos_sin(dim: int, end: int, theta: float = 500000.0) -> Tuple[torch.Tensor, torch.Tensor]:
+def resolve_dynamic_rope_theta(config: Optional[dict] = None) -> float:
+    """Dynamically resolve RoPE base frequency from configuration or environment."""
+    if config and "rope_theta" in config:
+        try:
+            val = float(config["rope_theta"])
+            if val > 0.0 and math.isfinite(val):
+                return val
+        except (ValueError, TypeError):
+            pass
+    env_theta = os.environ.get("TARA_ROPE_THETA", os.environ.get("ROPE_THETA", "")).strip()
+    if env_theta:
+        try:
+            val = float(env_theta)
+            if val > 0.0 and math.isfinite(val):
+                return val
+        except ValueError:
+            pass
+    return 500000.0
+
+
+def precompute_rope_cos_sin(dim: int, end: int, theta: Optional[float] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+    if theta is None:
+        theta = resolve_dynamic_rope_theta()
     half_dim = dim // 2
     freqs = 1.0 / (theta ** (torch.arange(0, half_dim, dtype=torch.float32) * 2.0 / dim))
     t = torch.arange(end, dtype=torch.float32)
@@ -271,14 +375,33 @@ class TaraModel(nn.Module):
         # Precompute RoPE cos/sin tables matching Rust rope.rs rotate-half layout
         head_dim = config.get("head_dim", config["hidden_size"] // config["num_attention_heads"])
         max_pos = config.get("max_position_embeddings", 4096)
-        theta = config.get("rope_theta", 500000.0)
+        theta = resolve_dynamic_rope_theta(config)
         cos, sin = precompute_rope_cos_sin(head_dim, max_pos, theta)
         self.register_buffer("rope_cos", cos, persistent=False)
         self.register_buffer("rope_sin", sin, persistent=False)
 
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
-        seqlen = input_ids.shape[1]
-        h = self.embed_tokens(input_ids)
+    def forward(self, input_ids: Optional[torch.Tensor] = None, inputs_embeds: Optional[torch.Tensor] = None) -> torch.Tensor:
+        if input_ids is not None and input_ids.dim() == 1:
+            input_ids = input_ids.unsqueeze(0)
+        if inputs_embeds is not None and inputs_embeds.dim() == 2:
+            inputs_embeds = inputs_embeds.unsqueeze(0)
+        if inputs_embeds is not None:
+            h = inputs_embeds
+            seqlen = h.shape[1]
+        elif input_ids is not None:
+            seqlen = input_ids.shape[1]
+            h = self.embed_tokens(input_ids)
+        else:
+            raise ValueError("Either input_ids or inputs_embeds must be provided")
+
+        if seqlen > self.rope_cos.shape[0]:
+            head_dim = self.config.get("head_dim", self.config["hidden_size"] // self.config["num_attention_heads"])
+            theta = resolve_dynamic_rope_theta(self.config)
+            new_max = max(seqlen, self.rope_cos.shape[0] * 2)
+            new_cos, new_sin = precompute_rope_cos_sin(head_dim, new_max, theta)
+            self.rope_cos = new_cos.to(h.device)
+            self.rope_sin = new_sin.to(h.device)
+
         cos = self.rope_cos[:seqlen]
         sin = self.rope_sin[:seqlen]
 
@@ -295,6 +418,147 @@ class TaraModel(nn.Module):
         return self.norm(h)
 
 
+class CrossModalProjector(nn.Module):
+    """Native cross-modal projector matching rust/tara_engine/src/multimodal/projector.rs."""
+    def __init__(self, projector_type: str, input_dim: int, output_dim: int, intermediate_dim: int):
+        super().__init__()
+        self.projector_type = projector_type.lower()
+        if self.projector_type == "mlp":
+            self.net = nn.Sequential(
+                nn.Linear(input_dim, intermediate_dim),
+                nn.GELU(),
+                nn.Linear(intermediate_dim, output_dim),
+            )
+        else:
+            self.net = nn.Linear(input_dim, output_dim)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class PyTorchVisionEncoder(nn.Module):
+    """Native 2D patch vision encoder matching rust/tara_engine/src/multimodal/vision.rs."""
+    def __init__(self, config: dict):
+        super().__init__()
+        self.patch_height = config.get("patch_height", 16)
+        self.patch_width = config.get("patch_width", 16)
+        self.channels = config.get("channels", 3)
+        self.hidden_size = config.get("hidden_size", 2048)
+        self.intermediate_dim = config.get("intermediate_dim", self.hidden_size * 2)
+        self.projector_type = config.get("projector_type", "mlp")
+        patch_dim = self.patch_height * self.patch_width * self.channels
+        self.projector = CrossModalProjector(self.projector_type, patch_dim, self.hidden_size, self.intermediate_dim)
+        self.normalize_pixels = config.get("normalize_pixels", True)
+        self.register_buffer("mean", torch.tensor(config.get("mean", [0.485, 0.456, 0.406])).view(1, -1, 1, 1))
+        self.register_buffer("std", torch.tensor(config.get("std", [0.229, 0.224, 0.225])).view(1, -1, 1, 1))
+
+    def generate_2d_pos_embeddings(self, num_y: int, num_x: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+        d_half = self.hidden_size // 2
+        d_y = d_half // 2
+        d_x = (self.hidden_size - d_half) // 2
+
+        py = torch.arange(1, num_y + 1, device=device, dtype=dtype).unsqueeze(1)
+        px = torch.arange(1, num_x + 1, device=device, dtype=dtype).unsqueeze(1)
+
+        div_y = 10000.0 ** (torch.arange(0, d_y, device=device, dtype=dtype) * 2 / d_half)
+        div_x = 10000.0 ** (torch.arange(0, d_x, device=device, dtype=dtype) * 2 / (self.hidden_size - d_half))
+
+        angles_y = py / div_y
+        angles_x = px / div_x
+
+        y_emb = torch.stack([angles_y.sin(), angles_y.cos()], dim=-1).flatten(1)
+        x_emb = torch.stack([angles_x.sin(), angles_x.cos()], dim=-1).flatten(1)
+
+        y_grid = y_emb.unsqueeze(1).expand(-1, num_x, -1)
+        x_grid = x_emb.unsqueeze(0).expand(num_y, -1, -1)
+        return torch.cat([y_grid, x_grid], dim=-1).reshape(-1, self.hidden_size)
+
+    def forward(self, images: torch.Tensor) -> torch.Tensor:
+        if images.dim() == 3:
+            images = images.unsqueeze(0)
+        B, C, H, W = images.shape
+        if self.normalize_pixels:
+            images = (images - self.mean.to(images.device)) / self.std.to(images.device).clamp(min=1e-5)
+
+        num_y = H // self.patch_height
+        num_x = W // self.patch_width
+        patches = images.unfold(2, self.patch_height, self.patch_height).unfold(3, self.patch_width, self.patch_width)
+        patches = patches.permute(0, 2, 3, 1, 4, 5).contiguous().reshape(B, num_y * num_x, -1)
+        projected = self.projector(patches)
+        pos = self.generate_2d_pos_embeddings(num_y, num_x, images.device, projected.dtype)
+        return projected + pos.unsqueeze(0)
+
+
+class PyTorchAudioEncoder(nn.Module):
+    """Native audio Mel-spectrogram encoder matching rust/tara_engine/src/multimodal/audio.rs."""
+    def __init__(self, config: dict):
+        super().__init__()
+        self.sample_rate = config.get("sample_rate", 16000)
+        self.n_fft = config.get("n_fft", 512)
+        self.hop_length = config.get("hop_length", 160)
+        self.n_mels = config.get("n_mels", 80)
+        self.hidden_size = config.get("hidden_size", 2048)
+        self.intermediate_dim = config.get("intermediate_dim", self.hidden_size * 2)
+        self.projector_type = config.get("projector_type", "mlp")
+        self.projector = CrossModalProjector(self.projector_type, self.n_mels, self.hidden_size, self.intermediate_dim)
+
+    def forward(self, audio: torch.Tensor) -> torch.Tensor:
+        if audio.dim() == 1:
+            audio = audio.unsqueeze(0)
+        if audio.dim() == 3:
+            audio = audio.squeeze(1)
+        window = torch.hann_window(self.n_fft, device=audio.device)
+        stft = torch.stft(audio, n_fft=self.n_fft, hop_length=self.hop_length, window=window, return_complex=True)
+        mag = torch.abs(stft).transpose(1, 2)
+        if mag.shape[-1] != self.n_mels:
+            mag = torch.nn.functional.adaptive_avg_pool1d(mag, self.n_mels)
+        log_mel = torch.log(mag.clamp(min=1e-5))
+        return self.projector(log_mel)
+
+
+class CausalLMOutput(tuple):
+    """
+    Output of TaraForCausalLM.forward that functions simultaneously as:
+    1. A 4-tuple: (logits, total_loss, ce_loss, aux_loss) for direct tuple unpacking:
+       logits, loss, ce_loss, aux_loss = model(...)
+    2. An object with .loss, .logits, .ce_loss, .aux_loss attribute access.
+    3. A dict-like container with ["loss"], ["logits"], etc.
+    """
+    def __new__(cls, logits, total_loss=None, ce_loss=None, aux_loss=None):
+        return super().__new__(cls, (logits, total_loss, ce_loss, aux_loss))
+
+    @property
+    def logits(self): return self[0]
+    @property
+    def loss(self): return self[1] if self[1] is not None else self[2]
+    @property
+    def ce_loss(self): return self[2]
+    @property
+    def aux_loss(self): return self[3]
+    @property
+    def total_loss(self): return self[1]
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            mapping = {
+                "logits": self[0],
+                "loss": self[1] if self[1] is not None else self[2],
+                "total_loss": self[1],
+                "ce_loss": self[2],
+                "aux_loss": self[3],
+            }
+            if key in mapping:
+                return mapping[key]
+            raise KeyError(key)
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+
 class TaraForCausalLM(nn.Module):
     def __init__(self, config: dict, gradient_checkpointing: bool = False):
         super().__init__()
@@ -306,10 +570,69 @@ class TaraForCausalLM(nn.Module):
         if config.get("tie_word_embeddings", False):
             self.lm_head.weight = self.model.embed_tokens.weight
 
+        # MultiModal perception encoders (enabled when multimodal is active)
+        self.vision_encoder = None
+        self.audio_encoder = None
+        if config.get("multimodal", False) or "vision_config" in config:
+            v_cfg = config.get("vision_config", {"hidden_size": config["hidden_size"]})
+            self.vision_encoder = PyTorchVisionEncoder(v_cfg)
+        if config.get("multimodal", False) or "audio_config" in config:
+            a_cfg = config.get("audio_config", {"hidden_size": config["hidden_size"]})
+            self.audio_encoder = PyTorchAudioEncoder(a_cfg)
+
     def forward(
-        self, input_ids: torch.Tensor, labels: Optional[torch.Tensor] = None
+        self,
+        input_ids: Optional[torch.Tensor] = None,
+        labels: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+        images: Optional[torch.Tensor] = None,
+        audio: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
-        hidden_states = self.model(input_ids)
+        if input_ids is not None and input_ids.dim() == 1:
+            input_ids = input_ids.unsqueeze(0)
+        if labels is not None and labels.dim() == 1:
+            labels = labels.unsqueeze(0)
+        if inputs_embeds is not None and inputs_embeds.dim() == 2:
+            inputs_embeds = inputs_embeds.unsqueeze(0)
+        if inputs_embeds is None:
+            if input_ids is not None:
+                embeds = self.model.embed_tokens(input_ids)
+            else:
+                raise ValueError("Either input_ids or inputs_embeds must be provided")
+
+            if images is not None:
+                if self.vision_encoder is None:
+                    v_cfg = self.config.get("vision_config", {"hidden_size": self.config["hidden_size"]})
+                    self.vision_encoder = PyTorchVisionEncoder(v_cfg).to(embeds.device)
+                v_patches = self.vision_encoder(images)
+                v_start_id = 9
+                v_end_id = 10
+                v_start = self.model.embed_tokens(torch.tensor([[v_start_id]], device=embeds.device)).expand(v_patches.size(0), -1, -1)
+                v_end = self.model.embed_tokens(torch.tensor([[v_end_id]], device=embeds.device)).expand(v_patches.size(0), -1, -1)
+                v_seq = torch.cat([v_start, v_patches, v_end], dim=1)
+                embeds = torch.cat([v_seq, embeds], dim=1)
+                if labels is not None:
+                    img_mask = torch.full((labels.size(0), v_seq.size(1)), -100, dtype=labels.dtype, device=labels.device)
+                    labels = torch.cat([img_mask, labels], dim=1)
+
+            if audio is not None:
+                if self.audio_encoder is None:
+                    a_cfg = self.config.get("audio_config", {"hidden_size": self.config["hidden_size"]})
+                    self.audio_encoder = PyTorchAudioEncoder(a_cfg).to(embeds.device)
+                a_frames = self.audio_encoder(audio)
+                a_start_id = 11
+                a_end_id = 12
+                a_start = self.model.embed_tokens(torch.tensor([[a_start_id]], device=embeds.device)).expand(a_frames.size(0), -1, -1)
+                a_end = self.model.embed_tokens(torch.tensor([[a_end_id]], device=embeds.device)).expand(a_frames.size(0), -1, -1)
+                a_seq = torch.cat([a_start, a_frames, a_end], dim=1)
+                embeds = torch.cat([a_seq, embeds], dim=1)
+                if labels is not None:
+                    aud_mask = torch.full((labels.size(0), a_seq.size(1)), -100, dtype=labels.dtype, device=labels.device)
+                    labels = torch.cat([aud_mask, labels], dim=1)
+
+            inputs_embeds = embeds
+
+        hidden_states = self.model(inputs_embeds=inputs_embeds)
         logits = self.lm_head(hidden_states)
 
         total_loss = None
@@ -327,7 +650,15 @@ class TaraForCausalLM(nn.Module):
             aux_loss = 0.005 * torch.relu(1.0 - hidden_var)
             total_loss = ce_loss + aux_loss
 
-        return logits, total_loss, ce_loss, aux_loss
+        return CausalLMOutput(logits, total_loss, ce_loss, aux_loss)
+
+
+class TaraMultiModalForCausalLM(TaraForCausalLM):
+    """Explicit MultiModal architecture binding vision and audio encoders."""
+    def __init__(self, config: dict, gradient_checkpointing: bool = False):
+        mm_config = dict(config)
+        mm_config["multimodal"] = True
+        super().__init__(mm_config, gradient_checkpointing=gradient_checkpointing)
 
 
 # Dedicated Neural World Model Architecture (matches storage/models/tara_world_model)
@@ -408,8 +739,9 @@ def download_single_shard_jit(
     incomplete temporary file is removed and a ``RuntimeError`` is raised —
     original dataset files and user-owned files are never deleted.
     """
-    os.makedirs(local_dir, exist_ok=True)
     target_path = os.path.join(local_dir, shard_name)
+    target_dir = os.path.dirname(target_path)
+    os.makedirs(target_dir if target_dir else local_dir, exist_ok=True)
     if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
         if max_shard_bytes > 0:
             existing_size = os.path.getsize(target_path)
@@ -422,7 +754,7 @@ def download_single_shard_jit(
         return target_path
 
     token = _resolve_hf_token()
-    remote_path = f"{prefix}/{shard_name}" if prefix else shard_name
+    remote_path = f"{prefix}/{shard_name}" if (prefix and not shard_name.startswith(f"{prefix}/")) else shard_name
     print(f"[JIT Downloader] Fetching single shard '{remote_path}' from https://huggingface.co/{repo_id}...", flush=True)
 
     max_retries = 5
@@ -532,6 +864,8 @@ class ShardLedger:
         # Phase 3 fields — persisted for cross-session incremental integrity
         self.committed_optimizer_step: int = 0
         self.checkpoint_identity: str = ""
+        self.domain_cursors: Dict[str, Dict[str, Any]] = {}
+        self.active_domain_idx: int = 0
         self.load()
 
     def load(self):
@@ -590,6 +924,8 @@ class ShardLedger:
             # Phase 3 fields — restored for cross-session incremental integrity
             self.committed_optimizer_step = loaded_data.get("committed_optimizer_step", 0)
             self.checkpoint_identity = loaded_data.get("checkpoint_identity", "")
+            self.domain_cursors = loaded_data.get("domain_cursors", {})
+            self.active_domain_idx = loaded_data.get("active_domain_idx", 0)
 
     def save(self):
         os.makedirs(self.output_dir, exist_ok=True)
@@ -609,6 +945,8 @@ class ShardLedger:
             "last_committed_step": self.last_committed_step,
             "committed_optimizer_step": self.committed_optimizer_step,
             "checkpoint_identity": self.checkpoint_identity,
+            "domain_cursors": self.domain_cursors,
+            "active_domain_idx": self.active_domain_idx,
             "last_updated_utc": datetime.now(timezone.utc).isoformat(),
         }
         # Write to local temporary file first to avoid creating lingering temp files on Google Drive FUSE
@@ -707,15 +1045,40 @@ class ShardLedger:
                 self.completed_shards = [s for s in self.completed_shards if s != c_shard]
                 self.completed_metadata.pop(c_shard, None)
 
+        if cursor.get("domain_cursors"):
+            self.domain_cursors = copy.deepcopy(cursor.get("domain_cursors", {}))
+        if "active_domain_idx" in cursor:
+            self.active_domain_idx = cursor.get("active_domain_idx", 0)
+
         self.total_records_processed = c_records
         self.last_committed_step = step
         self.save()
         print(
             f"[Shard Ledger Reconciled] Authoritative state restored: "
             f"Active Shard='{self.active_shard}', Line Offset={self.active_shard_line_offset:,} (Byte Offset: {self.active_shard_byte_offset:,}), "
-            f"Completed Shards={len(self.completed_shards)}.",
+            f"Completed Shards={len(self.completed_shards)}, Domain Cursors={len(self.domain_cursors)}.",
             flush=True,
         )
+
+    def update_domain_cursor(
+        self,
+        domain: str,
+        active_shard: Optional[str],
+        line_offset: int,
+        byte_offset: int = 0,
+        chunk_idx: int = 0,
+        total_lines: int = 0,
+    ):
+        if not domain:
+            return
+        if domain not in self.domain_cursors:
+            self.domain_cursors[domain] = {}
+        self.domain_cursors[domain]["active_shard"] = active_shard
+        self.domain_cursors[domain]["line_offset"] = line_offset
+        self.domain_cursors[domain]["byte_offset"] = byte_offset
+        self.domain_cursors[domain]["chunk_idx"] = chunk_idx
+        if total_lines > 0:
+            self.domain_cursors[domain]["total_lines"] = total_lines
 
     def update_active_cursor(
         self,
@@ -1117,8 +1480,18 @@ class TaraStreamingJsonlDataset(IterableDataset):
 
         # Validate resume target existence if explicitly specified
         if self.resume_shard:
-            known_shard_names = {os.path.basename(p) for p in self.file_paths}
-            if self.resume_shard not in known_shard_names:
+            norm_resume = self.resume_shard.replace("\\", "/")
+            base_resume = os.path.basename(norm_resume)
+            known_shard_names = set()
+            for p in self.file_paths:
+                norm_p = p.replace("\\", "/")
+                known_shard_names.add(norm_p)
+                known_shard_names.add(os.path.basename(norm_p))
+                if self.dataset_dir:
+                    norm_ds = self.dataset_dir.replace("\\", "/").rstrip("/")
+                    if norm_p.startswith(norm_ds + "/"):
+                        known_shard_names.add(norm_p[len(norm_ds) + 1:])
+            if norm_resume not in known_shard_names and base_resume not in known_shard_names:
                 raise RuntimeError(
                     f"[Dataset Resume Error] Specified resume target shard '{self.resume_shard}' "
                     f"is not present in the discovered dataset shards catalog ({len(known_shard_names)} shards)."
@@ -1149,6 +1522,333 @@ class TaraStreamingJsonlDataset(IterableDataset):
             except Exception as evict_err:
                 print(f"[JIT Shard Eviction Notice] Could not delete managed cache {shard_name}: {evict_err}")
 
+    @staticmethod
+    def _extract_training_text(record: dict) -> Tuple[str, str, str]:
+        """
+        Extracts (inp_text, out_text, raw_text) from heterogeneous records across all TARA domains:
+        - OpenWebMath, FineWeb, Caselaw: text / content
+        - COCO Captions: sentences_raw / caption
+        - FLEURS Audio: transcription / raw_transcription / sentence
+        - BFCL Tool-Use: question / function
+        - Lean 4 Formal Math: formal_statement / proof / goal
+        - CommitPackFT: commit / diff / message
+        - Standard SFT: input / output / prompt / response / messages
+        """
+        # 1. Text or Content
+        if "text" in record and record["text"]:
+            return "", "", str(record["text"])
+        if "content" in record and record["content"]:
+            return "", "", str(record["content"])
+
+        # 2. Input / Output or Prompt / Response
+        if "input" in record or "output" in record:
+            return str(record.get("input", "")), str(record.get("output", "")), ""
+        if "prompt" in record or "response" in record:
+            return str(record.get("prompt", "")), str(record.get("response", "")), ""
+
+        # 3. Vision Captions (COCO has 'sentences_raw' as list)
+        if "sentences_raw" in record and record["sentences_raw"]:
+            sents = record["sentences_raw"]
+            cap = sents[0] if isinstance(sents, list) and sents else str(sents)
+            return "", "", f"<|vision_start|> [Vision Context] <|vision_end|> {str(cap)}"
+        if "caption" in record and record["caption"]:
+            cap = record["caption"]
+            cap_txt = cap[0] if isinstance(cap, list) and cap else str(cap)
+            return "", "", f"<|vision_start|> [Vision Context] <|vision_end|> {str(cap_txt)}"
+
+        # 4. Audio Transcriptions (FLEURS)
+        if "transcription" in record and record["transcription"]:
+            return "", "", f"<|audio_start|> [Audio Transcription] <|audio_end|> {str(record['transcription'])}"
+        if "sentence" in record and record["sentence"]:
+            return "", "", f"<|audio_start|> [Audio Transcription] <|audio_end|> {str(record['sentence'])}"
+
+        # 5. Tool Use (BFCL has 'question' and 'function')
+        if "question" in record and record["question"]:
+            q = record["question"]
+            funcs = json.dumps(record.get("function", []))
+            user_msg = ""
+            if isinstance(q, list):
+                for turn in q:
+                    if isinstance(turn, list):
+                        for m in turn:
+                            if isinstance(m, dict) and "content" in m:
+                                user_msg += str(m["content"]) + " "
+                    elif isinstance(turn, dict) and "content" in turn:
+                        user_msg += str(turn["content"]) + " "
+                    else:
+                        user_msg += str(turn) + " "
+            else:
+                user_msg = str(q)
+            return f"<|tara_exec|> Tools: {funcs}\nQuery: {user_msg.strip()}", str(record.get("id", "")), ""
+
+        # 6. Formal Math Proofs (Lean 4)
+        if "formal_statement" in record or "proof" in record:
+            stmt = str(record.get("formal_statement", record.get("goal", "")))
+            prf = str(record.get("proof", record.get("code", "")))
+            return f"Formal Statement:\n{stmt}", f"Proof:\n{prf}", ""
+
+        # 7. Code Diffs & Bug Fixes (CommitPackFT)
+        if "commit" in record or "diff" in record or "new_file" in record:
+            msg = str(record.get("message", record.get("subject", "")))
+            diff = str(record.get("diff", record.get("new_file", "")))[:2048]
+            return f"Fix commit: {msg}", diff, ""
+
+        # 8. Chat Messages format
+        if "messages" in record and isinstance(record["messages"], list):
+            conv = []
+            for m in record["messages"]:
+                if isinstance(m, dict):
+                    r = m.get("role", "user")
+                    c = m.get("content", "")
+                    conv.append(f"<|im_start|>{r}\n{c}<|im_end|>")
+            if conv:
+                return "", "", "\n".join(conv)
+
+        # 9. Fallback: stringify non-empty scalar values
+        vals = [str(v) for v in record.values() if isinstance(v, (str, int, float)) and str(v).strip()]
+        if vals:
+            return "", "", " ".join(vals[:5])
+        return "", "", ""
+
+    def _iter_shard_records(
+        self,
+        actual_fp: str,
+        is_resume_target: bool,
+        target_resume_line: int,
+        target_resume_byte: int,
+        target_resume_chunk: int,
+        shard_name: str,
+        shard_sha: str,
+    ):
+        ext = os.path.splitext(actual_fp)[1].lower()
+
+        # Check for Git-LFS pointer stub
+        try:
+            with open(actual_fp, "rb") as check_f:
+                header = check_f.read(100)
+                if b"version https://git-lfs.github.com/spec/v1" in header:
+                    print(f"[Dataset Shard Error] '{actual_fp}' is an unresolved Git-LFS pointer. Skipping raw stub.", flush=True)
+                    return
+        except Exception:
+            pass
+
+        # Branch 1: Parquet files (.parquet)
+        if ext == ".parquet":
+            try:
+                import pyarrow.parquet as pq
+                pf = pq.ParquetFile(actual_fp)
+                line_idx = 0
+                for batch in pf.iter_batches(batch_size=64):
+                    df = batch.to_pydict()
+                    keys = list(df.keys())
+                    n_rows = len(df[keys[0]]) if keys else 0
+                    for r in range(n_rows):
+                        current_idx = line_idx
+                        line_idx += 1
+                        if is_resume_target:
+                            if current_idx < target_resume_line:
+                                continue
+                            if current_idx == target_resume_line and target_resume_chunk == 0:
+                                continue
+                        row = {k: df[k][r] for k in keys}
+                        yield current_idx, (current_idx + 1) * 1024, row
+                return
+            except Exception as pe:
+                print(f"[Parquet Stream Error] {actual_fp}: {pe}", flush=True)
+                return
+
+        # Branch 2: Compressed Gzip (.gz / .jsonl.gz / .txt.gz)
+        if ext in (".gz", ".tar.gz"):
+            import gzip
+            try:
+                with gzip.open(actual_fp, "rt", encoding="utf-8", errors="ignore") as gf:
+                    line_idx = 0
+                    for gline in gf:
+                        current_idx = line_idx
+                        line_idx += 1
+                        if is_resume_target:
+                            if current_idx < target_resume_line:
+                                continue
+                            if current_idx == target_resume_line and target_resume_chunk == 0:
+                                continue
+                        gline = gline.strip()
+                        if not gline:
+                            continue
+                        try:
+                            rec = json.loads(gline)
+                        except Exception:
+                            rec = {"text": gline}
+                        yield current_idx, (current_idx + 1) * 1024, rec
+                return
+            except Exception as ge:
+                print(f"[Gzip Stream Error] {actual_fp}: {ge}", flush=True)
+                return
+
+        # Branch 3: Delimited CSV / TSV
+        if ext in (".csv", ".tsv"):
+            import csv
+            delim = "\t" if ext == ".tsv" else ","
+            try:
+                with open(actual_fp, "r", encoding="utf-8", errors="ignore") as cf:
+                    reader = csv.reader(cf, delimiter=delim)
+                    line_idx = 0
+                    header_row = None
+                    for row_cells in reader:
+                        if not row_cells:
+                            continue
+                        # Detect FLEURS TSV with no headers (col[1] is .wav, col[2] is transcription)
+                        if len(row_cells) >= 3 and row_cells[1].endswith((".wav", ".mp3", ".flac")):
+                            current_idx = line_idx
+                            line_idx += 1
+                            if is_resume_target:
+                                if current_idx < target_resume_line:
+                                    continue
+                                if current_idx == target_resume_line and target_resume_chunk == 0:
+                                    continue
+                            yield current_idx, (current_idx + 1) * 1024, {"transcription": row_cells[2]}
+                            continue
+
+                        if header_row is None:
+                            header_row = [c.strip() for c in row_cells]
+                            continue
+
+                        current_idx = line_idx
+                        line_idx += 1
+                        if is_resume_target:
+                            if current_idx < target_resume_line:
+                                continue
+                            if current_idx == target_resume_line and target_resume_chunk == 0:
+                                continue
+                        row_dict = {header_row[i]: row_cells[i] for i in range(min(len(header_row), len(row_cells)))}
+                        yield current_idx, (current_idx + 1) * 1024, row_dict
+                return
+            except Exception as ce:
+                print(f"[CSV/TSV Stream Error] {actual_fp}: {ce}", flush=True)
+                return
+
+        # Branch 4: Plain Text (.txt / .text)
+        if ext in (".txt", ".text"):
+            try:
+                with open(actual_fp, "r", encoding="utf-8", errors="ignore") as tf:
+                    buf = []
+                    line_idx = 0
+                    for tline in tf:
+                        tline = tline.strip()
+                        if not tline:
+                            if buf:
+                                current_idx = line_idx
+                                line_idx += 1
+                                if not (is_resume_target and current_idx < target_resume_line):
+                                    yield current_idx, (current_idx + 1) * 1024, {"text": "\n".join(buf)}
+                                buf = []
+                        else:
+                            buf.append(tline)
+                            if len(buf) >= 40:
+                                current_idx = line_idx
+                                line_idx += 1
+                                if not (is_resume_target and current_idx < target_resume_line):
+                                    yield current_idx, (current_idx + 1) * 1024, {"text": "\n".join(buf)}
+                                buf = []
+                    if buf:
+                        current_idx = line_idx
+                        if not (is_resume_target and current_idx < target_resume_line):
+                            yield current_idx, (current_idx + 1) * 1024, {"text": "\n".join(buf)}
+                return
+            except Exception as te:
+                print(f"[Text Stream Error] {actual_fp}: {te}", flush=True)
+                return
+
+        # Branch 5: JSON file (check if array or lines)
+        if ext == ".json":
+            try:
+                with open(actual_fp, "r", encoding="utf-8", errors="ignore") as jf:
+                    content_start = jf.read(50).strip()
+                    jf.seek(0)
+                    if content_start.startswith("["):
+                        data_arr = json.load(jf)
+                        for line_idx, rec in enumerate(data_arr):
+                            if is_resume_target and line_idx < target_resume_line:
+                                continue
+                            yield line_idx, (line_idx + 1) * 1024, rec
+                        return
+            except Exception as je:
+                pass
+
+        # Branch 6: Standard JSONL (with ShardLineIndex fast byte-seek resume support)
+        with open(actual_fp, "r", encoding="utf-8", errors="ignore") as f:
+            start_line_idx = 0
+            if is_resume_target and (target_resume_line >= 0 or target_resume_chunk > 0):
+                sought = False
+                file_end = f.seek(0, 2)
+                f.seek(0)
+                if self._line_index is not None:
+                    try:
+                        offsets = self._line_index.get_or_build(actual_fp, shard_sha)
+                        if target_resume_chunk == 0:
+                            next_line = target_resume_line + 1
+                            if next_line in offsets and 0 < offsets[next_line] <= file_end:
+                                f.seek(offsets[next_line])
+                                start_line_idx = next_line
+                                sought = True
+                            elif 0 < target_resume_byte <= file_end:
+                                f.seek(target_resume_byte)
+                                start_line_idx = next_line
+                                sought = True
+                        else:
+                            if target_resume_line in offsets and 0 <= offsets[target_resume_line] <= file_end:
+                                f.seek(offsets[target_resume_line])
+                                start_line_idx = target_resume_line
+                                sought = True
+                            elif target_resume_line == 0:
+                                f.seek(0)
+                                start_line_idx = 0
+                                sought = True
+                    except Exception as idx_err:
+                        print(f"[ShardLineIndex] Seek error: {idx_err}. Falling back to sequential.", flush=True)
+                        f.seek(0)
+                        start_line_idx = 0
+
+                if not sought:
+                    if target_resume_chunk == 0 and 0 < target_resume_byte <= file_end:
+                        f.seek(target_resume_byte)
+                        start_line_idx = target_resume_line + 1
+                        sought = True
+
+                if sought:
+                    print(
+                        f"[Dataset Stream] Byte-seek resume: shard '{shard_name}' "
+                        f"positioned at byte {f.tell():,} (line {start_line_idx:,}, "
+                        f"chunk_idx_resume={target_resume_chunk}).",
+                        flush=True,
+                    )
+                else:
+                    f.seek(0)
+                    start_line_idx = 0
+
+            line_offset_in_read = 0
+            while True:
+                line = f.readline()
+                if not line:
+                    break
+                line_idx = start_line_idx + line_offset_in_read
+                line_offset_in_read += 1
+                line_byte_offset = f.tell()
+                line = line.strip()
+                if not line:
+                    continue
+
+                if is_resume_target and start_line_idx == 0:
+                    if line_idx < target_resume_line:
+                        continue
+                    if line_idx == target_resume_line and target_resume_chunk == 0:
+                        continue
+
+                try:
+                    record = json.loads(line)
+                    yield line_idx, line_byte_offset, record
+                except Exception:
+                    continue
+
     def __iter__(self):
         fps = list(self.file_paths)
         if self.shuffle_shards:
@@ -1158,7 +1858,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
         emitted = 0
         buffer = []
         buffer_size = self.buffer_size
-        target_resume_shard = self.resume_shard
+        target_resume_shard = self.resume_shard.replace("\\", "/") if self.resume_shard else None
         target_resume_line = self.resume_line_offset
         target_resume_byte = getattr(self, "resume_byte_offset", 0)
         target_resume_chunk = getattr(self, "resume_chunk_idx", 0)
@@ -1172,17 +1872,22 @@ class TaraStreamingJsonlDataset(IterableDataset):
                   f"chunk_idx >= {target_resume_chunk})...", flush=True)
 
         for fp in fps:
-            shard_name = os.path.basename(fp)
+            # Preserve normalized relative path to avoid basename collisions across subfolders
+            shard_name = fp.replace("\\", "/")
+            if self.dataset_dir:
+                norm_ds = self.dataset_dir.replace("\\", "/").rstrip("/")
+                if shard_name.startswith(norm_ds + "/"):
+                    shard_name = shard_name[len(norm_ds) + 1:]
 
             # Skip earlier shards BEFORE invoking the downloader when resuming from a middle shard
             if not resume_target_reached:
-                if shard_name == target_resume_shard:
+                if shard_name == target_resume_shard or (target_resume_shard and os.path.basename(shard_name) == os.path.basename(target_resume_shard)):
                     resume_target_reached = True
                 else:
                     # Earlier shard precedes resume target; skip without downloading!
                     continue
 
-            is_resume_target = (shard_name == target_resume_shard)
+            is_resume_target = (shard_name == target_resume_shard or bool(target_resume_shard and os.path.basename(shard_name) == os.path.basename(target_resume_shard)))
 
             # Determine authentic local file path
             if os.path.isabs(fp) or os.path.exists(fp):
@@ -1257,238 +1962,81 @@ class TaraStreamingJsonlDataset(IterableDataset):
             total_shard_lines = 0
             reached_eof = True
             try:
-                with open(actual_fp, "r", encoding="utf-8") as f:
-                    start_line_idx = 0
-
-                    if is_resume_target and (target_resume_line >= 0 or target_resume_chunk > 0):
-                        # -------------------------------------------------------------------
-                        # Byte-seek resume strategy (ShardLineIndex-backed, Phase 3.1-A).
-                        #
-                        # We want to seek to target_resume_line in the file without scanning
-                        # every preceding line.  The source of truth for the byte offset is:
-                        #
-                        #   1. ShardLineIndex (content-hash-keyed): correct as long as shard
-                        #      content matches the SHA recorded when the index was built.
-                        #      We already hold `shard_sha` from the compute above.
-                        #
-                        #   2. target_resume_byte stored in the checkpoint: a secondary hint
-                        #      that can be used when it is positive AND passes the file-size
-                        #      guard.  It is the f.tell() position AFTER reading that line,
-                        #      so it points to the START of the next line — only valid when
-                        #      target_resume_chunk == 0 (the whole line was committed).
-                        #
-                        # Seek target depends on whether the resume line is fully or partially
-                        # committed:
-                        #
-                        #   target_resume_chunk == 0  → whole line committed; seek to start of
-                        #                               line (target_resume_line + 1) and set
-                        #                               start_line_idx accordingly.  The
-                        #                               checkpoint's target_resume_byte is the
-                        #                               f.tell() AFTER line target_resume_line,
-                        #                               i.e. start of the next line — use it
-                        #                               directly when valid.
-                        #
-                        #   target_resume_chunk > 0   → line partially committed; seek to the
-                        #                               START of target_resume_line so the line
-                        #                               can be re-parsed and per-chunk filtering
-                        #                               (chunk_idx < target_resume_chunk) applied.
-                        # -------------------------------------------------------------------
-                        sought = False
-                        file_end = f.seek(0, 2)
-                        f.seek(0)
-
-                        if self._line_index is not None:
-                            try:
-                                offsets = self._line_index.get_or_build(actual_fp, shard_sha)
-                                if target_resume_chunk == 0:
-                                    # Seek past the fully-committed line.
-                                    # Use the offset of (target_resume_line + 1) if present;
-                                    # otherwise use the checkpoint byte offset as fallback.
-                                    next_line = target_resume_line + 1
-                                    if next_line in offsets and 0 < offsets[next_line] <= file_end:
-                                        f.seek(offsets[next_line])
-                                        start_line_idx = next_line
-                                        sought = True
-                                    elif 0 < target_resume_byte <= file_end:
-                                        f.seek(target_resume_byte)
-                                        start_line_idx = next_line
-                                        sought = True
-                                else:
-                                    # target_resume_chunk > 0: seek to start of resume line.
-                                    # Use >= 0 (not > 0) because line 0 legitimately has offset 0.
-                                    if target_resume_line in offsets and 0 <= offsets[target_resume_line] <= file_end:
-                                        f.seek(offsets[target_resume_line])
-                                        start_line_idx = target_resume_line
-                                        sought = True
-                                    elif target_resume_line == 0:
-                                        # Line 0 always starts at offset 0
-                                        f.seek(0)
-                                        start_line_idx = 0
-                                        sought = True
-                            except Exception as idx_err:
-                                print(f"[ShardLineIndex] Seek error: {idx_err}. Falling back to sequential.", flush=True)
-                                f.seek(0)
-                                start_line_idx = 0
-
-                        if not sought:
-                            # Fallback: use checkpoint byte offset when ShardLineIndex is
-                            # unavailable or returned no valid offset.
-                            #
-                            # Only use the checkpoint byte offset for chunk==0 resumption.
-                            # The checkpoint stores f.tell() AFTER reading the resume line,
-                            # i.e. the start of the NEXT line.  For chunk==0 the whole
-                            # resume line is already committed so seeking past it is correct.
-                            #
-                            # For chunk>0, the resume line has uncommitted chunks that must
-                            # be re-parsed.  target_resume_byte points past the line, NOT
-                            # to its start, so using it would silently skip those chunks.
-                            # Leave sought=False so the sequential-scan safety fallback
-                            # (f.seek(0), start_line_idx=0) runs instead; the per-line and
-                            # per-chunk filters then correctly navigate to the first
-                            # uncommitted chunk.
-                            if target_resume_chunk == 0 and 0 < target_resume_byte <= file_end:
-                                f.seek(target_resume_byte)
-                                start_line_idx = target_resume_line + 1
-                                sought = True
-
-                        if sought:
-                            print(
-                                f"[Dataset Stream] Byte-seek resume: shard '{shard_name}' "
-                                f"positioned at byte {f.tell():,} (line {start_line_idx:,}, "
-                                f"chunk_idx_resume={target_resume_chunk}).",
-                                flush=True,
-                            )
-                        else:
-                            # Final safety fallback: sequential scan (no seek performed)
-                            f.seek(0)
-                            start_line_idx = 0
-
-                    line_offset_in_read = 0
-                    while True:
-                        line = f.readline()
-                        if not line:
-                            break
-                        line_idx = start_line_idx + line_offset_in_read
-                        line_offset_in_read += 1
-                        line_byte_offset = f.tell()
-                        total_shard_lines = max(total_shard_lines, line_idx + 1)
-                        line = line.strip()
-                        if not line:
+                for line_idx, line_byte_offset, record in self._iter_shard_records(
+                    actual_fp, is_resume_target, target_resume_line, target_resume_byte, target_resume_chunk, shard_name, shard_sha
+                ):
+                    total_shard_lines = max(total_shard_lines, line_idx + 1)
+                    try:
+                        inp_text, out_text, raw_text = self._extract_training_text(record)
+                        if not inp_text and not out_text and not raw_text:
                             continue
 
-                        # Sequential line fast-forward when byte-seek was not performed.
-                        #
-                        # Resume cursor semantics for active_chunk_idx (stored in checkpoint):
-                        # - active_chunk_idx = 0 and line is the resume line → whole line is
-                        #   committed; skip it entirely and start from the next line.
-                        # - active_chunk_idx = N > 0 → chunks 0 .. N-1 of the resume line are
-                        #   committed; resume from chunk N onward (per-chunk filter below).
-                        # - Lines strictly before target_resume_line are always skipped.
-                        #
-                        # The training loop writes active_chunk_idx = c_chunk + 1, where c_chunk
-                        # is the chunk_idx of the last sample included in the successful
-                        # optimizer step.  This guarantees the stored value is always the index
-                        # of the first uncommitted chunk within the resume line (or 0 when the
-                        # entire line was consumed before the optimizer step committed).
-                        #
-                        # When a byte-seek was performed, start_line_idx is already set to the
-                        # correct position (past or at the resume line), so sequential filtering
-                        # is only needed when start_line_idx == 0 (no seek occurred).
-                        if is_resume_target and start_line_idx == 0:
-                            if line_idx < target_resume_line:
-                                continue
-                            if line_idx == target_resume_line and target_resume_chunk == 0:
+                        if not inp_text and not out_text and raw_text:
+                            enc = self.tokenizer.encode(raw_text)
+                            full_ids = enc.ids if hasattr(enc, "ids") else list(enc)
+                            target_start = 0
+                        elif inp_text or out_text:
+                            enc_i = self.tokenizer.encode(inp_text)
+                            enc_o = self.tokenizer.encode(out_text)
+                            enc_inp = enc_i.ids if hasattr(enc_i, "ids") else list(enc_i)
+                            enc_out = enc_o.ids if hasattr(enc_o, "ids") else list(enc_o)
+                            target_start = len(enc_inp)
+                            full_ids = enc_inp + enc_out
+                        else:
+                            continue
+
+                        # Task B: Deterministic consecutive chunking.
+                        n_tokens = len(full_ids)
+                        if n_tokens < 4:
+                            continue
+
+                        chunk_size = self.max_seq_len
+                        n_chunks = max(1, math.ceil(n_tokens / chunk_size))
+
+                        valid_chunks = []
+                        for chunk_idx in range(n_chunks):
+                            chunk_start = chunk_idx * chunk_size
+                            chunk_end = min(chunk_start + chunk_size, n_tokens)
+                            chunk_ids = full_ids[chunk_start:chunk_end]
+                            if len(chunk_ids) >= 4:
+                                valid_chunks.append((chunk_idx, chunk_ids, chunk_start))
+
+                        for c_i, (chunk_idx, chunk_ids, chunk_start) in enumerate(valid_chunks):
+                            is_last_chunk = (c_i == len(valid_chunks) - 1)
+
+                            if is_resume_target and line_idx == target_resume_line and chunk_idx < target_resume_chunk:
                                 continue
 
-                        try:
-                            record = json.loads(line)
-                            inp_text = record.get("input", "")
-                            out_text = record.get("output", "")
-                            raw_text = record.get("text", "")
+                            chunk_target_start = max(0, target_start - chunk_start)
+                            chunk_target_start = min(chunk_target_start, len(chunk_ids))
 
-                            if not inp_text and not out_text and raw_text:
-                                enc = self.tokenizer.encode(raw_text)
-                                full_ids = enc.ids if hasattr(enc, "ids") else list(enc)
-                                target_start = 0
-                            elif inp_text or out_text:
-                                enc_i = self.tokenizer.encode(inp_text)
-                                enc_o = self.tokenizer.encode(out_text)
-                                enc_inp = enc_i.ids if hasattr(enc_i, "ids") else list(enc_i)
-                                enc_out = enc_o.ids if hasattr(enc_o, "ids") else list(enc_o)
-                                target_start = len(enc_inp)
-                                full_ids = enc_inp + enc_out
+                            input_ids = torch.tensor(chunk_ids, dtype=torch.long)
+                            labels = input_ids.clone()
+                            if chunk_target_start > 0:
+                                labels[:chunk_target_start] = -100
+
+                            self.active_shard_offset = line_idx
+                            self.active_shard_byte_offset = line_byte_offset
+                            self.active_chunk_idx = chunk_idx
+
+                            item = (input_ids, labels, shard_name, line_idx, line_byte_offset, chunk_idx, is_last_chunk)
+                            if buffer_size <= 1:
+                                yield item
+                                emitted += 1
+                                if 0 < self.max_samples <= emitted:
+                                    reached_eof = False
+                                    return
                             else:
-                                continue
-
-                            # -------------------------------------------------------
-                            # Task B: Deterministic consecutive chunking.
-                            # Every token in full_ids is covered by exactly one chunk.
-                            # Silent truncation via full_ids[:max_seq_len] is replaced
-                            # with a sliding window that yields all chunks.
-                            #
-                            # Chunk identity: (shard_name, line_idx, chunk_idx)
-                            # Overlap/context: none — chunks are non-overlapping so
-                            # no token is accidentally trained as a duplicate target.
-                            # Final short chunk policy: yield if len >= 4, else discard.
-                            # Label masking: per-chunk target_start is adjusted so
-                            # only output tokens within each chunk carry loss.
-                            # -------------------------------------------------------
-                            n_tokens = len(full_ids)
-                            if n_tokens < 4:
-                                continue
-
-                            chunk_size = self.max_seq_len
-                            n_chunks = max(1, math.ceil(n_tokens / chunk_size))
-
-                            valid_chunks = []
-                            for chunk_idx in range(n_chunks):
-                                chunk_start = chunk_idx * chunk_size
-                                chunk_end = min(chunk_start + chunk_size, n_tokens)
-                                chunk_ids = full_ids[chunk_start:chunk_end]
-                                if len(chunk_ids) >= 4:
-                                    valid_chunks.append((chunk_idx, chunk_ids, chunk_start))
-
-                            for c_i, (chunk_idx, chunk_ids, chunk_start) in enumerate(valid_chunks):
-                                is_last_chunk = (c_i == len(valid_chunks) - 1)
-
-                                # Skip chunks already processed at resume boundary:
-                                # For the resume line, skip chunks before the resume chunk_idx.
-                                if is_resume_target and line_idx == target_resume_line and chunk_idx < target_resume_chunk:
-                                    continue
-
-                                # Compute label masking for this specific chunk.
-                                # chunk_target_start is the number of input tokens inside
-                                # this chunk; only output tokens carry loss (label != -100).
-                                chunk_target_start = max(0, target_start - chunk_start)
-                                chunk_target_start = min(chunk_target_start, len(chunk_ids))
-
-                                input_ids = torch.tensor(chunk_ids, dtype=torch.long)
-                                labels = input_ids.clone()
-                                if chunk_target_start > 0:
-                                    labels[:chunk_target_start] = -100
-
-                                self.active_shard_offset = line_idx
-                                self.active_shard_byte_offset = line_byte_offset
-                                self.active_chunk_idx = chunk_idx
-
-                                item = (input_ids, labels, shard_name, line_idx, line_byte_offset, chunk_idx, is_last_chunk)
-                                if buffer_size <= 1:
-                                    yield item
+                                buffer.append(item)
+                                if len(buffer) >= buffer_size:
+                                    idx = random.randrange(len(buffer))
+                                    yield buffer.pop(idx)
                                     emitted += 1
                                     if 0 < self.max_samples <= emitted:
                                         reached_eof = False
                                         return
-                                else:
-                                    buffer.append(item)
-                                    if len(buffer) >= buffer_size:
-                                        idx = random.randrange(len(buffer))
-                                        yield buffer.pop(idx)
-                                        emitted += 1
-                                        if 0 < self.max_samples <= emitted:
-                                            reached_eof = False
-                                            return
-                        except Exception:
-                            continue
+                    except Exception:
+                        continue
 
                 # Drain remaining buffer for this shard before signalling EOF
                 while buffer:
@@ -1543,6 +2091,126 @@ class TaraStreamingJsonlDataset(IterableDataset):
 TaraJsonlDataset = TaraStreamingJsonlDataset
 
 
+def extract_state_transition(rec: Any) -> Optional[Tuple[str, str, str]]:
+    """
+    Extracts genuine environment state transitions (s_t, a_t) -> s_{t+1} from:
+    1. Direct keys: state_observation / state / observation, action / intervention, next_state_observation / next_state
+    2. Embedded derivation text: e.g. State observation: ... Action: ... Next state observation: ...
+    3. Curriculum causal transitions (e.g. agi_causal_transitions records)
+    4. Parquet / QA records (e.g. 08_commonsense_world_model)
+    """
+    if not isinstance(rec, dict):
+        return None
+
+    t_obj = rec.get("state_transition") if isinstance(rec.get("state_transition"), dict) else rec
+    s_obs = t_obj.get("state_observation") or t_obj.get("state") or t_obj.get("observation")
+    act = t_obj.get("action") or t_obj.get("intervention")
+    ns_obs = t_obj.get("next_state_observation") or t_obj.get("next_state") or t_obj.get("subsequent_state")
+
+    if (
+        isinstance(s_obs, str) and s_obs.strip()
+        and isinstance(act, str) and act.strip()
+        and isinstance(ns_obs, str) and ns_obs.strip()
+    ):
+        reward = t_obj.get("reward")
+        if reward is not None and not isinstance(reward, (int, float)):
+            return None
+        confidence = t_obj.get("confidence")
+        if confidence is not None:
+            if not isinstance(confidence, (int, float)) or confidence < 0.0 or confidence > 1.0:
+                return None
+        return (s_obs.strip(), act.strip(), ns_obs.strip())
+
+    if any(k in t_obj for k in ("state_observation", "next_state_observation")):
+        return None
+
+    deriv = str(rec.get("derivation", ""))
+    if "State observation" in deriv or "State s" in deriv:
+        m = re.search(
+            r"State(?:\s+observation)?:\s*(.+?)\.\s*Action:\s*(.+?)\.\s*Next(?:\s+state)?(?:\s+observation)?:\s*(.+?)(?:\.\s*Reward:|$)",
+            deriv,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if m:
+            s_val, a_val, ns_val = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+            if s_val and a_val and ns_val:
+                return (s_val, a_val, ns_val)
+
+    if (
+        rec.get("domain") == "agi_causal_transitions"
+        or "transition" in str(rec.get("concept", "")).lower()
+        or "transition" in str(rec.get("topic", "")).lower()
+        or "transition" in str(rec.get("id", "")).lower()
+    ):
+        s = str(rec.get("definition", rec.get("concept", rec.get("input", ""))))[:512].strip()
+        a = str(rec.get("formula", rec.get("subject", "causal_transition")))[:256].strip()
+        ns = str(rec.get("derivation", rec.get("explanation", rec.get("output", ""))))[:1024].strip()
+        if s and a and ns:
+            return (s, a, ns)
+
+    if rec.get("question") and (rec.get("answer") or rec.get("response")):
+        s = str(rec.get("question"))[:512].strip()
+        a = str(rec.get("action", "reasoning_transition"))[:256].strip()
+        ns = str(rec.get("answer", rec.get("response"))).strip()
+        if s and ns:
+            return (s, a, ns)
+
+    if rec.get("input") and rec.get("output"):
+        s = str(rec.get("input"))[:512].strip()
+        a = str(rec.get("action", "transition"))[:256].strip()
+        ns = str(rec.get("output"))[:1024].strip()
+        if s and ns:
+            return (s, a, ns)
+
+    return None
+
+
+def inspect_candidate_world_transitions(fp: str, max_records: int = 50) -> int:
+    """Inspects a candidate world model transition file (JSONL or Parquet) and returns count of valid transitions."""
+    if not os.path.isfile(fp):
+        return 0
+    count = 0
+    ext = os.path.splitext(fp)[1].lower()
+    if ext == ".parquet":
+        try:
+            import pyarrow.parquet as pq
+            pf = pq.ParquetFile(fp)
+            for batch in pf.iter_batches(batch_size=min(max_records, 64)):
+                df = batch.to_pydict()
+                keys = list(df.keys())
+                n_rows = len(df[keys[0]]) if keys else 0
+                for r in range(n_rows):
+                    row = {k: df[k][r] for k in keys}
+                    if extract_state_transition(row) is not None:
+                        count += 1
+                        if count >= max_records:
+                            return count
+                if count >= max_records:
+                    break
+        except Exception:
+            return count
+    else:
+        try:
+            with open(fp, "r", encoding="utf-8", errors="ignore") as f:
+                for line_idx, line in enumerate(f):
+                    if line_idx >= max_records * 2:
+                        break
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        if extract_state_transition(rec) is not None:
+                            count += 1
+                            if count >= max_records:
+                                return count
+                    except Exception:
+                        continue
+        except Exception:
+            return count
+    return count
+
+
 def route_dataset_record(rec: Any) -> str:
     """
     Categorizes a dataset record into its designated processing pathway:
@@ -1562,7 +2230,7 @@ def route_dataset_record(rec: Any) -> str:
     act = t_obj.get("action") or t_obj.get("intervention")
     ns_obs = t_obj.get("next_state_observation") or t_obj.get("next_state") or t_obj.get("subsequent_state")
 
-    # 1. Genuine environment state transition
+    # 1. Genuine environment state transition (direct keys)
     if (
         isinstance(s_obs, str) and s_obs.strip()
         and isinstance(act, str) and act.strip()
@@ -1576,6 +2244,13 @@ def route_dataset_record(rec: Any) -> str:
         if confidence is not None:
             if not isinstance(confidence, (int, float)) or confidence < 0.0 or confidence > 1.0:
                 return "invalid"
+        return "transition"
+
+    if any(k in t_obj for k in ("state_observation", "next_state_observation")):
+        return "invalid"
+
+    # 1b. Genuine transition semantics extracted from curriculum or environment dynamics
+    if extract_state_transition(rec) is not None:
         return "transition"
 
     # 2. Knowledge graph / relational facts pathway
@@ -1600,12 +2275,81 @@ def route_dataset_record(rec: Any) -> str:
     return "invalid"
 
 
+class TaraDomainBatchItem(tuple):
+    """
+    Multi-domain batch item that acts simultaneously as:
+    1. A standard 7-tuple: (input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last_chunk)
+       compatible with existing dataset collate_fn and 7-tuple unpacking.
+    2. A dictionary with keys 'input_ids', 'labels', 'attention_mask', 'domain', 'is_anchor', 'shard_name', etc.
+    3. Property access for .input_ids, .labels, .domain, .is_anchor, etc.
+    """
+    def __new__(cls, input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last, domain="general", is_anchor=False):
+        instance = super().__new__(cls, (input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last))
+        instance._domain = domain
+        instance._is_anchor = is_anchor
+        return instance
+
+    @property
+    def input_ids(self): return self[0]
+    @property
+    def labels(self): return self[1]
+    @property
+    def attention_mask(self): return (self[0] != 0).long() if isinstance(self[0], torch.Tensor) else None
+    @property
+    def shard_name(self): return self[2]
+    @property
+    def line_idx(self): return self[3]
+    @property
+    def byte_offset(self): return self[4]
+    @property
+    def chunk_idx(self): return self[5]
+    @property
+    def is_last(self): return self[6]
+    @property
+    def domain(self): return getattr(self, "_domain", "general")
+    @property
+    def is_anchor(self): return getattr(self, "_is_anchor", False)
+
+    def __contains__(self, key):
+        if isinstance(key, str):
+            return key in {
+                "input_ids", "labels", "attention_mask", "shard_name",
+                "line_idx", "byte_offset", "chunk_idx", "is_last",
+                "domain", "is_anchor"
+            }
+        return super().__contains__(key)
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            mapping = {
+                "input_ids": self[0],
+                "labels": self[1],
+                "attention_mask": (self[0] != 0).long() if isinstance(self[0], torch.Tensor) else None,
+                "shard_name": self[2],
+                "line_idx": self[3],
+                "byte_offset": self[4],
+                "chunk_idx": self[5],
+                "is_last": self[6],
+                "domain": getattr(self, "_domain", "general"),
+                "is_anchor": getattr(self, "_is_anchor", False),
+            }
+            if key in mapping:
+                return mapping[key]
+            raise KeyError(key)
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+
 class WorldModelTransitionDataset(IterableDataset):
     """
     Streaming dataset for genuine World Model state transitions: (s_t, a_t) -> s_{t+1}.
-    Validates transition records adhering strictly to:
-      {"state_observation": ..., "action": ..., "next_state_observation": ..., "reward": ...}
-      or {"state": ..., "action": ..., "next_state": ...}
+    Supports both JSONL and Parquet formatted transitions, curriculum causal transitions,
+    and prompt-target state action modeling.
     Knowledge-graph facts and triples are routed to the knowledge graph pathway,
     and are strictly rejected as transition supervision.
     """
@@ -1626,70 +2370,917 @@ class WorldModelTransitionDataset(IterableDataset):
         for fp in self.file_paths:
             if not os.path.exists(fp):
                 continue
-            try:
-                with open(fp, "r", encoding="utf-8") as f:
-                    for line_idx, line in enumerate(f):
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            rec = json.loads(line)
-                        except Exception:
-                            continue
-
-                        if not isinstance(rec, dict):
-                            continue
-
-                        # Extract state transition components (support optional state_transition nested wrapper)
-                        t_obj = rec.get("state_transition") if isinstance(rec.get("state_transition"), dict) else rec
-                        s_obs = t_obj.get("state_observation") or t_obj.get("state") or t_obj.get("observation")
-                        act = t_obj.get("action") or t_obj.get("intervention")
-                        ns_obs = t_obj.get("next_state_observation") or t_obj.get("next_state") or t_obj.get("subsequent_state")
-
-                        # Validate field types, non-empty required values, and sequence semantics
-                        if not (
-                            isinstance(s_obs, str) and s_obs.strip()
-                            and isinstance(act, str) and act.strip()
-                            and isinstance(ns_obs, str) and ns_obs.strip()
-                        ):
-                            continue
-
-                        # Validate optional reward and confidence semantics
-                        reward = t_obj.get("reward")
-                        if reward is not None and not isinstance(reward, (int, float)):
-                            continue
-                        confidence = t_obj.get("confidence")
-                        if confidence is not None:
-                            if not isinstance(confidence, (int, float)) or confidence < 0.0 or confidence > 1.0:
+            ext = os.path.splitext(fp)[1].lower()
+            if ext == ".parquet":
+                try:
+                    import pyarrow.parquet as pq
+                    pf = pq.ParquetFile(fp)
+                    for batch in pf.iter_batches(batch_size=64):
+                        df = batch.to_pydict()
+                        keys = list(df.keys())
+                        n_rows = len(df[keys[0]]) if keys else 0
+                        for r in range(n_rows):
+                            row = {k: df[k][r] for k in keys}
+                            if route_dataset_record(row) != "transition":
                                 continue
+                            t = extract_state_transition(row)
+                            if not t:
+                                continue
+                            s_obs, act, ns_obs = t
+                            prompt_text = f"[STATE] {s_obs} [ACTION] {act} [NEXT_STATE] "
+                            target_text = f"{ns_obs} [EOS]"
+                            prompt_tokens = list(self.tokenizer.encode(prompt_text))
+                            target_tokens = list(self.tokenizer.encode(target_text))
+                            if not target_tokens:
+                                continue
+                            if len(prompt_tokens) >= self.max_seq_len - 4:
+                                prompt_tokens = prompt_tokens[-(self.max_seq_len // 2):]
+                            full_ids = (prompt_tokens + target_tokens)[:self.max_seq_len]
+                            if len(full_ids) < 4:
+                                continue
+                            input_ids = torch.tensor(full_ids, dtype=torch.long)
+                            labels = input_ids.clone()
+                            mask_len = min(len(prompt_tokens), len(full_ids))
+                            labels[:mask_len] = -100
+                            if not (labels != -100).any():
+                                continue
+                            yield TaraDomainBatchItem(input_ids, labels, os.path.basename(fp), emitted, 0, 0, True, domain="08_commonsense_world_model")
+                            emitted += 1
+                            if 0 < self.max_samples <= emitted:
+                                return
+                except Exception as e:
+                    print(f"[World Dataset Parquet Error] {fp}: {e}", flush=True)
+            else:
+                try:
+                    with open(fp, "r", encoding="utf-8", errors="ignore") as f:
+                        for line_idx, line in enumerate(f):
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                rec = json.loads(line)
+                            except Exception:
+                                continue
+                            if not isinstance(rec, dict):
+                                continue
+                            if route_dataset_record(rec) != "transition":
+                                continue
+                            t = extract_state_transition(rec)
+                            if not t:
+                                continue
+                            s_obs, act, ns_obs = t
+                            prompt_text = f"[STATE] {s_obs} [ACTION] {act} [NEXT_STATE] "
+                            target_text = f"{ns_obs} [EOS]"
+                            prompt_tokens = list(self.tokenizer.encode(prompt_text))
+                            target_tokens = list(self.tokenizer.encode(target_text))
+                            if not target_tokens:
+                                continue
+                            if len(prompt_tokens) >= self.max_seq_len - 4:
+                                prompt_tokens = prompt_tokens[-(self.max_seq_len // 2):]
+                            full_ids = (prompt_tokens + target_tokens)[:self.max_seq_len]
+                            if len(full_ids) < 4:
+                                continue
+                            input_ids = torch.tensor(full_ids, dtype=torch.long)
+                            labels = input_ids.clone()
+                            mask_len = min(len(prompt_tokens), len(full_ids))
+                            labels[:mask_len] = -100
+                            if not (labels != -100).any():
+                                continue
+                            yield TaraDomainBatchItem(input_ids, labels, os.path.basename(fp), line_idx, 0, 0, True, domain="08_commonsense_world_model")
+                            emitted += 1
+                            if 0 < self.max_samples <= emitted:
+                                return
+                except Exception as e:
+                    print(f"[World Dataset Error] Failed to stream {fp}: {e}", flush=True)
 
-                        s_obs = s_obs.strip()
-                        act = act.strip()
-                        ns_obs = ns_obs.strip()
 
-                        # Format prompt: [STATE] s_t [ACTION] a_t -> [NEXT_STATE] s_{t+1}
-                        prompt_text = f"[STATE] {s_obs} [ACTION] {act} [NEXT_STATE] "
-                        target_text = f"{ns_obs} [EOS]"
+# =============================================================================
+# 2b. Multi-Domain Interleaved Streaming & Anchor Replay Buffer Architecture
+# =============================================================================
 
-                        prompt_tokens = list(self.tokenizer.encode(prompt_text))
-                        target_tokens = list(self.tokenizer.encode(target_text))
-                        full_ids = (prompt_tokens + target_tokens)[:self.max_seq_len]
+CANONICAL_DOMAINS = [
+    "01_mathematics_formal_logic",
+    "02_computer_science_systems",
+    "03_natural_sciences_stem",
+    "04_linguistics_multilingual",
+    "05_philosophy_cognitive_ethics",
+    "06_social_sciences_economics_law",
+    "07_applied_engineering_robotics",
+    "08_commonsense_world_model",
+    "09_multimodal_audio",
+    "10_multimodal_vision",
+    "11_tool_use_execution",
+    "12_planning_reasoning_traces",
+    "13_debugging_self_correction",
+    "instruction_tuning_sft",
+]
 
-                        if len(full_ids) < 4:
+CORE_ANCHOR_DOMAINS = {
+    "12_planning_reasoning_traces",
+    "04_linguistics_multilingual",
+    "01_mathematics_formal_logic",
+    "11_tool_use_execution",
+}
+
+DOMAIN_ALIASES = {
+    "01_math": "01_mathematics_formal_logic",
+    "math": "01_mathematics_formal_logic",
+    "mathematics": "01_mathematics_formal_logic",
+    "01_mathematics_formal_logic": "01_mathematics_formal_logic",
+    "02_code": "02_computer_science_systems",
+    "code": "02_computer_science_systems",
+    "cs": "02_computer_science_systems",
+    "computer_science": "02_computer_science_systems",
+    "02_computer_science_systems": "02_computer_science_systems",
+    "03_stem": "03_natural_sciences_stem",
+    "stem": "03_natural_sciences_stem",
+    "natural_sciences": "03_natural_sciences_stem",
+    "03_natural_sciences_stem": "03_natural_sciences_stem",
+    "04_kannada": "04_linguistics_multilingual",
+    "kannada": "04_linguistics_multilingual",
+    "linguistics": "04_linguistics_multilingual",
+    "indic": "04_linguistics_multilingual",
+    "multilingual": "04_linguistics_multilingual",
+    "04_linguistics_multilingual": "04_linguistics_multilingual",
+    "05_philosophy": "05_philosophy_cognitive_ethics",
+    "philosophy": "05_philosophy_cognitive_ethics",
+    "ethics": "05_philosophy_cognitive_ethics",
+    "05_philosophy_cognitive_ethics": "05_philosophy_cognitive_ethics",
+    "06_social": "06_social_sciences_economics_law",
+    "social": "06_social_sciences_economics_law",
+    "economics": "06_social_sciences_economics_law",
+    "law": "06_social_sciences_economics_law",
+    "06_social_sciences_economics_law": "06_social_sciences_economics_law",
+    "07_engineering": "07_applied_engineering_robotics",
+    "engineering": "07_applied_engineering_robotics",
+    "robotics": "07_applied_engineering_robotics",
+    "07_applied_engineering_robotics": "07_applied_engineering_robotics",
+    "08_world_model": "08_commonsense_world_model",
+    "world_model": "08_commonsense_world_model",
+    "commonsense": "08_commonsense_world_model",
+    "08_commonsense_world_model": "08_commonsense_world_model",
+    "09_audio": "09_multimodal_audio",
+    "audio": "09_multimodal_audio",
+    "multimodal_audio": "09_multimodal_audio",
+    "09_multimodal_audio": "09_multimodal_audio",
+    "10_vision": "10_multimodal_vision",
+    "vision": "10_multimodal_vision",
+    "multimodal_vision": "10_multimodal_vision",
+    "10_multimodal_vision": "10_multimodal_vision",
+    "11_tool_use": "11_tool_use_execution",
+    "tools": "11_tool_use_execution",
+    "tool": "11_tool_use_execution",
+    "tool_use": "11_tool_use_execution",
+    "11_tool_use_execution": "11_tool_use_execution",
+    "12_reasoning": "12_planning_reasoning_traces",
+    "reasoning": "12_planning_reasoning_traces",
+    "planning": "12_planning_reasoning_traces",
+    "traces": "12_planning_reasoning_traces",
+    "12_planning_reasoning_traces": "12_planning_reasoning_traces",
+    "13_debugging": "13_debugging_self_correction",
+    "debugging": "13_debugging_self_correction",
+    "self_correction": "13_debugging_self_correction",
+    "13_debugging_self_correction": "13_debugging_self_correction",
+    "sft": "instruction_tuning_sft",
+    "instruction": "instruction_tuning_sft",
+    "instruction_tuning": "instruction_tuning_sft",
+    "instruction_tuning_sft": "instruction_tuning_sft",
+}
+
+
+def resolve_shard_domain(shard_path: str) -> str:
+    """
+    Resolves a shard path to its authentic canonical domain across arbitrary nested subfolders
+    (e.g., domain/folder/folder/folder/shard.parquet or v2/domain/sub/shard.jsonl).
+    Uses hierarchical directory segment matching and longest-alias matching to prevent
+    short alias collisions (such as 'cs' in 'linguistics' or 'physics').
+    """
+    norm = shard_path.replace("\\", "/").strip("/")
+    parts = [p.lower() for p in norm.split("/") if p]
+    dir_parts = parts[:-1]  # directory segments excluding filename
+
+    # 1. Exact directory segment matching against canonical domains & aliases
+    for p in dir_parts:
+        if p in DOMAIN_ALIASES:
+            return DOMAIN_ALIASES[p]
+        if p in CANONICAL_DOMAINS:
+            return p
+
+    # 2. Prefix matching on directory segments (e.g. '01_math' or '04_kannada')
+    for p in dir_parts:
+        for d in CANONICAL_DOMAINS:
+            if p.startswith(d) or d.startswith(p):
+                return d
+        for alias, canon in DOMAIN_ALIASES.items():
+            if p.startswith(alias) or p.endswith(alias):
+                return canon
+
+    # 3. Whole path search with word boundaries or segment search
+    for d in CANONICAL_DOMAINS:
+        if f"/{d}/" in f"/{norm}/" or norm.startswith(d):
+            return d
+
+    # 4. Longest alias match in path to prevent short aliases like 'cs' stealing from 'linguistics'
+    sorted_aliases = sorted(DOMAIN_ALIASES.items(), key=lambda x: len(x[0]), reverse=True)
+    for alias, canon in sorted_aliases:
+        if len(alias) >= 4 and alias in norm.lower():
+            return canon
+
+    # 5. Dynamic fallback: if directory exists and is not a generic wrapper, use it as a dynamic domain
+    for p in dir_parts:
+        if p not in ("v1", "v2", "v3", "data", "dataset", "datasets", "storage", "downloaded", "main_dataset_v2"):
+            return p
+
+    return "02_computer_science_systems"
+
+
+def parse_domain_weights(
+    weight_str: str,
+    active_domains: Optional[List[str]] = None,
+    available_domains: Optional[List[str]] = None,
+    **kwargs,
+) -> Dict[str, float]:
+    """
+    Parses flexible comma-separated domain weight mixing (e.g.
+    '01_math:0.20,02_code:0.30' or '01_math=0.20,02_code=0.30').
+    Normalizes weights over target domains so they sum strictly to 1.0.
+    """
+    domains = list(active_domains) if active_domains is not None else (list(available_domains) if available_domains is not None else list(CANONICAL_DOMAINS))
+    if not domains:
+        domains = list(CANONICAL_DOMAINS)
+
+    weights = {}
+    if weight_str:
+        for item in weight_str.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            sep = ":" if ":" in item else ("=" if "=" in item else None)
+            if not sep:
+                continue
+            k, v = item.split(sep, 1)
+            k = k.strip().lower()
+            try:
+                val = float(v.strip())
+            except ValueError:
+                continue
+            canon = None
+            if k in domains:
+                canon = k
+            elif DOMAIN_ALIASES.get(k) in domains:
+                canon = DOMAIN_ALIASES.get(k)
+            else:
+                canon = DOMAIN_ALIASES.get(k)
+                if not canon:
+                    for d in domains:
+                        if d.startswith(k) or k in d:
+                            canon = d
+                            break
+                if not canon:
+                    for d in CANONICAL_DOMAINS:
+                        if d.startswith(k) or k in d:
+                            canon = d
+                            break
+            if canon:
+                weights[canon] = max(0.0, val)
+
+    if not weights:
+        default_weights = {
+            "02_computer_science_systems": 0.25,
+            "01_mathematics_formal_logic": 0.15,
+            "04_linguistics_multilingual": 0.15,
+            "12_planning_reasoning_traces": 0.15,
+            "03_natural_sciences_stem": 0.10,
+            "08_commonsense_world_model": 0.05,
+            "11_tool_use_execution": 0.05,
+            "13_debugging_self_correction": 0.02,
+            "instruction_tuning_sft": 0.02,
+            "05_philosophy_cognitive_ethics": 0.012,
+            "06_social_sciences_economics_law": 0.012,
+            "07_applied_engineering_robotics": 0.012,
+            "09_multimodal_audio": 0.012,
+            "10_multimodal_vision": 0.012,
+        }
+        for d in domains:
+            weights[d] = default_weights.get(d, 0.01)
+
+    assigned_sum = sum(weights.get(d, 0.0) for d in domains)
+    unassigned = [d for d in domains if d not in weights]
+    if unassigned:
+        remaining = max(0.0, 1.0 - assigned_sum)
+        per_domain = remaining / len(unassigned) if remaining > 0 else 0.01
+        for d in unassigned:
+            weights[d] = per_domain
+
+    total = sum(weights.get(d, 0.0) for d in domains)
+    if total > 0:
+        return {d: weights.get(d, 0.0) / total for d in domains}
+    return {d: 1.0 / len(domains) for d in domains}
+
+
+class AnchorReplayBuffer:
+    """
+    Continuous Anchor Replay Buffer for Core Foundational Domains.
+    When core domains (Reasoning: 11 shards, Kannada: 66 shards, Math: 114 shards, Tool Use: 58 shards)
+    exhaust their shards while the 884-shard code stream continues, this buffer maintains a continuous
+    15%-20% anchor replay allocation in the stream so the model never loses reasoning, mathematics,
+    linguistics, or tool execution capabilities.
+    Uses reservoir sampling bounded to capacity (default 1500 samples/domain, < 35 MB CPU RAM).
+    """
+    def __init__(self, capacity_per_domain: int = 1500, anchor_ratio: float = 0.15):
+        self.capacity = capacity_per_domain
+        self.anchor_ratio = anchor_ratio
+        self.buffers: Dict[str, List[Any]] = {}
+        self.counts: Dict[str, int] = {}
+        self.depleted_domains: Set[str] = set()
+
+    def add_sample(self, domain: str, item: Any):
+        if domain not in CORE_ANCHOR_DOMAINS:
+            return
+        if domain not in self.buffers:
+            self.buffers[domain] = []
+            self.counts[domain] = 0
+
+        self.counts[domain] += 1
+        n = self.counts[domain]
+        k = self.capacity
+
+        if len(self.buffers[domain]) < k:
+            self.buffers[domain].append(item)
+        else:
+            replace_idx = random.randint(0, n - 1)
+            if replace_idx < k:
+                self.buffers[domain][replace_idx] = item
+
+    def mark_depleted(self, domain: str):
+        if domain in CORE_ANCHOR_DOMAINS and domain in self.buffers and len(self.buffers[domain]) > 0:
+            if domain not in self.depleted_domains:
+                self.depleted_domains.add(domain)
+                print(
+                    f"[Anchor Replay Buffer] Domain '{domain}' reached EOF across all shards. "
+                    f"Activating Anchor Replay Mode with {len(self.buffers[domain]):,} cached anchor exemplars.",
+                    flush=True,
+                )
+
+    def is_depleted(self, domain: str) -> bool:
+        return domain in self.depleted_domains
+
+    def has_anchors(self) -> bool:
+        return len(self.depleted_domains) > 0 and any(len(self.buffers.get(d, [])) > 0 for d in self.depleted_domains)
+
+    def sample_anchor(self, preferred_domain: Optional[str] = None) -> Optional[Any]:
+        candidates = [d for d in self.depleted_domains if self.buffers.get(d)]
+        if not candidates:
+            if preferred_domain and self.buffers.get(preferred_domain):
+                buf = self.buffers[preferred_domain]
+                return random.choice(buf)
+            all_bufs = [d for d in self.buffers if self.buffers[d]]
+            if all_bufs:
+                chosen_d = random.choice(all_bufs)
+                return random.choice(self.buffers[chosen_d])
+            return None
+
+        chosen_d = preferred_domain if (preferred_domain in candidates) else random.choice(candidates)
+        buf = self.buffers[chosen_d]
+        return random.choice(buf)
+
+    def get_state(self) -> Dict[str, Any]:
+        """
+        Serializes anchor replay buffer into a compact, memory-efficient JSON dictionary (< 10 MB).
+        Uses single-character keys and label deduplication to minimize storage footprint.
+        """
+        serialized_buffers: Dict[str, List[Dict[str, Any]]] = {}
+        for dom, items in self.buffers.items():
+            serialized_items = []
+            for item in items:
+                if isinstance(item, dict):
+                    inp = item.get("input_ids", [])
+                    lab = item.get("labels", None)
+                    s_name = str(item.get("shard_name", ""))
+                    l_idx = int(item.get("line_idx", 0))
+                    b_off = int(item.get("byte_offset", 0))
+                    c_idx = int(item.get("chunk_idx", 0))
+                    is_last = bool(item.get("is_last", True))
+                elif hasattr(item, "input_ids") and hasattr(item, "labels"):
+                    inp = item.input_ids
+                    lab = item.labels
+                    s_name = str(getattr(item, "shard_name", ""))
+                    l_idx = int(getattr(item, "line_idx", 0))
+                    b_off = int(getattr(item, "byte_offset", 0))
+                    c_idx = int(getattr(item, "chunk_idx", 0))
+                    is_last = bool(getattr(item, "is_last", True))
+                elif isinstance(item, (tuple, list)) and len(item) >= 7:
+                    inp, lab, s_name, l_idx, b_off, c_idx, is_last = item[:7]
+                    s_name = str(s_name)
+                    l_idx = int(l_idx)
+                    b_off = int(b_off)
+                    c_idx = int(c_idx)
+                    is_last = bool(is_last)
+                else:
+                    inp = item if isinstance(item, (list, tuple, torch.Tensor)) else []
+                    lab = None
+                    s_name, l_idx, b_off, c_idx, is_last = "", 0, 0, 0, True
+
+                inp_list = inp.detach().cpu().tolist() if isinstance(inp, torch.Tensor) else (list(inp) if isinstance(inp, (list, tuple)) else [])
+                lab_list = lab.detach().cpu().tolist() if isinstance(lab, torch.Tensor) else (list(lab) if isinstance(lab, (list, tuple)) else None)
+
+                # Space optimization: if labels is identical to input_ids, store None to halve size
+                if lab_list == inp_list or lab_list is None:
+                    lab_val = None
+                else:
+                    lab_val = lab_list
+
+                serialized_items.append({
+                    "i": inp_list,
+                    "l": lab_val,
+                    "s": s_name,
+                    "n": l_idx,
+                    "b": b_off,
+                    "c": c_idx,
+                    "e": is_last,
+                })
+            serialized_buffers[dom] = serialized_items
+
+        return {
+            "capacity": self.capacity,
+            "anchor_ratio": self.anchor_ratio,
+            "depleted_domains": sorted(list(self.depleted_domains)),
+            "counts": dict(self.counts),
+            "buffers": serialized_buffers,
+        }
+
+    def load_state(self, state: Dict[str, Any]):
+        """
+        Restores AnchorReplayBuffer state from serialized dictionary.
+        Reconstructs TaraDomainBatchItem exemplars and restores depleted domain statuses.
+        """
+        if not state:
+            return
+        if "capacity" in state:
+            self.capacity = int(state["capacity"])
+        if "anchor_ratio" in state:
+            self.anchor_ratio = float(state["anchor_ratio"])
+        if "counts" in state and isinstance(state["counts"], dict):
+            for dom, cnt in state["counts"].items():
+                self.counts[dom] = int(cnt)
+        if "depleted_domains" in state:
+            for d in state["depleted_domains"]:
+                self.depleted_domains.add(str(d))
+
+        raw_buffers = state.get("buffers", {})
+        if isinstance(raw_buffers, dict):
+            for dom, items in raw_buffers.items():
+                if not isinstance(items, list):
+                    continue
+                restored_list = []
+                for entry in items:
+                    if isinstance(entry, dict):
+                        inp_list = entry.get("i", entry.get("input_ids", []))
+                        lab_list = entry.get("l", entry.get("labels", None))
+                        if lab_list is None:
+                            lab_list = inp_list
+                        s_name = str(entry.get("s", entry.get("shard_name", "")))
+                        l_idx = int(entry.get("n", entry.get("line_idx", 0)))
+                        b_off = int(entry.get("b", entry.get("byte_offset", 0)))
+                        c_idx = int(entry.get("c", entry.get("chunk_idx", 0)))
+                        is_last = bool(entry.get("e", entry.get("is_last", True)))
+
+                        try:
+                            inp_t = torch.tensor(inp_list, dtype=torch.long)
+                            lab_t = torch.tensor(lab_list, dtype=torch.long)
+                        except Exception:
+                            inp_t = inp_list
+                            lab_t = lab_list
+
+                        batch_item = TaraDomainBatchItem(
+                            inp_t, lab_t, s_name, l_idx, b_off, c_idx, is_last,
+                            domain=dom, is_anchor=True
+                        )
+                        restored_list.append(batch_item)
+                    elif isinstance(entry, (tuple, list)) and len(entry) >= 7:
+                        inp, lab, s_name, l_idx, b_off, c_idx, is_last = entry[:7]
+                        batch_item = TaraDomainBatchItem(
+                            inp, lab, str(s_name), int(l_idx), int(b_off), int(c_idx), bool(is_last),
+                            domain=dom, is_anchor=True
+                        )
+                        restored_list.append(batch_item)
+                    elif hasattr(entry, "input_ids") and hasattr(entry, "labels"):
+                        restored_list.append(entry)
+                    else:
+                        restored_list.append(entry)
+
+                self.buffers[dom] = restored_list
+                if dom not in self.counts or self.counts[dom] < len(restored_list):
+                    self.counts[dom] = len(restored_list)
+
+
+
+class TeacherReplayBuffer:
+    """
+    Multi-Domain Stratified Teacher Replay Buffer.
+    Captures high-quality representative exemplar records from all 14 dataset domains
+    using reservoir sampling per domain (bounded to max_samples_per_domain = 500, ~7,000 total).
+    Memory footprint bounded to < 25 MB RAM.
+    Auto-persists atomically to best_checkpoint/teacher_replay_buffer.jsonl upon best milestones.
+    """
+    def __init__(self, max_samples_per_domain: int = 500):
+        self.max_samples_per_domain = max_samples_per_domain
+        self.buffers: Dict[str, List[Dict[str, Any]]] = {}
+        self.counts: Dict[str, int] = {}
+
+    def add_sample(
+        self,
+        domain: str,
+        input_ids: Optional[Any] = None,
+        text: str = "",
+        step: int = 0,
+        loss: float = 0.0,
+        metadata: Optional[Dict[str, Any]] = None,
+        *args,
+        **kwargs,
+    ):
+        if not domain:
+            domain = "general"
+        if domain not in self.buffers:
+            self.buffers[domain] = []
+            self.counts[domain] = 0
+
+        self.counts[domain] += 1
+        n = self.counts[domain]
+        k = self.max_samples_per_domain
+
+        entry: Dict[str, Any] = {
+            "domain": domain,
+            "step": step,
+            "loss": round(float(loss), 4),
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        if input_ids is not None:
+            if isinstance(input_ids, torch.Tensor):
+                raw_ids = input_ids.detach().cpu().tolist()
+                if isinstance(raw_ids, (int, float)):
+                    entry["input_ids"] = [int(raw_ids)]
+                else:
+                    entry["input_ids"] = list(raw_ids)[:512]
+            elif isinstance(input_ids, (int, float)):
+                entry["input_ids"] = [int(input_ids)]
+            elif isinstance(input_ids, (list, tuple)):
+                entry["input_ids"] = list(input_ids)[:512]
+            else:
+                try:
+                    entry["input_ids"] = [int(x) for x in input_ids][:512]
+                except TypeError:
+                    entry["input_ids"] = [int(input_ids)]
+        else:
+            entry["input_ids"] = []
+
+        if text:
+            entry["text"] = str(text)[:2048]
+        if metadata:
+            for mk, mv in metadata.items():
+                if mk not in entry and isinstance(mv, (str, int, float, bool, list, dict)):
+                    entry[mk] = mv
+        for kwk, kwv in kwargs.items():
+            if kwk not in entry and isinstance(kwv, (str, int, float, bool, list, dict)):
+                entry[kwk] = kwv
+
+        if len(self.buffers[domain]) < k:
+            self.buffers[domain].append(entry)
+        else:
+            replace_idx = random.randint(0, n - 1)
+            if replace_idx < k:
+                self.buffers[domain][replace_idx] = entry
+
+    def total_samples(self) -> int:
+        return sum(len(b) for b in self.buffers.values())
+
+    def save_to_jsonl(self, filepath: str):
+        target_dir = os.path.dirname(os.path.abspath(filepath))
+        os.makedirs(target_dir, exist_ok=True)
+        tmp_file = os.path.join(target_dir, f".teacher_buf_tmp_{os.getpid()}_{int(time.time())}.jsonl")
+        try:
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                for domain in sorted(self.buffers.keys()):
+                    for item in self.buffers[domain]:
+                        f.write(json.dumps(item, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            if os.path.exists(filepath):
+                try:
+                    os.replace(tmp_file, filepath)
+                except OSError:
+                    os.remove(filepath)
+                    os.rename(tmp_file, filepath)
+            else:
+                os.rename(tmp_file, filepath)
+            print(f"[Teacher Replay Buffer] Persisted {self.total_samples():,} stratified samples across {len(self.buffers)} domains -> {filepath}", flush=True)
+        finally:
+            if os.path.exists(tmp_file):
+                _safe_unlink(tmp_file)
+
+    def load_from_jsonl(self, filepath: str):
+        """Restores stratified replay samples from a previously persisted teacher replay JSONL file."""
+        if not os.path.isfile(filepath):
+            return
+        restored = 0
+        try:
+            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        item = json.loads(line)
+                        if not isinstance(item, dict):
                             continue
+                        domain = item.get("domain", "general")
+                        if domain not in self.buffers:
+                            self.buffers[domain] = []
+                            self.counts[domain] = 0
+                        if len(self.buffers[domain]) < self.max_samples_per_domain:
+                            self.buffers[domain].append(item)
+                        self.counts[domain] += 1
+                        restored += 1
+                    except Exception:
+                        continue
+            print(f"[Teacher Replay Buffer] Restored {self.total_samples():,} stratified sample(s) across {len(self.buffers)} domain(s) from {filepath}", flush=True)
+        except Exception as e:
+            print(f"[Teacher Replay Buffer Notice] Could not load replay buffer from {filepath}: {e}", flush=True)
 
-                        input_ids = torch.tensor(full_ids, dtype=torch.long)
-                        labels = input_ids.clone()
-                        # Mask prompt tokens so loss is computed exclusively on next-state prediction
-                        mask_len = min(len(prompt_tokens), len(full_ids))
-                        labels[:mask_len] = -100
 
-                        yield input_ids, labels, os.path.basename(fp), line_idx, 0, 0, True
+class TaraMultiDomainScheduler(IterableDataset):
+    """
+    Weighted Multi-Domain Interleaved Streaming Scheduler with Deficit Round-Robin (DRR)
+    and Anchor Replay Buffer for Core Depleted Domains.
+    
+    Eliminates catastrophic forgetting by interleaving batches from 14 domain buckets
+    proportional to domain weights, ensuring core reasoning, math, and linguistics
+    remain active throughout large-scale pretraining.
+    
+    Maintains Free Google Colab resource budgets:
+    - CPU RAM < 500 MB (generator-based streaming, 1-sample line buffers, bounded reservoir).
+    - GPU VRAM < 15 GB (AdamW8bit and gradient checkpointing compatibility).
+    - Local Disk < 5 GB (single active downloaded shard per domain with immediate eviction).
+    """
+    def __init__(
+        self,
+        domain_shards: Dict[str, List[str]],
+        domain_weights: Optional[Dict[str, float]] = None,
+        tokenizer: Optional[Any] = None,
+        batch_size: int = 1,
+        max_seq_len: int = 256,
+        max_samples: int = 0,
+        anchor_ratio: float = 0.15,
+        dataset_dir: Optional[str] = None,
+        repo_id: Optional[str] = None,
+        prefix: str = "",
+        shard_ledger: Optional[ShardLedger] = None,
+        keep_shards: bool = False,
+        buffer_size: int = 1,
+        max_shard_bytes: int = 0,
+        dataset_snapshot: Optional[Any] = None,
+        domain_cursors: Optional[Dict[str, Dict[str, Any]]] = None,
+        anchor_buffer_state: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ):
+        self.domain_shards = {d: list(s) for d, s in domain_shards.items() if s}
+        self.active_domains = sorted(self.domain_shards.keys())
+        self.tokenizer = tokenizer
+        self.batch_size = batch_size
+        self.max_seq_len = max_seq_len
+        self.max_samples = max_samples
+        self.anchor_ratio = anchor_ratio
+        self.dataset_dir = dataset_dir
+        self.repo_id = repo_id
+        self.prefix = prefix
+        self.shard_ledger = shard_ledger
+        self.keep_shards = keep_shards
+        self.buffer_size = buffer_size
+        self.max_shard_bytes = max_shard_bytes
+        self.dataset_snapshot = dataset_snapshot
+
+        self.domain_weights = parse_domain_weights("", self.active_domains)
+        if domain_weights:
+            norm_w = {}
+            for d in self.active_domains:
+                if d in domain_weights:
+                    norm_w[d] = float(domain_weights[d])
+            total_w = sum(norm_w.values())
+            if total_w > 0:
+                self.domain_weights = {d: norm_w.get(d, 0.0) / total_w for d in self.active_domains}
+
+        self.anchor_buffer = AnchorReplayBuffer(capacity_per_domain=1500, anchor_ratio=anchor_ratio)
+        init_anchor_state = anchor_buffer_state or kwargs.get("anchor_buffer") or kwargs.get("anchor_buffer_state")
+        if init_anchor_state and isinstance(init_anchor_state, dict):
+            self.anchor_buffer.load_state(init_anchor_state)
+        self.deficits: Dict[str, float] = {d: 0.0 for d in self.active_domains}
+        self.domain_cursors: Dict[str, Dict[str, Any]] = copy.deepcopy(domain_cursors) if domain_cursors else {}
+        self.active_domain_idx: int = 0
+
+        self.current_active_shard: Optional[str] = None
+        self.active_shard_offset: int = 0
+        self.active_shard_byte_offset: int = 0
+        self.active_shard_total_lines: int = 0
+        self.active_chunk_idx: int = 0
+        self.active_domain: str = ""
+        self.is_anchor_batch: bool = False
+
+        self.domain_datasets: Dict[str, TaraStreamingJsonlDataset] = {}
+        for d in self.active_domains:
+            cur = self.domain_cursors.get(d, {})
+            self.domain_datasets[d] = TaraStreamingJsonlDataset(
+                file_paths=self.domain_shards[d],
+                tokenizer=tokenizer,
+                max_seq_len=max_seq_len,
+                max_samples=max_samples,
+                shuffle_shards=False,
+                resume_shard=cur.get("active_shard"),
+                resume_line_offset=cur.get("line_offset", -1),
+                resume_byte_offset=cur.get("byte_offset", 0),
+                resume_chunk_idx=cur.get("chunk_idx", 0),
+                shard_ledger=shard_ledger,
+                keep_shards=keep_shards,
+                dataset_dir=dataset_dir,
+                repo_id=repo_id,
+                prefix=prefix,
+                buffer_size=buffer_size,
+                max_shard_bytes=max_shard_bytes,
+                dataset_snapshot=dataset_snapshot,
+            )
+
+    @property
+    def _pending_shard_completions(self) -> Dict[str, Tuple[int, str]]:
+        merged = {}
+        for ds in self.domain_datasets.values():
+            merged.update(getattr(ds, "_pending_shard_completions", {}))
+        return merged
+
+    @property
+    def managed_downloaded_shards(self) -> Set[str]:
+        merged = set()
+        for ds in self.domain_datasets.values():
+            merged.update(getattr(ds, "managed_downloaded_shards", set()))
+        return merged
+
+    def commit_shard_completion(self, shard_name: str, managed_cache: bool = False, actual_fp: Optional[str] = None):
+        for ds in self.domain_datasets.values():
+            if shard_name in getattr(ds, "_pending_shard_completions", {}):
+                ds.commit_shard_completion(shard_name, managed_cache=managed_cache, actual_fp=actual_fp)
+                return
+        if self.shard_ledger:
+            self.shard_ledger.mark_completed(shard_name, 0, "")
+
+    def get_state(self) -> Dict[str, Any]:
+        return {
+            "domain_cursors": copy.deepcopy(self.domain_cursors),
+            "active_domain_idx": self.active_domain_idx,
+            "scheduler_deficits": copy.deepcopy(self.deficits),
+            "depleted_domains": list(self.anchor_buffer.depleted_domains),
+            "anchor_buffer": self.anchor_buffer.get_state(),
+            "anchor_buffer_state": self.anchor_buffer.get_state(),
+        }
+
+    def load_state(self, state: Dict[str, Any]):
+        if not state:
+            return
+        if "domain_cursors" in state:
+            self.domain_cursors = copy.deepcopy(state["domain_cursors"])
+            for d, cur in self.domain_cursors.items():
+                if d in self.domain_shards:
+                    self.domain_datasets[d] = TaraStreamingJsonlDataset(
+                        file_paths=self.domain_shards[d],
+                        tokenizer=self.tokenizer,
+                        max_seq_len=self.max_seq_len,
+                        max_samples=self.max_samples,
+                        shuffle_shards=False,
+                        resume_shard=cur.get("active_shard"),
+                        resume_line_offset=cur.get("line_offset", -1),
+                        resume_byte_offset=cur.get("byte_offset", 0),
+                        resume_chunk_idx=cur.get("chunk_idx", 0),
+                        shard_ledger=self.shard_ledger,
+                        keep_shards=self.keep_shards,
+                        dataset_dir=self.dataset_dir,
+                        repo_id=self.repo_id,
+                        prefix=self.prefix,
+                        buffer_size=self.buffer_size,
+                        max_shard_bytes=self.max_shard_bytes,
+                        dataset_snapshot=self.dataset_snapshot,
+                    )
+        if "active_domain_idx" in state:
+            self.active_domain_idx = state["active_domain_idx"]
+        if "scheduler_deficits" in state:
+            self.deficits = copy.deepcopy(state["scheduler_deficits"])
+        if "depleted_domains" in state:
+            for d in state["depleted_domains"]:
+                self.anchor_buffer.depleted_domains.add(d)
+        if "anchor_buffer" in state and isinstance(state["anchor_buffer"], dict):
+            self.anchor_buffer.load_state(state["anchor_buffer"])
+        elif "anchor_buffer_state" in state and isinstance(state["anchor_buffer_state"], dict):
+            self.anchor_buffer.load_state(state["anchor_buffer_state"])
+
+    def __iter__(self):
+        emitted = 0
+        domain_iters = {d: iter(self.domain_datasets[d]) for d in self.active_domains}
+        active_candidates = list(self.active_domains)
+
+        while active_candidates:
+            should_replay_anchor = (
+                self.anchor_buffer.has_anchors()
+                and self.anchor_ratio > 0.0
+                and random.random() < self.anchor_ratio
+            )
+
+            if should_replay_anchor:
+                anchor_item = self.anchor_buffer.sample_anchor()
+                if anchor_item is not None:
+                    self.is_anchor_batch = True
+                    self.active_domain = anchor_item.domain
+                    self.current_active_shard = anchor_item.shard_name
+                    self.active_shard_offset = anchor_item.line_idx
+                    self.active_shard_byte_offset = anchor_item.byte_offset
+                    self.active_chunk_idx = anchor_item.chunk_idx
+                    replayed = TaraDomainBatchItem(
+                        anchor_item.input_ids, anchor_item.labels, anchor_item.shard_name,
+                        anchor_item.line_idx, anchor_item.byte_offset, anchor_item.chunk_idx,
+                        anchor_item.is_last, domain=anchor_item.domain, is_anchor=True
+                    )
+                    yield replayed
+                    emitted += 1
+                    if 0 < self.max_samples <= emitted:
+                        return
+                    continue
+
+            for d in active_candidates:
+                self.deficits[d] += self.domain_weights.get(d, 0.0)
+
+            best_d = max(active_candidates, key=lambda d: self.deficits[d])
+            self.deficits[best_d] -= 1.0
+
+            try:
+                raw_item = next(domain_iters[best_d])
+                input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last = raw_item
+
+                item = TaraDomainBatchItem(
+                    input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last,
+                    domain=best_d, is_anchor=False
+                )
+
+                if best_d in CORE_ANCHOR_DOMAINS:
+                    self.anchor_buffer.add_sample(best_d, item)
+
+                self.active_domain = best_d
+                self.is_anchor_batch = False
+                self.current_active_shard = shard_name
+                self.active_shard_offset = line_idx
+                self.active_shard_byte_offset = byte_offset
+                self.active_chunk_idx = chunk_idx
+                self.active_shard_total_lines = getattr(self.domain_datasets[best_d], "active_shard_total_lines", 0)
+
+                if best_d not in self.domain_cursors:
+                    self.domain_cursors[best_d] = {}
+                self.domain_cursors[best_d]["active_shard"] = shard_name
+                self.domain_cursors[best_d]["line_offset"] = line_idx
+                self.domain_cursors[best_d]["byte_offset"] = byte_offset
+                self.domain_cursors[best_d]["chunk_idx"] = chunk_idx
+                self.domain_cursors[best_d]["total_lines"] = self.active_shard_total_lines
+
+                if self.shard_ledger:
+                    self.shard_ledger.update_domain_cursor(
+                        domain=best_d,
+                        active_shard=shard_name,
+                        line_offset=line_idx,
+                        byte_offset=byte_offset,
+                        chunk_idx=chunk_idx,
+                        total_lines=self.active_shard_total_lines,
+                    )
+
+                yield item
+                emitted += 1
+                if 0 < self.max_samples <= emitted:
+                    return
+
+            except StopIteration:
+                self.anchor_buffer.mark_depleted(best_d)
+                if best_d in active_candidates:
+                    active_candidates.remove(best_d)
+                if self.anchor_ratio > 0.0 and self.anchor_buffer.is_depleted(best_d):
+                    anchor_item = self.anchor_buffer.sample_anchor(preferred_domain=best_d)
+                    if anchor_item is not None:
+                        self.is_anchor_batch = True
+                        self.active_domain = best_d
+                        self.current_active_shard = anchor_item.shard_name
+                        self.active_shard_offset = anchor_item.line_idx
+                        self.active_shard_byte_offset = anchor_item.byte_offset
+                        self.active_chunk_idx = anchor_item.chunk_idx
+                        replayed = TaraDomainBatchItem(
+                            anchor_item.input_ids, anchor_item.labels, anchor_item.shard_name,
+                            anchor_item.line_idx, anchor_item.byte_offset, anchor_item.chunk_idx,
+                            anchor_item.is_last, domain=best_d, is_anchor=True
+                        )
+                        yield replayed
                         emitted += 1
                         if 0 < self.max_samples <= emitted:
                             return
-            except Exception as e:
-                print(f"[World Dataset Error] Failed to stream {fp}: {e}", flush=True)
 
 
 def collate_fn(batch):
@@ -1707,17 +3298,20 @@ def collate_fn(batch):
         l = len(inp)
         padded_inputs[i, :l] = inp
         padded_labels[i, :l] = lab
-        # item layout: (input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last_chunk)
-        if len(item) >= 7:
-            cursors.append((item[2], item[3], item[4], item[5], item[6]))
+        # item layout: (input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last_chunk, [domain])
+        dom = getattr(item, "domain", getattr(item, "_domain", "general"))
+        if len(item) >= 8:
+            cursors.append((item[2], item[3], item[4], item[5], item[6], item[7]))
+        elif len(item) >= 7:
+            cursors.append((item[2], item[3], item[4], item[5], item[6], dom))
         elif len(item) >= 6:
-            cursors.append((item[2], item[3], item[4], item[5], False))
+            cursors.append((item[2], item[3], item[4], item[5], False, dom))
         elif len(item) >= 5:
-            cursors.append((item[2], item[3], item[4], 0, False))
+            cursors.append((item[2], item[3], item[4], 0, False, dom))
         elif len(item) >= 4:
-            cursors.append((item[2], item[3], 0, 0, False))
+            cursors.append((item[2], item[3], 0, 0, False, dom))
         else:
-            cursors.append(("", 0, 0, 0, False))
+            cursors.append(("", 0, 0, 0, False, dom))
 
     return padded_inputs, padded_labels, cursors
 
@@ -1752,6 +3346,8 @@ def load_candidate_weights(model: nn.Module, model_dir: str) -> bool:
 
 _gdrive_sync_thread: Optional[threading.Thread] = None
 _gdrive_sync_lock = threading.Lock()
+_pending_gdrive_sync: Optional[Tuple[str, str, str, List[str]]] = None
+_active_gdrive_sync_src: Optional[str] = None
 
 
 def _safe_unlink(path: str) -> bool:
@@ -2110,8 +3706,10 @@ def _ensure_gdrive_target_dir(target_dir: str):
 
 
 def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: List[str]):
-    global _pending_gdrive_sync
+    global _pending_gdrive_sync, _active_gdrive_sync_src
     while True:
+        with _gdrive_sync_lock:
+            _active_gdrive_sync_src = os.path.abspath(src_dir) if src_dir else None
         try:
             gdrive_root = _resolve_gdrive_root()
             if not gdrive_root:
@@ -2207,6 +3805,9 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
             print(f"[GDrive Mirror] Successfully backed up [{tag}] ({synced} files, {elapsed:.1f}s) -> {target_dir}", flush=True)
         except Exception as e:
             print(f"[GDrive Mirror Notice] Non-fatal background backup notice: {e}", flush=True)
+        finally:
+            with _gdrive_sync_lock:
+                _active_gdrive_sync_src = None
 
         with _gdrive_sync_lock:
             if _pending_gdrive_sync is not None:
@@ -2253,8 +3854,9 @@ def sync_checkpoint_to_gdrive(
 
     file_list = [
         "config.json", "tokenizer.json", "model.safetensors",
-        "checkpoint_state.json", "STAGE_METADATA.json",
-        "shard_ledger.json", "dataset_snapshot.json"
+        "world_model.safetensors", "checkpoint_state.json", "STAGE_METADATA.json",
+        "shard_ledger.json", "dataset_snapshot.json", "teacher_replay_buffer.jsonl",
+        "COMMITTED"
     ]
     if sync_optimizer:
         file_list.append("optimizer_state.pt")
@@ -2736,6 +4338,7 @@ def save_best_milestone(
     scaler: Optional[torch.cuda.amp.GradScaler] = None,
     world_optimizer: Optional[torch.optim.Optimizer] = None,
     world_scaler: Optional[torch.cuda.amp.GradScaler] = None,
+    teacher_replay_buffer: Optional[Any] = None,
 ) -> bool:
     """
     Saves a clean, compact BEST MILESTONE checkpoint using atomic verified commit:
@@ -2745,6 +4348,7 @@ def save_best_milestone(
     - Atomically promotes staging directory to best_dir with rollback safety.
     - Preserves optimizer state and RNG states if provided for 100% crash-proof recovery.
     - Preserves exact data cursor so fallback resumption retains shard and line offsets.
+    - Auto-persists stratified teacher replay buffer across all canonical domains.
     """
     with _checkpoint_write_lock:
         _reclaim_emergency_disk_space(min_free_gb=10.0)
@@ -2768,6 +4372,10 @@ def save_best_milestone(
                     src_aux = os.path.join(src_tok_dir, aux_name)
                     if os.path.isfile(src_aux):
                         shutil.copy2(src_aux, os.path.join(staging_dir, aux_name))
+
+            # 2b. teacher_replay_buffer.jsonl (stratified domain exemplars for continual learning)
+            if teacher_replay_buffer is not None and hasattr(teacher_replay_buffer, "save_to_jsonl"):
+                teacher_replay_buffer.save_to_jsonl(os.path.join(staging_dir, "teacher_replay_buffer.jsonl"))
 
             tok_fingerprint = compute_tokenizer_fingerprint(
                 tokenizer_path=tokenizer_path,
@@ -2917,6 +4525,42 @@ def save_best_milestone(
                 completed_records = data_cursor.get("total_samples_trained", 0)
                 samples_consumed = data_cursor.get("samples_consumed", completed_records)
 
+            domain_cursors = None
+            anchor_buffer_state = None
+            scheduler_deficits = None
+
+            if data_cursor and data_cursor.get("domain_cursors"):
+                domain_cursors = data_cursor["domain_cursors"]
+            elif hasattr(dataset, "get_state"):
+                ds_st = dataset.get_state()
+                domain_cursors = ds_st.get("domain_cursors")
+                anchor_buffer_state = ds_st.get("anchor_buffer") or ds_st.get("anchor_buffer_state")
+            elif shard_ledger and hasattr(shard_ledger, "domain_cursors"):
+                domain_cursors = shard_ledger.domain_cursors
+
+            if not anchor_buffer_state and hasattr(dataset, "get_state"):
+                ds_st = dataset.get_state()
+                anchor_buffer_state = ds_st.get("anchor_buffer") or ds_st.get("anchor_buffer_state")
+            if not anchor_buffer_state and data_cursor and "anchor_buffer" in data_cursor:
+                anchor_buffer_state = data_cursor["anchor_buffer"]
+            elif not anchor_buffer_state and data_cursor and "anchor_buffer_state" in data_cursor:
+                anchor_buffer_state = data_cursor["anchor_buffer_state"]
+
+            if data_cursor and data_cursor.get("scheduler_deficits"):
+                scheduler_deficits = data_cursor["scheduler_deficits"]
+            elif hasattr(dataset, "get_state"):
+                scheduler_deficits = dataset.get_state().get("scheduler_deficits")
+            elif hasattr(dataset, "deficits"):
+                scheduler_deficits = getattr(dataset, "deficits", None)
+
+            if domain_cursors:
+                data_cursor["domain_cursors"] = domain_cursors
+            if anchor_buffer_state:
+                data_cursor["anchor_buffer"] = anchor_buffer_state
+                data_cursor["anchor_buffer_state"] = anchor_buffer_state
+            if scheduler_deficits:
+                data_cursor["scheduler_deficits"] = scheduler_deficits
+
             state = {
                 "step": step,
                 "epoch": epoch,
@@ -2931,6 +4575,10 @@ def save_best_milestone(
                 "joint_world_model": world_model is not None,
                 "tokenizer_fingerprint": tok_fingerprint,
                 "data_cursor": data_cursor,
+                "domain_cursors": domain_cursors or {},
+                "scheduler_deficits": scheduler_deficits or {},
+                "anchor_buffer": anchor_buffer_state,
+                "anchor_buffer_state": anchor_buffer_state,
                 "active_shard": active_shard,
                 "active_shard_offset": active_offset,
                 "active_shard_line_offset": active_offset,
@@ -3075,6 +4723,7 @@ def save_checkpoint(
     world_optimizer: Optional[torch.optim.Optimizer] = None,
     world_scaler: Optional[torch.cuda.amp.GradScaler] = None,
     per_shard_promotion: bool = False,
+    teacher_replay_buffer: Optional[Any] = None,
 ):
     """
     Crash-safe, versioned checkpoint protocol (Task A):
@@ -3138,6 +4787,10 @@ def save_checkpoint(
                     src_aux = os.path.join(src_tok_dir, aux_name)
                     if os.path.isfile(src_aux):
                         shutil.copy2(src_aux, os.path.join(staging_dir, aux_name))
+
+            # 2b. teacher_replay_buffer.jsonl (if provided)
+            if teacher_replay_buffer is not None and hasattr(teacher_replay_buffer, "save_to_jsonl"):
+                teacher_replay_buffer.save_to_jsonl(os.path.join(staging_dir, "teacher_replay_buffer.jsonl"))
 
             tok_fingerprint = compute_tokenizer_fingerprint(
                 tokenizer_path=tokenizer_path,
@@ -3203,6 +4856,42 @@ def save_checkpoint(
                 completed_records = data_cursor.get("total_samples_trained", 0)
                 samples_consumed = data_cursor.get("samples_consumed", completed_records)
 
+            domain_cursors = None
+            anchor_buffer_state = None
+            scheduler_deficits = None
+
+            if data_cursor and data_cursor.get("domain_cursors"):
+                domain_cursors = data_cursor["domain_cursors"]
+            elif hasattr(dataset, "get_state"):
+                ds_st = dataset.get_state()
+                domain_cursors = ds_st.get("domain_cursors")
+                anchor_buffer_state = ds_st.get("anchor_buffer") or ds_st.get("anchor_buffer_state")
+            elif shard_ledger and hasattr(shard_ledger, "domain_cursors"):
+                domain_cursors = shard_ledger.domain_cursors
+
+            if not anchor_buffer_state and hasattr(dataset, "get_state"):
+                ds_st = dataset.get_state()
+                anchor_buffer_state = ds_st.get("anchor_buffer") or ds_st.get("anchor_buffer_state")
+            if not anchor_buffer_state and data_cursor and "anchor_buffer" in data_cursor:
+                anchor_buffer_state = data_cursor["anchor_buffer"]
+            elif not anchor_buffer_state and data_cursor and "anchor_buffer_state" in data_cursor:
+                anchor_buffer_state = data_cursor["anchor_buffer_state"]
+
+            if data_cursor and data_cursor.get("scheduler_deficits"):
+                scheduler_deficits = data_cursor["scheduler_deficits"]
+            elif hasattr(dataset, "get_state"):
+                scheduler_deficits = dataset.get_state().get("scheduler_deficits")
+            elif hasattr(dataset, "deficits"):
+                scheduler_deficits = getattr(dataset, "deficits", None)
+
+            if domain_cursors:
+                data_cursor["domain_cursors"] = domain_cursors
+            if anchor_buffer_state:
+                data_cursor["anchor_buffer"] = anchor_buffer_state
+                data_cursor["anchor_buffer_state"] = anchor_buffer_state
+            if scheduler_deficits:
+                data_cursor["scheduler_deficits"] = scheduler_deficits
+
             continuation_state = {
                 "step": step,
                 "epoch": epoch,
@@ -3220,6 +4909,10 @@ def save_checkpoint(
                 # Python-originated checkpoints and refuse incompatible optimizer-state exchange.
                 "written_by_runtime": "python",
                 "data_cursor": data_cursor,
+                "domain_cursors": domain_cursors or {},
+                "scheduler_deficits": scheduler_deficits or {},
+                "anchor_buffer": anchor_buffer_state,
+                "anchor_buffer_state": anchor_buffer_state,
                 "active_shard": active_shard,
                 "active_shard_offset": active_offset,
                 "active_shard_line_offset": active_offset,
@@ -3448,17 +5141,30 @@ def save_checkpoint(
             # Step 6: Clean temp artifacts from output_dir
             clean_stale_checkpoint_artifacts(output_dir, is_best=is_best)
 
+            # Step 7: Mirror verified checkpoint to Google Drive in background (from immutable versioned_dir)
+            if sync_to_gdrive:
+                sync_checkpoint_to_gdrive(
+                    output_dir,
+                    tag,
+                    wait=is_completed,
+                    sync_optimizer=sync_optimizer,
+                    source_dir=versioned_dir,
+                )
+            else:
+                print(f"[GDrive Mirror] Skipped cloud sync for [{tag}] (Google Drive preserves best model only).", flush=True)
+
             # ----------------------------------------------------------------
-            # Step 7: Apply checkpoint retention policy — keep the two most
+            # Step 8: Apply checkpoint retention policy — keep the most
             # recent versioned checkpoint directories; delete older ones only
-            # AFTER the new checkpoint is confirmed durable.  This call is
-            # safe here because the pointer has already been published above.
+            # AFTER the new checkpoint is confirmed durable. Protected dirs
+            # include versioned_dir and any active/pending GDrive sync dir.
             # ----------------------------------------------------------------
             _cleanup_old_versioned_checkpoints(
                 parent_dir,
                 os.path.basename(output_dir),
                 keep_n=keep_n,
                 force_keep_exact=force_keep_exact,
+                protected_dirs=[versioned_dir] if versioned_dir else None,
             )
 
         except Exception as e:
@@ -3466,18 +5172,6 @@ def save_checkpoint(
             if os.path.exists(staging_dir):
                 _safe_rmtree(staging_dir)
             return
-
-    # Step 7: Mirror verified checkpoint to Google Drive in background (from immutable versioned_dir)
-    if sync_to_gdrive:
-        sync_checkpoint_to_gdrive(
-            output_dir,
-            tag,
-            wait=is_completed,
-            sync_optimizer=sync_optimizer,
-            source_dir=versioned_dir,
-        )
-    else:
-        print(f"[GDrive Mirror] Skipped cloud sync for [{tag}] (Google Drive preserves best model only).", flush=True)
 
 
 def promote_checkpoint(
@@ -3693,6 +5387,7 @@ def _cleanup_old_versioned_checkpoints(
     active_staging_dir: Optional[str] = None,
     min_abandoned_age_seconds: int = 300,
     force_keep_exact: bool = False,
+    protected_dirs: Optional[List[str]] = None,
 ) -> None:
     """
     Retains the most recent keep_n versioned checkpoint directories (by step number)
@@ -3755,6 +5450,18 @@ def _cleanup_old_versioned_checkpoints(
                     break
             except Exception:
                 pass
+
+    # Protect active or pending GDrive sync source directories and explicitly protected dirs from deletion
+    protected_sync_dirs = set()
+    if protected_dirs:
+        for pd in protected_dirs:
+            if pd:
+                protected_sync_dirs.add(os.path.abspath(pd))
+    with _gdrive_sync_lock:
+        if _active_gdrive_sync_src:
+            protected_sync_dirs.add(os.path.abspath(_active_gdrive_sync_src))
+        if _pending_gdrive_sync and _pending_gdrive_sync[0]:
+            protected_sync_dirs.add(os.path.abspath(_pending_gdrive_sync[0]))
 
     active_staging_abs = os.path.abspath(active_staging_dir) if active_staging_dir else None
     now = time.time()
@@ -3845,6 +5552,8 @@ def _cleanup_old_versioned_checkpoints(
             dir_abs = os.path.abspath(old_dir)
             if pointer_target and dir_abs == pointer_target:
                 continue
+            if dir_abs in protected_sync_dirs:
+                continue
             removed = _safe_rmtree(old_dir)
             if removed:
                 print(f"[Checkpoint Retention] Removed obsolete superseded run for Step {step_num}: {os.path.basename(old_dir)}", flush=True)
@@ -3859,6 +5568,11 @@ def _cleanup_old_versioned_checkpoints(
         dir_abs = os.path.abspath(dir_path)
 
         if pointer_target and dir_abs == pointer_target:
+            if is_committed:
+                committed_kept += 1
+            continue
+
+        if dir_abs in protected_sync_dirs:
             if is_committed:
                 committed_kept += 1
             continue
@@ -4153,6 +5867,10 @@ def try_resume_from_checkpoint(
                         "total_samples_trained": s_data.get("total_samples_trained", s_data.get("total_completed_records", 0)),
                         "samples_consumed": s_data.get("samples_consumed", s_data.get("total_completed_records", 0)),
                         "completed_shards": s_data.get("completed_shards", []),
+                        "domain_cursors": s_data.get("domain_cursors", {}),
+                        "scheduler_deficits": s_data.get("scheduler_deficits", {}),
+                        "anchor_buffer": s_data.get("anchor_buffer") or s_data.get("anchor_buffer_state"),
+                        "anchor_buffer_state": s_data.get("anchor_buffer_state") or s_data.get("anchor_buffer"),
                     }
                 else:
                     if "active_shard_byte_offset" not in best_cand_cursor:
@@ -4163,6 +5881,17 @@ def try_resume_from_checkpoint(
                         best_cand_cursor["total_samples_trained"] = s_data.get("total_samples_trained", s_data.get("total_completed_records", 0))
                     if "samples_consumed" not in best_cand_cursor:
                         best_cand_cursor["samples_consumed"] = s_data.get("samples_consumed", best_cand_cursor["total_samples_trained"])
+                    if "domain_cursors" not in best_cand_cursor and "domain_cursors" in s_data:
+                        best_cand_cursor["domain_cursors"] = s_data["domain_cursors"]
+                    if "scheduler_deficits" not in best_cand_cursor and "scheduler_deficits" in s_data:
+                        best_cand_cursor["scheduler_deficits"] = s_data["scheduler_deficits"]
+                    if "anchor_buffer" not in best_cand_cursor:
+                        if "anchor_buffer" in s_data:
+                            best_cand_cursor["anchor_buffer"] = s_data["anchor_buffer"]
+                        elif "anchor_buffer_state" in s_data:
+                            best_cand_cursor["anchor_buffer"] = s_data["anchor_buffer_state"]
+                    if "anchor_buffer_state" not in best_cand_cursor:
+                        best_cand_cursor["anchor_buffer_state"] = best_cand_cursor.get("anchor_buffer")
         except Exception as e:
             print(f"  -> Notice: Could not parse candidate {cand}: {e}")
 
@@ -4227,6 +5956,10 @@ def try_resume_from_checkpoint(
                             "total_samples_trained": s_data.get("total_samples_trained", s_data.get("total_completed_records", 0)),
                             "samples_consumed": s_data.get("samples_consumed", s_data.get("total_completed_records", 0)),
                             "completed_shards": s_data.get("completed_shards", []),
+                            "domain_cursors": s_data.get("domain_cursors", {}),
+                            "scheduler_deficits": s_data.get("scheduler_deficits", {}),
+                            "anchor_buffer": s_data.get("anchor_buffer") or s_data.get("anchor_buffer_state"),
+                            "anchor_buffer_state": s_data.get("anchor_buffer_state") or s_data.get("anchor_buffer"),
                         }
                     else:
                         if "active_shard_byte_offset" not in best_cand_cursor:
@@ -4237,6 +5970,17 @@ def try_resume_from_checkpoint(
                             best_cand_cursor["total_samples_trained"] = s_data.get("total_samples_trained", s_data.get("total_completed_records", 0))
                         if "samples_consumed" not in best_cand_cursor:
                             best_cand_cursor["samples_consumed"] = s_data.get("samples_consumed", best_cand_cursor["total_samples_trained"])
+                        if "domain_cursors" not in best_cand_cursor and "domain_cursors" in s_data:
+                            best_cand_cursor["domain_cursors"] = s_data["domain_cursors"]
+                        if "scheduler_deficits" not in best_cand_cursor and "scheduler_deficits" in s_data:
+                            best_cand_cursor["scheduler_deficits"] = s_data["scheduler_deficits"]
+                        if "anchor_buffer" not in best_cand_cursor:
+                            if "anchor_buffer" in s_data:
+                                best_cand_cursor["anchor_buffer"] = s_data["anchor_buffer"]
+                            elif "anchor_buffer_state" in s_data:
+                                best_cand_cursor["anchor_buffer"] = s_data["anchor_buffer_state"]
+                        if "anchor_buffer_state" not in best_cand_cursor:
+                            best_cand_cursor["anchor_buffer_state"] = best_cand_cursor.get("anchor_buffer")
             except Exception as fb_err:
                 print(f"  -> Notice: Could not parse fallback candidate {cand}: {fb_err}")
 
@@ -4276,7 +6020,11 @@ def try_resume_from_checkpoint(
     # Sync healthy checkpoint files to local checkpoint_dir if restored from GDrive
     if os.path.abspath(best_cand_dir) != os.path.abspath(checkpoint_dir):
         os.makedirs(checkpoint_dir, exist_ok=True)
-        for fname in ["config.json", "tokenizer.json", "checkpoint_state.json", "optimizer_state.pt", "STAGE_METADATA.json", "model.safetensors", "world_model.safetensors"]:
+        for fname in [
+            "config.json", "tokenizer.json", "checkpoint_state.json", "optimizer_state.pt",
+            "STAGE_METADATA.json", "model.safetensors", "world_model.safetensors",
+            "shard_ledger.json", "teacher_replay_buffer.jsonl", "COMMITTED"
+        ]:
             s = os.path.join(best_cand_dir, fname)
             d = os.path.join(checkpoint_dir, fname)
             if os.path.exists(s) and os.path.abspath(s) != os.path.abspath(d):
@@ -4379,8 +6127,9 @@ def check_stage_already_completed(output_dir: str) -> bool:
 
 # ANSI Color Codes for Terminal & Colab
 CLR_RED = "\033[91m"
-CLR_PURPLE = "\033[95;1m"  # High-contrast vibrant bold purple for white/dark themes
+CLR_PURPLE = "\033[95;1m"
 CLR_GREEN = "\033[92m"
+CLR_YELLOW = "\033[93m"   # <-- Added to prevent NameError on Anchor Replay
 CLR_CYAN = "\033[96m"
 CLR_BOLD = "\033[1m"
 CLR_RESET = "\033[0m"
@@ -4764,10 +6513,12 @@ def main():
     parser.add_argument("--max-steps", type=int, default=200, help="Max optimizer steps")
     parser.add_argument("--warmup-steps", type=int, default=50, help="Linear warmup optimizer steps")
     parser.add_argument("--min-lr", type=float, default=1e-5, help="Minimum learning rate floor for cosine decay")
-    parser.add_argument("--hf-repo", type=str, default=os.environ.get("HF_REPO", os.environ.get("HF_MODEL_REPO", "")), help="Hugging Face repository for auto-upload")
+    parser.add_argument("--hf-repo", type=str, default=os.environ.get("HF_REPO", os.environ.get("HF_MODEL_REPO", os.environ.get("HF_DATASET_REPO", "manjukp6/tara_dataset_v1"))), help="Hugging Face repository for auto-upload and dataset discovery")
+    parser.add_argument("--hf-dataset-repo", type=str, default=os.environ.get("HF_DATASET_REPO", None), help="Hugging Face dataset repository for dataset streaming and discovery")
+    parser.add_argument("--hf-model-repo", type=str, default=os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara")), help="Hugging Face model repository for checkpoint and weight uploads")
     parser.add_argument("--hf-token", type=str, default=None, help="Hugging Face authentication token (or via HF_TOKEN / Colab secret 'tara_sync')")
     parser.add_argument("--verify-gate", action="store_true", default=True, help="Verify pretraining authorization proof before training")
-    parser.add_argument("--max-seq-len", type=int, default=int(os.environ.get("TARA_MAX_SEQ_LEN", 256)), help="Max sequence length")
+    parser.add_argument("--max-seq-len", type=int, default=int(os.environ.get("TARA_MAX_SEQ_LEN", 0)), help="Max sequence length (0 = dynamically resolve from model config)")
     parser.add_argument("--max-shards", type=int, default=0, help="Max shards to ingest (0 for all discovered shards)")
     parser.add_argument("--exclude-shards", type=str, default="*shard_099*,*shard_098*", help="Comma-separated patterns of shards strictly excluded from training (held-out validation)")
     parser.add_argument("--max-samples", type=int, default=0, help="Max samples to ingest across shards (0 for unlimited)")
@@ -4778,9 +6529,8 @@ def main():
     parser.add_argument("--buffer-size", type=int, default=1, help="Streaming buffer size (default: 1 for exact sequential crash-safe zero-duplicate recovery)")
     parser.add_argument("--full-dataset", action="store_true", default=False, help="Train continuously across all shards until full dataset is exhausted")
     parser.add_argument("--keep-shards", action="store_true", default=False, help="Do not delete local shards after completion")
-    parser.add_argument("--dataset-prefix", type=str, default="v2",
-                        help="Remote dataset version prefix on Hugging Face (e.g. 'v1', 'v2'). "
-                             "Determines which shard files are discovered and downloaded. Default: 'v2'")
+    parser.add_argument("--dataset-prefix", type=str, default="",
+                        help="Remote dataset version prefix on Hugging Face (default empty for root dataset structure e.g. tara_dataset_v1)")
     parser.add_argument("--max-shard-bytes", type=int, default=1_073_741_824,
                         help="Enforced maximum size per downloaded shard in bytes (default: 1 GiB = 1073741824). "
                              "Downloads exceeding this limit are aborted; incomplete temp files are removed.")
@@ -4792,8 +6542,12 @@ def main():
                         help="Override memory preflight gate to allow FP32 AdamW on memory-constrained GPUs")
     parser.add_argument("--keep-checkpoints", type=int, default=int(os.environ.get("KEEP_CHECKPOINTS", 1)),
                         help="Number of past checkpoints to retain (default: 1; deletes older checkpoints upon verified new commit)")
-    parser.add_argument("--skip-save-steps", type=int, default=int(os.environ.get("SKIP_SAVE_STEPS", 1000)),
-                        help="Number of initial steps to skip checkpoint and best-milestone disk/cloud saves (default: 1000; saves start at step > skip_save_steps)")
+    parser.add_argument("--skip-save-steps", type=int, default=int(os.environ.get("SKIP_SAVE_STEPS", 0)),
+                        help="Number of initial steps to skip checkpoint and best-milestone disk/cloud saves (default: 0; immediate zero-lock saves active)")
+    parser.add_argument("--domain-weights", type=str, default=os.environ.get("DOMAIN_WEIGHTS", ""),
+                        help="Custom comma-separated domain weights (e.g. '01_mathematics_formal_logic=0.15,12_planning_reasoning_traces=0.20')")
+    parser.add_argument("--anchor-ratio", type=float, default=float(os.environ.get("ANCHOR_RATIO", 0.15)),
+                        help="Fraction of batches drawn from anchor replay buffer when core domains are depleted (default: 0.15)")
     parser.add_argument("--sync-all-to-gdrive", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true", default=True,
                         help="Sync all intermediate training checkpoints to Google Drive (default: True)")
     parser.add_argument("--sync-gdrive-optimizer", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true", default=True,
@@ -4872,8 +6626,9 @@ def main():
             best_source = os.path.join(args.output_dir, "best_checkpoint")
             src_cp = best_source if os.path.exists(os.path.join(best_source, "model.safetensors")) else args.output_dir
             promote_checkpoint(src_cp, args.promoted_dir, args.stage_id)
-            if args.hf_repo:
-                upload_promoted_model_to_hf(args.promoted_dir, args.hf_repo, args.stage_id)
+            target_model_repo = args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara"))
+            if target_model_repo:
+                upload_promoted_model_to_hf(args.promoted_dir, target_model_repo, args.stage_id)
         if args.previous_stage_dir:
             clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
         sys.exit(0)
@@ -4962,6 +6717,14 @@ def main():
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
+    # Harmonize dynamic RoPE theta and sequence length from model architecture config
+    config["rope_theta"] = resolve_dynamic_rope_theta(config)
+    if args.max_seq_len <= 0 and not args.canary:
+        args.max_seq_len = int(config.get("max_position_embeddings", 2048))
+        print(f"[Dynamic Config] Dynamically resolved max_seq_len={args.max_seq_len} from {config_path}")
+    else:
+        config["max_position_embeddings"] = max(int(config.get("max_position_embeddings", 2048)), args.max_seq_len)
+
     # 4. Load Tokenizer
     tok_path = os.path.join(args.model_dir, "tokenizer.json")
     if not os.path.exists(tok_path):
@@ -5017,36 +6780,54 @@ def main():
     shard_ledger = ShardLedger(args.output_dir, gdrive_stage_dir,
                                stage_id=args.stage_id, dataset_revision=args.dataset_prefix.strip("/"))
 
-    dataset_repo = args.hf_repo or os.environ.get("HF_DATASET_REPO", os.environ.get("HF_REPO", "manjukp6/tara"))
+    dataset_repo = args.hf_dataset_repo or args.hf_repo or os.environ.get("HF_DATASET_REPO", os.environ.get("HF_REPO", "manjukp6/tara_dataset_v1"))
+    model_repo = args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara"))
     ds_prefix = args.dataset_prefix.strip("/")
     discovered_shards = []
 
-    # Priority 1: Check if local dataset directory already contains genuine JSONL shards
-    if os.path.isdir(args.dataset_dir):
-        local_files = sorted([os.path.basename(p) for p in glob.glob(os.path.join(args.dataset_dir, "*.jsonl"))])
-        if local_files:
-            discovered_shards = local_files
-            print(f"[Dataset Discovery] Discovered {len(discovered_shards)} local shard(s) in '{args.dataset_dir}'.", flush=True)
+    VALID_EXTS = (".parquet", ".jsonl", ".txt", ".csv", ".tsv", ".gz")
+    SKIP_SUBSTRINGS = ("eval.yaml", "minif2f_lean4_test", "minif2f_lean4_valid", ".gitattributes", "readme.md", ".yaml", ".yml")
 
-    # Priority 2: Remote Hugging Face shard catalog discovery if local dataset directory has no shards
-    if not discovered_shards and dataset_repo:
+    local_files = []
+    if os.path.isdir(args.dataset_dir):
+        for root, _, files in os.walk(args.dataset_dir):
+            for f in files:
+                rel = os.path.relpath(os.path.join(root, f), args.dataset_dir).replace("\\", "/")
+                if rel.endswith(VALID_EXTS) and not any(s in rel.lower() for s in SKIP_SUBSTRINGS):
+                    local_files.append(rel)
+        if local_files:
+            print(f"[Dataset Discovery] Discovered {len(local_files)} local shard(s) in '{args.dataset_dir}'.", flush=True)
+
+    remote_files = []
+    if dataset_repo:
         try:
             from huggingface_hub import HfApi
             token = _resolve_hf_token()
             api = HfApi(token=token)
             files = api.list_repo_files(repo_id=dataset_repo, repo_type="dataset")
-            prefix_filter = f"{ds_prefix}/"
-            discovered_files = sorted([os.path.basename(f) for f in files if f.startswith(prefix_filter) and f.endswith(".jsonl")])
-            if discovered_files:
-                discovered_shards = discovered_files
-                print(f"[Dataset Discovery] Discovered {len(discovered_shards)} remote canonical shards on Hugging Face ({dataset_repo} : {ds_prefix}/*).", flush=True)
+            if ds_prefix:
+                prefix_filter = f"{ds_prefix}/"
+                remote_files = [
+                    f[len(prefix_filter):] if f.startswith(prefix_filter) else f
+                    for f in files
+                    if f.startswith(prefix_filter) and f.endswith(VALID_EXTS) and not any(s in f.lower() for s in SKIP_SUBSTRINGS)
+                ]
+            if not remote_files:
+                remote_files = [
+                    f for f in files
+                    if f.endswith(VALID_EXTS) and not any(s in f.lower() for s in SKIP_SUBSTRINGS)
+                ]
+            if remote_files:
+                print(f"[Dataset Discovery] Discovered {len(remote_files)} remote canonical shards on Hugging Face ({dataset_repo}).", flush=True)
         except Exception as e:
             print(f"[Dataset Discovery Notice] Remote Hugging Face file discovery note: {e}", flush=True)
+
+    discovered_shards = sorted(set(local_files) | set(remote_files))
 
     if not discovered_shards:
         raise RuntimeError(
             f"[Dataset Discovery Fatal] Zero dataset shards discovered in local dataset directory '{args.dataset_dir}' "
-            f"or on Hugging Face repository '{dataset_repo}' (prefix '{ds_prefix}/', pattern '{ds_prefix}/*.jsonl'). Cannot proceed with zero training shards."
+            f"or on Hugging Face repository '{dataset_repo}'. Cannot proceed with zero training shards."
         )
 
     # Strictly filter out held-out shards to prevent evaluation leakage
@@ -5264,55 +7045,67 @@ def main():
 
         # Mandatory World Model Transition Data Preflight Gate
         world_files = []
-        if args.world_dataset_dir and os.path.isdir(args.world_dataset_dir):
-            world_files = sorted(glob.glob(os.path.join(args.world_dataset_dir, "*.jsonl")))
+        TRANS_EXTS = (".jsonl", ".parquet")
+        if args.world_dataset_dir:
+            if os.path.isfile(args.world_dataset_dir) and args.world_dataset_dir.endswith(TRANS_EXTS):
+                world_files = [args.world_dataset_dir]
+            elif os.path.isdir(args.world_dataset_dir):
+                for ext in TRANS_EXTS:
+                    world_files.extend(sorted(glob.glob(os.path.join(args.world_dataset_dir, f"*{ext}"))))
 
         if not world_files:
-            default_wm_dir = "storage/datasets/world_transitions"
-            if os.path.isdir(default_wm_dir):
-                world_files = sorted(glob.glob(os.path.join(default_wm_dir, "*.jsonl")))
+            for candidate_wm_path in [
+                "storage/datasets/curriculum/agi_causal_transitions.jsonl",
+                "storage/datasets/curriculum",
+                "storage/datasets/world_transitions",
+            ]:
+                if os.path.isfile(candidate_wm_path) and candidate_wm_path.endswith(TRANS_EXTS):
+                    world_files.append(candidate_wm_path)
+                    break
+                elif os.path.isdir(candidate_wm_path):
+                    found = []
+                    for ext in TRANS_EXTS:
+                        found.extend(sorted(glob.glob(os.path.join(candidate_wm_path, f"*transition*{ext}")) + glob.glob(os.path.join(candidate_wm_path, f"*causal*{ext}"))))
+                    if found:
+                        world_files.extend(found)
+                        break
+
+        if not world_files and dataset_repo and selected_shards:
+            wm_shard_candidates = [
+                s for s in selected_shards
+                if "08_commonsense_world_model" in s or "world_model" in s.lower() or "transition" in s.lower()
+            ]
+            for wm_cand in wm_shard_candidates[:2]:
+                try:
+                    dl_wm = download_single_shard_jit(
+                        dataset_repo, ds_prefix, wm_cand, args.dataset_dir, max_shard_bytes=args.max_shard_bytes
+                    )
+                    if os.path.isfile(dl_wm):
+                        world_files.append(dl_wm)
+                        break
+                except Exception as wm_jit_err:
+                    print(f"[Joint World Model JIT Notice] Could not fetch {wm_cand}: {wm_jit_err}", flush=True)
 
         if not world_files:
             raise RuntimeError(
                 f"[Joint World Model Preflight Gate] Joint training was requested (--joint-world-model), "
-                f"but zero genuine World Model transition datasets (*.jsonl) were discovered in '{args.world_dataset_dir}'. "
-                f"The 53 language shards contain pure text and do NOT provide genuine state-transition supervision. "
-                f"Failing preflight safely per directive. Provide genuine transition data via --world-dataset-dir."
+                f"but zero genuine World Model transition datasets (*.jsonl, *.parquet) were discovered. "
+                f"Genuine state-transition supervision (s_t, a_t -> s_{{t+1}}) is required for World Model training. "
+                f"Provide genuine transition data via --world-dataset-dir or place in storage/datasets/curriculum/."
             )
 
         # Deep record-level validation: Ensure discovered files contain authentic, usable transition records
         valid_transition_sample_count = 0
+        verified_world_files = []
         for wf in world_files:
-            try:
-                with open(wf, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            rec = json.loads(line)
-                            if not isinstance(rec, dict):
-                                continue
-                            t_obj = rec.get("state_transition") if isinstance(rec.get("state_transition"), dict) else rec
-                            s_obs = t_obj.get("state_observation") or t_obj.get("state") or t_obj.get("observation")
-                            act = t_obj.get("action") or t_obj.get("intervention")
-                            ns_obs = t_obj.get("next_state_observation") or t_obj.get("next_state") or t_obj.get("subsequent_state")
-                            if (
-                                isinstance(s_obs, str) and s_obs.strip()
-                                and isinstance(act, str) and act.strip()
-                                and isinstance(ns_obs, str) and ns_obs.strip()
-                            ):
-                                valid_transition_sample_count += 1
-                                if valid_transition_sample_count >= 10:
-                                    break
-                        except Exception:
-                            continue
-            except Exception as e:
-                print(f"[Joint World Model Preflight Warning] Error inspecting {wf}: {e}")
-            if valid_transition_sample_count >= 10:
-                break
+            cnt = inspect_candidate_world_transitions(wf, max_records=20)
+            if cnt > 0:
+                valid_transition_sample_count += cnt
+                verified_world_files.append(wf)
+                if valid_transition_sample_count >= 10:
+                    break
 
-        if valid_transition_sample_count == 0:
+        if valid_transition_sample_count == 0 or not verified_world_files:
             raise RuntimeError(
                 f"[Joint World Model Preflight Gate] Files were discovered in '{args.world_dataset_dir}', "
                 f"but zero valid state-transition records were found. Records must strictly provide valid, non-empty "
@@ -5320,6 +7113,8 @@ def main():
                 f"Relational facts (subject, predicate, object) and raw text are strictly rejected as transition supervision. "
                 f"Failing preflight safely per directive."
             )
+
+        world_files = verified_world_files
 
         print(f"[Joint World Model Dataset] Discovered {len(world_files)} transition dataset file(s) with verified usable records.")
         world_dataset = WorldModelTransitionDataset(
@@ -5386,8 +7181,9 @@ def main():
                 best_source = os.path.join(args.output_dir, "best_checkpoint")
                 src_cp = best_source if os.path.exists(os.path.join(best_source, "model.safetensors")) else args.output_dir
                 promote_checkpoint(src_cp, args.promoted_dir, args.stage_id)
-                if args.hf_repo:
-                    upload_promoted_model_to_hf(args.promoted_dir, args.hf_repo, args.stage_id)
+                target_model_repo = args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara"))
+                if target_model_repo:
+                    upload_promoted_model_to_hf(args.promoted_dir, target_model_repo, args.stage_id)
             if args.previous_stage_dir:
                 clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
             sys.exit(0)
@@ -5441,27 +7237,78 @@ def main():
             print("  Status                        : 100% DETERMINISTIC ZERO DUPLICATE RESUMPTION GUARANTEED", flush=True)
             print("=" * 80, flush=True)
 
-    # 9. Instantiate Streaming Dataset & DataLoader with Exact Cursor
+    # 9. Instantiate Streaming Dataset & DataLoader with Multi-Domain DRR Scheduler
     resume_chunk_idx = resumed_cursor.get("active_chunk_idx", 0) if resumed_cursor else 0
-    dataset = TaraStreamingJsonlDataset(
-        file_paths=selected_shards,
-        tokenizer=tokenizer,
-        max_seq_len=args.max_seq_len,
-        max_samples=args.max_samples,
-        shuffle_shards=False,
-        resume_shard=resume_shard,
-        resume_line_offset=resume_line_offset,
-        resume_byte_offset=resume_byte_offset,
-        resume_chunk_idx=resume_chunk_idx,
-        shard_ledger=shard_ledger,
-        keep_shards=args.keep_shards,
-        dataset_dir=args.dataset_dir,
-        repo_id=dataset_repo,
-        prefix=ds_prefix,
-        buffer_size=args.buffer_size,
-        max_shard_bytes=args.max_shard_bytes,
-        dataset_snapshot=dataset_snapshot,
-    )
+
+    # Stratified Teacher Replay Buffer for continual learning across all canonical domains
+    teacher_replay_buffer = TeacherReplayBuffer(max_samples_per_domain=500)
+    for tb_cand in [
+        os.path.join(args.output_dir, "best_checkpoint", "teacher_replay_buffer.jsonl"),
+        os.path.join(args.output_dir, "teacher_replay_buffer.jsonl"),
+    ]:
+        if os.path.exists(tb_cand):
+            teacher_replay_buffer.load_from_jsonl(tb_cand)
+            break
+
+    domain_shards: Dict[str, List[str]] = {d: [] for d in CANONICAL_DOMAINS}
+    for s in selected_shards:
+        d = resolve_shard_domain(s)
+        if d not in domain_shards:
+            domain_shards[d] = []
+        domain_shards[d].append(s)
+
+    active_doms_with_shards = [d for d, shards in domain_shards.items() if shards]
+    print(f"[Multi-Domain Setup] Grouped {len(selected_shards)} shards into {len(active_doms_with_shards)} active domain bucket(s):", flush=True)
+    for d in active_doms_with_shards:
+        print(f"  - {d}: {len(domain_shards[d])} shard(s)", flush=True)
+
+    domain_weights_map = parse_domain_weights(getattr(args, "domain_weights", ""), active_doms_with_shards)
+    print(f"[Multi-Domain DRR Weights] Normalized domain weights: {domain_weights_map}", flush=True)
+
+    resumed_domain_cursors = resumed_cursor.get("domain_cursors", {}) if resumed_cursor else (shard_ledger.domain_cursors if shard_ledger else {})
+    resumed_anchor_buffer = (resumed_cursor.get("anchor_buffer") or resumed_cursor.get("anchor_buffer_state")) if resumed_cursor else None
+
+    if len(active_doms_with_shards) > 1:
+        dataset = TaraMultiDomainScheduler(
+            domain_shards=domain_shards,
+            domain_weights=domain_weights_map,
+            tokenizer=tokenizer,
+            max_seq_len=args.max_seq_len,
+            max_samples=args.max_samples,
+            anchor_ratio=getattr(args, "anchor_ratio", 0.15),
+            dataset_dir=args.dataset_dir,
+            repo_id=dataset_repo,
+            prefix=ds_prefix,
+            shard_ledger=shard_ledger,
+            keep_shards=args.keep_shards,
+            buffer_size=args.buffer_size,
+            max_shard_bytes=args.max_shard_bytes,
+            dataset_snapshot=dataset_snapshot,
+            domain_cursors=resumed_domain_cursors,
+            anchor_buffer_state=resumed_anchor_buffer,
+        )
+        if resumed_anchor_buffer and isinstance(resumed_anchor_buffer, dict):
+            dataset.anchor_buffer.load_state(resumed_anchor_buffer)
+    else:
+        dataset = TaraStreamingJsonlDataset(
+            file_paths=selected_shards,
+            tokenizer=tokenizer,
+            max_seq_len=args.max_seq_len,
+            max_samples=args.max_samples,
+            shuffle_shards=False,
+            resume_shard=resume_shard,
+            resume_line_offset=resume_line_offset,
+            resume_byte_offset=resume_byte_offset,
+            resume_chunk_idx=resume_chunk_idx,
+            shard_ledger=shard_ledger,
+            keep_shards=args.keep_shards,
+            dataset_dir=args.dataset_dir,
+            repo_id=dataset_repo,
+            prefix=ds_prefix,
+            buffer_size=args.buffer_size,
+            max_shard_bytes=args.max_shard_bytes,
+            dataset_snapshot=dataset_snapshot,
+        )
     dataloader = DataLoader(dataset, batch_size=args.batch_size, collate_fn=collate_fn)
 
     # Setup Best Checkpoint Directory
@@ -5475,6 +7322,7 @@ def main():
     best_loss_epoch = start_epoch
     best_loss_cursor = resumed_cursor
     current_cursor = resumed_cursor
+    committed_domain_cursors = copy.deepcopy(resumed_domain_cursors) if resumed_domain_cursors else {}
 
     total_samples_trained = int(resumed_cursor.get("total_samples_trained", 0)) if resumed_cursor else 0
     samples_consumed = int(resumed_cursor.get("samples_consumed", total_samples_trained)) if resumed_cursor else 0
@@ -5545,10 +7393,21 @@ def main():
                 grad_norm_val = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
                 is_non_finite_grad = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
 
+                w_grad_norm_val = 0.0
+                if world_model is not None and world_optimizer is not None:
+                    world_scaler.unscale_(world_optimizer)
+                    w_grad_norm = torch.nn.utils.clip_grad_norm_(world_model.parameters(), 1.0)
+                    w_grad_norm_val = w_grad_norm.item() if isinstance(w_grad_norm, torch.Tensor) else float(w_grad_norm)
+                    if math.isnan(w_grad_norm_val) or math.isinf(w_grad_norm_val):
+                        is_non_finite_grad = True
+
                 # Dynamic Learning Rate Schedule (Linear Warmup + Cosine Decay)
                 cur_lr = compute_scheduled_lr(step, args.warmup_steps, args.max_steps, args.lr, args.min_lr)
                 for pg in optimizer.param_groups:
                     pg["lr"] = cur_lr
+                if world_model is not None and world_optimizer is not None:
+                    for w_pg in world_optimizer.param_groups:
+                        w_pg["lr"] = cur_lr
 
                 if is_non_finite_grad and not scaler.is_enabled():
                     # Under BF16 / FP32, skip optimizer step on non-finite gradients to prevent parameter corruption
@@ -5562,16 +7421,6 @@ def main():
                     scale_after = scaler.get_scale()
                     is_step_skipped = (scaler.is_enabled() and (scale_after < scale_before)) or is_non_finite_grad
 
-                # Step World Model Optimizer if joint training
-                if world_model is not None and world_optimizer is not None:
-                    world_scaler.unscale_(world_optimizer)
-                    w_grad_norm = torch.nn.utils.clip_grad_norm_(world_model.parameters(), 1.0)
-                    for w_pg in world_optimizer.param_groups:
-                        w_pg["lr"] = cur_lr
-                    world_scaler.step(world_optimizer)
-                    world_scaler.update()
-                    world_optimizer.zero_grad(set_to_none=True)
-
                 if is_step_skipped:
                     print(
                         f"[Gradient Loss Scaler] Inf/NaN gradient detected! Scaler reduced scale factor: "
@@ -5583,9 +7432,12 @@ def main():
                     while is_step_skipped and retry_count < max_overflow_retries:
                         retry_count += 1
                         optimizer.zero_grad(set_to_none=True)
+                        if world_optimizer is not None:
+                            world_optimizer.zero_grad(set_to_none=True)
                         accum_loss = 0.0
                         accum_ce = 0.0
                         accum_aux = 0.0
+                        accum_world_loss = 0.0
                         for r_inputs, r_labels, _ in accum_batches:
                             r_inputs = r_inputs.to(device)
                             r_labels = r_labels.to(device)
@@ -5597,10 +7449,29 @@ def main():
                             accum_ce += r_ce.item() if r_ce is not None else r_loss.item()
                             accum_aux += r_aux.item() if r_aux is not None else 0.0
 
+                        if world_model is not None and world_optimizer is not None and accum_world_batches:
+                            for rw_inputs, rw_labels, _ in accum_world_batches:
+                                rw_inputs = rw_inputs.to(device)
+                                rw_labels = rw_labels.to(device)
+                                with autocast_ctx:
+                                    _, rw_loss, _, _ = world_model(rw_inputs, labels=rw_labels)
+                                    rw_loss_scaled = rw_loss / args.grad_accum
+                                world_scaler.scale(rw_loss_scaled).backward()
+                                accum_world_loss += rw_loss.item()
+
                         scaler.unscale_(optimizer)
                         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                         grad_norm_val = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
                         is_non_finite_grad = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
+
+                        w_grad_norm_val = 0.0
+                        if world_model is not None and world_optimizer is not None:
+                            world_scaler.unscale_(world_optimizer)
+                            w_grad_norm = torch.nn.utils.clip_grad_norm_(world_model.parameters(), 1.0)
+                            w_grad_norm_val = w_grad_norm.item() if isinstance(w_grad_norm, torch.Tensor) else float(w_grad_norm)
+                            if math.isnan(w_grad_norm_val) or math.isinf(w_grad_norm_val):
+                                is_non_finite_grad = True
+
                         if is_non_finite_grad and not scaler.is_enabled():
                             is_step_skipped = True
                         else:
@@ -5619,6 +7490,10 @@ def main():
                             break
 
                 if not is_step_skipped:
+                    if world_model is not None and world_optimizer is not None:
+                        world_scaler.step(world_optimizer)
+                        world_scaler.update()
+                        world_optimizer.zero_grad(set_to_none=True)
                     optimizer.zero_grad(set_to_none=True)
                     step += 1
                     window_samples = sum(len(c) for _, _, c in accum_batches)
@@ -5640,22 +7515,28 @@ def main():
                     if world_model is not None:
                         ema_world_loss = cur_step_world if ema_world_loss is None else (0.9 * ema_world_loss + 0.1 * cur_step_world)
 
+                    # Update committed domain cursors strictly from successfully committed micro-batches
+                    for _, _, b_cursors in accum_batches:
+                        for c_item in b_cursors:
+                            if len(c_item) >= 6:
+                                c_dom = c_item[5]
+                                if c_dom:
+                                    committed_domain_cursors[c_dom] = {
+                                        "active_shard": c_item[0],
+                                        "line_offset": c_item[1],
+                                        "byte_offset": c_item[2],
+                                        "chunk_idx": c_item[3],
+                                    }
+
                     # Track exact committed data cursor from the last sample of this
                     # successfully applied optimizer step.
-                    # Cursor tuple layout: (shard_name, line_idx, byte_offset, chunk_idx)
-                    #
-                    # active_chunk_idx is stored as c_chunk + 1 — the index of the FIRST
-                    # uncommitted chunk within the resume line.  The dataset iterator
-                    # interprets active_chunk_idx as the exclusive lower bound: it skips
-                    # chunks 0 .. active_chunk_idx-1 and resumes from active_chunk_idx.
-                    # When active_chunk_idx == 0 the entire resume line is considered
-                    # committed and is skipped on reload.
                     last_sample_cursor = accum_batches[-1][2][-1] if (accum_batches and accum_batches[-1][2]) else (
                         getattr(dataset, "current_active_shard", None),
                         getattr(dataset, "active_shard_offset", 0),
                         getattr(dataset, "active_shard_byte_offset", 0),
                         getattr(dataset, "active_chunk_idx", 0),
                         False,
+                        "general",
                     )
                     c_shard = last_sample_cursor[0]
                     c_line = last_sample_cursor[1] if len(last_sample_cursor) > 1 else 0
@@ -5681,6 +7562,8 @@ def main():
                         "total_samples_trained": total_samples_trained,
                         "samples_consumed": samples_consumed,
                         "completed_shards": list(shard_ledger.completed_shards) if shard_ledger else [],
+                        "domain_cursors": copy.deepcopy(committed_domain_cursors),
+                        "scheduler_deficits": copy.deepcopy(getattr(dataset, "deficits", {})),
                     }
                     accum_batches.clear()
                     accum_world_batches.clear()
@@ -5722,6 +7605,22 @@ def main():
                 ppl_clr, ppl_status, ppl_tag = get_metric_status_and_color(ppl, (4.0, 7.0), (7.1, 20.0))
                 bpb_clr, bpb_status, bpb_tag = get_metric_status_and_color(bpb, (0.55, 0.75), (0.76, 1.20))
 
+                cur_domain = getattr(dataset, "active_domain", "")
+                cur_is_anchor = getattr(dataset, "is_anchor_batch", False)
+                if not cur_domain and current_cursor and current_cursor.get("active_shard"):
+                    cur_domain = resolve_shard_domain(current_cursor["active_shard"])
+
+                if teacher_replay_buffer is not None:
+                    try:
+                        teacher_replay_buffer.add_sample(
+                            domain=cur_domain or "02_computer_science_systems",
+                            input_ids=inputs[0] if (isinstance(inputs, torch.Tensor) and inputs.shape[0] > 0) else None,
+                            step=step,
+                            loss=cur_step_loss,
+                        )
+                    except Exception:
+                        pass
+
                 cur_shard_name = current_cursor.get("active_shard") if current_cursor else getattr(dataset, "current_active_shard", "N/A")
                 cur_line_num = current_cursor.get("active_shard_line_offset", 0) if current_cursor else getattr(dataset, "active_shard_offset", 0)
                 cur_shard_tot = getattr(dataset, "active_shard_total_lines", 0)
@@ -5729,9 +7628,12 @@ def main():
                 shard_progress_str = f"Shard: {cur_shard_name} (Line {cur_line_num:,}/{cur_shard_tot:,}{shard_pct})" if cur_shard_tot > 0 else f"Shard: {cur_shard_name} (Line {cur_line_num:,})"
                 shard_line_log = f"{shard_progress_str} | " if (cur_shard_name and cur_shard_name != "N/A") else ""
 
+                domain_tag = f"Domain: [{cur_domain}] " if cur_domain else ""
+                anchor_tag = f"{CLR_YELLOW}[ANCHOR REPLAY]{CLR_RESET} " if cur_is_anchor else ""
                 wm_log = f" | WM Loss: {cur_step_world:.4f} (EMA: {ema_world_loss:.4f}) | Joint: {cur_joint_loss:.4f}" if world_model is not None else ""
                 print(
                     f"[{args.stage_id} | Step {step:04d}/{args.max_steps}] "
+                    f"{domain_tag}{anchor_tag}"
                     f"Total Loss: {loss_clr}{cur_step_loss:.4f}{CLR_RESET} (CE: {cur_step_ce:.4f}, Aux: {cur_step_aux:.4f}, EMA: {ema_loss:.4f}){wm_log} | "
                     f"PPL: {ppl_clr}{ppl:.2f}{CLR_RESET} | "
                     f"BPB: {bpb_clr}{bpb:.2f} b/B{CLR_RESET} | "
@@ -5775,6 +7677,7 @@ def main():
                             scaler=scaler,
                             world_optimizer=world_optimizer,
                             world_scaler=world_scaler,
+                            teacher_replay_buffer=teacher_replay_buffer,
                         )
 
                         # Immediately mirror authentic best milestone to Google Drive in background
@@ -5818,6 +7721,7 @@ def main():
                         world_optimizer=world_optimizer,
                         world_scaler=world_scaler,
                         per_shard_promotion=args.per_shard_promotion,
+                        teacher_replay_buffer=teacher_replay_buffer,
                     )
 
 
@@ -5936,6 +7840,8 @@ def main():
                     "total_samples_trained": total_samples_trained,
                     "samples_consumed": samples_consumed,
                     "completed_shards": list(shard_ledger.completed_shards) if shard_ledger else [],
+                    "domain_cursors": copy.deepcopy(committed_domain_cursors),
+                    "scheduler_deficits": copy.deepcopy(getattr(dataset, "deficits", {})),
                 }
             accum_batches.clear()
             accum_world_batches.clear()
@@ -5964,8 +7870,9 @@ def main():
         world_optimizer=world_optimizer,
         world_scaler=world_scaler,
         per_shard_promotion=args.per_shard_promotion,
+        teacher_replay_buffer=teacher_replay_buffer,
     )
-    if final_loss <= best_loss:
+    if ema_loss is not None and final_loss <= best_loss:
         best_loss = final_loss
         best_loss_step = step
         save_best_milestone(
@@ -5977,6 +7884,7 @@ def main():
             scaler=scaler,
             world_optimizer=world_optimizer,
             world_scaler=world_scaler,
+            teacher_replay_buffer=teacher_replay_buffer,
         )
         has_unsaved_gdrive_best = True
 
@@ -6002,8 +7910,9 @@ def main():
         clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
 
     # Automatic Hugging Face Deployment & Promotion
-    if args.hf_repo:
-        upload_promoted_model_to_hf(promoted_target, args.hf_repo, args.stage_id)
+    target_model_repo = args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara"))
+    if target_model_repo:
+        upload_promoted_model_to_hf(promoted_target, target_model_repo, args.stage_id)
 
     # Canary Checkpoint Reload Verification & Telemetry (Requirement 10)
     if args.canary:

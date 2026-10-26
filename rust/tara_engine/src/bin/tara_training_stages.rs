@@ -1,4 +1,4 @@
-//! TARA Extensible Multi-Stage Training Pipeline Orchestrator (100% Native Rust).
+﻿//! TARA Extensible Multi-Stage Training Pipeline Orchestrator (100% Native Rust).
 //!
 //! Features:
 //! - True DAG Dependency Resolution: Supports arbitrary N stages with explicit `depends_on`
@@ -26,6 +26,7 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
+use tara_engine::benchmark::BenchmarkSuite;
 use tara_engine::config::TaraConfig;
 use tara_engine::dataset::{ExpandableDatasetReader, ShardStreamingMode};
 use tara_engine::internal_diagnostics::{
@@ -1152,7 +1153,6 @@ pub fn select_and_report_best_checkpoint(
     staging_out_dir: &Path,
     intermediate_cp_dir: &Path,
 ) -> Result<(f64, f64, String), String> {
-    let probe_text = "ಕನ್ನಡ: ಕಂಪ್ಯೂಟರ್ ವಿಜ್ಞಾನ ತತ್ವಗಳು ೧೨೩೪೫. संस्कृत: सङ्गणकतत्त्वानि ०१२३४. Code: fn run() -> i32 { 42 } English: Foundations of computation.";
 
     let eval_dir_loss = |dir: &Path| -> Option<(f64, f64)> {
         let (is_m, _, _) = verify_working_model(dir);
@@ -1166,16 +1166,10 @@ pub fn select_and_report_best_checkpoint(
         let model =
             TaraForCausalLM::from_weights_and_config(weights, cfg.clone(), &dir.to_string_lossy())
                 .ok()?;
-        let tids = tok.encode(probe_text);
-        let (total_loss, targets) =
-            compute_causal_sequence_loss(&model, &tids, cfg.vocab_size).ok()?;
-        if targets == 0 {
-            return None;
-        }
-        let avg_loss = total_loss / targets as f64;
-        let ppl = avg_loss.exp();
-        if avg_loss.is_finite() && ppl.is_finite() {
-            Some((avg_loss, ppl))
+        let suite = BenchmarkSuite::canonical_suite();
+        let report = suite.evaluate(&model, &tok, &cfg).ok()?;
+        if report.overall_loss.is_finite() && report.overall_perplexity.is_finite() {
+            Some((report.overall_loss, report.overall_perplexity))
         } else {
             None
         }
@@ -1318,7 +1312,7 @@ pub fn evaluate_checkpoint_model(
     );
 
     println!("--------------------------------------------------------------------------------");
-    println!("Executing live evaluation forward pass on canonical probe sequence...");
+    println!("Executing live evaluation forward pass across Ground-Truth Benchmark Suite...");
 
     let (weights, _) = load_model_weights_with_shapes(&eval_cp.to_string_lossy())?;
     let model = TaraForCausalLM::from_weights_and_config(
@@ -1327,35 +1321,15 @@ pub fn evaluate_checkpoint_model(
         &eval_cp.to_string_lossy(),
     )?;
 
-    let probe_text = "ಕನ್ನಡ: ಕಂಪ್ಯೂಟರ್ ವಿಜ್ಞಾನ ತತ್ವಗಳು ೧೨೩೪೫. संस्कृत: सङ्गणकतत्त्वानि ०१२३४. Code: fn run() -> i32 { 42 } English: Foundations of computation.";
-    let token_ids = tokenizer.encode(probe_text);
-    if token_ids.len() < 2 {
-        return Err("Tokenizer produced fewer than 2 tokens for probe text".into());
-    }
 
-    let (probe_total_loss, probe_targets) =
-        compute_causal_sequence_loss(&model, &token_ids, config.vocab_size)?;
-    let avg_loss = if probe_targets > 0 {
-        probe_total_loss / probe_targets as f64
-    } else {
-        f64::NAN
-    };
-    let perplexity = avg_loss.exp();
 
-    println!("  Forward Pass Probe Loss        : {:.4}", avg_loss);
-    println!("  Estimated Probe Perplexity     : {:.4}", perplexity);
-    println!(
-        "  Probe Loss & Perplexity Finite : {}",
-        if avg_loss.is_finite() && perplexity.is_finite() {
-            "PASSED"
-        } else {
-            "FAILED (Non-finite)"
-        }
-    );
+    let suite = BenchmarkSuite::canonical_suite();
+    let report = suite.evaluate(&model, &tokenizer, &config)?;
+    report.print_summary();
 
-    if !avg_loss.is_finite() || !perplexity.is_finite() {
+    if !report.overall_loss.is_finite() || !report.overall_perplexity.is_finite() {
         return Err(
-            "Model evaluation rejected: forward pass produced non-finite loss or perplexity".into(),
+            "Model evaluation rejected: benchmark suite produced non-finite loss or perplexity".into(),
         );
     }
 

@@ -50,6 +50,7 @@ storage/models/**/*.safetensors
 !storage/models/tara_candidate_v1/model.safetensors
 !storage/models/**/model.safetensors.index.json
 storage/backup/
+storage/models/*_legacy*/
 TARA_TRAINING_PERSISTENT/
 .scratch_hf_space/
 
@@ -78,6 +79,8 @@ scratch/
 
 # Standalone downloader output (isolated boundary)
 downloader/downloaded/
+downloader/*_register.*
+downloader/bundle_checkpoint.json
 
 # Weak and unverified raw datasets (User directive)
 **/weak/
@@ -99,4 +102,5 @@ storage/knowledge/verified_download_pool/
 
 # Agent & IDE workspace scratch
 .gemini/
+.agents/
 brain/

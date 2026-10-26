@@ -1,7 +1,5 @@
 //! Android Emulator QA skill native Rust implementations.
-//! Replaces:
-//! - TARA/SKILLS/android/android-emulator-qa/scripts/ui_pick.py
-//! - TARA/SKILLS/android/android-emulator-qa/scripts/ui_tree_summarize.py
+//! Native implementations for ui_pick and ui_tree_summarize.
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -130,14 +128,30 @@ pub fn parse_android_hierarchy(xml_str: &str) -> Result<UiNode, String> {
         xml_str.trim()
     };
 
-    // Parse root or mock tree from attributes
+    // Extract optional attributes from <hierarchy ...> tag
+    let hierarchy_re = regex::Regex::new(r#"<hierarchy\s+([^>]+)>"#).map_err(|e| e.to_string())?;
+    let mut root_bounds = String::new();
+    let mut root_rotation = String::new();
+    if let Some(h_cap) = hierarchy_re.captures(trimmed) {
+        if let Some(attr_match) = h_cap.get(1) {
+            let attr_re = regex::Regex::new(r#"([a-zA-Z0-9_\-]+)="([^"]*)""#).map_err(|e| e.to_string())?;
+            for a_cap in attr_re.captures_iter(attr_match.as_str()) {
+                if &a_cap[1] == "bounds" {
+                    root_bounds = a_cap[2].to_string();
+                } else if &a_cap[1] == "rotation" {
+                    root_rotation = a_cap[2].to_string();
+                }
+            }
+        }
+    }
+
     let mut root = UiNode {
         tag: "hierarchy".to_string(),
         class_name: "android.widget.FrameLayout".to_string(),
         text: String::new(),
-        content_desc: String::new(),
+        content_desc: root_rotation,
         resource_id: String::new(),
-        bounds: "[0,0][1080,2400]".to_string(),
+        bounds: root_bounds,
         clickable: false,
         long_clickable: false,
         scrollable: false,
@@ -186,10 +200,45 @@ pub fn parse_android_hierarchy(xml_str: &str) -> Result<UiNode, String> {
         }
     }
 
+    // If root bounds was not explicit in <hierarchy ...>, compute dynamically from child bounds
+    if root.bounds.is_empty() && !root.children.is_empty() {
+        let b_re = regex::Regex::new(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]").map_err(|e| e.to_string())?;
+        let mut min_x = i32::MAX;
+        let mut min_y = i32::MAX;
+        let mut max_x = i32::MIN;
+        let mut max_y = i32::MIN;
+        let mut found_bounds = false;
+
+        for child in &root.children {
+            if let Some(cap) = b_re.captures(&child.bounds) {
+                if let (Ok(x1), Ok(y1), Ok(x2), Ok(y2)) = (
+                    cap[1].parse::<i32>(),
+                    cap[2].parse::<i32>(),
+                    cap[3].parse::<i32>(),
+                    cap[4].parse::<i32>(),
+                ) {
+                    min_x = min_x.min(x1);
+                    min_y = min_y.min(y1);
+                    max_x = max_x.max(x2);
+                    max_y = max_y.max(y2);
+                    found_bounds = true;
+                }
+            }
+        }
+
+        if found_bounds {
+            root.bounds = format!("[{},{}][{},{}]", min_x, min_y, max_x, max_y);
+        }
+    }
+
+    if root.bounds.is_empty() {
+        root.bounds = "[0,0][0,0]".to_string();
+    }
+
     Ok(root)
 }
 
-/// Port of `ui_pick.py`: Finds target element center coordinates in XML dump.
+/// Finds target element center coordinates in XML dump.
 pub fn ui_pick(xml_content: &str, target_text: &str) -> Result<(i32, i32), String> {
     let norm_target = clean_text(Some(target_text));
     if norm_target.is_empty() {
@@ -238,7 +287,7 @@ pub fn ui_pick(xml_content: &str, target_text: &str) -> Result<(i32, i32), Strin
     Ok((cx, cy))
 }
 
-/// Port of `ui_tree_summarize.py`: Summarizes UI hierarchy into compact indented tree.
+/// Summarizes UI hierarchy into compact indented tree.
 pub fn ui_tree_summarize(xml_content: &str, max_depth: usize) -> Result<String, String> {
     let root = parse_android_hierarchy(xml_content)?;
     let mut lines = Vec::new();
@@ -288,5 +337,52 @@ pub fn handle_android_skill(action: &str, params: Value) -> Value {
             }
         }
         _ => json!({ "status": "ERROR", "error": format!("Unknown android action: {}", action) }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_android_dynamic_bounds_from_hierarchy_tag() {
+        let xml = r#"<hierarchy rotation="0" bounds="[0,0][1440,3120]">
+            <node class="android.widget.TextView" text="Settings" bounds="[100,200][400,300]" />
+        </hierarchy>"#;
+        let root = parse_android_hierarchy(xml).unwrap();
+        assert_eq!(root.bounds, "[0,0][1440,3120]");
+        assert_eq!(root.children.len(), 1);
+    }
+
+    #[test]
+    fn test_android_dynamic_bounds_computed_from_children() {
+        let xml = r#"<hierarchy>
+            <node class="android.widget.TextView" text="Button1" bounds="[50,100][200,250]" />
+            <node class="android.widget.TextView" text="Button2" bounds="[300,400][600,800]" />
+        </hierarchy>"#;
+        let root = parse_android_hierarchy(xml).unwrap();
+        // Union of [50,100][200,250] and [300,400][600,800] -> [50,100][600,800]
+        assert_eq!(root.bounds, "[50,100][600,800]");
+    }
+
+    #[test]
+    fn test_ui_pick_finds_center_coordinates() {
+        let xml = r#"<hierarchy bounds="[0,0][1080,1920]">
+            <node class="android.widget.Button" text="Submit" bounds="[100,200][300,400]" clickable="true" />
+        </hierarchy>"#;
+        let (cx, cy) = ui_pick(xml, "Submit").unwrap();
+        assert_eq!(cx, 200); // (100 + 300) / 2
+        assert_eq!(cy, 300); // (200 + 400) / 2
+    }
+
+    #[test]
+    fn test_handle_android_skill_dispatch() {
+        let xml = r#"<hierarchy>
+            <node class="android.widget.Button" text="Confirm" bounds="[0,0][100,100]" />
+        </hierarchy>"#;
+        let res = handle_android_skill("ui_pick", json!({ "xml": xml, "target": "Confirm" }));
+        assert_eq!(res["status"], "SUCCESS");
+        assert_eq!(res["x"], 50);
+        assert_eq!(res["y"], 50);
     }
 }

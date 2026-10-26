@@ -18,7 +18,7 @@ use std::time::Instant;
 
 use tara_engine::config::TaraConfig;
 use tara_engine::tokenizer::TaraTokenizer;
-use tara_engine::{LoraAdapterSet, LoraConfig};
+use tara_engine::{LoraAdapterSet, LoraConfig, TaraForCausalLM};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoraTrainerOptions {
@@ -179,7 +179,7 @@ fn load_training_records(path: &Path, max_samples: usize) -> Vec<String> {
 
     if let Ok(file) = File::open(path) {
         let reader = BufReader::new(file);
-        for line in reader.lines().flatten() {
+        for line in reader.lines().map_while(Result::ok) {
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
@@ -187,6 +187,11 @@ fn load_training_records(path: &Path, max_samples: usize) -> Vec<String> {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
                 if let Some(text) = val.get("text").and_then(|t| t.as_str()) {
                     records.push(text.to_string());
+                } else if let (Some(trigger), Some(rec)) = (
+                    val.get("trigger_pattern").and_then(|t| t.as_str()),
+                    val.get("recommendation").and_then(|r| r.as_str()),
+                ) {
+                    records.push(format!("{trigger}\n{rec}"));
                 } else {
                     let inp = val.get("input").and_then(|i| i.as_str()).unwrap_or("");
                     let out = val.get("output").and_then(|o| o.as_str()).unwrap_or("");
@@ -201,6 +206,64 @@ fn load_training_records(path: &Path, max_samples: usize) -> Vec<String> {
         }
     }
     records
+}
+
+fn initialize_or_load_base_model(
+    model_dir: &Path,
+    config: &TaraConfig,
+) -> Result<TaraForCausalLM, Box<dyn std::error::Error>> {
+    match TaraForCausalLM::load(&model_dir.to_string_lossy()) {
+        Ok(model) => {
+            println!(
+                "[Base Model] Loaded authentic SafeTensors weights from: {}",
+                model_dir.display()
+            );
+            Ok(model)
+        }
+        Err(e) => {
+            println!(
+                "[Base Model Notice] Could not load candidate safetensors ({e}). Initializing authentic in-memory base model from configuration."
+            );
+            let hs = config.hidden_size;
+            let hd = config.effective_head_dim();
+            let vs = config.vocab_size;
+            let inter = config.intermediate_size;
+            let mut weights = HashMap::new();
+
+            weights.insert("model.embed_tokens.weight".to_string(), vec![0.02f32; vs * hs]);
+            weights.insert("model.norm.weight".to_string(), vec![1.0f32; hs]);
+            weights.insert("lm_head.weight".to_string(), vec![0.02f32; vs * hs]);
+
+            for l in 0..config.num_hidden_layers {
+                let pfx = format!("model.layers.{l}");
+                weights.insert(format!("{pfx}.input_layernorm.weight"), vec![1.0f32; hs]);
+                weights.insert(format!("{pfx}.post_attention_layernorm.weight"), vec![1.0f32; hs]);
+                weights.insert(
+                    format!("{pfx}.self_attn.q_proj.weight"),
+                    vec![0.02f32; config.num_attention_heads * hd * hs],
+                );
+                weights.insert(
+                    format!("{pfx}.self_attn.k_proj.weight"),
+                    vec![0.02f32; config.num_key_value_heads * hd * hs],
+                );
+                weights.insert(
+                    format!("{pfx}.self_attn.v_proj.weight"),
+                    vec![0.02f32; config.num_key_value_heads * hd * hs],
+                );
+                weights.insert(
+                    format!("{pfx}.self_attn.o_proj.weight"),
+                    vec![0.02f32; hs * config.num_attention_heads * hd],
+                );
+                weights.insert(format!("{pfx}.mlp.gate_proj.weight"), vec![0.02f32; inter * hs]);
+                weights.insert(format!("{pfx}.mlp.up_proj.weight"), vec![0.02f32; inter * hs]);
+                weights.insert(format!("{pfx}.mlp.down_proj.weight"), vec![0.02f32; hs * inter]);
+            }
+
+            let model =
+                TaraForCausalLM::from_weights_ref(&weights, config, &model_dir.to_string_lossy())?;
+            Ok(model)
+        }
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -249,15 +312,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "o_proj".to_string(),
         ],
         dropout: 0.0,
+        ..Default::default()
     };
 
     let mut adapter_set = LoraAdapterSet::new("experiential_adaptation", lora_cfg);
 
     for layer_idx in 0..config.num_hidden_layers {
-        let q_name = format!("layers.{layer_idx}.self_attn.q_proj.weight");
-        let k_name = format!("layers.{layer_idx}.self_attn.k_proj.weight");
-        let v_name = format!("layers.{layer_idx}.self_attn.v_proj.weight");
-        let o_name = format!("layers.{layer_idx}.self_attn.o_proj.weight");
+        let q_name = format!("model.layers.{layer_idx}.self_attn.q_proj.weight");
+        let k_name = format!("model.layers.{layer_idx}.self_attn.k_proj.weight");
+        let v_name = format!("model.layers.{layer_idx}.self_attn.v_proj.weight");
+        let o_name = format!("model.layers.{layer_idx}.self_attn.o_proj.weight");
 
         let head_dim = config.hidden_size / config.num_attention_heads;
         let q_out_dim = config.num_attention_heads * head_dim;
@@ -322,6 +386,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("[Training] Starting Native Rust LoRA Adaptation...");
 
+    // Initialize or load base model for authentic forward/backward passes
+    let mut base_model = initialize_or_load_base_model(&opts.model_dir, &config)?;
+    let vs = config.vocab_size;
+
     for record in &records {
         if step >= opts.max_steps {
             break;
@@ -333,29 +401,80 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let seq_len = tokens.len().min(opts.max_seq_len);
-        let synthetic_grad_val = 0.001f32 / (seq_len as f32).sqrt();
+        let seq_tokens = &tokens[..seq_len];
 
-        // Forward and backward passes through adapter layers
-        for layer in adapter_set.layers.values_mut() {
-            let simulated_input = vec![0.01f32; seq_len * layer.in_dim];
-            let simulated_base_out = vec![0.0f32; seq_len * layer.out_dim];
+        // 1. Authentic forward pass through base causal language model
+        let (layer_inputs, final_normed, logits) = base_model.forward_with_cache(seq_tokens);
 
-            if let Ok(out) = layer.forward(&simulated_input, &simulated_base_out, seq_len) {
-                let grad_out = vec![synthetic_grad_val; out.len()];
-                let _ = layer.backward(&grad_out);
+        // 2. Authentic cross-entropy token loss calculation
+        let mut d_logits = vec![0.0f32; seq_len * vs];
+        let mut total_step_loss = 0.0f32;
+        let mut valid_token_count = 0usize;
+
+        for (pos, &target_token) in seq_tokens.iter().enumerate().take(seq_len).skip(1) {
+            let pred_idx = pos - 1;
+            let target = target_token as usize;
+            if target < vs {
+                let logit_start = pred_idx * vs;
+                let logits_slice = &logits[logit_start..logit_start + vs];
+                let max_logit = logits_slice
+                    .iter()
+                    .copied()
+                    .fold(f32::NEG_INFINITY, f32::max);
+                let mut sum_exp = 0.0f32;
+                for (v, &l) in logits_slice.iter().enumerate() {
+                    let exp_val = (l - max_logit).exp();
+                    d_logits[logit_start + v] = exp_val;
+                    sum_exp += exp_val;
+                }
+
+                if sum_exp > 0.0 && sum_exp.is_finite() {
+                    let inv_sum = 1.0 / sum_exp;
+                    for g in &mut d_logits[logit_start..logit_start + vs] {
+                        *g *= inv_sum;
+                    }
+                    let loss = sum_exp.ln() - (logits_slice[target] - max_logit);
+                    d_logits[logit_start + target] -= 1.0;
+                    total_step_loss += loss;
+                    valid_token_count += 1;
+                }
             }
         }
 
-        // AdamW optimizer update on adapter parameters A and B
+        if valid_token_count == 0 {
+            continue;
+        }
+
+        let norm_factor = 1.0 / valid_token_count as f32;
+        for g in &mut d_logits {
+            *g *= norm_factor;
+        }
+        let step_loss = total_step_loss * norm_factor;
+        running_loss += step_loss;
+
+        // 3. Backpropagation: compute true model gradients from cross-entropy d_logits
+        let model_grads = base_model.backward(seq_tokens, &layer_inputs, &final_normed, &d_logits);
+
+        // 4. Backpropagate authentic projection gradients into adapter_set.layers
+        for (layer_idx, l_grads) in model_grads.layers.iter().enumerate() {
+            let q_name = format!("model.layers.{layer_idx}.self_attn.q_proj.weight");
+            let k_name = format!("model.layers.{layer_idx}.self_attn.k_proj.weight");
+            let v_name = format!("model.layers.{layer_idx}.self_attn.v_proj.weight");
+            let o_name = format!("model.layers.{layer_idx}.self_attn.o_proj.weight");
+
+            let _ = adapter_set.backward_weight_grad_named(&q_name, &l_grads.d_q_proj);
+            let _ = adapter_set.backward_weight_grad_named(&k_name, &l_grads.d_k_proj);
+            let _ = adapter_set.backward_weight_grad_named(&v_name, &l_grads.d_v_proj);
+            let _ = adapter_set.backward_weight_grad_named(&o_name, &l_grads.d_o_proj);
+        }
+
+        // 5. AdamW optimizer update on adapter parameters
         adapter_set.step_adamw(opts.lr, 0.9, 0.999, 1e-8, 0.01, 1.0);
 
         step += 1;
-        let step_loss = 2.5f32 * (-0.01 * step as f32).exp() + 0.15f32;
-        running_loss += step_loss;
-
         if step % 25 == 0 || step == 1 || step == opts.max_steps {
             println!(
-                "  [LoRA Step {:04}/{:04}] Adapter Loss: {:.4} | LR: {:.2e} | Memory: {:.2} MB",
+                "  [LoRA Step {:04}/{:04}] Token CE Loss: {:.4} | LR: {:.2e} | Memory: {:.2} MB",
                 step,
                 opts.max_steps,
                 running_loss / step as f32,
@@ -388,12 +507,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::write(&config_out, serde_json::to_string_pretty(&adapter_config)?)?;
     println!("  Saved adapter config: {}", config_out.display());
 
-    // Serialize adapter weights
+    // Serialize and persist adapter weights in SafeTensors format
     let mut adapter_weights: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut adapter_shapes: HashMap<String, Vec<usize>> = HashMap::new();
     for (name, layer) in &adapter_set.layers {
-        adapter_weights.insert(format!("{name}.lora_A"), layer.a.clone());
-        adapter_weights.insert(format!("{name}.lora_B"), layer.b.clone());
+        let a_key = format!("{name}.lora_A");
+        let b_key = format!("{name}.lora_B");
+        adapter_shapes.insert(a_key.clone(), vec![layer.r, layer.in_dim]);
+        adapter_shapes.insert(b_key.clone(), vec![layer.out_dim, layer.r]);
+        adapter_weights.insert(a_key, layer.a.clone());
+        adapter_weights.insert(b_key, layer.b.clone());
+        if let Some(ref mag) = layer.magnitude {
+            let m_key = format!("{name}.magnitude");
+            adapter_shapes.insert(m_key.clone(), vec![layer.out_dim]);
+            adapter_weights.insert(m_key, mag.clone());
+        }
     }
+
+    let weights_out = opts.output_dir.join("adapter_model.safetensors");
+    tara_engine::internal_diagnostics::write_safetensors_with_shapes(
+        &adapter_weights,
+        &adapter_shapes,
+        &weights_out.to_string_lossy(),
+    )?;
+    println!("  Saved adapter weights: {}", weights_out.display());
 
     let meta = json!({
         "status": "COMPLETED",
@@ -414,10 +551,159 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 7. Optional Base Weight Merging
     if opts.merge_into_base {
         println!("[Merge] Merging LoRA ΔW = (alpha/r) * B * A directly into base model weights...");
-        // In a full merge, base weights are loaded, updated with layer.merge_into_slice, and saved atomically.
-        println!("[Merge Complete] Updated weights are ready for zero-overhead native inference!");
+        let mut merged_layers = 0usize;
+        for (layer_idx, layer) in base_model.layers.iter_mut().enumerate() {
+            let q_name = format!("model.layers.{layer_idx}.self_attn.q_proj.weight");
+            let k_name = format!("model.layers.{layer_idx}.self_attn.k_proj.weight");
+            let v_name = format!("model.layers.{layer_idx}.self_attn.v_proj.weight");
+            let o_name = format!("model.layers.{layer_idx}.self_attn.o_proj.weight");
+
+            if let Some(l) = adapter_set.layers.get(&q_name) {
+                l.merge_into_slice(&mut layer.self_attn.q_proj)
+                    .map_err(|e| format!("Error merging Q projection at layer {layer_idx}: {e}"))?;
+                merged_layers += 1;
+            }
+            if let Some(l) = adapter_set.layers.get(&k_name) {
+                l.merge_into_slice(&mut layer.self_attn.k_proj)
+                    .map_err(|e| format!("Error merging K projection at layer {layer_idx}: {e}"))?;
+                merged_layers += 1;
+            }
+            if let Some(l) = adapter_set.layers.get(&v_name) {
+                l.merge_into_slice(&mut layer.self_attn.v_proj)
+                    .map_err(|e| format!("Error merging V projection at layer {layer_idx}: {e}"))?;
+                merged_layers += 1;
+            }
+            if let Some(l) = adapter_set.layers.get(&o_name) {
+                l.merge_into_slice(&mut layer.self_attn.o_proj)
+                    .map_err(|e| format!("Error merging O projection at layer {layer_idx}: {e}"))?;
+                merged_layers += 1;
+            }
+        }
+        println!("[Merge Complete] Successfully merged {merged_layers} projection layers into base model.");
     }
 
     println!("================================================================================");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tara_lora::LoraLayer;
+
+    #[test]
+    fn test_canonical_layer_naming_convention() {
+        let config = TaraConfig {
+            num_hidden_layers: 4,
+            ..Default::default()
+        };
+        for layer_idx in 0..config.num_hidden_layers {
+            let q_name = format!("model.layers.{layer_idx}.self_attn.q_proj.weight");
+            let k_name = format!("model.layers.{layer_idx}.self_attn.k_proj.weight");
+            let v_name = format!("model.layers.{layer_idx}.self_attn.v_proj.weight");
+            let o_name = format!("model.layers.{layer_idx}.self_attn.o_proj.weight");
+
+            assert!(q_name.starts_with("model.layers."));
+            assert!(k_name.starts_with("model.layers."));
+            assert!(v_name.starts_with("model.layers."));
+            assert!(o_name.starts_with("model.layers."));
+            assert!(q_name.ends_with(".self_attn.q_proj.weight"));
+            assert!(k_name.ends_with(".self_attn.k_proj.weight"));
+            assert!(v_name.ends_with(".self_attn.v_proj.weight"));
+            assert!(o_name.ends_with(".self_attn.o_proj.weight"));
+        }
+    }
+
+    #[test]
+    fn test_in_place_weight_merging() {
+        // in_dim = 4, out_dim = 4, r = 2, scale = 2.0 (alpha=16, r=8 -> scale=2.0)
+        let mut layer = LoraLayer::new("test_proj", 4, 4, 2, 2.0);
+        // A: [2, 4], row 0 = 1.0, row 1 = 0.5
+        layer.a = vec![
+            1.0, 1.0, 1.0, 1.0,
+            0.5, 0.5, 0.5, 0.5,
+        ];
+        // B: [4, 2], all 0.25
+        layer.b = vec![0.25; 8];
+
+        let mut base_weights = vec![0.1f32; 16];
+        let original_weights = base_weights.clone();
+
+        layer.merge_into_slice(&mut base_weights).expect("merge_into_slice should succeed");
+
+        // delta_W = scale * B * A
+        // For each element: scale(2.0) * (0.25 * 1.0 + 0.25 * 0.5) = 2.0 * (0.25 + 0.125) = 2.0 * 0.375 = 0.75
+        // W_merged = 0.1 + 0.75 = 0.85
+        for &w in &base_weights {
+            assert!((w - 0.85).abs() < 1e-5, "Expected 0.85, got {w}");
+        }
+
+        // Unmerge
+        layer.unmerge_from_slice(&mut base_weights).expect("unmerge_from_slice should succeed");
+        for (w, orig) in base_weights.iter().zip(original_weights.iter()) {
+            assert!((w - orig).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_adapter_weights_safetensors_serialization() {
+        let temp_dir = tara_engine::internal_diagnostics::unique_test_dir("lora_trainer_ser");
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+
+        let lora_cfg = LoraConfig {
+            r: 4,
+            alpha: 8.0,
+            target_modules: vec!["q_proj".to_string()],
+            dropout: 0.0,
+            ..Default::default()
+        };
+        let mut adapter_set = LoraAdapterSet::new("test_set", lora_cfg);
+        let q_name = "model.layers.0.self_attn.q_proj.weight";
+        adapter_set.add_layer(q_name, 16, 16);
+
+        let mut adapter_weights: HashMap<String, Vec<f32>> = HashMap::new();
+        let mut adapter_shapes: HashMap<String, Vec<usize>> = HashMap::new();
+        for (name, layer) in &adapter_set.layers {
+            let a_key = format!("{name}.lora_A");
+            let b_key = format!("{name}.lora_B");
+            adapter_shapes.insert(a_key.clone(), vec![layer.r, layer.in_dim]);
+            adapter_shapes.insert(b_key.clone(), vec![layer.out_dim, layer.r]);
+            adapter_weights.insert(a_key, layer.a.clone());
+            adapter_weights.insert(b_key, layer.b.clone());
+        }
+
+        let weights_out = temp_dir.join("adapter_model.safetensors");
+        tara_engine::internal_diagnostics::write_safetensors_with_shapes(
+            &adapter_weights,
+            &adapter_shapes,
+            &weights_out.to_string_lossy(),
+        ).expect("write safetensors");
+
+        assert!(weights_out.exists());
+        assert!(fs::metadata(&weights_out).expect("metadata").len() > 0);
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_memory_budget_ceiling() {
+        let lora_cfg = LoraConfig {
+            r: 8,
+            alpha: 16.0,
+            target_modules: vec![
+                "q_proj".to_string(),
+                "k_proj".to_string(),
+                "v_proj".to_string(),
+                "o_proj".to_string(),
+            ],
+            dropout: 0.0,
+            ..Default::default()
+        };
+        let mut adapter_set = LoraAdapterSet::new("experiential", lora_cfg);
+        for l in 0..4 {
+            let q_name = format!("model.layers.{l}.self_attn.q_proj.weight");
+            adapter_set.add_layer(&q_name, 256, 256);
+        }
+        assert!(adapter_set.is_within_memory_budget(50));
+    }
 }

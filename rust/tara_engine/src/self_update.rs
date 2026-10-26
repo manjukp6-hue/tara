@@ -21,6 +21,7 @@ use crate::config::TaraConfig;
 use crate::dataset::vocab_builder::VocabBuilder;
 use crate::dataset::{ExpandableDatasetReader, ShardStreamingMode};
 use crate::model::causal_lm::TaraForCausalLM;
+use crate::multimodal::{MultiModalConfig, MultiModalEngine, MultiModalInput, RawAudio, RawImage};
 use crate::tokenizer::TaraTokenizer;
 use crate::trainer::NativeSelfTrainer;
 
@@ -80,6 +81,7 @@ pub struct SelfUpdateReport {
     pub final_loss: f32,
     pub loss_reduction_achieved: bool,
     pub validation_passed: bool,
+    pub multimodal_verified: bool,
     pub promotion_executed: bool,
     pub runtime_reload_verified: bool,
     pub duration_seconds: f32,
@@ -319,6 +321,61 @@ impl SelfUpdateController {
         }
         let validation_passed = true;
 
+        // Multi-modal candidate forward validation gate
+        let mm_config_path = Path::new(&target_candidate_path).join("multimodal_config.json");
+        let mm_config = if mm_config_path.exists() {
+            fs::read_to_string(&mm_config_path)
+                .ok()
+                .and_then(|raw| serde_json::from_str::<MultiModalConfig>(&raw).ok())
+                .unwrap_or_else(|| {
+                    let mut cfg = MultiModalConfig::default();
+                    cfg.vision.hidden_size = start_config.hidden_size;
+                    cfg.audio.hidden_size = start_config.hidden_size;
+                    cfg
+                })
+        } else {
+            let mut cfg = MultiModalConfig::default();
+            cfg.vision.hidden_size = start_config.hidden_size;
+            cfg.audio.hidden_size = start_config.hidden_size;
+            cfg
+        };
+
+        let _ = fs::write(
+            &mm_config_path,
+            serde_json::to_string_pretty(&mm_config).unwrap_or_default(),
+        );
+
+        let tokenizer_path = format!("{}/tokenizer.json", target_candidate_path);
+        let candidate_tokenizer = TaraTokenizer::from_file(&tokenizer_path)
+            .unwrap_or_else(|_| TaraTokenizer::from_json_str(r#"{"vocab":{"<|unk|>":0}}"#).unwrap());
+
+        let mm_engine = MultiModalEngine::new(mm_config.clone());
+        let ph = mm_config.vision.patch_height.max(1);
+        let pw = mm_config.vision.patch_width.max(1);
+        let c = mm_config.vision.channels.max(1);
+        let probe_img = RawImage::from_f32(pw, ph, c, vec![0.5f32; ph * pw * c]).ok();
+
+        let n_fft = mm_config.audio.n_fft.max(16);
+        let probe_audio = RawAudio::from_f32(vec![0.0f32; n_fft * 2], mm_config.audio.sample_rate);
+
+        let mm_input = MultiModalInput {
+            text: Some("<|im_start|>validation<|im_end|>".to_string()),
+            image: probe_img,
+            audio: Some(probe_audio),
+        };
+
+        let mm_logits = mm_engine.forward(&candidate_model, &candidate_tokenizer, &mm_input)
+            .map_err(|e| SelfUpdateError::ValidationFailed(format!("Candidate multimodal forward failed: {e}")))?;
+
+        if mm_logits.iter().any(|v| v.is_nan() || v.is_infinite()) {
+            state = UpdateState::Rejected;
+            persist_state(state, "rejected_multimodal_nan_inf_logits");
+            return Err(SelfUpdateError::ValidationFailed(
+                "Candidate emitted NaN/Inf logits during multimodal verification".into(),
+            ));
+        }
+        let multimodal_verified = true;
+
         // 6. State: Promoted (Atomic pointer / directory promotion)
         state = UpdateState::Promoted;
         persist_state(state, "promoting_candidate");
@@ -385,6 +442,7 @@ impl SelfUpdateController {
             final_loss,
             loss_reduction_achieved,
             validation_passed,
+            multimodal_verified,
             promotion_executed: true,
             runtime_reload_verified,
             duration_seconds: start_time.elapsed().as_secs_f32(),

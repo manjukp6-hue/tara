@@ -96,6 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 alpha: 8.0,
                 target_modules: vec!["q_proj".into(), "v_proj".into()],
                 dropout: 0.0,
+                ..Default::default()
             };
             let mut adapter_set = LoraAdapterSet::new("test_ability", lora_cfg);
             let q_target = "model.layers.0.self_attn.q_proj.weight";

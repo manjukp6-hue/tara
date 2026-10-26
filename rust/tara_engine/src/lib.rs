@@ -32,10 +32,16 @@ pub use inference::generate;
 pub mod tokenizer;
 pub mod train_candidate;
 pub mod joint_trainer;
+pub mod multimodal;
 
 // ============================================================================
 // Tier 2: Domain & Verification Subsystems
 // ============================================================================
+pub mod benchmark;
+pub use benchmark::{
+    BenchmarkCategory, BenchmarkProbe, BenchmarkSuite, BenchmarkSuiteReport, CategoryReport,
+    ProbeEvaluationResult,
+};
 pub use inference::auto_loader;
 pub mod control_tokens;
 #[path = "../../tara_training_system/curriculum_engine/curriculum_engine.rs"]
@@ -115,6 +121,11 @@ pub use loading_policy::{
 };
 pub use tara_hd::{LoraAdapterSet, LoraConfig, LoraLayer};
 pub use model::{ModelGradients, TaraForCausalLM};
+pub use multimodal::{
+    AudioConfig, AudioEncoder, AudioError, CrossModalProjector, MultiModalConfig, MultiModalEngine,
+    MultiModalError, MultiModalInput, MultiModalSequence, ProjectorType, RawAudio, RawImage,
+    VisionConfig, VisionEncoder, VisionError,
+};
 pub use model_expansion::{
     ArchitectureConstraints, ArchitectureScaler, GrowthMetadata, GrowthType, ModelExpansionEngine,
 };

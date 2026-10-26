@@ -177,6 +177,9 @@ export SKIP_SAVE_STEPS
 DOMAIN_WEIGHTS="${DOMAIN_WEIGHTS:-02_code:0.25,01_math:0.15,04_kannada:0.15,12_reasoning:0.15,03_stem:0.10,08_world_model:0.05,11_tool_use:0.05,13_debugging:0.02,sft:0.02,05_philosophy:0.012,06_social:0.012,07_engineering:0.012,09_audio:0.012,10_vision:0.012}"
 export DOMAIN_WEIGHTS
 GDRIVE_SYNC_FLAGS="--sync-all-to-gdrive --sync-gdrive-optimizer --keep-checkpoints 1"
+if [ "${GDRIVE_SYNC_WAIT:-1}" = "1" ]; then
+    GDRIVE_SYNC_FLAGS="$GDRIVE_SYNC_FLAGS --gdrive-sync-wait"
+fi
 JOINT_STEPS="${JOINT_STEPS:-200}"
 MAIN_DS_DIR="storage/datasets/main_dataset_v2"
 PROMOTED_BASE="storage/models/promoted"
@@ -365,97 +368,115 @@ if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
             continue
         fi
         LOCAL_STAGE="$ACTIVE_CP_DIR/$STAGE_SUBDIR"
-        LOCAL_MODEL="$LOCAL_STAGE/model.safetensors"
-        LOCAL_VALID=0
-        if [ -f "$LOCAL_STAGE/checkpoint_state.json" ] && [ -f "$LOCAL_MODEL" ]; then
-            LOCAL_SIZE=$(wc -c < "$LOCAL_MODEL" 2>/dev/null || echo 0)
-            if [ "$LOCAL_SIZE" -gt 100000000 ]; then
-                LOCAL_VALID=1
-            fi
-        fi
+        mkdir -p "$LOCAL_STAGE"
 
-        if [ -d "$GDRIVE_STAGE" ]; then
-            if [ "$LOCAL_VALID" -eq 1 ]; then
-                echo "[RESUME SYNC] Local verified checkpoint already present in $LOCAL_STAGE; skipping Google Drive copy."
-            else
-                echo "[RESUME SYNC] Restoring Google Drive checkpoint mirror: $GDRIVE_STAGE -> $LOCAL_STAGE..."
-                mkdir -p "$LOCAL_STAGE"
-                python3 -c "
-import os, shutil
+        echo "[RESUME SYNC] Evaluating Google Drive checkpoint vs local: $GDRIVE_STAGE -> $LOCAL_STAGE..."
+        python3 -c "
+import os, shutil, json
+
 src = '$GDRIVE_STAGE'
 dst = '$LOCAL_STAGE'
+parent_dst = '$ACTIVE_CP_DIR'
+
 canonical = {
     'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json',
     'model.safetensors', 'world_model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json',
     'optimizer_state.pt', 'shard_ledger.json', 'latest_checkpoint.json', 'dataset_snapshot.json',
     'teacher_replay_buffer.jsonl', 'COMMITTED'
 }
-if os.path.isdir(src):
-    os.makedirs(dst, exist_ok=True)
-    best_src = os.path.join(src, 'best_checkpoint')
-    best_dst = os.path.join(dst, 'best_checkpoint')
 
-    top_model = os.path.join(src, 'model.safetensors')
-    top_is_valid = False
-    if os.path.isfile(top_model) and os.path.getsize(top_model) > 100000000:
+def get_step(dir_path):
+    st_file = os.path.join(dir_path, 'checkpoint_state.json')
+    if os.path.isfile(st_file):
         try:
-            import safetensors
-            with safetensors.safe_open(top_model, framework='pt', device='cpu') as sf:
-                if len(sf.keys()) > 0:
-                    top_is_valid = True
-        except Exception:
-            top_is_valid = False
-
-    best_model = os.path.join(best_src, 'model.safetensors')
-    best_is_valid = False
-    if os.path.isfile(best_model) and os.path.getsize(best_model) > 100000000:
-        try:
-            import safetensors
-            with safetensors.safe_open(best_model, framework='pt', device='cpu') as sf:
-                if len(sf.keys()) > 0:
-                    best_is_valid = True
-        except Exception:
-            best_is_valid = False
-
-    # Auto-heal: If top-level model on GDrive has corrupted/truncated header but best_checkpoint is authentic:
-    # Heal GDrive top-level model and use authentic best_checkpoint to restore clean weights locally!
-    if not top_is_valid and best_is_valid:
-        print('[Auto-Heal] GDrive top-level model.safetensors has corrupt header; healing from authentic best_checkpoint...', flush=True)
-        try:
-            shutil.copy2(best_model, top_model)
-            top_is_valid = True
+            with open(st_file, 'r', encoding='utf-8') as f:
+                d = json.load(f)
+                return int(d.get('step', -1))
         except Exception:
             pass
+    return -1
 
-    # 1. Copy top-level canonical files strictly into dst
-    for f in os.listdir(src):
-        sf = os.path.join(src, f)
-        if os.path.isfile(sf) and f in canonical:
-            df = os.path.join(dst, f)
-            min_size = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
-            if f == 'model.safetensors' and not top_is_valid and best_is_valid:
-                print('  -> Restoring model.safetensors directly from authentic best_checkpoint...', flush=True)
-                shutil.copy2(best_model, df)
-                continue
-            if not os.path.exists(df) or os.path.getsize(df) < min_size:
-                print(f'  -> Copying canonical top-level {f}...', flush=True)
-                shutil.copy2(sf, df)
+def is_valid_model(mpath):
+    if os.path.isfile(mpath) and os.path.getsize(mpath) > 100000000:
+        try:
+            import safetensors
+            with safetensors.safe_open(mpath, framework='pt', device='cpu') as sf:
+                return len(sf.keys()) > 0
+        except Exception:
+            return False
+    return False
 
-    # 2. Copy best_checkpoint subfolder strictly into dst/best_checkpoint
-    if os.path.isdir(best_src):
-        os.makedirs(best_dst, exist_ok=True)
-        for f in os.listdir(best_src):
-            sf = os.path.join(best_src, f)
+if os.path.isdir(src):
+    os.makedirs(dst, exist_ok=True)
+    local_step = max(get_step(dst), get_step(os.path.join(dst, 'best_checkpoint')))
+    local_has_model = is_valid_model(os.path.join(dst, 'model.safetensors')) or is_valid_model(os.path.join(dst, 'best_checkpoint', 'model.safetensors'))
+
+    src_top_step = get_step(src)
+    src_best_step = get_step(os.path.join(src, 'best_checkpoint'))
+    gdrive_max_step = max(src_top_step, src_best_step)
+
+    # Check versioned directories on GDrive under src or parent
+    for item in os.listdir(src):
+        sub = os.path.join(src, item)
+        if os.path.isdir(sub) and '.step' in item:
+            gdrive_max_step = max(gdrive_max_step, get_step(sub))
+
+    print(f'[RESUME SYNC] Step comparison: Local={local_step} (has_model={local_has_model}) vs Google Drive={gdrive_max_step} (top={src_top_step}, best={src_best_step})', flush=True)
+
+    should_restore = (not local_has_model) or (gdrive_max_step >= local_step and gdrive_max_step >= 0)
+
+    if should_restore:
+        best_src = os.path.join(src, 'best_checkpoint')
+        best_dst = os.path.join(dst, 'best_checkpoint')
+        top_model = os.path.join(src, 'model.safetensors')
+        best_model = os.path.join(best_src, 'model.safetensors')
+
+        top_is_valid = is_valid_model(top_model)
+        best_is_valid = is_valid_model(best_model)
+
+        # 1. Restore best_checkpoint subfolder if present on Google Drive
+        if os.path.isdir(best_src):
+            os.makedirs(best_dst, exist_ok=True)
+            for f in os.listdir(best_src):
+                sf = os.path.join(best_src, f)
+                if os.path.isfile(sf) and f in canonical:
+                    df = os.path.join(best_dst, f)
+                    min_sz = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
+                    if not os.path.exists(df) or os.path.getsize(df) < min_sz or gdrive_max_step > local_step:
+                        print(f'  -> Restoring best_checkpoint/{f}...', flush=True)
+                        shutil.copy2(sf, df)
+
+        # 2. Restore top-level canonical files
+        for f in os.listdir(src):
+            sf = os.path.join(src, f)
             if os.path.isfile(sf) and f in canonical:
-                df = os.path.join(best_dst, f)
-                min_size = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
-                if not os.path.exists(df) or os.path.getsize(df) < min_size:
-                    print(f'  -> Copying canonical best_checkpoint/{f}...', flush=True)
+                df = os.path.join(dst, f)
+                min_sz = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
+                if not os.path.exists(df) or os.path.getsize(df) < min_sz or gdrive_max_step > local_step:
+                    print(f'  -> Restoring canonical {f}...', flush=True)
                     shutil.copy2(sf, df)
+
+        # 3. Auto-promote authentic best_checkpoint if top-level model is invalid or older than best_checkpoint
+        if best_is_valid and (not top_is_valid or src_best_step > src_top_step):
+            print(f'  -> Promoting authentic best_checkpoint (Step {src_best_step}) to local stage root...', flush=True)
+            for f in ('model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt', 'config.json'):
+                b_src = os.path.join(best_src, f)
+                if os.path.isfile(b_src):
+                    shutil.copy2(b_src, os.path.join(dst, f))
+
+        # 4. Restore any versioned subdirectories (.step*) into parent active checkpoints dir
+        for item in os.listdir(src):
+            s_item = os.path.join(src, item)
+            if os.path.isdir(s_item) and '.step' in item:
+                d_item = os.path.join(parent_dst, item)
+                if not os.path.exists(d_item):
+                    print(f'  -> Restoring versioned checkpoint directory: {item}...', flush=True)
+                    shutil.copytree(s_item, d_item)
+
+        print('[RESUME SYNC] Checkpoint mirror restore complete.', flush=True)
+    else:
+        print('[RESUME SYNC] Local checkpoint is up to date; skipping restore.', flush=True)
 " 2>/dev/null || true
-                echo "[RESUME SYNC] Checkpoint mirror restore complete."
-            fi
-        fi
     done
 fi
 

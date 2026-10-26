@@ -3471,7 +3471,7 @@ def _safe_rmtree(dir_path: str) -> bool:
     return not os.path.exists(dir_path) and not os.path.islink(dir_path)
 
 
-def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
+def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024) -> bool:
     """
     Atomic direct streaming copy for Google Drive FUSE and local files.
     Writes to an isolated temporary file (dst.upload_tmp_<pid>) first.
@@ -3480,13 +3480,13 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
     even if the process or connection is terminated midway!
     """
     if os.path.abspath(src) == os.path.abspath(dst):
-        return
+        return True
     if not os.path.exists(src):
-        return
+        return False
     src_sz = os.path.getsize(src)
     if src_sz == 0:
         print(f"[GDrive Safety Block] Refusing to mirror empty 0-byte file: {src} -> {dst}", flush=True)
-        return
+        return False
 
     if src.endswith(".safetensors"):
         try:
@@ -3494,10 +3494,10 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
             with safe_open(src, framework="pt", device="cpu") as sf:
                 if not sf.keys():
                     print(f"[GDrive Safety Block] Refusing to mirror safetensors without tensor keys: {src}", flush=True)
-                    return
+                    return False
         except Exception as sf_err:
             print(f"[GDrive Safety Block] Refusing to mirror invalid safetensors ({sf_err}): {src}", flush=True)
-            return
+            return False
 
     dst_dir = os.path.dirname(dst)
     if dst_dir:
@@ -3513,7 +3513,8 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
                 except Exception:
                     pass
 
-    tmp_dst = os.path.join(dst_dir, f".{os.path.basename(dst)}.upload_tmp_{os.getpid()}_{int(time.time())}")
+    # Non-hidden staging temp file with .upload_temp at the end of the filename (DriveFS compatible)
+    tmp_dst = os.path.join(dst_dir, f"{os.path.basename(dst)}.upload_temp_{os.getpid()}_{int(time.time())}")
     try:
         if os.path.exists(tmp_dst):
             _safe_unlink(tmp_dst)
@@ -3532,7 +3533,9 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
             except Exception:
                 pass
 
-        # Verification Gate before promotion: ensure complete byte transfer and valid safetensors
+        # ------------------------------------------------------------------
+        # Verification Gate before promotion: ensure complete transfer & validity
+        # ------------------------------------------------------------------
         tmp_sz = os.path.getsize(tmp_dst)
         if tmp_sz != src_sz:
             raise IOError(f"Incomplete streaming write: expected {src_sz} bytes, wrote {tmp_sz} bytes")
@@ -3543,25 +3546,54 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 8 * 1024 * 1024):
                 if not sf.keys():
                     raise IOError("Staged safetensors file contains 0 keys")
 
-        # Atomic promotion: replace dst in 0.001s (clean overwrite without truncating dst if aborted earlier)
-        if os.path.exists(dst):
-            try:
-                os.remove(dst)
-            except Exception:
-                pass
+        if src.endswith(".json"):
+            with open(tmp_dst, "r", encoding="utf-8") as jf:
+                json.load(jf)
 
+        # ------------------------------------------------------------------
+        # Promotion: Delete old file explicitly, then align new verified file
+        # ------------------------------------------------------------------
+        if os.path.exists(dst):
+            for _ in range(3):
+                try:
+                    os.remove(dst)
+                    break
+                except Exception:
+                    time.sleep(0.1)
+
+        # Align new verified file to target destination
+        promoted = False
         try:
-            os.replace(tmp_dst, dst)
+            os.rename(tmp_dst, dst)
+            promoted = True
         except OSError:
             try:
-                os.rename(tmp_dst, dst)
+                os.replace(tmp_dst, dst)
+                promoted = True
             except OSError:
-                shutil.copy2(tmp_dst, dst)
-                _safe_unlink(tmp_dst)
+                try:
+                    shutil.move(tmp_dst, dst)
+                    promoted = True
+                except Exception:
+                    try:
+                        shutil.copy2(tmp_dst, dst)
+                        _safe_unlink(tmp_dst)
+                        promoted = True
+                    except Exception as cp_err:
+                        raise IOError(f"Failed to align staged file to {dst}: {cp_err}")
+
+        if not promoted or not os.path.exists(dst):
+            raise IOError(f"Target destination {dst} missing after alignment attempt")
+
+        if os.path.exists(tmp_dst):
+            _safe_unlink(tmp_dst)
+
+        return True
     except Exception as e:
         if os.path.exists(tmp_dst):
             _safe_unlink(tmp_dst)
         print(f"[Atomic Copy Notice] Streaming copy note for {os.path.basename(dst)}: {e}", flush=True)
+        return False
 
 
 
@@ -3738,8 +3770,9 @@ def _ensure_gdrive_target_dir(target_dir: str):
 
 
 
-def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: List[str]):
+def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: List[str], step: int = 0, is_best: bool = False, gdrive_stage_dir: Optional[str] = None, loss: Optional[float] = None):
     global _pending_gdrive_sync, _active_gdrive_sync_src
+    last_synced_step = -1
     while True:
         with _gdrive_sync_lock:
             _active_gdrive_sync_src = os.path.abspath(src_dir) if src_dir else None
@@ -3752,100 +3785,171 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
             _ensure_gdrive_target_dir(target_dir)
             synced = 0
             t_start = time.time()
+            manifest_files = {}
 
-            # Partition file list: copy heavy model weights & tensors FIRST, configs SECOND, and metadata/state LAST
-            weights_files = [f for f in file_list if f in ("model.safetensors", "pytorch_model.bin", "world_model.safetensors", "optimizer_state.pt")]
-            config_files = [f for f in file_list if f in ("config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json", "COMMITTED")]
-            meta_files = [f for f in file_list if f in ("checkpoint_state.json", "STAGE_METADATA.json", "shard_ledger.json", "latest_checkpoint.json")]
-            other_files = [f for f in file_list if f not in weights_files and f not in config_files and f not in meta_files]
-
-            ordered_files = weights_files + config_files + other_files + meta_files
-
-            synced_model_sha = None
-            for fname in ordered_files:
-                src = os.path.join(src_dir, fname)
-                dst = os.path.join(target_dir, fname)
-                if os.path.exists(src):
-                    if os.path.abspath(src) == os.path.abspath(dst):
-                        continue
-                    _stream_copy_file(src, dst)
-                    if fname in ("model.safetensors", "pytorch_model.bin", "optimizer_state.pt") and os.path.exists(dst):
-                        src_sz = os.path.getsize(src)
-                        dst_sz = os.path.getsize(dst)
-                        if src_sz != dst_sz or dst_sz == 0:
-                            print(f"[GDrive Sync Warning] Size mismatch for {fname} ({src_sz} != {dst_sz})! Retrying stream copy...", flush=True)
-                            _stream_copy_file(src, dst)
-                        else:
-                            print(f"[GDrive Mirror Verified] {fname} ({dst_sz / (1024*1024):.1f} MB) mirror complete.", flush=True)
-                        if fname == "model.safetensors":
-                            try:
-                                synced_model_sha = compute_file_sha256(dst)
-                            except Exception:
-                                pass
-                    synced += 1
-
-            # If model.safetensors was synced and hash computed, ensure target_dir metadata reflects authentic synced weights hash
-            if synced_model_sha:
-                for meta_name in ("checkpoint_state.json", "STAGE_METADATA.json"):
-                    meta_p = os.path.join(target_dir, meta_name)
-                    if os.path.exists(meta_p):
-                        try:
-                            with open(meta_p, "r", encoding="utf-8") as mf:
-                                mdata = json.load(mf)
-                            if mdata.get("model_weights_sha256") != synced_model_sha:
-                                mdata["model_weights_sha256"] = synced_model_sha
-                                with open(meta_p, "w", encoding="utf-8") as mf:
-                                    json.dump(mdata, mf, indent=2)
-                        except Exception:
-                            pass
-
-            # Post-sync verification and obsolete file cleanup in Google Drive target directory:
-            if os.path.exists(target_dir):
-                for f in os.listdir(target_dir):
-                    if f.endswith(".tmp") or ".tmp_" in f:
-                        try:
-                            os.remove(os.path.join(target_dir, f))
-                        except Exception:
-                            pass
-                    # Delete duplicate numbered files created by DriveFS: (1), (2), (5), etc.
-                    if " (" in f and ")" in f:
-                        try:
-                            os.remove(os.path.join(target_dir, f))
-                            print(f"[GDrive Hygiene] Deleted duplicate numbered file from GDrive: {f}", flush=True)
-                        except Exception:
-                            pass
-
-            # Enforce retention cleanup and clone purge in Google Drive parent directory
-            gdrive_parent = os.path.dirname(os.path.abspath(target_dir))
-            if gdrive_parent and os.path.exists(gdrive_parent):
+            # Read source metadata to confirm expected step and stage_id
+            src_state_file = os.path.join(src_dir, "checkpoint_state.json")
+            expected_step = step
+            expected_stage_id = ""
+            expected_loss = loss
+            expected_best_loss = loss
+            if os.path.isfile(src_state_file):
                 try:
-                    for pf in os.listdir(gdrive_parent):
-                        if " (" in pf and ")" in pf:
-                            try:
-                                pfull = os.path.join(gdrive_parent, pf)
-                                if os.path.isfile(pfull) or os.path.islink(pfull):
-                                    os.remove(pfull)
-                                elif os.path.isdir(pfull):
-                                    shutil.rmtree(pfull, ignore_errors=True)
-                                print(f"[GDrive Hygiene] Deleted parent duplicate artifact from GDrive: {pf}", flush=True)
-                            except Exception:
-                                pass
-                    _cleanup_old_versioned_checkpoints(gdrive_parent, os.path.basename(target_dir), keep_n=1, force_keep_exact=True)
+                    with open(src_state_file, "r", encoding="utf-8") as fs:
+                        st_info = json.load(fs)
+                        expected_step = int(st_info.get("step", step))
+                        expected_stage_id = st_info.get("stage_id", "")
+                        expected_loss = float(st_info.get("loss", loss if loss is not None else float("inf")))
+                        expected_best_loss = float(st_info.get("best_loss", expected_loss))
                 except Exception:
                     pass
 
-            elapsed = time.time() - t_start
-            print(f"[GDrive Mirror] Successfully backed up [{tag}] ({synced} files, {elapsed:.1f}s) -> {target_dir}", flush=True)
+            # Partition file list: copy metadata and configs FIRST, weights SECOND
+            meta_files = [f for f in file_list if f in ("checkpoint_state.json", "STAGE_METADATA.json", "shard_ledger.json", "latest_checkpoint.json", "dataset_snapshot.json", "teacher_replay_buffer.jsonl")]
+            config_files = [f for f in file_list if f in ("config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json")]
+            weights_files = [f for f in file_list if f in ("model.safetensors", "pytorch_model.bin", "world_model.safetensors", "optimizer_state.pt")]
+            other_files = [f for f in file_list if f not in weights_files and f not in config_files and f not in meta_files and f != "COMMITTED"]
+
+            ordered_files = meta_files + config_files + other_files + weights_files
+
+            all_files_ok = True
+            for fname in ordered_files:
+                src = os.path.join(src_dir, fname)
+                dst = os.path.join(target_dir, fname)
+                if not os.path.exists(src):
+                    continue
+                if os.path.abspath(src) == os.path.abspath(dst):
+                    continue
+
+                # Stream copy with non-hidden .upload_temp staging suffix
+                ok = _stream_copy_file(src, dst)
+                if not ok:
+                    print(f"[GDrive Sync Error] Failed to mirror {fname} -> {dst}", flush=True)
+                    all_files_ok = False
+                    break
+
+                # Dynamic Dual SHA-256 verification
+                src_sz = os.path.getsize(src)
+                dst_sz = os.path.getsize(dst) if os.path.exists(dst) else 0
+                if src_sz != dst_sz or dst_sz == 0:
+                    print(f"[GDrive Sync Warning] Size mismatch for {fname} ({src_sz} != {dst_sz})! Retrying...", flush=True)
+                    ok = _stream_copy_file(src, dst)
+                    if not ok:
+                        all_files_ok = False
+                        break
+
+                src_sha = compute_file_sha256(src)
+                dst_sha = compute_file_sha256(dst)
+                if src_sha != dst_sha:
+                    print(f"[GDrive Sync Warning] SHA-256 mismatch for {fname}! Retrying...", flush=True)
+                    ok = _stream_copy_file(src, dst)
+                    dst_sha = compute_file_sha256(dst)
+                    if src_sha != dst_sha:
+                        print(f"[GDrive Sync Fatal] Dual SHA-256 mismatch for {fname} ({src_sha[:16]} != {dst_sha[:16]})! Aborting candidate.", flush=True)
+                        all_files_ok = False
+                        break
+
+                manifest_files[fname] = {
+                    "size": dst_sz,
+                    "sha256": dst_sha,
+                }
+                synced += 1
+
+            if not all_files_ok:
+                print(f"[GDrive Sync Abort] Candidate at {target_dir} failed integrity checks. Not committing.", flush=True)
+                _safe_rmtree(target_dir)
+            else:
+                # Step consistency verification: check checkpoint_state.json and STAGE_METADATA.json
+                dst_state = os.path.join(target_dir, "checkpoint_state.json")
+                if os.path.isfile(dst_state):
+                    try:
+                        with open(dst_state, "r", encoding="utf-8") as fd:
+                            dst_st = json.load(fd)
+                        if dst_st.get("step") != expected_step:
+                            print(f"[GDrive Sync Warning] Target checkpoint_state step mismatch! Expected {expected_step}, found {dst_st.get('step')}.", flush=True)
+                    except Exception:
+                        pass
+
+                # Write verified COMMITTED manifest LAST (defining atomic commitment)
+                committed_manifest_path = os.path.join(target_dir, "COMMITTED")
+                committed_payload = {
+                    "step": expected_step,
+                    "stage_id": expected_stage_id,
+                    "loss": expected_loss,
+                    "best_loss": expected_best_loss,
+                    "is_best": is_best,
+                    "committed_utc": datetime.now(timezone.utc).isoformat(),
+                    "files": manifest_files,
+                }
+                with open(committed_manifest_path, "w", encoding="utf-8") as cm:
+                    json.dump(committed_payload, cm, indent=2)
+
+                last_synced_step = expected_step
+                elapsed = time.time() - t_start
+                print(f"[GDrive Mirror] Successfully backed up and COMMITTED [{tag}] ({synced} files, {elapsed:.1f}s) -> {target_dir}", flush=True)
+
+                # Update lightweight pointer files in stage parent directory
+                stage_dir = gdrive_stage_dir or os.path.dirname(os.path.abspath(target_dir))
+                if stage_dir and os.path.isdir(stage_dir):
+                    ptr_file = os.path.join(stage_dir, "latest_checkpoint.json")
+                    try:
+                        with open(ptr_file, "w", encoding="utf-8") as pf:
+                            json.dump({
+                                "step": expected_step,
+                                "versioned_dir": target_dir,
+                                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                                "has_optimizer": "optimizer_state.pt" in manifest_files,
+                            }, pf, indent=2)
+                    except Exception:
+                        pass
+
+                    if is_best:
+                        best_ptr = os.path.join(stage_dir, "best_checkpoint.json")
+                        try:
+                            with open(best_ptr, "w", encoding="utf-8") as bf:
+                                json.dump({
+                                    "step": expected_step,
+                                    "loss": expected_loss,
+                                    "versioned_dir": target_dir,
+                                    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                                }, bf, indent=2)
+                        except Exception:
+                            pass
+
+                # Enforce safe retention cleanup in Google Drive stage directory (protecting latest and best)
+                if stage_dir and os.path.isdir(stage_dir):
+                    _cleanup_old_versioned_checkpoints(
+                        parent_dir=stage_dir,
+                        output_dir_basename=os.path.basename(stage_dir),
+                        keep_n=2,
+                        protected_dirs=[target_dir],
+                    )
+
         except Exception as e:
             print(f"[GDrive Mirror Notice] Non-fatal background backup notice: {e}", flush=True)
         finally:
             with _gdrive_sync_lock:
                 _active_gdrive_sync_src = None
+            if src_dir and (os.path.basename(src_dir).startswith("sync_snap_") or os.path.basename(src_dir).startswith(".best_sync_snap_")) and os.path.isdir(src_dir):
+                _safe_rmtree(src_dir)
 
         with _gdrive_sync_lock:
             if _pending_gdrive_sync is not None:
-                src_dir, target_dir, tag, file_list = _pending_gdrive_sync
+                p_src, p_dst, p_tag, p_flist, p_step, p_is_best, p_stg, p_loss = _pending_gdrive_sync
                 _pending_gdrive_sync = None
+                if p_step <= last_synced_step and last_synced_step >= 0:
+                    print(f"[GDrive Mirror] Discarding stale queued sync for Step {p_step} (already completed Step {last_synced_step}).", flush=True)
+                    if p_src and (os.path.basename(p_src).startswith("sync_snap_") or os.path.basename(p_src).startswith(".best_sync_snap_")) and os.path.isdir(p_src):
+                        _safe_rmtree(p_src)
+                    break
+                src_dir = p_src
+                target_dir = p_dst
+                tag = p_tag
+                file_list = p_flist
+                step = p_step
+                is_best = p_is_best
+                gdrive_stage_dir = p_stg
+                loss = p_loss
                 print(f"[GDrive Mirror] Processing queued latest checkpoint sync: [{tag}] -> {target_dir}", flush=True)
                 continue
             else:
@@ -3858,12 +3962,14 @@ def sync_checkpoint_to_gdrive(
     wait: bool = False,
     sync_optimizer: bool = False,
     source_dir: Optional[str] = None,
+    step: Optional[int] = None,
+    is_best: bool = False,
+    loss: Optional[float] = None,
 ):
     """
-    Mirrors local checkpoint files to Google Drive.
-    Single-worker lock with pending queue ensures the latest checkpoint is ALWAYS uploaded.
-    By default, excludes heavy optimizer_state.pt to prevent Google Drive quota exhaustion.
-    Uses immutable source_dir (versioned_dir) when provided to prevent race conditions during write.
+    Mirrors verified local checkpoint files to an immutable, versioned folder on Google Drive.
+    Single-worker lock with pending queue ensures the latest checkpoint is ALWAYS uploaded without
+    stale overwrite collisions or race conditions.
     """
     global _gdrive_sync_thread, _pending_gdrive_sync
     gdrive_root = _resolve_gdrive_root()
@@ -3878,18 +3984,40 @@ def sync_checkpoint_to_gdrive(
     except Exception:
         pass
 
-    # Compute canonical target directory on Google Drive preserving stage/milestone hierarchy
-    target_dir = resolve_gdrive_stage_dir(output_dir)
-    if not target_dir:
-        return
-
     actual_src = source_dir if (source_dir and os.path.isdir(source_dir)) else output_dir
 
+    # Extract step, is_best, and loss from source checkpoint_state.json if not provided
+    st_file = os.path.join(actual_src, "checkpoint_state.json")
+    if os.path.isfile(st_file):
+        try:
+            with open(st_file, "r", encoding="utf-8") as sf:
+                st_meta = json.load(sf)
+            if step is None:
+                step = int(st_meta.get("step", 0))
+            if not is_best and "is_best" in st_meta:
+                is_best = bool(st_meta.get("is_best", False))
+            if loss is None:
+                loss = float(st_meta.get("loss", float("inf")))
+        except Exception:
+            pass
+    if step is None:
+        step = 0
+
+    # Compute canonical stage root directory on Google Drive preserving stage hierarchy
+    gdrive_stage_dir = resolve_gdrive_stage_dir(output_dir)
+    if not gdrive_stage_dir:
+        return
+    if os.path.basename(gdrive_stage_dir) == "best_checkpoint":
+        gdrive_stage_dir = os.path.dirname(gdrive_stage_dir)
+
+    # Compute clean, non-hidden immutable destination directory on Google Drive
+    folder_prefix = "best_milestone" if is_best else "checkpoint"
+    target_dir = os.path.join(gdrive_stage_dir, f"{folder_prefix}_step_{step:08d}_{int(time.time())}")
+
     file_list = [
-        "config.json", "tokenizer.json", "model.safetensors",
-        "world_model.safetensors", "checkpoint_state.json", "STAGE_METADATA.json",
+        "config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
+        "model.safetensors", "world_model.safetensors", "checkpoint_state.json", "STAGE_METADATA.json",
         "shard_ledger.json", "dataset_snapshot.json", "teacher_replay_buffer.jsonl",
-        "COMMITTED"
     ]
     if sync_optimizer:
         file_list.append("optimizer_state.pt")
@@ -3900,15 +4028,26 @@ def sync_checkpoint_to_gdrive(
                 print(f"[GDrive Mirror] Waiting for previous sync to complete...", flush=True)
                 _gdrive_sync_thread.join()
             else:
-                # Queue the latest checkpoint so the worker syncs it immediately upon finishing current job
-                _pending_gdrive_sync = (actual_src, target_dir, tag, file_list)
+                # Discard if already queued job is newer
+                if _pending_gdrive_sync is not None and _pending_gdrive_sync[4] >= step:
+                    print(f"[GDrive Mirror] Active sync in progress; Step {step} is not newer than queued Step {_pending_gdrive_sync[4]}. Skipping queue.", flush=True)
+                    if actual_src and os.path.basename(actual_src).startswith("sync_snap_") and os.path.isdir(actual_src):
+                        _safe_rmtree(actual_src)
+                    return
+                # Purge previous superseded queued snapshot if it was a temporary snapshot
+                if _pending_gdrive_sync is not None:
+                    prev_snap = _pending_gdrive_sync[0]
+                    if prev_snap and os.path.basename(prev_snap).startswith("sync_snap_") and os.path.isdir(prev_snap):
+                        _safe_rmtree(prev_snap)
+
+                _pending_gdrive_sync = (actual_src, target_dir, tag, file_list, step, is_best, gdrive_stage_dir, loss)
                 print(f"[GDrive Mirror] Active sync in progress; queued [{tag}] as next GDrive update.", flush=True)
                 return
 
         _pending_gdrive_sync = None
         _gdrive_sync_thread = threading.Thread(
             target=_sync_to_gdrive_worker,
-            args=(actual_src, target_dir, tag, file_list),
+            args=(actual_src, target_dir, tag, file_list, step, is_best, gdrive_stage_dir, loss),
             daemon=True
         )
         _gdrive_sync_thread.start()
@@ -5177,11 +5316,14 @@ def save_checkpoint(
             # Step 7: Mirror verified checkpoint to Google Drive in background (from immutable versioned_dir)
             if sync_to_gdrive:
                 sync_checkpoint_to_gdrive(
-                    output_dir,
-                    tag,
-                    wait=is_completed,
+                    output_dir=output_dir,
+                    tag=tag,
+                    wait=is_completed or (os.environ.get("GDRIVE_SYNC_WAIT", "0") == "1"),
                     sync_optimizer=sync_optimizer,
                     source_dir=versioned_dir,
+                    step=step,
+                    is_best=is_best,
+                    loss=loss,
                 )
             else:
                 print(f"[GDrive Mirror] Skipped cloud sync for [{tag}] (Google Drive preserves best model only).", flush=True)
@@ -5386,28 +5528,47 @@ def _collect_versioned_checkpoint_dirs(parent_dir: str, output_dir_basename: str
     Discovers immutable versioned checkpoint directories that have a COMMITTED marker
     or complete checkpoint assets (checkpoint_state.json + model.safetensors).
     Returns them sorted newest-first (highest step number first).
-    Pattern: <output_dir_basename>.step<N>_<ts>
+    Supports patterns:
+      - <output_dir_basename>.step<N>_<ts>
+      - checkpoint_step_<N>_<ts>
+      - best_milestone_step_<N>_<ts>
     """
     prefix = output_dir_basename + ".step"
     candidates = []
     if not os.path.isdir(parent_dir):
         return candidates
     for entry in os.listdir(parent_dir):
-        if entry.startswith(prefix) and not entry.startswith("."):
-            full_path = os.path.join(parent_dir, entry)
+        if entry.startswith("."):
+            continue
+        full_path = os.path.join(parent_dir, entry)
+        if not os.path.isdir(full_path):
+            continue
+
+        step_num = None
+        if entry.startswith(prefix):
+            try:
+                step_part = entry[len(prefix):].split("_")[0]
+                step_num = int(step_part)
+            except (ValueError, IndexError):
+                step_num = 0
+        elif entry.startswith("checkpoint_step_"):
+            try:
+                step_part = entry[len("checkpoint_step_"):].split("_")[0]
+                step_num = int(step_part)
+            except (ValueError, IndexError):
+                step_num = 0
+        elif entry.startswith("best_milestone_step_"):
+            try:
+                step_part = entry[len("best_milestone_step_"):].split("_")[0]
+                step_num = int(step_part)
+            except (ValueError, IndexError):
+                step_num = 0
+
+        if step_num is not None:
             committed_marker = os.path.join(full_path, "COMMITTED")
             cand_state = os.path.join(full_path, "checkpoint_state.json")
             cand_model = os.path.join(full_path, "model.safetensors")
-            if os.path.isdir(full_path) and (
-                os.path.isfile(committed_marker) or
-                (os.path.isfile(cand_state) and os.path.isfile(cand_model))
-            ):
-                # Extract step number for sorting
-                try:
-                    step_part = entry[len(prefix):].split("_")[0]
-                    step_num = int(step_part)
-                except (ValueError, IndexError):
-                    step_num = 0
+            if os.path.isfile(committed_marker) or (os.path.isfile(cand_state) and os.path.isfile(cand_model)):
                 candidates.append((step_num, full_path))
     candidates.sort(key=lambda x: x[0], reverse=True)
     return [path for _, path in candidates]
@@ -5428,12 +5589,10 @@ def _cleanup_old_versioned_checkpoints(
 
     Safety contract:
     - Never deletes before new checkpoint is verified and committed.
-    - The directory referenced by latest_checkpoint.json is NEVER deleted.
-    - An active staging directory is NEVER deleted.
-    - Abandoned staging directories (.ckpt_staging_*) are deleted only if they
-      exceed min_abandoned_age_seconds and do not belong to an active process.
-    - Obsolete duplicate runs for the exact same step number are purged immediately.
-    - Stale or invalid pointers do not cause valid checkpoints to be purged.
+    - NEVER deletes the latest valid full-resume checkpoint (with optimizer).
+    - NEVER deletes the best historical milestone checkpoint.
+    - NEVER deletes active snapshots or protected directories.
+    - In-flight uploads (younger than min_abandoned_age_seconds without COMMITTED) are protected.
     - All deletions are logged explicitly.
     """
     if force_keep_exact:
@@ -5478,7 +5637,7 @@ def _cleanup_old_versioned_checkpoints(
                 if ptr_output and os.path.basename(ptr_output) != output_dir_basename:
                     # Ignore pointer belonging to a sibling checkpoint/stage
                     continue
-                if p_vdir and os.path.isdir(p_vdir) and os.path.basename(p_vdir).startswith(prefix):
+                if p_vdir and os.path.isdir(p_vdir):
                     pointer_target = os.path.abspath(p_vdir)
                     break
             except Exception:
@@ -5505,12 +5664,23 @@ def _cleanup_old_versioned_checkpoints(
         print(f"[Checkpoint Retention Error] Could not list {parent_dir}: {list_err}", flush=True)
         return
 
+    # Scan all entries and categorize
+    best_loss_seen = float("inf")
+    best_milestone_dir_to_protect = None
+    latest_full_step_seen = -1
+    latest_full_dir_to_protect = None
+
     for entry in entries:
         full_path = os.path.join(parent_dir, entry)
         if not os.path.isdir(full_path):
             continue
 
         full_path_abs = os.path.abspath(full_path)
+
+        # Protect temporary sync snapshot folders from being deleted by retention
+        if entry.startswith("sync_snap_") or entry.startswith(".best_sync_snap_"):
+            protected_sync_dirs.add(full_path_abs)
+            continue
 
         # Case A: Abandoned staging directories (.ckpt_staging_{output_dir_basename}_*)
         if entry.startswith(staging_prefix):
@@ -5556,29 +5726,79 @@ def _cleanup_old_versioned_checkpoints(
                     print(f"[Checkpoint Retention Notice] Could not remove abandoned staging dir {entry}", flush=True)
             continue
 
-        # Case B: Versioned checkpoints ({output_dir_basename}.step*)
+        # Case B: Versioned checkpoints
+        step_num = None
         if entry.startswith(prefix) and not entry.startswith("."):
-            committed_marker = os.path.join(full_path, "COMMITTED")
-            is_committed = os.path.isfile(committed_marker)
             try:
                 step_part = entry[len(prefix):].split("_")[0]
                 step_num = int(step_part)
             except (ValueError, IndexError):
                 step_num = -1
+        elif entry.startswith("checkpoint_step_") and not entry.startswith("."):
+            try:
+                step_part = entry[len("checkpoint_step_"):].split("_")[0]
+                step_num = int(step_part)
+            except (ValueError, IndexError):
+                step_num = -1
+        elif entry.startswith("best_milestone_step_") and not entry.startswith("."):
+            try:
+                step_part = entry[len("best_milestone_step_"):].split("_")[0]
+                step_num = int(step_part)
+            except (ValueError, IndexError):
+                step_num = -1
+
+        if step_num is not None:
+            committed_marker = os.path.join(full_path, "COMMITTED")
+            is_committed = os.path.isfile(committed_marker)
+
+            # Check if this checkpoint is an in-flight sync (younger than min_abandoned_age_seconds)
+            if not is_committed:
+                try:
+                    mtime = os.path.getmtime(full_path)
+                    if now - mtime < min_abandoned_age_seconds:
+                        protected_sync_dirs.add(full_path_abs)
+                        continue
+                except Exception:
+                    pass
+
+            if is_committed:
+                # Inspect metadata to protect the highest-step full resume checkpoint and best-loss milestone
+                cand_st = os.path.join(full_path, "checkpoint_state.json")
+                cand_opt = os.path.join(full_path, "optimizer_state.pt")
+                has_opt = os.path.isfile(cand_opt) and os.path.getsize(cand_opt) > 0
+                if has_opt and step_num > latest_full_step_seen:
+                    latest_full_step_seen = step_num
+                    latest_full_dir_to_protect = full_path_abs
+
+                if os.path.isfile(cand_st):
+                    try:
+                        with open(cand_st, "r", encoding="utf-8") as csf:
+                            cmeta = json.load(csf)
+                            c_loss = float(cmeta.get("loss", cmeta.get("best_loss", float("inf"))))
+                            if c_loss < best_loss_seen:
+                                best_loss_seen = c_loss
+                                best_milestone_dir_to_protect = full_path_abs
+                    except Exception:
+                        pass
+                elif entry.startswith("best_milestone_step_"):
+                    best_milestone_dir_to_protect = full_path_abs
+
             all_versioned.append((step_num, full_path, is_committed))
 
-    # Group versioned directories by step number:
-    # For any given step number, only the NEWEST directory (highest timestamp/mtime) is retained;
-    # all older directories for the EXACT SAME step number are obsolete superseded runs and deleted immediately.
+    # Protect the identified latest full-resume checkpoint and best-milestone checkpoint unconditionally
+    if latest_full_dir_to_protect:
+        protected_sync_dirs.add(latest_full_dir_to_protect)
+    if best_milestone_dir_to_protect:
+        protected_sync_dirs.add(best_milestone_dir_to_protect)
+
+    # Group versioned directories by step number
     step_groups: Dict[int, List[Tuple[str, bool]]] = {}
     for step_num, dir_path, is_committed in all_versioned:
         step_groups.setdefault(step_num, []).append((dir_path, is_committed))
 
     candidates_to_evaluate: List[Tuple[int, str, bool]] = []
     for step_num, dir_entries in step_groups.items():
-        # Sort newest-first within this step number (descending by directory path string containing timestamp)
         dir_entries.sort(key=lambda x: x[0], reverse=True)
-        # Keep newest run as the candidate
         candidates_to_evaluate.append((step_num, dir_entries[0][0], dir_entries[0][1]))
         # All older runs for the exact same step number are purged immediately
         for old_dir, old_committed in dir_entries[1:]:
@@ -5704,6 +5924,24 @@ def try_resume_from_checkpoint(
                     )
                     continue
 
+                if ptr_vdir and not os.path.isdir(ptr_vdir):
+                    v_base = os.path.basename(ptr_vdir)
+                    gdrive_root_check = _resolve_gdrive_root()
+                    alt_dirs = [
+                        os.path.join(parent_dir, v_base),
+                        os.path.join(checkpoint_dir, v_base),
+                    ]
+                    if gdrive_root_check:
+                        canon_gd = resolve_gdrive_stage_dir(checkpoint_dir, expected_stage_id)
+                        if canon_gd:
+                            alt_dirs.append(os.path.join(canon_gd, v_base))
+                            alt_dirs.append(os.path.join(os.path.dirname(canon_gd), v_base))
+                        alt_dirs.append(os.path.join(gdrive_root_check, v_base))
+                    for alt in alt_dirs:
+                        if os.path.isdir(alt):
+                            ptr_vdir = alt
+                            break
+
                 if ptr_vdir and os.path.isdir(ptr_vdir):
                     # Ensure versioned_dir name matches the target output_dir_basename prefix
                     vdir_base = os.path.basename(ptr_vdir)
@@ -5753,6 +5991,7 @@ def try_resume_from_checkpoint(
 
     # 4. Google Drive mirror
     gdrive_root = _resolve_gdrive_root()
+    canonical_gdrive = None
     if gdrive_root:
         canonical_gdrive = resolve_gdrive_stage_dir(checkpoint_dir, expected_stage_id)
         if canonical_gdrive and canonical_gdrive not in candidate_dirs:
@@ -5766,13 +6005,42 @@ def try_resume_from_checkpoint(
         if gdrive_stage not in candidate_dirs:
             candidate_dirs.append(gdrive_stage)
 
+    # 5. Add best_checkpoint directories as first-class candidates
+    best_cands = [
+        os.path.join(checkpoint_dir, "best_checkpoint"),
+        os.path.join(parent_dir, "best_checkpoint"),
+    ]
+    if gdrive_root:
+        if canonical_gdrive:
+            best_cands.append(os.path.join(canonical_gdrive, "best_checkpoint"))
+        if expected_stage_id:
+            best_cands.append(os.path.join(gdrive_root, expected_stage_id, "best_checkpoint"))
+        best_cands.append(os.path.join(gdrive_root, output_dir_basename, "best_checkpoint"))
+
+    for bc in best_cands:
+        if os.path.isdir(bc) and bc not in candidate_dirs:
+            candidate_dirs.append(bc)
+
+    # 6. Also discover versioned checkpoint directories from Google Drive
+    if gdrive_root:
+        gd_search_dirs = []
+        if canonical_gdrive:
+            gd_search_dirs.extend([os.path.dirname(canonical_gdrive), canonical_gdrive])
+        gd_search_dirs.append(gdrive_root)
+        for gd_dir in gd_search_dirs:
+            if os.path.isdir(gd_dir):
+                for vdir in _collect_versioned_checkpoint_dirs(gd_dir, output_dir_basename):
+                    if vdir not in candidate_dirs:
+                        candidate_dirs.append(vdir)
+
     best_cand_dir = None
     best_cand_step = -1
     best_cand_epoch = 0
     best_cand_loss = float("inf")
     best_cand_cursor = None
+    best_cand_has_opt = False
 
-    print("[Resume Discovery] Scanning complete training checkpoint directories (excluding best milestones):")
+    print("[Resume Discovery] Scanning candidate checkpoint directories for highest verified step:")
     for cand in candidate_dirs:
         cand_state = os.path.join(cand, "checkpoint_state.json")
         cand_model = os.path.join(cand, "model.safetensors")
@@ -5793,6 +6061,29 @@ def try_resume_from_checkpoint(
         if not verify_checkpoint_integrity(cand, require_optimizer=has_cand_opt, require_completed=False):
             print(f"  -> Notice: Candidate at {cand} failed integrity verification. Skipping.")
             continue
+
+        # COMMITTED manifest verification: verify every recorded file exists and matches size
+        cand_committed = os.path.join(cand, "COMMITTED")
+        if os.path.isfile(cand_committed):
+            try:
+                with open(cand_committed, "r", encoding="utf-8") as cm_f:
+                    cm_data = json.load(cm_f)
+                if isinstance(cm_data, dict) and "files" in cm_data:
+                    manifest_valid = True
+                    for m_fname, m_info in cm_data["files"].items():
+                        m_file_path = os.path.join(cand, m_fname)
+                        if not os.path.isfile(m_file_path):
+                            print(f"  -> Notice: Candidate {cand} missing file {m_fname} specified in COMMITTED manifest! Skipping.")
+                            manifest_valid = False
+                            break
+                        if os.path.getsize(m_file_path) != m_info.get("size"):
+                            print(f"  -> Notice: Candidate {cand} file {m_fname} size mismatch against COMMITTED manifest! Skipping.")
+                            manifest_valid = False
+                            break
+                    if not manifest_valid:
+                        continue
+            except Exception:
+                pass
 
         try:
             with open(cand_state, "r", encoding="utf-8") as f:
@@ -5885,8 +6176,9 @@ def try_resume_from_checkpoint(
 
             cand_type_str = "complete" if has_cand_opt else "model-only"
             print(f"  -> Found valid {cand_type_str} candidate at {cand} (Step: {c_step}, Loss: {c_loss:.4f}) [VERIFIED HEALTHY]")
-            if c_step > best_cand_step:
+            if c_step > best_cand_step or (c_step == best_cand_step and has_cand_opt and not best_cand_has_opt):
                 best_cand_step = c_step
+                best_cand_has_opt = has_cand_opt
                 best_cand_epoch = int(s_data.get("epoch", 0))
                 best_cand_loss = c_best_loss
                 best_cand_dir = cand
@@ -6585,6 +6877,9 @@ def main():
                         help="Sync all intermediate training checkpoints to Google Drive (default: True)")
     parser.add_argument("--sync-gdrive-optimizer", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true", default=True,
                         help="Include heavy optimizer state when mirroring checkpoints to Google Drive (default: True)")
+    parser.add_argument("--gdrive-sync-wait", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true",
+                        default=bool(int(os.environ.get("GDRIVE_SYNC_WAIT", "1"))),
+                        help="Wait synchronously for Google Drive checkpoint sync to finish before advancing training (default: True, eliminates background concurrency collisions)")
     parser.add_argument("--preflight-only", action="store_true", default=False, help="Execute only the dual-stage preflight validation diagnostic and exit with report")
     parser.add_argument("--joint-world-model", action="store_true", default=False,
                         help="Enable coordinated joint training of Neural Model + World Model")
@@ -7273,15 +7568,8 @@ def main():
     # 9. Instantiate Streaming Dataset & DataLoader with Multi-Domain DRR Scheduler
     resume_chunk_idx = resumed_cursor.get("active_chunk_idx", 0) if resumed_cursor else 0
 
-    # Stratified Teacher Replay Buffer for continual learning across all canonical domains
-    teacher_replay_buffer = TeacherReplayBuffer(max_samples_per_domain=500)
-    for tb_cand in [
-        os.path.join(args.output_dir, "best_checkpoint", "teacher_replay_buffer.jsonl"),
-        os.path.join(args.output_dir, "teacher_replay_buffer.jsonl"),
-    ]:
-        if os.path.exists(tb_cand):
-            teacher_replay_buffer.load_from_jsonl(tb_cand)
-            break
+    # Stratified Teacher Replay Buffer (Disabled per directive to eliminate CPU overhead and GPU-to-CPU sync)
+    teacher_replay_buffer = None
 
     domain_shards: Dict[str, List[str]] = {d: [] for d in CANONICAL_DOMAINS}
     for s in selected_shards:
@@ -7713,12 +8001,32 @@ def main():
                             teacher_replay_buffer=teacher_replay_buffer,
                         )
 
-                        # Immediately mirror authentic best milestone to Google Drive in background
+                        # Snapshot best milestone to an immutable sync staging directory so background copy never collides with active training
+                        best_sync_snapshot = os.path.join(
+                            os.path.dirname(os.path.abspath(best_cp_dir)),
+                            f"sync_snap_best_step_{step}_{int(time.time())}"
+                        )
+                        os.makedirs(best_sync_snapshot, exist_ok=True)
+                        for item in os.listdir(best_cp_dir):
+                            s_file = os.path.join(best_cp_dir, item)
+                            d_file = os.path.join(best_sync_snapshot, item)
+                            if os.path.isfile(s_file):
+                                try:
+                                    os.link(s_file, d_file)
+                                except Exception:
+                                    shutil.copy2(s_file, d_file)
+
+                        # Mirror authentic best milestone to Google Drive
+                        wait_sync = getattr(args, "gdrive_sync_wait", False) or (os.environ.get("GDRIVE_SYNC_WAIT", "0") == "1")
                         sync_checkpoint_to_gdrive(
                             best_cp_dir,
                             f"BEST-MILESTONE (Step {step:04d}, Loss: {best_loss:.4f})",
-                            wait=False,
+                            wait=wait_sync,
                             sync_optimizer=True,
+                            source_dir=best_sync_snapshot,
+                            step=step,
+                            is_best=True,
+                            loss=cur_step_loss,
                         )
                     else:
                         print(

@@ -35,7 +35,7 @@ export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export MALLOC_TRIM_THRESHOLD_=65536
 export TARA_MAX_MEMORY_MB="${TARA_MAX_MEMORY_MB:-}"
 
-# Dynamically resolve max sequence length bounded by hardware headroom and model architecture
+# Dynamically resolve max sequence length bounded by model architecture
 if [ -z "${TARA_MAX_SEQ_LEN:-}" ]; then
     MODEL_MAX_POS=4096
     for cfg in "storage/models/tara_candidate_v1/config.json" "storage/models/tara_base/config.json" "config.json"; do
@@ -47,28 +47,8 @@ if [ -z "${TARA_MAX_SEQ_LEN:-}" ]; then
             fi
         fi
     done
-
-    # Dynamic hardware-headroom derivation
-    if command -v nvidia-smi >/dev/null 2>&1; then
-        GPU_MEM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 || echo "0")
-        if [ "$GPU_MEM_MB" -ge 30000 ] 2>/dev/null; then
-            HW_SAFE_LEN=4096
-        elif [ "$GPU_MEM_MB" -ge 14000 ] 2>/dev/null; then
-            HW_SAFE_LEN=2048
-        else
-            HW_SAFE_LEN=1024
-        fi
-    else
-        HW_SAFE_LEN=1024
-    fi
-
-    # Assign minimum of model capacity and hardware safe length
-    if [ "$MODEL_MAX_POS" -lt "$HW_SAFE_LEN" ]; then
-        export TARA_MAX_SEQ_LEN="$MODEL_MAX_POS"
-    else
-        export TARA_MAX_SEQ_LEN="$HW_SAFE_LEN"
-    fi
-    echo "[DYNAMIC CONFIG] Assigned TARA_MAX_SEQ_LEN=$TARA_MAX_SEQ_LEN (Hardware headroom: ${GPU_MEM_MB:-CPU} MB, Model capacity: $MODEL_MAX_POS)"
+    export TARA_MAX_SEQ_LEN="$MODEL_MAX_POS"
+    echo "[DYNAMIC CONFIG] Assigned TARA_MAX_SEQ_LEN=$TARA_MAX_SEQ_LEN from model architecture capacity"
 else
     echo "[DYNAMIC CONFIG] Using user-specified TARA_MAX_SEQ_LEN=$TARA_MAX_SEQ_LEN"
 fi
@@ -741,12 +721,20 @@ if [ "$TRAINER_MODE" = "python" ]; then
         STAGE1_INPUT="$PROMOTED_BASE/stage0_pretraining"
     fi
 
-    # Unified Stage 1: Full-Curriculum Continuous Pretraining & Joint World Model Co-Training
+    # Unified Stage 1: Full-Curriculum Continuous Pretraining
     WORLD_DS_ARG=""
     if [ -d "$MAIN_DS_DIR/08_commonsense_world_model" ]; then
         WORLD_DS_ARG="--world-dataset-dir $MAIN_DS_DIR/08_commonsense_world_model"
     elif [ -f "storage/datasets/curriculum/agi_causal_transitions.jsonl" ]; then
         WORLD_DS_ARG="--world-dataset-dir storage/datasets/curriculum/agi_causal_transitions.jsonl"
+    fi
+
+    JOINT_WORLD_FLAG=""
+    if [ "${ENABLE_JOINT_WORLD_MODEL:-0}" = "1" ] || [ "${GPU_MEM_MB:-0}" -ge 30000 ]; then
+        echo "[JOINT WORLD MODEL] Sufficient GPU VRAM (${GPU_MEM_MB:-0} MB) detected: Enabling simultaneous World Model co-training."
+        JOINT_WORLD_FLAG="--joint-world-model --world-model-dir storage/models/tara_world_model $WORLD_DS_ARG"
+    else
+        echo "[VRAM HEADROOM SAFETY] GPU VRAM (${GPU_MEM_MB:-0} MB < 30 GB): Allocating full GPU memory to Neural Model to guarantee 8+ GB headroom and full 4096 context length."
     fi
 
     python3 cloud_train.py \
@@ -768,9 +756,7 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --hf-repo "$HF_DATASET_REPO" \
         --hf-dataset-repo "$HF_DATASET_REPO" \
         --hf-model-repo "$HF_MODEL_REPO" \
-        --joint-world-model \
-        --world-model-dir storage/models/tara_world_model \
-        $WORLD_DS_ARG \
+        $JOINT_WORLD_FLAG \
         $GDRIVE_SYNC_FLAGS \
         $CANARY_EXTRA_ARGS \
         $FULL_DATASET_EXTRA \

@@ -6641,6 +6641,7 @@ def main():
     parser.add_argument("--checkpoint-interval", type=int, default=int(os.environ.get("CHECKPOINT_INTERVAL", 500)), help="Optimizer step interval between checkpoint commits and cloud backups (default: 500)")
     parser.add_argument("--optimizer", type=str, default="auto", choices=["auto", "adamw", "adamw8bit"], help="Optimizer choice ('adamw8bit' saves 5.5GB VRAM for Tesla T4)")
     parser.add_argument("--resume", action="store_true", default=True, help="Auto-resume from existing checkpoint if available")
+    parser.add_argument("--force", action="store_true", default=False, help="Force training continuation even if stage is marked completed")
     parser.add_argument("--canary", action="store_true", default=False, help="Enable 15-step T4 canary validation mode (batch_size=1, grad_accum=4, max_seq_len=256, max_steps=15, warmup_steps=3)")
     parser.add_argument("--buffer-size", type=int, default=1, help="Streaming buffer size (default: 1 for exact sequential crash-safe zero-duplicate recovery)")
     parser.add_argument("--full-dataset", action="store_true", default=False, help="Train continuously across all shards until full dataset is exhausted")
@@ -6688,6 +6689,12 @@ def main():
 
     # Pre-resolve and export HF_TOKEN across runtime
     _resolve_hf_token(args.hf_token)
+
+    raw_dataset_repo = args.hf_dataset_repo if args.hf_dataset_repo is not None else (args.hf_repo if args.hf_repo is not None else os.environ.get("HF_DATASET_REPO", os.environ.get("HF_REPO", "manjukp6/tara_dataset_v1")))
+    dataset_repo = None if (raw_dataset_repo is None or str(raw_dataset_repo).strip().lower() in ("", "none", "local", "null")) else str(raw_dataset_repo).strip()
+
+    raw_model_repo = args.hf_model_repo if args.hf_model_repo is not None else (args.hf_repo if args.hf_repo is not None else os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara")))
+    model_repo = None if (raw_model_repo is None or str(raw_model_repo).strip().lower() in ("", "none", "local", "null")) else str(raw_model_repo).strip()
 
     if (args.full_dataset or args.max_steps <= 0) and not args.canary:
         args.max_steps = 100_000_000
@@ -6741,25 +6748,27 @@ def main():
         )
 
     # 1. Idempotence Check
-    if check_stage_already_completed(args.output_dir):
+    if not args.force and check_stage_already_completed(args.output_dir):
         finalize_stage_and_promote(
             output_dir=args.output_dir,
             promoted_dir=args.promoted_dir,
             stage_id=args.stage_id,
-            hf_repo=args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara")),
+            hf_repo=model_repo,
             previous_stage_dir=args.previous_stage_dir,
         )
         sys.exit(0)
 
     # 2. Fast Asset Verification & Streaming Download (if files missing)
-    ensure_remote_assets_available(
-        args.model_dir,
-        args.dataset_dir,
-        prefix=args.dataset_prefix.strip("/"),
-        bulk_download_dataset=args.bulk_download_dataset,
-        output_dir=args.output_dir,
-        stage_id=args.stage_id,
-    )
+    if model_repo:
+        ensure_remote_assets_available(
+            args.model_dir,
+            args.dataset_dir,
+            repo_id=model_repo,
+            prefix=args.dataset_prefix.strip("/"),
+            bulk_download_dataset=args.bulk_download_dataset,
+            output_dir=args.output_dir,
+            stage_id=args.stage_id,
+        )
 
     # 2b. Pretraining Authorization Gate check
     if args.verify_gate:
@@ -6874,8 +6883,6 @@ def main():
     shard_ledger = ShardLedger(args.output_dir, gdrive_stage_dir,
                                stage_id=args.stage_id, dataset_revision=args.dataset_prefix.strip("/"))
 
-    dataset_repo = args.hf_dataset_repo or args.hf_repo or os.environ.get("HF_DATASET_REPO", os.environ.get("HF_REPO", "manjukp6/tara_dataset_v1"))
-    model_repo = args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara"))
     ds_prefix = args.dataset_prefix.strip("/")
     discovered_shards = []
 
@@ -7271,7 +7278,7 @@ def main():
                 output_dir=args.output_dir,
                 promoted_dir=args.promoted_dir,
                 stage_id=args.stage_id,
-                hf_repo=args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara")),
+                hf_repo=model_repo,
                 previous_stage_dir=args.previous_stage_dir,
             )
             sys.exit(0)
@@ -7921,7 +7928,7 @@ def main():
             output_dir=args.output_dir,
             promoted_dir=promoted_target,
             stage_id=args.stage_id,
-            hf_repo=args.hf_model_repo or os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara")),
+            hf_repo=model_repo,
             previous_stage_dir=args.previous_stage_dir,
             candidate_source_dir=best_source,
         )

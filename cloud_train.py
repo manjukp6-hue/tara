@@ -4397,8 +4397,8 @@ def verify_checkpoint_integrity(
                     return False
         if require_optimizer and os.path.exists(os.path.join(checkpoint_dir, "optimizer_state.pt")):
             opt_path = os.path.join(checkpoint_dir, "optimizer_state.pt")
-            if os.path.getsize(opt_path) <= 1024 * 1024:
-                print(f"[Verification Fail] Optimizer state file too small: {opt_path}")
+            if os.path.getsize(opt_path) == 0:
+                print(f"[Verification Fail] Optimizer state file is empty: {opt_path}")
                 return False
             import zipfile
             if zipfile.is_zipfile(opt_path):

@@ -3951,10 +3951,12 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
 
                 # Enforce safe retention cleanup in Google Drive stage directory (protecting latest and best)
                 if stage_dir and os.path.isdir(stage_dir):
+                    gdrive_keep = int(os.environ.get("KEEP_CHECKPOINTS", "1"))
                     _cleanup_old_versioned_checkpoints(
                         parent_dir=stage_dir,
                         output_dir_basename=os.path.basename(stage_dir),
-                        keep_n=2,
+                        keep_n=gdrive_keep,
+                        force_keep_exact=True,
                         protected_dirs=[target_dir],
                     )
 
@@ -5668,14 +5670,11 @@ def _cleanup_old_versioned_checkpoints(
     - In-flight uploads (younger than min_abandoned_age_seconds without COMMITTED) are protected.
     - All deletions are logged explicitly.
     """
-    if force_keep_exact:
-        keep_n = max(keep_n, 1)
-    else:
-        keep_n = max(keep_n, 2)  # default safety floor for backward compatibility
+    keep_n = max(int(keep_n), 1)
 
     prefix = output_dir_basename + ".step"
     staging_prefix = f".ckpt_staging_{output_dir_basename}_"
-    all_versioned: List[Tuple[int, str, bool]] = []
+    all_versioned: List[Tuple[int, str, bool, bool]] = []
 
     if not os.path.isdir(parent_dir):
         return
@@ -5799,9 +5798,17 @@ def _cleanup_old_versioned_checkpoints(
                     print(f"[Checkpoint Retention Notice] Could not remove abandoned staging dir {entry}", flush=True)
             continue
 
-        # Case B: Versioned checkpoints
+        # Case B: Versioned checkpoints and best milestones
         step_num = None
-        if entry.startswith(prefix) and not entry.startswith("."):
+        is_milestone = False
+        if entry.startswith("best_milestone_step_") and not entry.startswith("."):
+            is_milestone = True
+            try:
+                step_part = entry[len("best_milestone_step_"):].split("_")[0]
+                step_num = int(step_part)
+            except (ValueError, IndexError):
+                step_num = -1
+        elif entry.startswith(prefix) and not entry.startswith("."):
             try:
                 step_part = entry[len(prefix):].split("_")[0]
                 step_num = int(step_part)
@@ -5810,12 +5817,6 @@ def _cleanup_old_versioned_checkpoints(
         elif entry.startswith("checkpoint_step_") and not entry.startswith("."):
             try:
                 step_part = entry[len("checkpoint_step_"):].split("_")[0]
-                step_num = int(step_part)
-            except (ValueError, IndexError):
-                step_num = -1
-        elif entry.startswith("best_milestone_step_") and not entry.startswith("."):
-            try:
-                step_part = entry[len("best_milestone_step_"):].split("_")[0]
                 step_num = int(step_part)
             except (ValueError, IndexError):
                 step_num = -1
@@ -5834,86 +5835,84 @@ def _cleanup_old_versioned_checkpoints(
                 except Exception:
                     pass
 
-            if is_committed:
-                # Inspect metadata to protect the highest-step full resume checkpoint and best-loss milestone
-                cand_st = os.path.join(full_path, "checkpoint_state.json")
-                cand_opt = os.path.join(full_path, "optimizer_state.pt")
-                has_opt = os.path.isfile(cand_opt) and os.path.getsize(cand_opt) > 0
-                if has_opt and step_num > latest_full_step_seen:
-                    latest_full_step_seen = step_num
-                    latest_full_dir_to_protect = full_path_abs
+            all_versioned.append((step_num, full_path, is_committed, is_milestone))
 
-                if os.path.isfile(cand_st):
-                    try:
-                        with open(cand_st, "r", encoding="utf-8") as csf:
-                            cmeta = json.load(csf)
-                            c_loss = float(cmeta.get("loss", cmeta.get("best_loss", float("inf"))))
-                            if c_loss < best_loss_seen:
-                                best_loss_seen = c_loss
-                                best_milestone_dir_to_protect = full_path_abs
-                    except Exception:
-                        pass
-                elif entry.startswith("best_milestone_step_"):
-                    best_milestone_dir_to_protect = full_path_abs
+    # Evaluate legacy unversioned best_checkpoint directory: purge if any newer milestone exists
+    legacy_best = os.path.join(parent_dir, "best_checkpoint")
+    if os.path.isdir(legacy_best):
+        legacy_step = -1
+        l_st = os.path.join(legacy_best, "checkpoint_state.json")
+        if os.path.isfile(l_st):
+            try:
+                with open(l_st, "r", encoding="utf-8") as lf:
+                    legacy_step = int(json.load(lf).get("step", -1))
+            except Exception:
+                pass
+        max_milestone_step = max((s for s, _, c, m in all_versioned if c and m), default=-1)
+        if max_milestone_step > legacy_step or (legacy_step >= 0 and max_milestone_step >= legacy_step) or max_milestone_step >= 0:
+            if _safe_rmtree(legacy_best):
+                print(f"[Checkpoint Retention] Purged obsolete legacy best_checkpoint folder: {legacy_best} (Step {legacy_step} superseded by Step {max_milestone_step})", flush=True)
 
-            all_versioned.append((step_num, full_path, is_committed))
+    # Separate candidates into Best Milestones and Regular Full Checkpoints
+    # Each pool independently enforces keep_n retention:
+    # 1. Best milestones: keep newest keep_n (default 1); purge older milestones unconditionally.
+    # 2. Regular checkpoints: keep newest keep_n (default 1); purge older checkpoints.
+    pools = [
+        ("best milestone", [item for item in all_versioned if item[3]]),
+        ("regular checkpoint", [item for item in all_versioned if not item[3]]),
+    ]
 
-    # Protect the identified latest full-resume checkpoint and best-milestone checkpoint unconditionally
-    if latest_full_dir_to_protect:
-        protected_sync_dirs.add(latest_full_dir_to_protect)
-    if best_milestone_dir_to_protect:
-        protected_sync_dirs.add(best_milestone_dir_to_protect)
+    for pool_tag, pool_items in pools:
+        if not pool_items:
+            continue
 
-    # Group versioned directories by step number
-    step_groups: Dict[int, List[Tuple[str, bool]]] = {}
-    for step_num, dir_path, is_committed in all_versioned:
-        step_groups.setdefault(step_num, []).append((dir_path, is_committed))
+        step_groups: Dict[int, List[Tuple[str, bool]]] = {}
+        for step_num, dir_path, is_committed, _ in pool_items:
+            step_groups.setdefault(step_num, []).append((dir_path, is_committed))
 
-    candidates_to_evaluate: List[Tuple[int, str, bool]] = []
-    for step_num, dir_entries in step_groups.items():
-        dir_entries.sort(key=lambda x: x[0], reverse=True)
-        candidates_to_evaluate.append((step_num, dir_entries[0][0], dir_entries[0][1]))
-        # All older runs for the exact same step number are purged immediately
-        for old_dir, old_committed in dir_entries[1:]:
-            dir_abs = os.path.abspath(old_dir)
+        candidates_to_eval: List[Tuple[int, str, bool]] = []
+        for step_num, dir_entries in step_groups.items():
+            dir_entries.sort(key=lambda x: x[0], reverse=True)
+            candidates_to_eval.append((step_num, dir_entries[0][0], dir_entries[0][1]))
+            # Purge older duplicate runs for the exact same step number immediately
+            for old_dir, _ in dir_entries[1:]:
+                dir_abs = os.path.abspath(old_dir)
+                if pointer_target and dir_abs == pointer_target:
+                    continue
+                if dir_abs in protected_sync_dirs:
+                    continue
+                removed = _safe_rmtree(old_dir)
+                if removed:
+                    print(f"[Checkpoint Retention] Removed obsolete superseded run for Step {step_num}: {os.path.basename(old_dir)}", flush=True)
+
+        # Sort distinct steps newest-first (highest step number first)
+        candidates_to_eval.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+        committed_kept = 0
+        for step_num, dir_path, is_committed in candidates_to_eval:
+            dir_abs = os.path.abspath(dir_path)
+
             if pointer_target and dir_abs == pointer_target:
+                if is_committed:
+                    committed_kept += 1
                 continue
+
             if dir_abs in protected_sync_dirs:
+                if is_committed:
+                    committed_kept += 1
                 continue
-            removed = _safe_rmtree(old_dir)
+
+            if is_committed:
+                if committed_kept < keep_n:
+                    committed_kept += 1
+                    continue
+
+            removed = _safe_rmtree(dir_path)
             if removed:
-                print(f"[Checkpoint Retention] Removed obsolete superseded run for Step {step_num}: {os.path.basename(old_dir)}", flush=True)
+                reason = f"old committed {pool_tag} beyond retention window ({keep_n})" if is_committed else f"uncommitted {pool_tag} remnant"
+                print(f"[Checkpoint Retention] Removed {reason}: {os.path.basename(dir_path)} (Step {step_num})", flush=True)
             else:
-                print(f"[Checkpoint Retention Notice] Could not remove {old_dir}", flush=True)
-
-    # Sort distinct steps newest-first (highest step number first)
-    candidates_to_evaluate.sort(key=lambda x: (x[0], x[1]), reverse=True)
-
-    committed_kept = 0
-    for step_num, dir_path, is_committed in candidates_to_evaluate:
-        dir_abs = os.path.abspath(dir_path)
-
-        if pointer_target and dir_abs == pointer_target:
-            if is_committed:
-                committed_kept += 1
-            continue
-
-        if dir_abs in protected_sync_dirs:
-            if is_committed:
-                committed_kept += 1
-            continue
-
-        if is_committed:
-            if committed_kept < keep_n:
-                committed_kept += 1
-                continue
-
-        removed = _safe_rmtree(dir_path)
-        if removed:
-            reason = "old committed checkpoint beyond retention window" if is_committed else "uncommitted versioned remnant"
-            print(f"[Checkpoint Retention] Removed {reason}: {os.path.basename(dir_path)}", flush=True)
-        else:
-            print(f"[Checkpoint Retention Notice] Could not remove {dir_path}", flush=True)
+                print(f"[Checkpoint Retention Notice] Could not remove {dir_path}", flush=True)
 
 
 def try_resume_from_checkpoint(

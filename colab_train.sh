@@ -482,14 +482,32 @@ if os.path.isdir(src):
                     if os.path.isfile(cand_f) and not os.path.exists(os.path.join(dst, f)):
                         shutil.copy2(cand_f, os.path.join(dst, f))
 
-        # 3. Restore any versioned subdirectories into parent active checkpoints dir
-        for item in os.listdir(src):
-            s_item = os.path.join(src, item)
-            if os.path.isdir(s_item) and ('.step' in item or '_step_' in item or 'step_' in item):
-                d_item = os.path.join(parent_dst, item)
-                if not os.path.exists(d_item):
-                    print(f'  -> Restoring versioned checkpoint directory: {item}...', flush=True)
-                    shutil.copytree(s_item, d_item)
+        # 3. Purge obsolete older milestones and legacy folders from Google Drive
+        if gdrive_max_step > 0:
+            for item in os.listdir(src):
+                sub = os.path.join(src, item)
+                if not os.path.isdir(sub):
+                    continue
+                s_step = get_step(sub)
+                if item == 'best_checkpoint' and s_step < gdrive_max_step:
+                    print(f'  -> [GDRIVE CLEANUP] Purging obsolete legacy best_checkpoint on Google Drive (Step {s_step} < {gdrive_max_step})...', flush=True)
+                    shutil.rmtree(sub, ignore_errors=True)
+                elif item.startswith('best_milestone_step_') and s_step < gdrive_max_step and sub != best_src and sub != top_src_dir:
+                    print(f'  -> [GDRIVE CLEANUP] Purging superseded best milestone on Google Drive: {item} (Step {s_step} < {gdrive_max_step})...', flush=True)
+                    shutil.rmtree(sub, ignore_errors=True)
+                elif (item.startswith('checkpoint_step_') or '.step' in item) and s_step < gdrive_max_step and sub != top_src_dir:
+                    print(f'  -> [GDRIVE CLEANUP] Purging superseded regular checkpoint on Google Drive: {item} (Step {s_step} < {gdrive_max_step})...', flush=True)
+                    shutil.rmtree(sub, ignore_errors=True)
+
+        # 4. Clean local parent checkpoints directory of any obsolete versioned remnants
+        if os.path.isdir(parent_dst) and gdrive_max_step > 0:
+            for item in os.listdir(parent_dst):
+                sub = os.path.join(parent_dst, item)
+                if os.path.isdir(sub) and (item.startswith('best_milestone_step_') or item.startswith('checkpoint_step_') or '.step' in item):
+                    s_step = get_step(sub)
+                    if s_step < gdrive_max_step and s_step >= 0:
+                        print(f'  -> [LOCAL CLEANUP] Purging obsolete local versioned checkpoint: {item} (Step {s_step} < {gdrive_max_step})...', flush=True)
+                        shutil.rmtree(sub, ignore_errors=True)
 
         print('[RESUME SYNC] Checkpoint mirror restore complete.', flush=True)
     else:

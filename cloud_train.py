@@ -226,7 +226,7 @@ class TaraNativeTokenizer:
 
 
 # =============================================================================
-# 1. Native PyTorch Tara Causal Architecture (Matches config.json 1-to-1)
+# 1. Native PyTorch Tara Causal Architecture, Multi-Modal Projectors & Tokenizer
 # =============================================================================
 
 class RMSNorm(nn.Module):
@@ -2457,7 +2457,7 @@ class WorldModelTransitionDataset(IterableDataset):
 
 
 # =============================================================================
-# 2b. Multi-Domain Interleaved Streaming & Anchor Replay Buffer Architecture
+# 3. Multi-Domain Interleaved Streaming, World Model & Replay Buffers
 # =============================================================================
 
 CANONICAL_DOMAINS = [
@@ -3316,7 +3316,7 @@ def collate_fn(batch):
 
 
 # =============================================================================
-# 3. Model Weight Loading, Resumption & Checkpoint Export
+# 4. Storage, Google Drive FUSE Transport & Background Sync Engine
 # =============================================================================
 
 def load_candidate_weights(model: nn.Module, model_dir: str) -> bool:
@@ -3647,6 +3647,17 @@ def _resolve_gdrive_root() -> Optional[str]:
             else:
                 return os.path.realpath(env_dir)
 
+    # In Colab environments where drive was not pre-mounted, attempt non-interactive mount
+    if os.path.exists("/content") and not is_real_gdrive_mount("/content/drive"):
+        try:
+            from google.colab import drive
+            drive.mount("/content/drive", force_remount=False)
+        except Exception:
+            pass
+
+    if not is_real_gdrive_mount("/content/drive"):
+        return None
+
     candidate_bases = [
         "/content/drive/MyDrive",
         "/content/drive/My Drive",
@@ -3662,41 +3673,15 @@ def _resolve_gdrive_root() -> Optional[str]:
             except Exception:
                 pass
 
-    if is_real_gdrive_mount("/content/drive"):
-        # First priority: check existing TARA_CHECKPOINTS directory or shortcut
-        for base in candidate_bases:
-            cand = os.path.join(base, "TARA_CHECKPOINTS")
-            if os.path.isdir(cand):
-                return os.path.realpath(cand)
-        # Second priority: default to MyDrive/TARA_CHECKPOINTS if MyDrive exists
-        for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
-            if os.path.isdir(base):
-                return os.path.realpath(os.path.join(base, "TARA_CHECKPOINTS"))
-
-    # In Colab environments where drive was not pre-mounted, attempt non-interactive mount
-    if os.path.exists("/content") and not is_real_gdrive_mount("/content/drive"):
-        try:
-            from google.colab import drive
-            drive.mount("/content/drive", force_remount=False)
-            if is_real_gdrive_mount("/content/drive"):
-                for sroot in ["/content/drive/Shareddrives", "/content/drive/Shared drives"]:
-                    if os.path.isdir(sroot):
-                        try:
-                            for entry in os.listdir(sroot):
-                                full = os.path.join(sroot, entry)
-                                if os.path.isdir(full):
-                                    candidate_bases.append(full)
-                        except Exception:
-                            pass
-                for base in candidate_bases:
-                    cand = os.path.join(base, "TARA_CHECKPOINTS")
-                    if os.path.isdir(cand):
-                        return os.path.realpath(cand)
-                for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
-                    if os.path.isdir(base):
-                        return os.path.realpath(os.path.join(base, "TARA_CHECKPOINTS"))
-        except Exception:
-            pass
+    # First priority: check existing TARA_CHECKPOINTS directory or shortcut
+    for base in candidate_bases:
+        cand = os.path.join(base, "TARA_CHECKPOINTS")
+        if os.path.isdir(cand):
+            return os.path.realpath(cand)
+    # Second priority: default to MyDrive/TARA_CHECKPOINTS if MyDrive exists
+    for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
+        if os.path.isdir(base):
+            return os.path.realpath(os.path.join(base, "TARA_CHECKPOINTS"))
 
     return None
 
@@ -4122,7 +4107,9 @@ def sync_checkpoint_to_gdrive(
         thread_to_wait_curr.join()
 
 
-
+# =============================================================================
+# 5. Cryptographic Hashing, Tokenizer Fingerprinting & Checkpoint Verification
+# =============================================================================
 
 # ---------------------------------------------------------------------------
 # Cross-Runtime Optimizer Compatibility (Task D)
@@ -4237,11 +4224,12 @@ def compute_tokenizer_fingerprint(
 
     search_dir = None
     if tokenizer_path:
-        if os.path.isfile(tokenizer_path):
-            tok_file_sha = compute_file_sha256(tokenizer_path)
-            search_dir = os.path.dirname(os.path.abspath(tokenizer_path))
+        actual_tok_path = tokenizer_path if os.path.isfile(tokenizer_path) else os.path.join(tokenizer_path, "tokenizer.json") if os.path.isdir(tokenizer_path) else None
+        if actual_tok_path and os.path.isfile(actual_tok_path):
+            tok_file_sha = compute_file_sha256(actual_tok_path)
+            search_dir = os.path.dirname(os.path.abspath(actual_tok_path))
             try:
-                with open(tokenizer_path, "r", encoding="utf-8") as f:
+                with open(actual_tok_path, "r", encoding="utf-8") as f:
                     tok_data = json.load(f)
                 if isinstance(tok_data, dict):
                     vocab = tok_data.get("model", {}).get("vocab") or tok_data.get("vocab")
@@ -4249,20 +4237,6 @@ def compute_tokenizer_fingerprint(
                         vocab_size = len(vocab)
             except Exception:
                 pass
-        elif os.path.isdir(tokenizer_path):
-            search_dir = os.path.abspath(tokenizer_path)
-            tok_json_path = os.path.join(search_dir, "tokenizer.json")
-            if os.path.isfile(tok_json_path):
-                tok_file_sha = compute_file_sha256(tok_json_path)
-                try:
-                    with open(tok_json_path, "r", encoding="utf-8") as f:
-                        tok_data = json.load(f)
-                    if isinstance(tok_data, dict):
-                        vocab = tok_data.get("model", {}).get("vocab") or tok_data.get("vocab")
-                        if isinstance(vocab, dict):
-                            vocab_size = len(vocab)
-                except Exception:
-                    pass
 
     if search_dir and os.path.isdir(search_dir):
         cfg_file = os.path.join(search_dir, "tokenizer_config.json")
@@ -4628,6 +4602,10 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
     except Exception as e:
         print(f"[DISK HYGIENE Notice] Disk check notice: {e}", flush=True)
 
+
+# =============================================================================
+# 6. Atomic Checkpoint Persistence, Promotion Pipeline & Versioned Retention
+# =============================================================================
 
 def save_checkpoint(
     model: nn.Module,
@@ -5638,6 +5616,9 @@ def _cleanup_old_versioned_checkpoints(
                 print(f"[Checkpoint Retention Notice] Could not remove {dir_path}", flush=True)
 
 
+# =============================================================================
+# 7. Checkpoint Discovery, Scoped Resumption & Stage Completion Gates
+# =============================================================================
 
 def extract_data_cursor_from_state(s_data: dict) -> dict:
     """Extract and normalize data cursor from checkpoint_state.json dictionary."""
@@ -6165,7 +6146,7 @@ def check_stage_already_completed(output_dir: str) -> bool:
 
 
 # =============================================================================
-# 4. Real-Time Frontier Benchmark Evaluation & Color Matrix
+# 8. Real-Time Frontier Benchmark Evaluation & Telemetry Matrix
 # =============================================================================
 
 # ANSI Color Codes for Terminal & Colab
@@ -6219,7 +6200,7 @@ def print_frontier_comparison_matrix_colored(step: int, cur_loss: float, best_lo
 
 
 # =============================================================================
-# 5. High-Speed Cloud Asset Ingestion (Hugging Face CDN)
+# 8b. High-Speed Cloud Asset Ingestion (Hugging Face CDN)
 # =============================================================================
 
 def ensure_remote_assets_available(
@@ -6396,6 +6377,51 @@ def execute_optimizer_step(
         is_step_skipped = (scaler.is_enabled() and (scale_after < scale_before)) or is_non_finite_grad
 
     return is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after
+
+
+def extract_accumulated_data_cursor(
+    accum_batches: list,
+    dataset: Any,
+    total_samples_trained: int,
+    samples_consumed: int,
+    shard_ledger: Optional[Any],
+    committed_domain_cursors: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Extracts exact resumption cursor metadata from the last sample of an accumulated batch window.
+    """
+    last_sample_cursor = accum_batches[-1][2][-1] if (accum_batches and accum_batches[-1][2]) else (
+        getattr(dataset, "current_active_shard", None),
+        getattr(dataset, "active_shard_offset", 0),
+        getattr(dataset, "active_shard_byte_offset", 0),
+        getattr(dataset, "active_chunk_idx", 0),
+        False,
+    )
+    c_shard = last_sample_cursor[0]
+    c_line = last_sample_cursor[1] if len(last_sample_cursor) > 1 else 0
+    c_byte = last_sample_cursor[2] if len(last_sample_cursor) > 2 else 0
+    c_chunk_last = last_sample_cursor[3] if len(last_sample_cursor) > 3 else 0
+    c_is_last = last_sample_cursor[4] if len(last_sample_cursor) > 4 else False
+
+    if c_is_last:
+        c_line_offset = c_line
+        c_chunk_next = 0
+    else:
+        c_line_offset = c_line
+        c_chunk_next = c_chunk_last + 1
+
+    return {
+        "active_shard": c_shard,
+        "active_shard_line_offset": c_line_offset,
+        "active_shard_total_lines": getattr(dataset, "active_shard_total_lines", 0),
+        "active_shard_byte_offset": c_byte,
+        "active_chunk_idx": c_chunk_next,
+        "total_samples_trained": total_samples_trained,
+        "samples_consumed": samples_consumed,
+        "completed_shards": list(shard_ledger.completed_shards) if shard_ledger else [],
+        "domain_cursors": copy.deepcopy(committed_domain_cursors),
+        "scheduler_deficits": copy.deepcopy(getattr(dataset, "deficits", {})),
+    }
 
 
 def compute_scheduled_lr(step: int, warmup_steps: int, max_steps: int, base_lr: float, min_lr: float) -> float:
@@ -6584,7 +6610,7 @@ def run_canary_preflight_diagnostic(
 
 
 # =============================================================================
-# 6. Main Autonomous Multi-Stage Training Runner
+# 9. Main Autonomous Multi-Stage Training Runner & Optimizer Execution
 # =============================================================================
 
 def main():
@@ -7556,41 +7582,9 @@ def main():
 
                     # Track exact committed data cursor from the last sample of this
                     # successfully applied optimizer step.
-                    last_sample_cursor = accum_batches[-1][2][-1] if (accum_batches and accum_batches[-1][2]) else (
-                        getattr(dataset, "current_active_shard", None),
-                        getattr(dataset, "active_shard_offset", 0),
-                        getattr(dataset, "active_shard_byte_offset", 0),
-                        getattr(dataset, "active_chunk_idx", 0),
-                        False,
-                        "general",
+                    current_cursor = extract_accumulated_data_cursor(
+                        accum_batches, dataset, total_samples_trained, samples_consumed, shard_ledger, committed_domain_cursors
                     )
-                    c_shard = last_sample_cursor[0]
-                    c_line = last_sample_cursor[1] if len(last_sample_cursor) > 1 else 0
-                    c_byte = last_sample_cursor[2] if len(last_sample_cursor) > 2 else 0
-                    c_chunk_last = last_sample_cursor[3] if len(last_sample_cursor) > 3 else 0
-                    c_is_last = last_sample_cursor[4] if len(last_sample_cursor) > 4 else False
-
-                    # If the entire line was completed, record active_chunk_idx=0 so resume
-                    # seamlessly advances past this line without re-reading or re-chunking it.
-                    if c_is_last:
-                        c_line_offset = c_line
-                        c_chunk_next = 0
-                    else:
-                        c_line_offset = c_line
-                        c_chunk_next = c_chunk_last + 1
-
-                    current_cursor = {
-                        "active_shard": c_shard,
-                        "active_shard_line_offset": c_line_offset,
-                        "active_shard_total_lines": getattr(dataset, "active_shard_total_lines", 0),
-                        "active_shard_byte_offset": c_byte,
-                        "active_chunk_idx": c_chunk_next,
-                        "total_samples_trained": total_samples_trained,
-                        "samples_consumed": samples_consumed,
-                        "completed_shards": list(shard_ledger.completed_shards) if shard_ledger else [],
-                        "domain_cursors": copy.deepcopy(committed_domain_cursors),
-                        "scheduler_deficits": copy.deepcopy(getattr(dataset, "deficits", {})),
-                    }
                     accum_batches.clear()
                     accum_world_batches.clear()
                 else:
@@ -7853,38 +7847,9 @@ def main():
                 accum_world_loss = 0.0
                 ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
 
-                last_sample_cursor = accum_batches[-1][2][-1] if (accum_batches and accum_batches[-1][2]) else (
-                    getattr(dataset, "current_active_shard", None),
-                    getattr(dataset, "active_shard_offset", 0),
-                    getattr(dataset, "active_shard_byte_offset", 0),
-                    getattr(dataset, "active_chunk_idx", 0),
-                    False,
+                current_cursor = extract_accumulated_data_cursor(
+                    accum_batches, dataset, total_samples_trained, samples_consumed, shard_ledger, committed_domain_cursors
                 )
-                c_shard = last_sample_cursor[0]
-                c_line = last_sample_cursor[1] if len(last_sample_cursor) > 1 else 0
-                c_byte = last_sample_cursor[2] if len(last_sample_cursor) > 2 else 0
-                c_chunk_last = last_sample_cursor[3] if len(last_sample_cursor) > 3 else 0
-                c_is_last = last_sample_cursor[4] if len(last_sample_cursor) > 4 else False
-
-                if c_is_last:
-                    c_line_offset = c_line
-                    c_chunk_next = 0
-                else:
-                    c_line_offset = c_line
-                    c_chunk_next = c_chunk_last + 1
-
-                current_cursor = {
-                    "active_shard": c_shard,
-                    "active_shard_line_offset": c_line_offset,
-                    "active_shard_total_lines": getattr(dataset, "active_shard_total_lines", 0),
-                    "active_shard_byte_offset": c_byte,
-                    "active_chunk_idx": c_chunk_next,
-                    "total_samples_trained": total_samples_trained,
-                    "samples_consumed": samples_consumed,
-                    "completed_shards": list(shard_ledger.completed_shards) if shard_ledger else [],
-                    "domain_cursors": copy.deepcopy(committed_domain_cursors),
-                    "scheduler_deficits": copy.deepcopy(getattr(dataset, "deficits", {})),
-                }
             accum_batches.clear()
             accum_world_batches.clear()
             optimizer.zero_grad(set_to_none=True)

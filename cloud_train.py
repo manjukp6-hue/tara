@@ -3936,6 +3936,18 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                                 }, bf, indent=2)
                         except Exception:
                             pass
+                        # Purge stale legacy best_checkpoint directory if older than current best
+                        legacy_best = os.path.join(stage_dir, "best_checkpoint")
+                        if os.path.isdir(legacy_best):
+                            try:
+                                l_st_file = os.path.join(legacy_best, "checkpoint_state.json")
+                                if os.path.isfile(l_st_file):
+                                    with open(l_st_file, "r", encoding="utf-8") as l_f:
+                                        l_st = json.load(l_f)
+                                    if int(l_st.get("step", -1)) < expected_step:
+                                        _safe_rmtree(legacy_best)
+                            except Exception:
+                                pass
 
                 # Enforce safe retention cleanup in Google Drive stage directory (protecting latest and best)
                 if stage_dir and os.path.isdir(stage_dir):

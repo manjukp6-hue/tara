@@ -414,29 +414,49 @@ if os.path.isdir(src):
     local_has_model = is_valid_model(os.path.join(dst, 'model.safetensors')) or is_valid_model(os.path.join(dst, 'best_checkpoint', 'model.safetensors'))
 
     src_top_step = get_step(src)
-    src_best_step = get_step(os.path.join(src, 'best_checkpoint'))
-    gdrive_max_step = max(src_top_step, src_best_step)
+    best_src = os.path.join(src, 'best_checkpoint')
+    src_best_step = get_step(best_src)
 
-    # Check versioned directories on GDrive under src or parent
+    # 1. Resolve authentic best_checkpoint from best_checkpoint.json if present on GDrive
+    best_ptr_file = os.path.join(src, 'best_checkpoint.json')
+    if os.path.isfile(best_ptr_file):
+        try:
+            with open(best_ptr_file, 'r', encoding='utf-8') as f:
+                bp_data = json.load(f)
+            vdir = bp_data.get('versioned_dir')
+            if vdir and os.path.isdir(vdir):
+                v_step = get_step(vdir)
+                if v_step > src_best_step:
+                    src_best_step = v_step
+                    best_src = vdir
+        except Exception:
+            pass
+
+    # 2. Check all subdirectories on Google Drive to discover true highest step and newest best milestone
+    gdrive_max_step = max(src_top_step, src_best_step)
+    top_src_dir = src
     for item in os.listdir(src):
         sub = os.path.join(src, item)
-        if os.path.isdir(sub) and ('.step' in item or '_step_' in item or 'step_' in item):
-            gdrive_max_step = max(gdrive_max_step, get_step(sub))
+        if os.path.isdir(sub):
+            s_step = get_step(sub)
+            if s_step > gdrive_max_step:
+                gdrive_max_step = s_step
+                top_src_dir = sub
+            if (item.startswith('best_milestone') or 'best' in item.lower()) and s_step > src_best_step:
+                src_best_step = s_step
+                best_src = sub
 
     print(f'[RESUME SYNC] Step comparison: Local={local_step} (has_model={local_has_model}) vs Google Drive={gdrive_max_step} (top={src_top_step}, best={src_best_step})', flush=True)
 
-    should_restore = (not local_has_model) or (gdrive_max_step >= local_step and gdrive_max_step >= 0)
+    # Only restore from GDrive if local has no valid model OR GDrive has a strictly higher step
+    should_restore = (not local_has_model) or (gdrive_max_step > local_step and gdrive_max_step >= 0)
 
     if should_restore:
-        best_src = os.path.join(src, 'best_checkpoint')
         best_dst = os.path.join(dst, 'best_checkpoint')
-        top_model = os.path.join(src, 'model.safetensors')
         best_model = os.path.join(best_src, 'model.safetensors')
-
-        top_is_valid = is_valid_model(top_model)
         best_is_valid = is_valid_model(best_model)
 
-        # 1. Restore best_checkpoint subfolder if present on Google Drive
+        # 1. Restore authentic best_checkpoint subfolder from Google Drive
         if os.path.isdir(best_src):
             os.makedirs(best_dst, exist_ok=True)
             for f in os.listdir(best_src):
@@ -444,33 +464,25 @@ if os.path.isdir(src):
                 if os.path.isfile(sf) and f in canonical:
                     df = os.path.join(best_dst, f)
                     min_sz = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
-                    if not os.path.exists(df) or os.path.getsize(df) < min_sz or gdrive_max_step > local_step:
-                        print(f'  -> Restoring best_checkpoint/{f}...', flush=True)
+                    if not os.path.exists(df) or os.path.getsize(df) < min_sz or src_best_step > local_step:
+                        print(f'  -> Restoring best_checkpoint/{f} (Step {src_best_step})...', flush=True)
                         shutil.copy2(sf, df)
 
-        # 2. Restore top-level canonical files
-        for f in os.listdir(src):
-            sf = os.path.join(src, f)
-            if os.path.isfile(sf) and f in canonical:
-                df = os.path.join(dst, f)
-                min_sz = 1000000 if f.endswith(('.safetensors', '.pt', '.bin')) else 1
-                if not os.path.exists(df) or os.path.getsize(df) < min_sz or gdrive_max_step > local_step:
-                    print(f'  -> Restoring canonical {f}...', flush=True)
-                    shutil.copy2(sf, df)
-
-        # 3. Auto-promote authentic best_checkpoint if top-level model is invalid or older than best_checkpoint
-        if best_is_valid and (not top_is_valid or src_best_step > src_top_step):
-            print(f'  -> Promoting authentic best_checkpoint (Step {src_best_step}) to local stage root...', flush=True)
-            for f in ('model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt', 'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json'):
-                b_src = os.path.join(best_src, f)
-                if os.path.isfile(b_src):
-                    shutil.copy2(b_src, os.path.join(dst, f))
+        # 2. Restore top-level checkpoint from top_src_dir (the highest step directory)
+        source_for_root = top_src_dir if (top_src_dir != src and os.path.isdir(top_src_dir)) else (best_src if best_is_valid else src)
+        source_step = get_step(source_for_root)
+        if source_step > local_step or not local_has_model:
+            print(f'  -> Promoting authentic checkpoint (Step {source_step}) from {os.path.basename(source_for_root)} to local stage root...', flush=True)
+            for f in ('model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json', 'optimizer_state.pt', 'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'COMMITTED'):
+                sf = os.path.join(source_for_root, f)
+                if os.path.isfile(sf):
+                    shutil.copy2(sf, os.path.join(dst, f))
                 else:
                     cand_f = os.path.join('storage/models/tara_candidate_v1', f)
                     if os.path.isfile(cand_f) and not os.path.exists(os.path.join(dst, f)):
                         shutil.copy2(cand_f, os.path.join(dst, f))
 
-        # 4. Restore any versioned subdirectories into parent active checkpoints dir
+        # 3. Restore any versioned subdirectories into parent active checkpoints dir
         for item in os.listdir(src):
             s_item = os.path.join(src, item)
             if os.path.isdir(s_item) and ('.step' in item or '_step_' in item or 'step_' in item):
@@ -481,7 +493,7 @@ if os.path.isdir(src):
 
         print('[RESUME SYNC] Checkpoint mirror restore complete.', flush=True)
     else:
-        print('[RESUME SYNC] Local checkpoint is up to date; skipping restore.', flush=True)
+        print(f'[RESUME SYNC] Local checkpoint is up to date (Step {local_step}); skipping restore.', flush=True)
 " 2>/dev/null || true
     done
 fi

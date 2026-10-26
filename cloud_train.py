@@ -4919,8 +4919,14 @@ def save_checkpoint(
                         _stream_copy_file(src, dst)
 
             committed_marker = os.path.join(versioned_dir, "COMMITTED")
+            committed_payload = {"step": step, "is_best": is_best, "committed_utc": datetime.now(timezone.utc).isoformat()}
             with open(committed_marker, "w", encoding="utf-8") as f:
-                json.dump({"step": step, "is_best": is_best, "committed_utc": datetime.now(timezone.utc).isoformat()}, f)
+                json.dump(committed_payload, f)
+
+            if os.path.isdir(output_dir):
+                out_committed = os.path.join(output_dir, "COMMITTED")
+                with open(out_committed, "w", encoding="utf-8") as f:
+                    json.dump(committed_payload, f)
 
             # Pointer updates
             if is_best:
@@ -5018,12 +5024,15 @@ def save_checkpoint(
                 print(f"[GDrive Mirror] Skipped cloud sync for [{tag}] (sync_to_gdrive is False).", flush=True)
 
             # Step 8: Retention cleanup
+            prot_dirs = [versioned_dir] if versioned_dir else []
+            if output_dir:
+                prot_dirs.append(output_dir)
             _cleanup_old_versioned_checkpoints(
                 parent_dir,
                 os.path.basename(output_dir),
                 keep_n=keep_n,
                 force_keep_exact=force_keep_exact,
-                protected_dirs=[versioned_dir] if versioned_dir else None,
+                protected_dirs=prot_dirs,
             )
 
             return True
@@ -5498,7 +5507,8 @@ def _cleanup_old_versioned_checkpoints(
 
     # Evaluate legacy unversioned best_checkpoint directory: purge if any newer milestone exists
     legacy_best = os.path.join(parent_dir, "best_checkpoint")
-    if os.path.isdir(legacy_best):
+    protected_resolved = {os.path.abspath(p) for p in (protected_dirs or []) if p}
+    if os.path.isdir(legacy_best) and os.path.abspath(legacy_best) not in protected_resolved:
         legacy_step = -1
         l_st = os.path.join(legacy_best, "checkpoint_state.json")
         if os.path.isfile(l_st):
@@ -6386,6 +6396,53 @@ def ensure_remote_assets_available(
     else:
         print(f"[High-Speed HF] Single-shard JIT streaming active — shards will be fetched on-demand by TaraStreamingJsonlDataset.", flush=True)
 
+
+
+def execute_optimizer_step(
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scaler: Any,
+    world_model: Optional[nn.Module] = None,
+    world_optimizer: Optional[torch.optim.Optimizer] = None,
+    world_scaler: Optional[Any] = None,
+    max_grad_norm: float = 1.0,
+) -> Tuple[bool, float, float, float, float]:
+    """
+    Executes a unified optimizer step: gradient unscaling, norm clipping,
+    NaN/Inf verification, optimizer stepping, and scaler scale update.
+
+    Returns:
+        (is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after)
+    """
+    scaler.unscale_(optimizer)
+    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+    grad_norm_val = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
+    is_non_finite_grad = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
+
+    w_grad_norm_val = 0.0
+    if world_model is not None and world_optimizer is not None:
+        if world_scaler is not None:
+            world_scaler.unscale_(world_optimizer)
+        w_grad_norm = torch.nn.utils.clip_grad_norm_(world_model.parameters(), max_grad_norm)
+        w_grad_norm_val = w_grad_norm.item() if isinstance(w_grad_norm, torch.Tensor) else float(w_grad_norm)
+        if math.isnan(w_grad_norm_val) or math.isinf(w_grad_norm_val):
+            is_non_finite_grad = True
+
+    if is_non_finite_grad and not scaler.is_enabled():
+        is_step_skipped = True
+        scale_before = 1.0
+        scale_after = 1.0
+    else:
+        scale_before = scaler.get_scale()
+        scaler.step(optimizer)
+        if world_optimizer is not None and world_scaler is not None:
+            world_scaler.step(world_optimizer)
+            world_scaler.update()
+        scaler.update()
+        scale_after = scaler.get_scale()
+        is_step_skipped = (scaler.is_enabled() and (scale_after < scale_before)) or is_non_finite_grad
+
+    return is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after
 
 
 def compute_scheduled_lr(step: int, warmup_steps: int, max_steps: int, base_lr: float, min_lr: float) -> float:
@@ -7472,19 +7529,6 @@ def main():
                 accum_world_batches.append((w_inputs.cpu(), w_labels.cpu(), w_cursors))
 
             if (batch_idx + 1) % args.grad_accum == 0:
-                scaler.unscale_(optimizer)
-                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                grad_norm_val = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
-                is_non_finite_grad = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
-
-                w_grad_norm_val = 0.0
-                if world_model is not None and world_optimizer is not None:
-                    world_scaler.unscale_(world_optimizer)
-                    w_grad_norm = torch.nn.utils.clip_grad_norm_(world_model.parameters(), 1.0)
-                    w_grad_norm_val = w_grad_norm.item() if isinstance(w_grad_norm, torch.Tensor) else float(w_grad_norm)
-                    if math.isnan(w_grad_norm_val) or math.isinf(w_grad_norm_val):
-                        is_non_finite_grad = True
-
                 # Dynamic Learning Rate Schedule (Linear Warmup + Cosine Decay)
                 cur_lr = compute_scheduled_lr(step, args.warmup_steps, args.max_steps, args.lr, args.min_lr)
                 for pg in optimizer.param_groups:
@@ -7493,17 +7537,9 @@ def main():
                     for w_pg in world_optimizer.param_groups:
                         w_pg["lr"] = cur_lr
 
-                if is_non_finite_grad and not scaler.is_enabled():
-                    # Under BF16 / FP32, skip optimizer step on non-finite gradients to prevent parameter corruption
-                    is_step_skipped = True
-                    scale_before = 1.0
-                    scale_after = 1.0
-                else:
-                    scale_before = scaler.get_scale()
-                    scaler.step(optimizer)
-                    scaler.update()
-                    scale_after = scaler.get_scale()
-                    is_step_skipped = (scaler.is_enabled() and (scale_after < scale_before)) or is_non_finite_grad
+                is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after = execute_optimizer_step(
+                    model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0
+                )
 
                 if is_step_skipped:
                     print(
@@ -7543,27 +7579,9 @@ def main():
                                 world_scaler.scale(rw_loss_scaled).backward()
                                 accum_world_loss += rw_loss.item()
 
-                        scaler.unscale_(optimizer)
-                        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                        grad_norm_val = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
-                        is_non_finite_grad = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
-
-                        w_grad_norm_val = 0.0
-                        if world_model is not None and world_optimizer is not None:
-                            world_scaler.unscale_(world_optimizer)
-                            w_grad_norm = torch.nn.utils.clip_grad_norm_(world_model.parameters(), 1.0)
-                            w_grad_norm_val = w_grad_norm.item() if isinstance(w_grad_norm, torch.Tensor) else float(w_grad_norm)
-                            if math.isnan(w_grad_norm_val) or math.isinf(w_grad_norm_val):
-                                is_non_finite_grad = True
-
-                        if is_non_finite_grad and not scaler.is_enabled():
-                            is_step_skipped = True
-                        else:
-                            scale_before = scaler.get_scale()
-                            scaler.step(optimizer)
-                            scaler.update()
-                            scale_after = scaler.get_scale()
-                            is_step_skipped = (scaler.is_enabled() and (scale_after < scale_before)) or is_non_finite_grad
+                        is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after = execute_optimizer_step(
+                            model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0
+                        )
 
                         if not is_step_skipped:
                             print(
@@ -7882,42 +7900,27 @@ def main():
                 for w_pg in world_optimizer.param_groups:
                     w_pg["lr"] = cur_lr
 
-            scaler.unscale_(optimizer)
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            grad_norm_val = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
-            is_non_finite_grad = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
+            is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after = execute_optimizer_step(
+                model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0
+            )
 
-            if is_non_finite_grad and not scaler.is_enabled():
-                # Under BF16 / FP32, skip optimizer step on non-finite gradients to
-                # prevent parameter corruption.  The partial window is discarded and
-                # the committed step and cursor remain unchanged.
-                is_step_skipped = True
-                print(
-                    f"[Partial Window Non-Finite Gradient] Inf/NaN gradient detected in "
-                    f"end-of-epoch partial accumulation window ({partial_count} batches). "
-                    f"Optimizer step skipped; partial window discarded. Committed step "
-                    f"and cursor are unchanged.",
-                    flush=True,
-                )
-            else:
-                scale_before = scaler.get_scale()
-                scaler.step(optimizer)
-                scaler.update()
-                scale_after = scaler.get_scale()
-                is_step_skipped = (scaler.is_enabled() and (scale_after < scale_before)) or is_non_finite_grad
-                if is_step_skipped:
+            if is_step_skipped:
+                if (math.isnan(grad_norm_val) or math.isinf(grad_norm_val)) and not scaler.is_enabled():
+                    print(
+                        f"[Partial Window Non-Finite Gradient] Inf/NaN gradient detected in "
+                        f"end-of-epoch partial accumulation window ({partial_count} batches). "
+                        f"Optimizer step skipped; partial window discarded. Committed step "
+                        f"and cursor are unchanged.",
+                        flush=True,
+                    )
+                else:
                     print(
                         f"[Partial Window AMP Overflow] Scale reduction {scale_before} -> {scale_after} "
                         f"in end-of-epoch partial window ({partial_count} batches). "
                         f"Optimizer step skipped; partial window discarded.",
                         flush=True,
                     )
-
-            if world_model is not None and world_optimizer is not None:
-                world_scaler.unscale_(world_optimizer)
-                torch.nn.utils.clip_grad_norm_(world_model.parameters(), 1.0)
-                world_scaler.step(world_optimizer)
-                world_scaler.update()
+            elif world_optimizer is not None:
                 world_optimizer.zero_grad(set_to_none=True)
 
             if not is_step_skipped:

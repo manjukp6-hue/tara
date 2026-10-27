@@ -2310,13 +2310,12 @@ class TaraDomainBatchItem(tuple):
     Multi-domain batch item that acts simultaneously as:
     1. A standard 7-tuple: (input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last_chunk)
        compatible with existing dataset collate_fn and 7-tuple unpacking.
-    2. A dictionary with keys 'input_ids', 'labels', 'attention_mask', 'domain', 'is_anchor', 'shard_name', etc.
-    3. Property access for .input_ids, .labels, .domain, .is_anchor, etc.
+    2. A dictionary with keys 'input_ids', 'labels', 'attention_mask', 'domain', 'shard_name', etc.
+    3. Property access for .input_ids, .labels, .domain, etc.
     """
-    def __new__(cls, input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last, domain="general", is_anchor=False):
+    def __new__(cls, input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last, domain="general"):
         instance = super().__new__(cls, (input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last))
         instance._domain = domain
-        instance._is_anchor = is_anchor
         return instance
 
     @property
@@ -2337,15 +2336,13 @@ class TaraDomainBatchItem(tuple):
     def is_last(self): return self[6]
     @property
     def domain(self): return getattr(self, "_domain", "general")
-    @property
-    def is_anchor(self): return getattr(self, "_is_anchor", False)
 
     def __contains__(self, key):
         if isinstance(key, str):
             return key in {
                 "input_ids", "labels", "attention_mask", "shard_name",
                 "line_idx", "byte_offset", "chunk_idx", "is_last",
-                "domain", "is_anchor"
+                "domain"
             }
         return super().__contains__(key)
 
@@ -2361,7 +2358,6 @@ class TaraDomainBatchItem(tuple):
                 "chunk_idx": self[5],
                 "is_last": self[6],
                 "domain": getattr(self, "_domain", "general"),
-                "is_anchor": getattr(self, "_is_anchor", False),
             }
             if key in mapping:
                 return mapping[key]
@@ -2497,13 +2493,6 @@ CANONICAL_DOMAINS = [
     "13_debugging_self_correction",
     "instruction_tuning_sft",
 ]
-
-CORE_ANCHOR_DOMAINS = {
-    "12_planning_reasoning_traces",
-    "04_linguistics_multilingual",
-    "01_mathematics_formal_logic",
-    "11_tool_use_execution",
-}
 
 DOMAIN_ALIASES = {
     "01_math": "01_mathematics_formal_logic",
@@ -5768,7 +5757,7 @@ def check_stage_already_completed(output_dir: str) -> bool:
 CLR_RED = "\033[91m"
 CLR_PURPLE = "\033[95;1m"
 CLR_GREEN = "\033[92m"
-CLR_YELLOW = "\033[93m"   # <-- Added to prevent NameError on Anchor Replay
+CLR_YELLOW = "\033[93m"
 CLR_CYAN = "\033[96m"
 CLR_BOLD = "\033[1m"
 CLR_RESET = "\033[0m"
@@ -7241,7 +7230,6 @@ def main():
                 bpb_clr, bpb_status, bpb_tag = get_metric_status_and_color(bpb, (0.55, 0.75), (0.76, 1.20))
 
                 cur_domain = getattr(dataset, "active_domain", "")
-                cur_is_anchor = getattr(dataset, "is_anchor_batch", False)
                 if not cur_domain and current_cursor and current_cursor.get("active_shard"):
                     cur_domain = resolve_shard_domain(current_cursor["active_shard"])
 
@@ -7253,7 +7241,6 @@ def main():
                 shard_line_log = f"{shard_progress_str} | " if (cur_shard_name and cur_shard_name != "N/A") else ""
 
                 domain_tag = f"Domain: [{cur_domain}] " if cur_domain else ""
-                anchor_tag = f"{CLR_YELLOW}[ANCHOR REPLAY]{CLR_RESET} " if cur_is_anchor else ""
                 wm_log = f" | WM Loss: {cur_step_world:.4f} (EMA: {ema_world_loss:.4f}) | Joint: {cur_joint_loss:.4f}" if world_model is not None else ""
                 grad_norm_str = f"GradNorm: {grad_norm_val:.2f} (WM: {w_grad_norm_val:.2f})" if world_model is not None else f"GradNorm: {grad_norm_val:.2f}"
                 print(

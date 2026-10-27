@@ -6184,7 +6184,6 @@ def main():
     parser.add_argument("--optimizer", type=str, default="auto", choices=["auto", "adamw", "adamw8bit"], help="Optimizer choice ('adamw8bit' saves 5.5GB VRAM for Tesla T4)")
     parser.add_argument("--resume", action="store_true", default=True, help="Auto-resume from existing checkpoint if available")
     parser.add_argument("--force", action="store_true", default=False, help="Force training continuation even if stage is marked completed")
-    parser.add_argument("--canary", action="store_true", default=False, help="Enable 15-step T4 canary validation mode (batch_size=1, grad_accum=4, max_seq_len=256, max_steps=15, warmup_steps=3)")
     parser.add_argument("--buffer-size", type=int, default=1, help="Streaming buffer size (default: 1 for exact sequential crash-safe zero-duplicate recovery)")
     parser.add_argument("--full-dataset", action="store_true", default=False, help="Train continuously across all shards until full dataset is exhausted")
     parser.add_argument("--keep-shards", action="store_true", default=False, help="Do not delete local shards after completion")
@@ -6317,7 +6316,6 @@ def main():
     print("=" * 80)
     print(f"  Stage ID              : {args.stage_id}")
     print(f"  Stage Name            : {args.stage_name}")
-    print(f"  Canary Mode Active    : {args.canary}")
     print(f"  Device Selected       : {device.type.upper()}" + (f" ({gpu_name}, sm_{major_cap}{minor_cap})" if device.type == "cuda" else ""))
     print(f"  Total GPU VRAM        : {total_vram_gb:.2f} GiB" if device.type == "cuda" else "  Total GPU VRAM        : N/A (CPU)")
     print(f"  Effective Precision   : {precision_str} (Model Parameters: FP32)")
@@ -6352,7 +6350,7 @@ def main():
 
     # Harmonize dynamic RoPE theta and sequence length from model architecture config
     config["rope_theta"] = resolve_dynamic_rope_theta(config)
-    if args.max_seq_len <= 0 and not args.canary:
+    if args.max_seq_len <= 0:
         args.max_seq_len = int(config.get("max_position_embeddings", 2048))
         print(f"[Dynamic Config] Dynamically resolved max_seq_len={args.max_seq_len} from {config_path}")
     else:
@@ -7435,45 +7433,6 @@ def main():
         print(f"[Promotion] Target step {args.promote_max_step} model already promoted and active for real-time inference -> {promoted_target}", flush=True)
         if args.previous_stage_dir:
             clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
-
-    # Canary Checkpoint Reload Verification & Telemetry (Requirement 10)
-    if args.canary:
-        print("\n" + "=" * 80)
-        print("  [CANARY CHECKPOINT RELOAD VERIFICATION & TELEMETRY]")
-        print("=" * 80)
-        reload_model = TaraForCausalLM(config).to(device=device, dtype=model_dtype)
-        model_restored = load_candidate_weights(reload_model, args.output_dir)
-        
-        # Load and verify checkpoint state & optimizer state
-        reload_state_path = os.path.join(args.output_dir, "checkpoint_state.json")
-        reload_opt_path = os.path.join(args.output_dir, "optimizer_state.pt")
-        with open(reload_state_path, "r", encoding="utf-8") as f:
-            saved_state = json.load(f)
-        saved_opt = torch.load(reload_opt_path, map_location="cpu")
-        
-        reload_trainable_params = sum(p.numel() for p in reload_model.parameters() if p.requires_grad)
-        opt_type_str = optimizer.__class__.__name__
-        
-        if device.type == "cuda":
-            peak_alloc_vram = torch.cuda.max_memory_allocated() / (1024 * 1024)
-            peak_res_vram = torch.cuda.max_memory_reserved() / (1024 * 1024)
-        else:
-            peak_alloc_vram = 0.0
-            peak_res_vram = 0.0
-            
-        print(f"  Verified Checkpoint Path : {args.output_dir}")
-        print(f"  Weights Deserialized     : {'SUCCESS' if model_restored else 'FAILED'}")
-        print(f"  Saved Steps Recorded     : {saved_state.get('step')} / {args.max_steps}")
-        print(f"  Final Step Loss Recorded : {saved_state.get('loss'):.4f}")
-        print(f"  Actual Trainable Params  : {reload_trainable_params:,} (~1 Billion parameters in FP32 master storage)")
-        print(f"  Optimizer Type Used      : {opt_type_str}")
-        print(f"  Effective Precision Dtype: {precision_str} ({autocast_dtype})")
-        print(f"  Peak Allocated VRAM      : {peak_alloc_vram:.1f} MB ({peak_alloc_vram / 1024:.2f} GiB)")
-        print(f"  Peak Reserved VRAM       : {peak_res_vram:.1f} MB ({peak_res_vram / 1024:.2f} GiB)")
-        print(f"  Canary Contract Status   : 100% VERIFIED & PASSED")
-
-        print("=" * 80 + "\n")
-        del reload_model, saved_opt
 
     print(f"[Promotion Complete] Deployment model ready at: {promoted_target}")
     print("[Success] All weights are 100% compatible with native Rust TARA inference & serving!")

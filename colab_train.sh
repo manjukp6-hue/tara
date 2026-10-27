@@ -354,10 +354,8 @@ fi
 
 # Restore checkpoints from Google Drive mirror into local active storage
 if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
-    echo "[GDRIVE CLEANUP] Purging stale temporary (.tmp) and duplicate (1), (2) files from Google Drive..."
-    find "$GDRIVE_CHECKPOINT_DIR" -name "*.tmp*" -type f -delete 2>/dev/null || true
-    find "$GDRIVE_CHECKPOINT_DIR" -name "* (*)*" -type f -delete 2>/dev/null || true
-    find "$GDRIVE_CHECKPOINT_DIR" -maxdepth 3 -name "* (*)" -type d -exec rm -rf {} + 2>/dev/null || true
+    echo "[GDRIVE CLEANUP] Purging stale temporary (.tmp) files from Google Drive (shallow scan)..."
+    find "$GDRIVE_CHECKPOINT_DIR" -maxdepth 2 -name "*.tmp*" -type f -delete 2>/dev/null || true
     find "$ACTIVE_CP_DIR" -name "* (*)*" -type f -delete 2>/dev/null || true
     rm -rf "$ACTIVE_CP_DIR/Colab Notebooks" 2>/dev/null || true
 
@@ -497,11 +495,26 @@ if os.path.isdir(src):
 
     if best_src_dir and (best_src_step > local_step or not local_has_model):
         print(f'  -> Single-Pass Restore: Copying verified Step {best_src_step} checkpoint from {os.path.basename(best_src_dir)} to {dst}...', flush=True)
+        def fast_copy(s_path, d_path):
+            try:
+                sz = os.path.getsize(s_path)
+                if sz > 10 * 1024 * 1024:
+                    with open(s_path, 'rb') as fin, open(d_path, 'wb') as fout:
+                        while True:
+                            buf = fin.read(16 * 1024 * 1024)
+                            if not buf:
+                                break
+                            fout.write(buf)
+                else:
+                    shutil.copy2(s_path, d_path)
+            except Exception:
+                shutil.copy2(s_path, d_path)
+
         for f in os.listdir(best_src_dir):
             if f in canonical:
                 sf = os.path.join(best_src_dir, f)
                 if os.path.isfile(sf):
-                    shutil.copy2(sf, os.path.join(dst, f))
+                    fast_copy(sf, os.path.join(dst, f))
         
         # Link or mirror best_checkpoint locally without duplicate bandwidth
         local_best = os.path.join(dst, 'best_checkpoint')

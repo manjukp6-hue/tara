@@ -404,19 +404,73 @@ def sync_checkpoint_to_gdrive(local_ckpt_dir: str, gdrive_dir: str) -> bool:
 
 def restore_checkpoint_from_gdrive(gdrive_dir: str, local_ckpt_dir: str) -> bool:
     """
-    Restores the latest checkpoint from Google Drive to local disk if available.
-    Supports either tara_checkpoints/normal_checkpoint or direct checkpoint directory.
+    Restores the latest valid checkpoint from Google Drive to local disk if available.
+    Supports:
+    1. Base tara_checkpoints directory (auto-resolves highest step between normal and best_milestone)
+    2. direct normal_checkpoint directory
+    3. direct best_milestone directory (auto-resolves highest step in step_*_loss_* subfolders)
+    4. specific milestone subfolder (step_*_loss_*)
     Uses atomic copy with SHA-256 verification.
     """
     if not os.path.exists(gdrive_dir):
         return False
-    
-    # Check if gdrive_dir points to parent tara_checkpoints or specific checkpoint folder
+
+    def resolve_best_milestone_folder(bm_path: str) -> str:
+        if not os.path.isdir(bm_path):
+            return bm_path
+        subdirs = []
+        for d in os.listdir(bm_path):
+            p = os.path.join(bm_path, d)
+            if os.path.isdir(p) and not d.startswith("."):
+                m = re.match(r"^step_(\d+)(?:_loss_([0-9\.]+))?", d)
+                if m:
+                    step_val = int(m.group(1))
+                    loss_val = float(m.group(2)) if m.group(2) else float("inf")
+                    subdirs.append((step_val, loss_val, p))
+        if subdirs:
+            # Sort by step descending (highest step first), then loss ascending
+            subdirs.sort(key=lambda x: (x[0], -x[1]), reverse=True)
+            chosen = subdirs[0][2]
+            print(f"[GDrive Restore] Resolved latest best milestone directory: {os.path.basename(chosen)} (step {subdirs[0][0]}, loss {subdirs[0][1]})", flush=True)
+            return chosen
+        return bm_path
+
     source_dir = gdrive_dir
-    if os.path.exists(os.path.join(gdrive_dir, "normal_checkpoint")):
-        source_dir = os.path.join(gdrive_dir, "normal_checkpoint")
-    elif os.path.exists(os.path.join(gdrive_dir, "best_milestone")):
-        source_dir = os.path.join(gdrive_dir, "best_milestone")
+    has_normal = os.path.exists(os.path.join(gdrive_dir, "normal_checkpoint"))
+    has_best = os.path.exists(os.path.join(gdrive_dir, "best_milestone"))
+
+    if has_normal or has_best:
+        normal_cand = os.path.join(gdrive_dir, "normal_checkpoint") if has_normal else None
+        best_cand = resolve_best_milestone_folder(os.path.join(gdrive_dir, "best_milestone")) if has_best else None
+
+        def get_dir_step(d: Optional[str]) -> int:
+            if not d or not os.path.exists(d):
+                return -1
+            state_file = os.path.join(d, "checkpoint_state.json")
+            if os.path.isfile(state_file):
+                try:
+                    with open(state_file, "r", encoding="utf-8") as f:
+                        return int(json.load(f).get("step", 0))
+                except Exception:
+                    pass
+            m = re.match(r"^step_(\d+)", os.path.basename(d))
+            if m:
+                return int(m.group(1))
+            return 0 if (os.path.exists(os.path.join(d, "model.safetensors")) or os.path.exists(os.path.join(d, "pytorch_model.bin"))) else -1
+
+        norm_step = get_dir_step(normal_cand)
+        bst_step = get_dir_step(best_cand)
+
+        if norm_step >= bst_step and norm_step >= 0:
+            source_dir = normal_cand
+        elif bst_step >= 0:
+            source_dir = best_cand
+        elif normal_cand:
+            source_dir = normal_cand
+        elif best_cand:
+            source_dir = best_cand
+    elif os.path.basename(os.path.normpath(gdrive_dir)) == "best_milestone":
+        source_dir = resolve_best_milestone_folder(gdrive_dir)
 
     try:
         os.makedirs(local_ckpt_dir, exist_ok=True)
@@ -440,12 +494,13 @@ def restore_checkpoint_from_gdrive(gdrive_dir: str, local_ckpt_dir: str) -> bool
         print(f"[GDrive Restore Warning] Failed to restore from GDrive: {e}", flush=True)
         return False
 
+
 def prune_gdrive_checkpoints(gdrive_base_dir: str, keep_n: int = 1):
     """
     Strict Google Drive Storage Quota Protection:
-    Ensures Google Drive NEVER accumulates duplicate or stale checkpoints.
+    Ensures Google Drive NEVER accumulates duplicate or stale normal step checkpoints.
     Keeps strictly the latest `keep_n` normal step checkpoints (default 1).
-    Best milestone ('best_milestone') is strictly preserved and never pruned.
+    Best milestone ('best_milestone') is strictly managed separately by prune_gdrive_best_milestones.
     """
     if not os.path.exists(gdrive_base_dir):
         return
@@ -456,7 +511,7 @@ def prune_gdrive_checkpoints(gdrive_base_dir: str, keep_n: int = 1):
             if not os.path.isdir(full_path):
                 continue
             if d == "best_milestone" or d.startswith("."):
-                continue  # Never prune best milestone or hidden staging dirs
+                continue  # Managed separately or hidden staging dirs
             m = re.match(r"(?:step_)?(\d+)", d)
             if m:
                 step_val = int(m.group(1))
@@ -472,6 +527,110 @@ def prune_gdrive_checkpoints(gdrive_base_dir: str, keep_n: int = 1):
                 _safe_rmtree(old_dir)
     except Exception as e:
         print(f"[GDrive Quota Warning] Failed to prune obsolete GDrive checkpoints: {e}", flush=True)
+
+
+def prune_gdrive_best_milestones(best_base_dir: str, keep_n: int = 2):
+    """
+    Rolling Retention Policy for Best Milestones in Google Drive:
+    - Scans subfolders matching `step_{step}_loss_{loss}`
+    - Sorts descending by step (highest/newest step first)
+    - Retains strictly the top `keep_n` (default 2) milestones
+    - Prunes older milestones (e.g., Step 3 removes Step 1; Step 4 removes Step 2)
+    - Automatically cleans up stale root staging directories (.tmp_staging_*)
+    """
+    if not os.path.exists(best_base_dir):
+        return
+    try:
+        now = time.time()
+        for item in os.listdir(best_base_dir):
+            item_path = os.path.join(best_base_dir, item)
+            if os.path.isdir(item_path) and item.startswith(".tmp_staging_"):
+                try:
+                    mtime = os.path.getmtime(item_path)
+                    if now - mtime > 1800:
+                        print(f"[GDrive Hygiene] Removing stale staging directory: {item}", flush=True)
+                        _safe_rmtree(item_path)
+                except Exception:
+                    pass
+
+        milestones = []
+        for d in os.listdir(best_base_dir):
+            full_path = os.path.join(best_base_dir, d)
+            if not os.path.isdir(full_path) or d.startswith("."):
+                continue
+            m = re.match(r"^step_(\d+)(?:_loss_([0-9\.]+))?", d)
+            if m:
+                step_num = int(m.group(1))
+                loss_val = float(m.group(2)) if m.group(2) else float("inf")
+                milestones.append((step_num, loss_val, full_path, d))
+
+        milestones.sort(key=lambda x: (x[0], -x[1]), reverse=True)
+
+        if len(milestones) > keep_n:
+            to_prune = milestones[keep_n:]
+            for step_num, loss_val, path_to_remove, folder_name in to_prune:
+                print(f"[GDrive Retention] Pruning older best milestone: {folder_name} (preserving latest {keep_n} copies)", flush=True)
+                _safe_rmtree(path_to_remove)
+
+    except Exception as e:
+        print(f"[GDrive Retention Warning] Error during best milestone pruning: {e}", flush=True)
+
+
+def sync_best_milestone_to_gdrive(
+    local_source_dir: str,
+    best_milestone_base_dir: str,
+    step: int,
+    loss: float,
+    keep_n: int = 2,
+) -> bool:
+    """
+    Synchronizes best milestone checkpoint into Google Drive under:
+        best_milestone/step_{step}_loss_{loss:.4f}/
+    
+    Architecture:
+    1. Staging occurs at the root of best_milestone (.tmp_staging_step_{step}_{ts})
+    2. All files are copied and verified with SHA-256 markers.
+    3. Atomically promotes/renames staging dir to step_{step}_loss_{loss:.4f}.
+    4. Automatically maintains a rolling window of `keep_n` (default 2) best milestones.
+       (e.g., Step 1 kept; Step 2 kept; Step 3 prunes Step 1; Step 4 prunes Step 2).
+       Ensures at least one verified backup copy is always preserved.
+    """
+    if not os.path.exists(local_source_dir):
+        return False
+    try:
+        os.makedirs(best_milestone_base_dir, exist_ok=True)
+        target_name = f"step_{step}_loss_{loss:.4f}"
+        final_target_dir = os.path.join(best_milestone_base_dir, target_name)
+        staging_dir = os.path.join(
+            best_milestone_base_dir, f".tmp_staging_step_{step}_{int(time.time())}_{random.randint(1000, 9999)}"
+        )
+        os.makedirs(staging_dir, exist_ok=True)
+
+        # Sync files to root-level staging directory
+        success = sync_checkpoint_to_gdrive(local_source_dir, staging_dir)
+        if not success:
+            print(f"[GDrive Best Milestone Warning] Sync to staging failed: {staging_dir}", flush=True)
+            _safe_rmtree(staging_dir)
+            return False
+
+        # Atomic promotion into final target directory
+        if os.path.exists(final_target_dir):
+            _safe_rmtree(final_target_dir)
+
+        try:
+            os.replace(staging_dir, final_target_dir)
+        except OSError:
+            shutil.move(staging_dir, final_target_dir)
+
+        print(f"[GDrive Best Milestone] Promoted verified milestone -> {final_target_dir}", flush=True)
+
+        # Enforce rolling retention: keep latest keep_n (2), safely prune older
+        prune_gdrive_best_milestones(best_milestone_base_dir, keep_n=keep_n)
+        return True
+
+    except Exception as e:
+        print(f"[GDrive Best Milestone Error] Failed to sync best milestone: {e}", flush=True)
+        return False
 
 
 def resolve_gdrive_backup_dir() -> Optional[str]:
@@ -507,17 +666,18 @@ class BackgroundGDriveSyncWorker:
                 cls._instance = cls()
             return cls._instance
 
-    def submit_task(self, local_ckpt_dir: str, gdrive_dir: str, is_best: bool = False, step: int = 0):
+    def submit_task(self, local_ckpt_dir: str, gdrive_dir: str, is_best: bool = False, step: int = 0, loss: float = 0.0):
         task = {
             "local_ckpt_dir": local_ckpt_dir,
             "gdrive_dir": gdrive_dir,
             "is_best": is_best,
             "step": step,
+            "loss": loss,
             "timestamp": time.time(),
         }
         try:
             self.task_queue.put_nowait(task)
-            tag = "BEST MILESTONE" if is_best else f"Step {step}"
+            tag = f"BEST MILESTONE (step {step}, loss {loss:.4f})" if is_best else f"Step {step}"
             print(f"[GDrive Async] Enqueued background upload for [{tag}] -> {gdrive_dir} (GPU training continues uninterrupted).", flush=True)
         except queue.Full:
             print(f"[GDrive Warning] Background sync queue full. Discarding duplicate intermediate task for Step {step}.", flush=True)
@@ -533,19 +693,36 @@ class BackgroundGDriveSyncWorker:
                 gdrive_dir = task["gdrive_dir"]
                 is_best = task["is_best"]
                 step = task["step"]
-                tag = "BEST MILESTONE" if is_best else f"Step {step}"
+                loss = task.get("loss", 0.0)
 
-                print(f"[GDrive Worker] Starting background transfer for [{tag}] -> {gdrive_dir}...", flush=True)
-                t0 = time.time()
-                success = sync_checkpoint_to_gdrive(local_dir, gdrive_dir)
-                elapsed = time.time() - t0
-                if success:
-                    print(f"[GDrive Worker] Completed background upload for [{tag}] in {elapsed:.1f}s.", flush=True)
-                    # Storage Quota Guard: Auto-prune older normal step checkpoints on GDrive
-                    if not is_best:
-                        prune_gdrive_checkpoints(os.path.dirname(gdrive_dir), keep_n=1)
+                if is_best:
+                    tag = f"BEST MILESTONE (step {step}, loss {loss:.4f})"
+                    print(f"[GDrive Worker] Starting background transfer for [{tag}] -> {gdrive_dir}...", flush=True)
+                    t0 = time.time()
+                    success = sync_best_milestone_to_gdrive(
+                        local_source_dir=local_dir,
+                        best_milestone_base_dir=gdrive_dir,
+                        step=step,
+                        loss=loss,
+                        keep_n=2,
+                    )
+                    elapsed = time.time() - t0
+                    if success:
+                        print(f"[GDrive Worker] Completed background upload for [{tag}] in {elapsed:.1f}s.", flush=True)
+                    else:
+                        print(f"[GDrive Worker Warning] Background upload failed or incomplete for [{tag}].", flush=True)
                 else:
-                    print(f"[GDrive Worker Warning] Background upload failed or incomplete for [{tag}].", flush=True)
+                    tag = f"Step {step}"
+                    print(f"[GDrive Worker] Starting background transfer for [{tag}] -> {gdrive_dir}...", flush=True)
+                    t0 = time.time()
+                    success = sync_checkpoint_to_gdrive(local_dir, gdrive_dir)
+                    elapsed = time.time() - t0
+                    if success:
+                        print(f"[GDrive Worker] Completed background upload for [{tag}] in {elapsed:.1f}s.", flush=True)
+                        # Storage Quota Guard: Auto-prune older normal step checkpoints on GDrive
+                        prune_gdrive_checkpoints(os.path.dirname(gdrive_dir), keep_n=1)
+                    else:
+                        print(f"[GDrive Worker Warning] Background upload failed or incomplete for [{tag}].", flush=True)
 
                 self.task_queue.task_done()
                 self.active_transfers -= 1
@@ -567,9 +744,9 @@ class BackgroundGDriveSyncWorker:
             return False
 
 
-def trigger_async_gdrive_sync(local_ckpt_dir: str, gdrive_dir: str, is_best: bool = False, step: int = 0):
+def trigger_async_gdrive_sync(local_ckpt_dir: str, gdrive_dir: str, is_best: bool = False, step: int = 0, loss: float = 0.0):
     worker = BackgroundGDriveSyncWorker.get_instance()
-    worker.submit_task(local_ckpt_dir, gdrive_dir, is_best=is_best, step=step)
+    worker.submit_task(local_ckpt_dir, gdrive_dir, is_best=is_best, step=step, loss=loss)
 
 
 def wait_for_gdrive_sync(timeout: Optional[float] = None) -> bool:
@@ -1703,6 +1880,7 @@ def save_checkpoint(
                     gdrive_dir=gdrive_sub,
                     is_best=is_best,
                     step=step,
+                    loss=loss,
                 )
 
             return True

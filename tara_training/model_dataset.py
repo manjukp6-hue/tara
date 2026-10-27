@@ -1980,22 +1980,24 @@ class TaraStreamingJsonlDataset(IterableDataset):
                         f"[Parquet Row Count Warning] {actual_fp}: {count_err}",
                         flush=True,
                     )
-            elif ext in (".jsonl", ".ndjson") and self._line_index is not None:
+            elif ext in (".jsonl", ".ndjson") and self._line_index is not None and self._line_index.load(shard_sha) is not None:
+                self.active_shard_total_lines = len(self._line_index.load(shard_sha))
+            else:
+                # Format-aware ultra-fast buffered binary line counter for .jsonl, .txt, .csv, and compressed .gz
                 try:
-                    # Fast-path: check if index is already cached on disk without re-scanning
-                    cached_idx = self._line_index.load(shard_sha)
-                    if cached_idx is not None:
-                        self.active_shard_total_lines = len(cached_idx)
-                    elif is_resume_target:
-                        # Only build full byte-offset index on-demand if this shard is the active resume seek target
-                        idx_map = self._line_index.get_or_build(actual_fp, shard_sha)
-                        self.active_shard_total_lines = len(idx_map)
-                except Exception as idx_err:
-                    print(
-                        f"[ShardLineIndex Warning] Could not index "
-                        f"'{actual_fp}': {idx_err}",
-                        flush=True,
-                    )
+                    if ext in (".gz", ".tar.gz") or actual_fp.endswith(".gz"):
+                        import gzip
+                        with gzip.open(actual_fp, "rb") as gf:
+                            self.active_shard_total_lines = sum(
+                                chunk.count(b"\n") for chunk in iter(lambda: gf.read(1024 * 1024), b"")
+                            )
+                    elif ext in (".jsonl", ".ndjson", ".txt", ".text", ".csv", ".tsv"):
+                        with open(actual_fp, "rb") as f:
+                            self.active_shard_total_lines = sum(
+                                chunk.count(b"\n") for chunk in iter(lambda: f.read(1024 * 1024), b"")
+                            )
+                except Exception:
+                    pass
             if self.shard_ledger:
                 self.shard_ledger.active_shard_total_lines = (
                     self.active_shard_total_lines

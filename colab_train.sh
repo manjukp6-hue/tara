@@ -395,7 +395,7 @@ canonical = {
     'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json',
     'model.safetensors', 'world_model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json',
     'optimizer_state.pt', 'shard_ledger.json', 'latest_checkpoint.json', 'dataset_snapshot.json',
-    'teacher_replay_buffer.jsonl', 'COMMITTED'
+    'COMMITTED'
 }
 
 def get_step(dir_path):

@@ -2701,330 +2701,13 @@ def parse_domain_weights(
     return {d: 1.0 / len(domains) for d in domains}
 
 
-class AnchorReplayBuffer:
-    """
-    Continuous Anchor Replay Buffer for Core Foundational Domains.
-    When core domains (Reasoning: 11 shards, Kannada: 66 shards, Math: 114 shards, Tool Use: 58 shards)
-    exhaust their shards while the 884-shard code stream continues, this buffer maintains a continuous
-    15%-20% anchor replay allocation in the stream so the model never loses reasoning, mathematics,
-    linguistics, or tool execution capabilities.
-    Uses reservoir sampling bounded to capacity (default 1500 samples/domain, < 35 MB CPU RAM).
-    """
-    def __init__(self, capacity_per_domain: int = 32, anchor_ratio: float = 0.15):
-        self.capacity = capacity_per_domain
-        self.anchor_ratio = anchor_ratio
-        self.buffers: Dict[str, List[Any]] = {}
-        self.counts: Dict[str, int] = {}
-        self.depleted_domains: Set[str] = set()
-
-    def add_sample(self, domain: str, item: Any):
-        if domain not in CORE_ANCHOR_DOMAINS:
-            return
-        if domain not in self.buffers:
-            self.buffers[domain] = []
-            self.counts[domain] = 0
-
-        self.counts[domain] += 1
-        n = self.counts[domain]
-        k = self.capacity
-
-        if len(self.buffers[domain]) < k:
-            self.buffers[domain].append(item)
-        else:
-            replace_idx = random.randint(0, n - 1)
-            if replace_idx < k:
-                self.buffers[domain][replace_idx] = item
-
-    def mark_depleted(self, domain: str):
-        if domain in CORE_ANCHOR_DOMAINS and domain in self.buffers and len(self.buffers[domain]) > 0:
-            if domain not in self.depleted_domains:
-                self.depleted_domains.add(domain)
-                print(
-                    f"[Anchor Replay Buffer] Domain '{domain}' reached EOF across all shards. "
-                    f"Activating Anchor Replay Mode with {len(self.buffers[domain]):,} cached anchor exemplars.",
-                    flush=True,
-                )
-
-    def is_depleted(self, domain: str) -> bool:
-        return domain in self.depleted_domains
-
-    def has_anchors(self) -> bool:
-        return len(self.depleted_domains) > 0 and any(len(self.buffers.get(d, [])) > 0 for d in self.depleted_domains)
-
-    def sample_anchor(self, preferred_domain: Optional[str] = None) -> Optional[Any]:
-        candidates = [d for d in self.depleted_domains if self.buffers.get(d)]
-        if not candidates:
-            if preferred_domain and self.buffers.get(preferred_domain):
-                buf = self.buffers[preferred_domain]
-                return random.choice(buf)
-            all_bufs = [d for d in self.buffers if self.buffers[d]]
-            if all_bufs:
-                chosen_d = random.choice(all_bufs)
-                return random.choice(self.buffers[chosen_d])
-            return None
-
-        chosen_d = preferred_domain if (preferred_domain in candidates) else random.choice(candidates)
-        buf = self.buffers[chosen_d]
-        return random.choice(buf)
-
-    def get_state(self) -> Dict[str, Any]:
-        """
-        Serializes anchor replay buffer into a lightweight, instant metadata dictionary (< 50 KB).
-        When domains are actively streaming, buffers are populated in memory without dumping millions
-        of token integers into checkpoint_state.json. If any domain is depleted, only a compact bounded
-        exemplar set is serialized.
-        """
-        serialized_buffers: Dict[str, List[Dict[str, Any]]] = {}
-        if self.depleted_domains:
-            for dom in self.depleted_domains:
-                items = self.buffers.get(dom, [])
-                serialized_items = []
-                for item in items[:32]:
-                    if isinstance(item, dict):
-                        inp = item.get("input_ids", [])
-                        s_name = str(item.get("shard_name", ""))
-                        l_idx = int(item.get("line_idx", 0))
-                        b_off = int(item.get("byte_offset", 0))
-                        c_idx = int(item.get("chunk_idx", 0))
-                        is_last = bool(item.get("is_last", True))
-                    elif hasattr(item, "input_ids"):
-                        inp = item.input_ids
-                        s_name = str(getattr(item, "shard_name", ""))
-                        l_idx = int(getattr(item, "line_idx", 0))
-                        b_off = int(getattr(item, "byte_offset", 0))
-                        c_idx = int(getattr(item, "chunk_idx", 0))
-                        is_last = bool(getattr(item, "is_last", True))
-                    else:
-                        continue
-
-                    inp_list = inp.detach().cpu().tolist() if isinstance(inp, torch.Tensor) else (list(inp) if isinstance(inp, (list, tuple)) else [])
-                    serialized_items.append({
-                        "i": inp_list[:1024],
-                        "s": s_name,
-                        "n": l_idx,
-                        "b": b_off,
-                        "c": c_idx,
-                        "e": is_last,
-                    })
-                serialized_buffers[dom] = serialized_items
-
-        return {
-            "capacity": self.capacity,
-            "anchor_ratio": self.anchor_ratio,
-            "depleted_domains": sorted(list(self.depleted_domains)),
-            "counts": dict(self.counts),
-            "buffers": serialized_buffers,
-        }
-
-    def load_state(self, state: Dict[str, Any]):
-        """
-        Restores AnchorReplayBuffer state from serialized dictionary.
-        Reconstructs TaraDomainBatchItem exemplars and restores depleted domain statuses.
-        """
-        if not state:
-            return
-        if "capacity" in state:
-            self.capacity = int(state["capacity"])
-        if "anchor_ratio" in state:
-            self.anchor_ratio = float(state["anchor_ratio"])
-        if "counts" in state and isinstance(state["counts"], dict):
-            for dom, cnt in state["counts"].items():
-                self.counts[dom] = int(cnt)
-        if "depleted_domains" in state:
-            for d in state["depleted_domains"]:
-                self.depleted_domains.add(str(d))
-
-        raw_buffers = state.get("buffers", {})
-        if isinstance(raw_buffers, dict):
-            for dom, items in raw_buffers.items():
-                if not isinstance(items, list):
-                    continue
-                restored_list = []
-                for entry in items:
-                    if isinstance(entry, dict):
-                        inp_list = entry.get("i", entry.get("input_ids", []))
-                        lab_list = entry.get("l", entry.get("labels", None))
-                        if lab_list is None:
-                            lab_list = inp_list
-                        s_name = str(entry.get("s", entry.get("shard_name", "")))
-                        l_idx = int(entry.get("n", entry.get("line_idx", 0)))
-                        b_off = int(entry.get("b", entry.get("byte_offset", 0)))
-                        c_idx = int(entry.get("c", entry.get("chunk_idx", 0)))
-                        is_last = bool(entry.get("e", entry.get("is_last", True)))
-
-                        try:
-                            inp_t = torch.tensor(inp_list, dtype=torch.long)
-                            lab_t = torch.tensor(lab_list, dtype=torch.long)
-                        except Exception:
-                            inp_t = inp_list
-                            lab_t = lab_list
-
-                        batch_item = TaraDomainBatchItem(
-                            inp_t, lab_t, s_name, l_idx, b_off, c_idx, is_last,
-                            domain=dom, is_anchor=True
-                        )
-                        restored_list.append(batch_item)
-                    elif isinstance(entry, (tuple, list)) and len(entry) >= 7:
-                        inp, lab, s_name, l_idx, b_off, c_idx, is_last = entry[:7]
-                        batch_item = TaraDomainBatchItem(
-                            inp, lab, str(s_name), int(l_idx), int(b_off), int(c_idx), bool(is_last),
-                            domain=dom, is_anchor=True
-                        )
-                        restored_list.append(batch_item)
-                    elif hasattr(entry, "input_ids") and hasattr(entry, "labels"):
-                        restored_list.append(entry)
-                    else:
-                        restored_list.append(entry)
-
-                self.buffers[dom] = restored_list
-                if dom not in self.counts or self.counts[dom] < len(restored_list):
-                    self.counts[dom] = len(restored_list)
-
-
-class TeacherReplayBuffer:
-    """
-    Multi-Domain Stratified Teacher Replay Buffer.
-    Captures high-quality representative exemplar records from all 14 dataset domains
-    using reservoir sampling per domain (bounded to max_samples_per_domain = 500, ~7,000 total).
-    Memory footprint bounded to < 25 MB RAM.
-    Auto-persists atomically to best_checkpoint/teacher_replay_buffer.jsonl upon best milestones.
-    """
-    def __init__(self, max_samples_per_domain: int = 500):
-        self.max_samples_per_domain = max_samples_per_domain
-        self.buffers: Dict[str, List[Dict[str, Any]]] = {}
-        self.counts: Dict[str, int] = {}
-
-    def add_sample(
-        self,
-        domain: str,
-        input_ids: Optional[Any] = None,
-        text: str = "",
-        step: int = 0,
-        loss: float = 0.0,
-        metadata: Optional[Dict[str, Any]] = None,
-        *args,
-        **kwargs,
-    ):
-        if not domain:
-            domain = "general"
-        if domain not in self.buffers:
-            self.buffers[domain] = []
-            self.counts[domain] = 0
-
-        self.counts[domain] += 1
-        n = self.counts[domain]
-        k = self.max_samples_per_domain
-
-        entry: Dict[str, Any] = {
-            "domain": domain,
-            "step": step,
-            "loss": round(float(loss), 4),
-            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-        }
-        if input_ids is not None:
-            if isinstance(input_ids, torch.Tensor):
-                raw_ids = input_ids.detach().cpu().tolist()
-                if isinstance(raw_ids, (int, float)):
-                    entry["input_ids"] = [int(raw_ids)]
-                else:
-                    entry["input_ids"] = list(raw_ids)[:512]
-            elif isinstance(input_ids, (int, float)):
-                entry["input_ids"] = [int(input_ids)]
-            elif isinstance(input_ids, (list, tuple)):
-                entry["input_ids"] = list(input_ids)[:512]
-            else:
-                try:
-                    entry["input_ids"] = [int(x) for x in input_ids][:512]
-                except TypeError:
-                    entry["input_ids"] = [int(input_ids)]
-        else:
-            entry["input_ids"] = []
-
-        if text:
-            entry["text"] = str(text)[:2048]
-        if metadata:
-            for mk, mv in metadata.items():
-                if mk not in entry and isinstance(mv, (str, int, float, bool, list, dict)):
-                    entry[mk] = mv
-        for kwk, kwv in kwargs.items():
-            if kwk not in entry and isinstance(kwv, (str, int, float, bool, list, dict)):
-                entry[kwk] = kwv
-
-        if len(self.buffers[domain]) < k:
-            self.buffers[domain].append(entry)
-        else:
-            replace_idx = random.randint(0, n - 1)
-            if replace_idx < k:
-                self.buffers[domain][replace_idx] = entry
-
-    def total_samples(self) -> int:
-        return sum(len(b) for b in self.buffers.values())
-
-    def save_to_jsonl(self, filepath: str):
-        target_dir = os.path.dirname(os.path.abspath(filepath))
-        os.makedirs(target_dir, exist_ok=True)
-        tmp_file = os.path.join(target_dir, f".teacher_buf_tmp_{os.getpid()}_{int(time.time())}.jsonl")
-        try:
-            with open(tmp_file, "w", encoding="utf-8") as f:
-                for domain in sorted(self.buffers.keys()):
-                    for item in self.buffers[domain]:
-                        f.write(json.dumps(item, ensure_ascii=False) + "\n")
-                f.flush()
-                os.fsync(f.fileno())
-            if os.path.exists(filepath):
-                try:
-                    os.replace(tmp_file, filepath)
-                except OSError:
-                    os.remove(filepath)
-                    os.rename(tmp_file, filepath)
-            else:
-                os.rename(tmp_file, filepath)
-            print(f"[Teacher Replay Buffer] Persisted {self.total_samples():,} stratified samples across {len(self.buffers)} domains -> {filepath}", flush=True)
-        finally:
-            if os.path.exists(tmp_file):
-                _safe_unlink(tmp_file)
-
-    def load_from_jsonl(self, filepath: str):
-        """Restores stratified replay samples from a previously persisted teacher replay JSONL file."""
-        if not os.path.isfile(filepath):
-            return
-        try:
-            with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        item = json.loads(line)
-                        if not isinstance(item, dict):
-                            continue
-                        domain = item.get("domain", "general")
-                        if domain not in self.buffers:
-                            self.buffers[domain] = []
-                            self.counts[domain] = 0
-                        if len(self.buffers[domain]) < self.max_samples_per_domain:
-                            self.buffers[domain].append(item)
-                        self.counts[domain] += 1
-                    except Exception:
-                        continue
-            print(f"[Teacher Replay Buffer] Restored {self.total_samples():,} stratified sample(s) across {len(self.buffers)} domain(s) from {filepath}", flush=True)
-        except Exception as e:
-            print(f"[Teacher Replay Buffer Notice] Could not load replay buffer from {filepath}: {e}", flush=True)
-
-
 class TaraMultiDomainScheduler(IterableDataset):
     """
-    Weighted Multi-Domain Interleaved Streaming Scheduler with Deficit Round-Robin (DRR)
-    and Anchor Replay Buffer for Core Depleted Domains.
+    Weighted Multi-Domain Interleaved Streaming Scheduler with Deficit Round-Robin (DRR).
     
     Eliminates catastrophic forgetting by interleaving batches from 14 domain buckets
     proportional to domain weights, ensuring core reasoning, math, and linguistics
     remain active throughout large-scale pretraining.
-    
-    Maintains Free Google Colab resource budgets:
-    - CPU RAM < 500 MB (generator-based streaming, 1-sample line buffers, bounded reservoir).
-    - GPU VRAM < 15 GB (AdamW8bit and gradient checkpointing compatibility).
-    - Local Disk < 5 GB (single active downloaded shard per domain with immediate eviction).
     """
     def __init__(
         self,
@@ -3034,7 +2717,6 @@ class TaraMultiDomainScheduler(IterableDataset):
         batch_size: int = 1,
         max_seq_len: int = 256,
         max_samples: int = 0,
-        anchor_ratio: float = 0.15,
         dataset_dir: Optional[str] = None,
         repo_id: Optional[str] = None,
         prefix: str = "",
@@ -3044,7 +2726,6 @@ class TaraMultiDomainScheduler(IterableDataset):
         max_shard_bytes: int = 0,
         dataset_snapshot: Optional[Any] = None,
         domain_cursors: Optional[Dict[str, Dict[str, Any]]] = None,
-        anchor_buffer_state: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         self.domain_shards = {d: list(s) for d, s in domain_shards.items() if s}
@@ -3053,7 +2734,6 @@ class TaraMultiDomainScheduler(IterableDataset):
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
         self.max_samples = max_samples
-        self.anchor_ratio = anchor_ratio
         self.dataset_dir = dataset_dir
         self.repo_id = repo_id
         self.prefix = prefix
@@ -3073,10 +2753,6 @@ class TaraMultiDomainScheduler(IterableDataset):
             if total_w > 0:
                 self.domain_weights = {d: norm_w.get(d, 0.0) / total_w for d in self.active_domains}
 
-        self.anchor_buffer = AnchorReplayBuffer(capacity_per_domain=32, anchor_ratio=anchor_ratio)
-        init_anchor_state = anchor_buffer_state or kwargs.get("anchor_buffer") or kwargs.get("anchor_buffer_state")
-        if init_anchor_state and isinstance(init_anchor_state, dict):
-            self.anchor_buffer.load_state(init_anchor_state)
         self.deficits: Dict[str, float] = {d: 0.0 for d in self.active_domains}
         self.domain_cursors: Dict[str, Dict[str, Any]] = copy.deepcopy(domain_cursors) if domain_cursors else {}
         self.active_domain_idx: int = 0
@@ -3087,7 +2763,6 @@ class TaraMultiDomainScheduler(IterableDataset):
         self.active_shard_total_lines: int = 0
         self.active_chunk_idx: int = 0
         self.active_domain: str = ""
-        self.is_anchor_batch: bool = False
 
         self.domain_datasets: Dict[str, TaraStreamingJsonlDataset] = {}
         for d in self.active_domains:
@@ -3139,8 +2814,6 @@ class TaraMultiDomainScheduler(IterableDataset):
             "domain_cursors": copy.deepcopy(self.domain_cursors),
             "active_domain_idx": self.active_domain_idx,
             "scheduler_deficits": copy.deepcopy(self.deficits),
-            "depleted_domains": list(self.anchor_buffer.depleted_domains),
-            "anchor_buffer": self.anchor_buffer.get_state(),
         }
 
     def load_state(self, state: Dict[str, Any]):
@@ -3173,13 +2846,6 @@ class TaraMultiDomainScheduler(IterableDataset):
             self.active_domain_idx = state["active_domain_idx"]
         if "scheduler_deficits" in state:
             self.deficits = copy.deepcopy(state["scheduler_deficits"])
-        if "depleted_domains" in state:
-            for d in state["depleted_domains"]:
-                self.anchor_buffer.depleted_domains.add(d)
-        if "anchor_buffer" in state and isinstance(state["anchor_buffer"], dict):
-            self.anchor_buffer.load_state(state["anchor_buffer"])
-        elif "anchor_buffer_state" in state and isinstance(state["anchor_buffer_state"], dict):
-            self.anchor_buffer.load_state(state["anchor_buffer_state"])
 
     def __iter__(self):
         emitted = 0
@@ -3187,32 +2853,6 @@ class TaraMultiDomainScheduler(IterableDataset):
         active_candidates = list(self.active_domains)
 
         while active_candidates:
-            should_replay_anchor = (
-                self.anchor_buffer.has_anchors()
-                and self.anchor_ratio > 0.0
-                and random.random() < self.anchor_ratio
-            )
-
-            if should_replay_anchor:
-                anchor_item = self.anchor_buffer.sample_anchor()
-                if anchor_item is not None:
-                    self.is_anchor_batch = True
-                    self.active_domain = anchor_item.domain
-                    self.current_active_shard = anchor_item.shard_name
-                    self.active_shard_offset = anchor_item.line_idx
-                    self.active_shard_byte_offset = anchor_item.byte_offset
-                    self.active_chunk_idx = anchor_item.chunk_idx
-                    replayed = TaraDomainBatchItem(
-                        anchor_item.input_ids, anchor_item.labels, anchor_item.shard_name,
-                        anchor_item.line_idx, anchor_item.byte_offset, anchor_item.chunk_idx,
-                        anchor_item.is_last, domain=anchor_item.domain, is_anchor=True
-                    )
-                    yield replayed
-                    emitted += 1
-                    if 0 < self.max_samples <= emitted:
-                        return
-                    continue
-
             for d in active_candidates:
                 self.deficits[d] += self.domain_weights.get(d, 0.0)
 
@@ -3225,14 +2865,10 @@ class TaraMultiDomainScheduler(IterableDataset):
 
                 item = TaraDomainBatchItem(
                     input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last,
-                    domain=best_d, is_anchor=False
+                    domain=best_d
                 )
 
-                if best_d in CORE_ANCHOR_DOMAINS:
-                    self.anchor_buffer.add_sample(best_d, item)
-
                 self.active_domain = best_d
-                self.is_anchor_batch = False
                 self.current_active_shard = shard_name
                 self.active_shard_offset = line_idx
                 self.active_shard_byte_offset = byte_offset
@@ -3263,27 +2899,8 @@ class TaraMultiDomainScheduler(IterableDataset):
                     return
 
             except StopIteration:
-                self.anchor_buffer.mark_depleted(best_d)
                 if best_d in active_candidates:
                     active_candidates.remove(best_d)
-                if self.anchor_ratio > 0.0 and self.anchor_buffer.is_depleted(best_d):
-                    anchor_item = self.anchor_buffer.sample_anchor(preferred_domain=best_d)
-                    if anchor_item is not None:
-                        self.is_anchor_batch = True
-                        self.active_domain = best_d
-                        self.current_active_shard = anchor_item.shard_name
-                        self.active_shard_offset = anchor_item.line_idx
-                        self.active_shard_byte_offset = anchor_item.byte_offset
-                        self.active_chunk_idx = anchor_item.chunk_idx
-                        replayed = TaraDomainBatchItem(
-                            anchor_item.input_ids, anchor_item.labels, anchor_item.shard_name,
-                            anchor_item.line_idx, anchor_item.byte_offset, anchor_item.chunk_idx,
-                            anchor_item.is_last, domain=best_d, is_anchor=True
-                        )
-                        yield replayed
-                        emitted += 1
-                        if 0 < self.max_samples <= emitted:
-                            return
 
 
 def collate_fn(batch):
@@ -3809,7 +3426,7 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
             # Prioritize model weights FIRST, configs SECOND, metadata THIRD, optimizer LAST
             weights_files = [f for f in combined_files if (f.endswith(".safetensors") or f == "pytorch_model.bin") and f != "optimizer_state.pt"]
             config_files = [f for f in combined_files if f in ("config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json")]
-            meta_files = [f for f in combined_files if f in ("checkpoint_state.json", "STAGE_METADATA.json", "shard_ledger.json", "latest_checkpoint.json", "dataset_snapshot.json", "teacher_replay_buffer.jsonl")]
+            meta_files = [f for f in combined_files if f in ("checkpoint_state.json", "STAGE_METADATA.json", "shard_ledger.json", "latest_checkpoint.json", "dataset_snapshot.json")]
             other_files = [f for f in combined_files if f not in weights_files and f not in config_files and f not in meta_files and f not in ("COMMITTED", "optimizer_state.pt")]
 
             ordered_files = weights_files + config_files + meta_files + other_files
@@ -4050,7 +3667,7 @@ def sync_checkpoint_to_gdrive(
     file_list = [
         "config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
         "model.safetensors", "world_model.safetensors", "checkpoint_state.json", "STAGE_METADATA.json",
-        "shard_ledger.json", "dataset_snapshot.json", "teacher_replay_buffer.jsonl",
+        "shard_ledger.json", "dataset_snapshot.json",
     ]
     if sync_optimizer:
         file_list.append("optimizer_state.pt")
@@ -4445,37 +4062,7 @@ def clean_stale_checkpoint_artifacts(checkpoint_dir: str, is_best: bool = False)
             except Exception:
                 pass
 
-    # 2. Clean Google Drive mirror
-    gdrive_root = _resolve_gdrive_root()
-    if gdrive_root and os.path.exists(gdrive_root):
-        try:
-            if "checkpoints" in checkpoint_dir:
-                rel = checkpoint_dir.split("checkpoints", 1)[1].lstrip(r"\/")
-                gdrive_target = os.path.join(gdrive_root, rel)
-            else:
-                gdrive_target = os.path.join(gdrive_root, os.path.basename(checkpoint_dir))
-
-            if os.path.exists(gdrive_target):
-                for f in os.listdir(gdrive_target):
-                    fp = os.path.join(gdrive_target, f)
-                    if f.endswith(".tmp") or ".tmp_" in f:
-                        try:
-                            os.remove(fp)
-                        except Exception:
-                            pass
-                    if " (" in f and ")" in f:
-                        try:
-                            if os.path.isdir(fp):
-                                _safe_rmtree(fp)
-                            else:
-                                os.remove(fp)
-                            print(f"[GDrive Hygiene] Removed duplicate clone from GDrive target: {f}", flush=True)
-                        except Exception:
-                            pass
-        except Exception:
-            pass
-
-    # 3. Clean temporary files strictly belonging to TARA in system temp dirs (never touch system sockets or DriveFS state)
+    # 2. Clean temporary files strictly belonging to TARA in system temp dirs (never touch system sockets or DriveFS state)
     for tmp_target in ["/tmp", "/var/tmp"]:
         if os.path.exists(tmp_target):
             try:
@@ -4659,7 +4246,7 @@ def save_checkpoint(
     world_optimizer: Optional[torch.optim.Optimizer] = None,
     world_scaler: Optional[torch.cuda.amp.GradScaler] = None,
     per_shard_promotion: bool = False,
-    teacher_replay_buffer: Optional[Any] = None,
+
 ) -> bool:
     """
     Unified Crash-Safe Checkpoint Engine:
@@ -4702,10 +4289,6 @@ def save_checkpoint(
                     src_aux = os.path.join(src_tok_dir, aux_name)
                     if os.path.isfile(src_aux):
                         shutil.copy2(src_aux, os.path.join(staging_dir, aux_name))
-
-            # 2b. teacher_replay_buffer.jsonl (stratified exemplars)
-            if teacher_replay_buffer is not None and hasattr(teacher_replay_buffer, "save_to_jsonl"):
-                teacher_replay_buffer.save_to_jsonl(os.path.join(staging_dir, "teacher_replay_buffer.jsonl"))
 
             tok_fingerprint = compute_tokenizer_fingerprint(
                 tokenizer_path=tokenizer_path,
@@ -4778,25 +4361,14 @@ def save_checkpoint(
                 samples_consumed = data_cursor.get("samples_consumed", completed_records)
 
             domain_cursors = None
-            anchor_buffer_state = None
             scheduler_deficits = None
 
             if data_cursor and data_cursor.get("domain_cursors"):
                 domain_cursors = data_cursor["domain_cursors"]
             elif hasattr(dataset, "get_state"):
-                ds_st = dataset.get_state()
-                domain_cursors = ds_st.get("domain_cursors")
-                anchor_buffer_state = ds_st.get("anchor_buffer") or ds_st.get("anchor_buffer_state")
+                domain_cursors = dataset.get_state().get("domain_cursors")
             elif shard_ledger and hasattr(shard_ledger, "domain_cursors"):
                 domain_cursors = shard_ledger.domain_cursors
-
-            if not anchor_buffer_state and hasattr(dataset, "get_state"):
-                ds_st = dataset.get_state()
-                anchor_buffer_state = ds_st.get("anchor_buffer") or ds_st.get("anchor_buffer_state")
-            if not anchor_buffer_state and data_cursor and "anchor_buffer" in data_cursor:
-                anchor_buffer_state = data_cursor["anchor_buffer"]
-            elif not anchor_buffer_state and data_cursor and "anchor_buffer_state" in data_cursor:
-                anchor_buffer_state = data_cursor["anchor_buffer_state"]
 
             if data_cursor and data_cursor.get("scheduler_deficits"):
                 scheduler_deficits = data_cursor["scheduler_deficits"]
@@ -4807,8 +4379,6 @@ def save_checkpoint(
 
             if domain_cursors:
                 data_cursor["domain_cursors"] = domain_cursors
-            if anchor_buffer_state:
-                data_cursor["anchor_buffer"] = anchor_buffer_state
             if scheduler_deficits:
                 data_cursor["scheduler_deficits"] = scheduler_deficits
 
@@ -4829,7 +4399,6 @@ def save_checkpoint(
                 "data_cursor": data_cursor,
                 "domain_cursors": domain_cursors or {},
                 "scheduler_deficits": scheduler_deficits or {},
-                "anchor_buffer": anchor_buffer_state,
                 "active_shard": active_shard,
                 "active_shard_offset": active_offset,
                 "active_shard_line_offset": active_offset,
@@ -4961,7 +4530,10 @@ def save_checkpoint(
                         try:
                             os.link(src, tmp_dst)
                         except OSError:
-                            _stream_copy_file(src, tmp_dst)
+                            try:
+                                os.symlink(os.path.abspath(src), tmp_dst)
+                            except OSError:
+                                _stream_copy_file(src, tmp_dst)
                         if os.path.exists(tmp_dst):
                             os.replace(tmp_dst, dst)
                     except Exception as align_err:
@@ -5113,7 +4685,7 @@ def save_best_milestone(
     scaler: Optional[torch.cuda.amp.GradScaler] = None,
     world_optimizer: Optional[torch.optim.Optimizer] = None,
     world_scaler: Optional[torch.cuda.amp.GradScaler] = None,
-    teacher_replay_buffer: Optional[Any] = None,
+
     sync_to_gdrive: bool = False,
 ) -> bool:
     """Delegates to unified save_checkpoint with is_best=True to eliminate duplicate logic while preserving public API."""
@@ -5132,14 +4704,13 @@ def save_best_milestone(
         is_best=True,
         is_completed=False,
         sync_to_gdrive=sync_to_gdrive,
-        sync_optimizer=(optimizer is not None),
+        sync_optimizer=False,
         dataset=dataset,
         shard_ledger=shard_ledger,
         data_cursor=data_cursor,
         world_model=world_model,
         world_optimizer=world_optimizer,
         world_scaler=world_scaler,
-        teacher_replay_buffer=teacher_replay_buffer,
     )
 
 
@@ -5684,8 +5255,6 @@ def extract_data_cursor_from_state(s_data: dict) -> dict:
             "completed_shards": s_data.get("completed_shards", []),
             "domain_cursors": s_data.get("domain_cursors", {}),
             "scheduler_deficits": s_data.get("scheduler_deficits", {}),
-            "anchor_buffer": s_data.get("anchor_buffer") or s_data.get("anchor_buffer_state"),
-            "anchor_buffer_state": s_data.get("anchor_buffer_state") or s_data.get("anchor_buffer"),
         }
     else:
         cursor = dict(cursor)
@@ -5701,10 +5270,6 @@ def extract_data_cursor_from_state(s_data: dict) -> dict:
             cursor["domain_cursors"] = s_data["domain_cursors"]
         if "scheduler_deficits" not in cursor and "scheduler_deficits" in s_data:
             cursor["scheduler_deficits"] = s_data["scheduler_deficits"]
-        if "anchor_buffer" not in cursor:
-            cursor["anchor_buffer"] = s_data.get("anchor_buffer") or s_data.get("anchor_buffer_state")
-        if "anchor_buffer_state" not in cursor:
-            cursor["anchor_buffer_state"] = cursor.get("anchor_buffer")
     return cursor
 
 
@@ -6092,7 +5657,7 @@ def try_resume_from_checkpoint(
         for fname in [
             "config.json", "tokenizer.json", "checkpoint_state.json", "optimizer_state.pt",
             "STAGE_METADATA.json", "model.safetensors", "world_model.safetensors",
-            "shard_ledger.json", "teacher_replay_buffer.jsonl", "COMMITTED"
+            "shard_ledger.json", "COMMITTED"
         ]:
             s = os.path.join(best_cand_dir, fname)
             d = os.path.join(checkpoint_dir, fname)
@@ -6719,8 +6284,6 @@ def main():
                         help="Target step ceiling for model promotion (e.g. 500). Promotes the best checkpoint achieved within steps <= PROMOTE_MAX_STEP for real-time deployment while training continues uninterrupted. 0 means unbounded/entire stage.")
     parser.add_argument("--domain-weights", type=str, default=os.environ.get("DOMAIN_WEIGHTS", ""),
                         help="Custom comma-separated domain weights (e.g. '01_mathematics_formal_logic=0.15,12_planning_reasoning_traces=0.20')")
-    parser.add_argument("--anchor-ratio", type=float, default=float(os.environ.get("ANCHOR_RATIO", 0.15)),
-                        help="Fraction of batches drawn from anchor replay buffer when core domains are depleted (default: 0.15)")
     parser.add_argument("--sync-all-to-gdrive", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true", default=True,
                         help="Sync all intermediate training checkpoints to Google Drive (default: True)")
     parser.add_argument("--sync-gdrive-optimizer", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true", default=True,
@@ -7393,10 +6956,6 @@ def main():
 
     # 9. Instantiate Streaming Dataset & DataLoader with Multi-Domain DRR Scheduler
     resume_chunk_idx = resumed_cursor.get("active_chunk_idx", 0) if resumed_cursor else 0
-
-    # Stratified Teacher Replay Buffer (Disabled per directive to eliminate CPU overhead and GPU-to-CPU sync)
-    teacher_replay_buffer = None
-
     domain_shards: Dict[str, List[str]] = {d: [] for d in CANONICAL_DOMAINS}
     for s in selected_shards:
         d = resolve_shard_domain(s)
@@ -7413,7 +6972,6 @@ def main():
     print(f"[Multi-Domain DRR Weights] Normalized domain weights: {domain_weights_map}", flush=True)
 
     resumed_domain_cursors = resumed_cursor.get("domain_cursors", {}) if resumed_cursor else (shard_ledger.domain_cursors if shard_ledger else {})
-    resumed_anchor_buffer = (resumed_cursor.get("anchor_buffer") or resumed_cursor.get("anchor_buffer_state")) if resumed_cursor else None
 
     if len(active_doms_with_shards) > 1:
         dataset = TaraMultiDomainScheduler(
@@ -7422,7 +6980,6 @@ def main():
             tokenizer=tokenizer,
             max_seq_len=args.max_seq_len,
             max_samples=args.max_samples,
-            anchor_ratio=getattr(args, "anchor_ratio", 0.15),
             dataset_dir=args.dataset_dir,
             repo_id=dataset_repo,
             prefix=ds_prefix,
@@ -7432,10 +6989,7 @@ def main():
             max_shard_bytes=args.max_shard_bytes,
             dataset_snapshot=dataset_snapshot,
             domain_cursors=resumed_domain_cursors,
-            anchor_buffer_state=resumed_anchor_buffer,
         )
-        if resumed_anchor_buffer and isinstance(resumed_anchor_buffer, dict):
-            dataset.anchor_buffer.load_state(resumed_anchor_buffer)
     else:
         dataset = TaraStreamingJsonlDataset(
             file_paths=selected_shards,
@@ -7704,7 +7258,7 @@ def main():
                 grad_norm_str = f"GradNorm: {grad_norm_val:.2f} (WM: {w_grad_norm_val:.2f})" if world_model is not None else f"GradNorm: {grad_norm_val:.2f}"
                 print(
                     f"[{args.stage_id} | Step {step:04d}/{args.max_steps}] "
-                    f"{domain_tag}{anchor_tag}"
+                    f"{domain_tag}"
                     f"Total Loss: {loss_clr}{cur_step_loss:.4f}{CLR_RESET} (CE: {cur_step_ce:.4f}, Aux: {cur_step_aux:.4f}, EMA: {ema_loss:.4f}){wm_log} | "
                     f"PPL: {ppl_clr}{ppl:.2f}{CLR_RESET} | "
                     f"BPB: {bpb_clr}{bpb:.2f} b/B{CLR_RESET} | "
@@ -7765,7 +7319,7 @@ def main():
                             is_best=True,
                             is_completed=False,
                             sync_to_gdrive=args.sync_all_to_gdrive,
-                            sync_optimizer=(optimizer is not None),
+                            sync_optimizer=False,
                             dataset=dataset,
                             shard_ledger=shard_ledger,
                             data_cursor=best_loss_cursor,
@@ -7788,7 +7342,10 @@ def main():
                                             try:
                                                 os.link(s_file, tmp_d_file)
                                             except Exception:
-                                                shutil.copy2(s_file, tmp_d_file)
+                                                try:
+                                                    os.symlink(os.path.abspath(s_file), tmp_d_file)
+                                                except Exception:
+                                                    shutil.copy2(s_file, tmp_d_file)
                                             if os.path.exists(tmp_d_file):
                                                 os.replace(tmp_d_file, d_file)
                                         except Exception:
@@ -7855,7 +7412,6 @@ def main():
                         world_optimizer=world_optimizer,
                         world_scaler=world_scaler,
                         per_shard_promotion=args.per_shard_promotion,
-                        teacher_replay_buffer=teacher_replay_buffer,
                     )
 
                 # Reset step timer after all checkpoint I/O, verification, and promotion
@@ -7963,7 +7519,6 @@ def main():
         world_optimizer=world_optimizer,
         world_scaler=world_scaler,
         per_shard_promotion=args.per_shard_promotion,
-        teacher_replay_buffer=teacher_replay_buffer,
     )
     if ema_loss is not None and final_loss <= best_loss:
         best_loss = final_loss

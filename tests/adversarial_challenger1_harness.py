@@ -33,10 +33,10 @@ from cloud_train import (
     CANONICAL_DOMAINS,
     CORE_ANCHOR_DOMAINS,
     parse_domain_weights,
-    AnchorReplayBuffer,
     TaraMultiDomainScheduler,
     TaraDomainBatchItem,
 )
+AnchorReplayBuffer = getattr(cloud_train, "AnchorReplayBuffer", None)
 
 
 class MockSimpleTokenizer:

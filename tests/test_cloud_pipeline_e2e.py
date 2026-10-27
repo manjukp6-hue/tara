@@ -269,7 +269,6 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
             batch = next(it)
             self.assertIn("domain", batch, "Batch must include 'domain' metadata key")
             self.assertIn("input_ids", batch, "Batch must include 'input_ids'")
-            self.assertIn("is_anchor", batch, "Batch must include 'is_anchor' metadata key")
             d_name = batch["domain"]
             self.assertIn(d_name, sampled_counts)
             sampled_counts[d_name] += 1
@@ -279,13 +278,12 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
         self.assertAlmostEqual(sampled_counts["02_computer_science_systems"] / total_samples, 0.50, delta=0.06)
         self.assertAlmostEqual(sampled_counts["04_linguistics_multilingual"] / total_samples, 0.30, delta=0.06)
 
-    def test_tier1_05_anchor_replay_activation_for_depleted_core_domains(self):
-        """Tier 1.5: Verify anchor replay activates when core domains deplete shards."""
+    def test_tier1_05_clean_domain_depletion_handling(self):
+        """Tier 1.5: Verify clean DRR handling when a domain depletes its shards."""
         scheduler_cls = getattr(cloud_train, "TaraMultiDomainScheduler", None) or getattr(cloud_train, "MultiDomainScheduler", None)
         if scheduler_cls is None:
             self.fail("TaraMultiDomainScheduler is not implemented or exported in cloud_train.py")
 
-        # Setup 1 small core domain with only 5 samples and 1 large domain with 100 samples
         core_domain = "12_planning_reasoning_traces"
         abundant_domain = "02_computer_science_systems"
         base_dir = os.path.join(self.work_dir, "anchor_test")
@@ -314,21 +312,17 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
             tokenizer=self.tokenizer,
             batch_size=1,
             max_seq_len=64,
-            anchor_ratio=0.20,
         )
 
-        seen_anchor = False
-        anchor_count = 0
         total_steps = 40
         it = iter(scheduler)
+        sampled_domains = []
         for step in range(total_steps):
             batch = next(it)
-            if batch["domain"] == core_domain and batch.get("is_anchor", False):
-                seen_anchor = True
-                anchor_count += 1
+            sampled_domains.append(batch["domain"])
 
-        self.assertTrue(seen_anchor, "Anchor replay buffer did not activate after core domain depletion")
-        self.assertGreaterEqual(anchor_count, 1, "Core domain anchor batches must be yielded after depletion")
+        self.assertEqual(sampled_domains.count(core_domain), 5, "Core domain must yield exactly its 5 authentic samples before depletion")
+        self.assertEqual(sampled_domains.count(abundant_domain), 35, "Remaining steps must be served from active abundant domain")
 
     def test_tier1_06_dynamic_best_checkpoint_commit(self):
         """Tier 1.6: Verify zero-lock dynamic best checkpoint saves on step 1 with skip_save_steps=0."""
@@ -363,41 +357,29 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
         self.assertEqual(state.get("step"), 1)
         self.assertAlmostEqual(state.get("loss"), 1.85)
 
-    def test_tier1_07_teacher_replay_buffer_generation_and_jsonl(self):
-        """Tier 1.7: Verify TeacherReplayBuffer reservoir sampling and valid JSONL persistence."""
-        buffer_cls = getattr(cloud_train, "TeacherReplayBuffer", None) or getattr(cloud_train, "TeacherBuffer", None)
-        if buffer_cls is None:
-            self.fail("TeacherReplayBuffer is not implemented or exported in cloud_train.py")
+    def test_tier1_07_clean_checkpoint_artifact_generation(self):
+        """Tier 1.7: Verify checkpoint saving persists clean verified model artifacts without teacher replay buffer."""
+        model = TaraForCausalLM(self.config)
+        output_dir = os.path.join(self.work_dir, "clean_ckpt_test")
+        best_dir = os.path.join(output_dir, "best_checkpoint")
+        os.makedirs(output_dir, exist_ok=True)
 
-        buffer = buffer_cls(max_samples_per_domain=500)
-        # Add diverse samples across 3 domains
-        for i in range(100):
-            buffer.add_sample("01_mathematics_formal_logic", [1, 2, 3, i], prompt="x", target="y")
-            buffer.add_sample("04_linguistics_multilingual", [4, 5, 6, i], prompt="k", target="v")
-            buffer.add_sample("12_planning_reasoning_traces", [7, 8, 9, i], prompt="r", target="s")
-
-        jsonl_path = os.path.join(self.work_dir, "teacher_replay_buffer.jsonl")
-        buffer.save_to_jsonl(jsonl_path)
-
-        self.assertTrue(os.path.isfile(jsonl_path), "teacher_replay_buffer.jsonl must exist on disk")
-        self.assertGreater(os.path.getsize(jsonl_path), 0, "teacher_replay_buffer.jsonl must be non-empty")
-
-        # Verify each line is valid JSON with required metadata
-        loaded_domains = set()
-        line_count = 0
-        with open(jsonl_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                line_count += 1
-                rec = json.loads(line)
-                self.assertIn("domain", rec, "Record must contain 'domain'")
-                self.assertIn("input_ids", rec, "Record must contain 'input_ids'")
-                loaded_domains.add(rec["domain"])
-
-        self.assertEqual(line_count, 300)
-        self.assertEqual(len(loaded_domains), 3)
+        committed = cloud_train.save_checkpoint(
+            model=model,
+            config=self.config,
+            tokenizer_path=self.tok_path,
+            output_dir=best_dir,
+            step=10,
+            epoch=0,
+            loss=2.1,
+            best_loss=2.1,
+            stage_id="stage1_unified",
+            is_best=True,
+        )
+        self.assertTrue(committed, "save_checkpoint must commit successfully")
+        self.assertTrue(os.path.isfile(os.path.join(best_dir, "model.safetensors")))
+        self.assertTrue(os.path.isfile(os.path.join(best_dir, "COMMITTED")))
+        self.assertFalse(os.path.exists(os.path.join(best_dir, "teacher_replay_buffer.jsonl")), "teacher_replay_buffer.jsonl must not be created")
 
     def test_tier1_08_multi_account_gdrive_resume_offset_restoration(self):
         """Tier 1.8: Verify domain_cursors and active_domain_idx restoration across checkpoint boundaries."""
@@ -564,11 +546,12 @@ class Tier1FeatureCoverageTests(unittest.TestCase):
         self.assertIsNotNone(canonical_block_match, "canonical file set block not found in colab_train.sh")
         canonical_str = canonical_block_match.group(1)
 
-        for required_file in ["'world_model.safetensors'", "'teacher_replay_buffer.jsonl'", "'COMMITTED'"]:
+        for required_file in ["'world_model.safetensors'", "'COMMITTED'"]:
             self.assertIn(
                 required_file, canonical_str,
                 f"colab_train.sh canonical file list must include {required_file}"
             )
+        self.assertNotIn("'teacher_replay_buffer.jsonl'", canonical_str, "teacher_replay_buffer.jsonl must not be in canonical list")
 
 
 # =============================================================================
@@ -642,18 +625,15 @@ class Tier2BoundaryCornerCaseTests(unittest.TestCase):
             tokenizer=self.tokenizer,
             batch_size=1,
             max_seq_len=32,
-            anchor_ratio=1.0,
         )
 
         it = iter(scheduler)
-        # First 3 samples must be live (is_anchor=False)
         for i in range(exact_count):
             b = next(it)
-            self.assertFalse(b.get("is_anchor", False), f"Sample {i} should be live, not anchor")
+            self.assertEqual(b["domain"], "12_planning_reasoning_traces")
 
-        # 4th sample must transition to anchor replay (is_anchor=True)
-        fourth_batch = next(it)
-        self.assertTrue(fourth_batch.get("is_anchor", False), "Sample 4 must be served from anchor replay")
+        with self.assertRaises(StopIteration, msg="Scheduler must terminate cleanly upon dataset exhaustion without infinite anchor loops"):
+            next(it)
 
     def test_tier2_03_domain_weight_normalization(self):
         """Tier 2.3: Verify weight normalization when inputs sum != 1.0 or weights are empty."""
@@ -830,15 +810,13 @@ class Tier3CrossFeatureCombinationTests(unittest.TestCase):
             self.assertTrue(has_neural_grads, "Neural model parameters must have non-zero gradients")
             self.assertTrue(has_wm_grads, "World model parameters must have non-zero gradients")
 
-    def test_tier3_02_anchor_replay_with_teacher_replay_buffer_snapshots(self):
-        """Tier 3.2: Verify TeacherReplayBuffer captures samples from anchor replay and live streams."""
-        buffer_cls = getattr(cloud_train, "TeacherReplayBuffer", None) or getattr(cloud_train, "TeacherBuffer", None)
+    def test_tier3_02_clean_multi_domain_streaming(self):
+        """Tier 3.2: Verify clean multi-domain DRR streaming and boundary exhaustion."""
         scheduler_cls = getattr(cloud_train, "TaraMultiDomainScheduler", None) or getattr(cloud_train, "MultiDomainScheduler", None)
-        if buffer_cls is None or scheduler_cls is None:
-            self.fail("TeacherReplayBuffer or TaraMultiDomainScheduler is not implemented")
+        if scheduler_cls is None:
+            self.fail("TaraMultiDomainScheduler is not implemented")
 
-        buffer = buffer_cls(max_samples_per_domain=100)
-        base_dir = os.path.join(self.work_dir, "anchor_teacher")
+        base_dir = os.path.join(self.work_dir, "clean_streaming_test")
         os.makedirs(base_dir, exist_ok=True)
 
         core_file = os.path.join(base_dir, "core.jsonl")
@@ -857,25 +835,14 @@ class Tier3CrossFeatureCombinationTests(unittest.TestCase):
             tokenizer=self.tokenizer,
             batch_size=1,
             max_seq_len=32,
-            anchor_ratio=0.5,
         )
 
-        it = iter(scheduler)
-        for _ in range(10):
-            batch = next(it)
-            buffer.add_sample(batch["domain"], batch["input_ids"][0].tolist())
-
-        snapshot_path = os.path.join(base_dir, "teacher_snapshot.jsonl")
-        buffer.save_to_jsonl(snapshot_path)
-
-        domains_in_snapshot = set()
-        with open(snapshot_path, "r", encoding="utf-8") as f:
-            for line in f:
-                rec = json.loads(line)
-                domains_in_snapshot.add(rec["domain"])
-
-        self.assertIn("12_reasoning", domains_in_snapshot, "Depleted core domain must be preserved in teacher buffer")
-        self.assertIn("02_code", domains_in_snapshot, "Active code domain must be present in teacher buffer")
+        samples = list(scheduler)
+        self.assertEqual(len(samples), 22, "Must yield exactly 22 authentic samples across both domains")
+        reasoning_samples = [s for s in samples if s["domain"] == "12_reasoning"]
+        code_samples = [s for s in samples if s["domain"] == "02_code"]
+        self.assertEqual(len(reasoning_samples), 2)
+        self.assertEqual(len(code_samples), 20)
 
     def test_tier3_03_multi_account_quota_handover_simulation(self):
         """Tier 3.3: Simulate Account 1 mid-stream disconnect and Account 2 exact offset resumption."""
@@ -1012,11 +979,10 @@ class Tier4RealWorldScenarioTests(unittest.TestCase):
             ppl = torch.exp(ce_loss).item()
             bpb = ce_loss.item() / 0.693147
             domain_tag = lang_batch.get("domain", "unknown")
-            anchor_tag = " [ANCHOR REPLAY]" if lang_batch.get("is_anchor", False) else ""
             telemetry_str = (
                 f"[Step {step:04d}] Total Loss: {total_loss.item():.4f} | CE Loss: {ce_loss.item():.4f} | "
                 f"WM Loss: {wm_loss.item():.4f} | PPL: {ppl:.2f} | BPB: {bpb:.2f} | "
-                f"Domain: {domain_tag}{anchor_tag}"
+                f"Domain: {domain_tag}"
             )
             telemetry_logs.append(telemetry_str)
 

@@ -1228,11 +1228,12 @@ class ShardLineIndex:
     def build_and_save(self, shard_path: str, shard_sha256: str) -> Dict[int, int]:
         """
         Build a byte-offset index by scanning ``shard_path`` once, then persist
-        it so subsequent resumes skip the scan.
-
-        Returns the ``{line_idx: byte_offset}`` mapping.  The mapping includes
-        offset 0 for line 0 so callers never need to special-case the first line.
+        it so subsequent resumes skip the scan. Only applicable to text JSONL files.
+        Binary formats (.parquet, .arrow, etc.) are skipped.
         """
+        ext = os.path.splitext(shard_path)[1].lower()
+        if ext in (".parquet", ".arrow", ".bin"):
+            return {}
         offsets: Dict[int, int] = {}
         try:
             with open(shard_path, "rb") as f:
@@ -1268,6 +1269,9 @@ class ShardLineIndex:
         Return a valid byte-offset index, loading from disk if available or
         building on demand if the cached index is absent or stale.
         """
+        ext = os.path.splitext(shard_path)[1].lower()
+        if ext in (".parquet", ".arrow", ".bin"):
+            return {}
         cached = self.load(shard_sha256)
         if cached is not None:
             return cached
@@ -1964,17 +1968,34 @@ class TaraStreamingJsonlDataset(IterableDataset):
             self.active_shard_name = shard_name
             self.current_active_shard = shard_name
 
-            # Count / fetch total lines in this shard via ShardLineIndex
+            # Count records without creating a huge byte-offset dictionary.
             self.active_shard_total_lines = 0
-            if self._line_index is not None:
+            ext = os.path.splitext(actual_fp)[1].lower()
+            if ext == ".parquet":
+                try:
+                    import pyarrow.parquet as pq
+                    self.active_shard_total_lines = int(
+                        pq.ParquetFile(actual_fp).metadata.num_rows
+                    )
+                except Exception as count_err:
+                    print(
+                        f"[Parquet Row Count Warning] {actual_fp}: {count_err}",
+                        flush=True,
+                    )
+            elif ext in (".jsonl", ".ndjson") and self._line_index is not None:
                 try:
                     idx_map = self._line_index.get_or_build(actual_fp, shard_sha)
                     self.active_shard_total_lines = len(idx_map)
-                except Exception:
-                    pass
-
+                except Exception as idx_err:
+                    print(
+                        f"[ShardLineIndex Warning] Could not index "
+                        f"'{actual_fp}': {idx_err}",
+                        flush=True,
+                    )
             if self.shard_ledger:
-                self.shard_ledger.active_shard_total_lines = self.active_shard_total_lines
+                self.shard_ledger.active_shard_total_lines = (
+                    self.active_shard_total_lines
+                )
                 self.shard_ledger.set_active_shard(shard_name)
 
             # Record live content hash in the dataset snapshot so content changes are detected
@@ -4607,6 +4628,41 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
 # 6. Atomic Checkpoint Persistence, Promotion Pipeline & Versioned Retention
 # =============================================================================
 
+def get_memory_status_str() -> str:
+    """Returns formatted system RAM and GPU VRAM status for diagnostic monitoring."""
+    sys_mem = ""
+    try:
+        if os.path.exists("/proc/meminfo"):
+            mem_info = {}
+            with open("/proc/meminfo", "r") as f:
+                for line in f:
+                    parts = line.split(":")
+                    if len(parts) == 2:
+                        mem_info[parts[0].strip()] = parts[1].strip()
+            total_kb = int(mem_info.get("MemTotal", "0 kB").split()[0])
+            avail_kb = int(mem_info.get("MemAvailable", "0 kB").split()[0])
+            used_mb = (total_kb - avail_kb) / 1024
+            total_mb = total_kb / 1024
+            sys_mem = f"RAM: {used_mb:.0f}M/{total_mb:.0f}M ({used_mb / max(total_mb, 1) * 100:.1f}%)"
+    except Exception:
+        pass
+    if not sys_mem:
+        try:
+            import psutil
+            vm = psutil.virtual_memory()
+            sys_mem = f"RAM: {vm.used / (1024**2):.0f}M/{vm.total / (1024**2):.0f}M ({vm.percent}%)"
+        except Exception:
+            sys_mem = "RAM: N/A"
+
+    gpu_mem = ""
+    if torch.cuda.is_available():
+        alloc = torch.cuda.memory_allocated() / (1024**2)
+        res = torch.cuda.memory_reserved() / (1024**2)
+        gpu_mem = f" | GPU VRAM: {alloc:.0f}M alloc, {res:.0f}M res"
+
+    return f"[{sys_mem}{gpu_mem}]"
+
+
 def save_checkpoint(
     model: nn.Module,
     optimizer: Optional[torch.optim.Optimizer] = None,
@@ -4640,7 +4696,7 @@ def save_checkpoint(
     with atomic verified staging, optimizer preservation, and background Google Drive sync.
     """
     tag = "BEST MILESTONE" if is_best else ("COMPLETED" if is_completed else f"STEP {step}")
-    print(f"[Checkpoint] Snapshotting [{tag}] checkpoint at Step {step}...", flush=True)
+    print(f"[Checkpoint] Snapshotting [{tag}] checkpoint at Step {step}... {get_memory_status_str()}", flush=True)
 
     with _checkpoint_write_lock:
         _reclaim_emergency_disk_space(min_free_gb=6.0)
@@ -4685,19 +4741,22 @@ def save_checkpoint(
                 tokenizer=None,
             )
 
-            # 3. model.safetensors
-            state_dict = {k: v.detach().to("cpu", copy=True) for k, v in model.state_dict().items()}
+            # 3. model.safetensors (stream directly to CPU without duplicate memory buffering)
+            state_dict = {k: v.detach().to("cpu") for k, v in model.state_dict().items()}
             if HAS_SAFETENSORS:
                 save_file(state_dict, os.path.join(staging_dir, "model.safetensors"))
             else:
                 torch.save(state_dict, os.path.join(staging_dir, "pytorch_model.bin"))
             del state_dict
             gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            print(f"[Checkpoint] Model weights staged. {get_memory_status_str()}", flush=True)
 
             # 3b. world_model.safetensors (if joint training)
             world_weights_sha256 = None
             if world_model is not None:
-                wm_sd = {k: v.detach().to("cpu", copy=True) for k, v in world_model.state_dict().items()}
+                wm_sd = {k: v.detach().to("cpu") for k, v in world_model.state_dict().items()}
                 wm_target = os.path.join(staging_dir, "world_model.safetensors")
                 if HAS_SAFETENSORS:
                     save_file(wm_sd, wm_target)
@@ -4705,8 +4764,11 @@ def save_checkpoint(
                     torch.save(wm_sd, os.path.join(staging_dir, "pytorch_world_model.bin"))
                 del wm_sd
                 gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
                 actual_wm_target = wm_target if HAS_SAFETENSORS else os.path.join(staging_dir, "pytorch_world_model.bin")
                 world_weights_sha256 = compute_file_sha256(actual_wm_target) if os.path.exists(actual_wm_target) else None
+                print(f"[Checkpoint] World model weights staged. {get_memory_status_str()}", flush=True)
 
             weights_file = (
                 os.path.join(staging_dir, "model.safetensors") if HAS_SAFETENSORS
@@ -4813,8 +4875,11 @@ def save_checkpoint(
             with open(os.path.join(staging_dir, "checkpoint_state.json"), "w", encoding="utf-8") as f:
                 json.dump(continuation_state, f, indent=2)
 
-            # 5. Optimizer state (saved whenever optimizer is provided)
-            if optimizer is not None:
+            # 5. Optimizer state (saved whenever optimizer is provided and requested)
+            if optimizer is not None and (sync_optimizer or not is_best):
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
                 opt_sd = optimizer.state_dict()
                 cpu_opt_state = {}
                 for k, v in opt_sd.items():
@@ -4822,7 +4887,7 @@ def save_checkpoint(
                         cpu_opt_state[k] = {}
                         for pid, pdata in v.items():
                             cpu_opt_state[k][pid] = {
-                                sk: sv.cpu() if isinstance(sv, torch.Tensor) else sv
+                                sk: (sv if sv.device.type == "cpu" else sv.cpu()) if isinstance(sv, torch.Tensor) else sv
                                 for sk, sv in pdata.items()
                             }
                     else:
@@ -4851,7 +4916,7 @@ def save_checkpoint(
                             w_cpu_opt_state[k] = {}
                             for pid, pdata in v.items():
                                 w_cpu_opt_state[k][pid] = {
-                                    sk: sv.cpu() if isinstance(sv, torch.Tensor) else sv
+                                    sk: (sv if sv.device.type == "cpu" else sv.cpu()) if isinstance(sv, torch.Tensor) else sv
                                     for sk, sv in pdata.items()
                                 }
                         else:
@@ -4863,8 +4928,11 @@ def save_checkpoint(
                     opt_save_dict,
                     os.path.join(staging_dir, "optimizer_state.pt"),
                 )
-                del cpu_opt_state, scaler_state
+                del opt_save_dict, cpu_opt_state, scaler_state
                 gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                print(f"[Checkpoint] Optimizer state staged. {get_memory_status_str()}", flush=True)
 
             # 6. STAGE_METADATA.json
             metadata = {
@@ -4883,7 +4951,7 @@ def save_checkpoint(
                 json.dump(metadata, f, indent=2)
 
             elapsed_write = time.time() - t0
-            print(f"[Checkpoint] Staged [{tag}] artifacts ({elapsed_write:.1f}s) -> {staging_dir}", flush=True)
+            print(f"[Checkpoint] Staged [{tag}] artifacts ({elapsed_write:.1f}s) -> {staging_dir} {get_memory_status_str()}", flush=True)
 
             # Step 2: Verify staged artifacts
             is_valid = verify_checkpoint_integrity(
@@ -7700,7 +7768,7 @@ def main():
                             is_best=True,
                             is_completed=False,
                             sync_to_gdrive=args.sync_all_to_gdrive,
-                            sync_optimizer=(optimizer is not None),
+                            sync_optimizer=False,
                             dataset=dataset,
                             shard_ledger=shard_ledger,
                             data_cursor=best_loss_cursor,

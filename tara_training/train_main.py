@@ -320,15 +320,18 @@ def execute_optimizer_step(
     is_non_finite_grad = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
 
     # Model Shock & Catastrophic Spike Detection
+    # Note: torch.nn.utils.clip_grad_norm_ already safely scales all gradients down to max_grad_norm (e.g. 1.0).
+    # Normal unclipped gradient norms (10 - 200) are safely clipped and must NOT be skipped.
+    # Only extreme numerical explosions (> 1000x max_grad_norm) or non-finite values require skipping.
     is_shock_detected = False
     if not is_non_finite_grad:
-        if grad_norm_val > (15.0 * max_grad_norm):
+        if grad_norm_val > (1000.0 * max_grad_norm):
             is_shock_detected = True
-            print(f"[Model Shock Guard] Gradient explosion shock detected (norm={grad_norm_val:.2f} > {15.0 * max_grad_norm:.1f}). Skipping step to prevent weight destruction!", flush=True)
-        elif cur_loss is not None and ema_loss is not None and ema_loss > 0.2:
-            if cur_loss > (4.0 * ema_loss):
+            print(f"[Model Shock Guard] Catastrophic gradient explosion detected (norm={grad_norm_val:.2f} > {1000.0 * max_grad_norm:.1f}). Skipping step to prevent weight destruction!", flush=True)
+        elif cur_loss is not None and ema_loss is not None and ema_loss > 0.5:
+            if cur_loss > (10.0 * ema_loss) and cur_loss > 15.0:
                 is_shock_detected = True
-                print(f"[Model Shock Guard] Sudden loss spike detected (Loss={cur_loss:.4f} vs EMA={ema_loss:.4f}). Skipping step to protect model stability!", flush=True)
+                print(f"[Model Shock Guard] Sudden catastrophic loss spike detected (Loss={cur_loss:.4f} vs EMA={ema_loss:.4f}). Skipping step to protect model stability!", flush=True)
 
     w_grad_norm_val = 0.0
     if world_model is not None and world_optimizer is not None:
@@ -1346,11 +1349,17 @@ def main():
                 )
 
                 if is_step_skipped:
-                    print(
-                        f"[Gradient Loss Scaler] Inf/NaN gradient detected. Scaler reduced scale factor: "
-                        f"{scale_before} -> {scale_after}. Step skipped safely; resuming next window.",
-                        flush=True,
-                    )
+                    if scale_after < scale_before:
+                        print(
+                            f"[Gradient Loss Scaler] Non-finite gradient detected. Scaler adjusted scale factor: "
+                            f"{scale_before} -> {scale_after}. Step skipped safely; resuming next window.",
+                            flush=True,
+                        )
+                    elif is_shock_detected:
+                        print(
+                            f"[Model Shock Guard] Step skipped safely to protect model stability; resuming next window.",
+                            flush=True,
+                        )
                     optimizer.zero_grad(set_to_none=True)
                     if world_optimizer is not None:
                         world_optimizer.zero_grad(set_to_none=True)

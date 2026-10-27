@@ -13,13 +13,12 @@ echo "==========================================================================
 
 # 0. Proactive Disk Hygiene: Reclaim disk space from stale scratch files, caches, and unused debug builds
 echo "[DISK CLEANUP] Reclaiming disk space and stopping any stale processes..."
-killall -9 tara_training_stages tara_gpu_step_test manual_trainer 2>/dev/null || true
+killall -9 tara_training_stages 2>/dev/null || true
 rm -rf /tmp/tara_moments_* /tmp/tara_* /tmp/tmp_tara_* 2>/dev/null || true
 rm -rf /root/.julia /content/sample_data 2>/dev/null || true
 rm -rf storage/datasets/*/.cache storage/models/*/.cache 2>/dev/null || true
 rm -f storage/datasets/*/indiccorp_v2* storage/datasets/*/*/indiccorp_v2* 2>/dev/null || true
 rm -rf target/debug target/release/deps target/release/build target/release/incremental 2>/dev/null || true
-rm -rf storage/checkpoints/gpu_step_test_parity 2>/dev/null || true
 rm -rf /root/.cache/huggingface /root/.cache/pip /root/.cache/torch /root/.cargo/registry/cache ~/.cache/* 2>/dev/null || true
 if command -v apt-get >/dev/null 2>&1; then
     apt-get clean 2>/dev/null || true
@@ -129,33 +128,21 @@ else
 fi
 
 TRAINER_MODE="${TRAINER_MODE:-python}"
-CANARY_MODE="${CANARY_MODE:-0}"
-CANARY_EXTRA_ARGS=""
-if [ "$CANARY_MODE" = "1" ] || [ "${1:-}" = "--canary" ]; then
-    echo "=============================================================================="
-    echo "  [CANARY VALIDATION RUNNER ACTIVE (15 Steps, Tesla T4 Safe Settings)]"
-    echo "=============================================================================="
-    CANARY_EXTRA_ARGS="--canary"
-    TRAIN_BATCH_SIZE=1
-    GRAD_ACCUM=4
-    STAGE_MAX_STEPS=15
-else
-    if command -v nvidia-smi >/dev/null 2>&1; then
-        GPU_MEM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 || echo "0")
-        if [ "$GPU_MEM_MB" -ge 30000 ] 2>/dev/null; then
-            TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-2}"
-            GRAD_ACCUM="${GRAD_ACCUM:-8}"
-        else
-            # For GPUs <= 16GB (Tesla T4), micro-batch=1 avoids OOM while grad_accum=16 preserves effective batch size 16
-            TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-1}"
-            GRAD_ACCUM="${GRAD_ACCUM:-16}"
-        fi
-    else
-        TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-1}"
+if command -v nvidia-smi >/dev/null 2>&1; then
+    GPU_MEM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 || echo "0")
+    if [ "$GPU_MEM_MB" -ge 30000 ] 2>/dev/null; then
+        TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-2}"
         GRAD_ACCUM="${GRAD_ACCUM:-8}"
+    else
+        # For GPUs <= 16GB (Tesla T4), micro-batch=1 avoids OOM while grad_accum=16 preserves effective batch size 16
+        TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-1}"
+        GRAD_ACCUM="${GRAD_ACCUM:-16}"
     fi
-    STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-0}"
+else
+    TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-1}"
+    GRAD_ACCUM="${GRAD_ACCUM:-8}"
 fi
+STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-0}"
 
 FULL_DATASET="${FULL_DATASET:-1}"
 FULL_DATASET_EXTRA=""
@@ -174,10 +161,6 @@ fi
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-500}"
 SKIP_SAVE_STEPS="${SKIP_SAVE_STEPS:-0}"
 export SKIP_SAVE_STEPS
-BEST_CHECKPOINT_INTERVAL="${BEST_CHECKPOINT_INTERVAL:-25}"
-export BEST_CHECKPOINT_INTERVAL
-MIN_BEST_LOSS_DELTA="${MIN_BEST_LOSS_DELTA:-0.20}"
-export MIN_BEST_LOSS_DELTA
 PROMOTE_MAX_STEP="${PROMOTE_MAX_STEP:-0}"
 export PROMOTE_MAX_STEP
 DOMAIN_WEIGHTS="${DOMAIN_WEIGHTS:-02_code:0.25,01_math:0.15,04_kannada:0.15,12_reasoning:0.15,03_stem:0.10,08_world_model:0.05,11_tool_use:0.05,13_debugging:0.02,sft:0.02,05_philosophy:0.012,06_social:0.012,07_engineering:0.012,09_audio:0.012,10_vision:0.012}"
@@ -715,9 +698,9 @@ ingest_model_asset "neural_model_v1" "storage/models/tara_candidate_v1" "Candida
 ingest_model_asset "world_model_v1" "storage/models/tara_world_model" "World Model"
 
 # 5. Mandatory Pre-Training Verification, Deep De-duplication & Tokenizer Gate
-if [ ! -f "./target/release/tara_pretraining_gate" ] || [ ! -f "./target/release/manual_trainer" ]; then
-    echo "[BUILD] Compiling TARA Pre-Training Gate & Manual Trainer binaries..."
-    cargo build --release --bin tara_pretraining_gate --bin manual_trainer
+if [ ! -f "./target/release/tara_pretraining_gate" ]; then
+    echo "[BUILD] Compiling TARA Pre-Training Gate binary..."
+    cargo build --release --bin tara_pretraining_gate
     # Reclaim intermediate Cargo build artifacts to preserve 10-15 GB disk space while keeping compiled binaries
     rm -rf target/release/deps target/release/build target/release/incremental target/debug ~/.cargo/registry/cache 2>/dev/null || true
 fi
@@ -745,15 +728,6 @@ rm -rf target/release/deps target/release/build target/release/incremental targe
 rm -rf /root/.cache/huggingface /root/.cache/pip ~/.cache/huggingface ~/.cache/pip 2>/dev/null || true
 if command -v df >/dev/null 2>&1; then
     df -h / | awk 'NR==2 {print "[DISK] Available disk space before training: " $4 " free / " $2 " total (" $5 " used)"}'
-fi
-
-# 5b. Optional Production-Model GPU 1-Step Diagnostic (Bypassed by default to start training immediately)
-if [ "${RUN_GPU_STEP_TEST:-0}" = "1" ] || [ "${RUN_GPU_STEP_TEST:-}" = "always" ]; then
-    echo "=== [PRODUCTION-MODEL GPU 1-STEP EXECUTION & MEMORY DIAGNOSTIC] ==="
-    ./target/release/tara_gpu_step_test \
-        --model storage/models/tara_candidate_v1 \
-        --device auto \
-        --precision auto || true
 fi
 
 # 6. Execute Autonomous Extensible Multi-Stage Training Pipeline (Stages 0..5)
@@ -813,8 +787,6 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --max-seq-len "$TARA_MAX_SEQ_LEN" \
         --checkpoint-interval "$CHECKPOINT_INTERVAL" \
         --skip-save-steps "$SKIP_SAVE_STEPS" \
-        --best-checkpoint-interval "$BEST_CHECKPOINT_INTERVAL" \
-        --min-best-loss-delta "$MIN_BEST_LOSS_DELTA" \
         --promote-max-step "$PROMOTE_MAX_STEP" \
         --domain-weights "$DOMAIN_WEIGHTS" \
         --hf-repo "$HF_DATASET_REPO" \
@@ -824,7 +796,6 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --max-shard-bytes 0 \
         $JOINT_WORLD_FLAG \
         $GDRIVE_SYNC_FLAGS \
-        $CANARY_EXTRA_ARGS \
         $FULL_DATASET_EXTRA \
         $GRAD_CHECKPOINT_FLAG
 

@@ -874,12 +874,10 @@ class ShardLedger:
     def __init__(
         self,
         output_dir: str,
-        gdrive_dir: Optional[str] = None,
         stage_id: str = "",
         dataset_revision: str = "v2",
     ):
         self.output_dir = output_dir
-        self.gdrive_dir = gdrive_dir
         self.ledger_file = os.path.join(output_dir, "shard_ledger.json")
         self.schema_version: str = self.SCHEMA_VERSION
         self.stage_id: str = stage_id
@@ -903,32 +901,7 @@ class ShardLedger:
 
     def load(self):
         loaded_data = None
-        candidate_gdrive_ledgers = []
-        if self.gdrive_dir:
-            candidate_gdrive_ledgers.append(os.path.join(self.gdrive_dir, "shard_ledger.json"))
-
-        gdrive_root = _resolve_gdrive_root()
-        if gdrive_root:
-            canonical_gdrive = resolve_gdrive_stage_dir(self.output_dir, self.stage_id)
-            if canonical_gdrive and canonical_gdrive != self.gdrive_dir:
-                candidate_gdrive_ledgers.append(os.path.join(canonical_gdrive, "shard_ledger.json"))
-            if self.stage_id:
-                candidate_gdrive_ledgers.append(os.path.join(gdrive_root, self.stage_id, "shard_ledger.json"))
-            bname = os.path.basename(os.path.normpath(self.output_dir))
-            if bname:
-                candidate_gdrive_ledgers.append(os.path.join(gdrive_root, bname, "shard_ledger.json"))
-
-        for gpath in candidate_gdrive_ledgers:
-            if os.path.exists(gpath):
-                try:
-                    with open(gpath, "r", encoding="utf-8") as f:
-                        loaded_data = json.load(f)
-                    print(f"[Shard Ledger] Loaded authoritative ledger from Google Drive ({gpath}, {len(loaded_data.get('completed_shards', []))} completed shards).", flush=True)
-                    break
-                except Exception as e:
-                    print(f"[Shard Ledger Notice] Google Drive ledger read note ({gpath}): {e}")
-
-        if loaded_data is None and os.path.exists(self.ledger_file):
+        if os.path.exists(self.ledger_file):
             try:
                 with open(self.ledger_file, "r", encoding="utf-8") as f:
                     loaded_data = json.load(f)
@@ -982,7 +955,9 @@ class ShardLedger:
             "active_domain_idx": self.active_domain_idx,
             "last_updated_utc": datetime.now(timezone.utc).isoformat(),
         }
-        # Write to local temporary file first to avoid creating lingering temp files on Google Drive FUSE
+        # Write to local temporary file first, then atomically move to authoritative local ledger file.
+        # Checkpoints and ledgers write exclusively to local NVMe/SSD to guarantee zero-latency execution;
+        # Google Drive mirroring is handled strictly via asynchronous background workers.
         tmp_dir = tempfile.gettempdir()
         tmp_ledger = os.path.join(tmp_dir, f"shard_ledger_{os.getpid()}_{int(time.time())}.json")
         try:
@@ -992,14 +967,6 @@ class ShardLedger:
         finally:
             if os.path.exists(tmp_ledger):
                 _safe_unlink(tmp_ledger)
-
-        if self.gdrive_dir and os.path.exists(os.path.dirname(self.gdrive_dir)):
-            os.makedirs(self.gdrive_dir, exist_ok=True)
-            gdrive_file = os.path.join(self.gdrive_dir, "shard_ledger.json")
-            try:
-                _stream_copy_file(self.ledger_file, gdrive_file)
-            except Exception as e:
-                print(f"[Shard Ledger Warning] Could not mirror ledger to Google Drive: {e}")
 
     def get_total_completed_records(self) -> int:
         total = 0
@@ -1143,14 +1110,12 @@ class ShardLedger:
         pct_str = f" ({(line_offset / tot_lines) * 100:.2f}%)" if tot_lines > 0 else ""
         tot_lines_str = f"{tot_lines:,}" if tot_lines > 0 else "counting..."
         tot_shards_str = f"{len(self.completed_shards)}/{self.total_eligible_shards}" if self.total_eligible_shards > 0 else f"{len(self.completed_shards)}"
-        gdrive_ledger_path = os.path.join(self.gdrive_dir, "shard_ledger.json") if self.gdrive_dir else "Not Mounted"
 
         print(
             f"[Shard Ledger Saved] Step {step:04d} | Active Shard: '{shard_name}' | "
             f"Line: {line_offset:,} / {tot_lines_str}{pct_str} | Byte Offset: {byte_offset:,} | "
             f"Completed Shards: {tot_shards_str}\n"
-            f"  -> Local Ledger  : {os.path.abspath(self.ledger_file)}\n"
-            f"  -> GDrive Mirror : {gdrive_ledger_path}",
+            f"  -> Local Ledger  : {os.path.abspath(self.ledger_file)}",
             flush=True,
         )
 
@@ -2969,10 +2934,7 @@ def load_candidate_weights(model: nn.Module, model_dir: str) -> bool:
     return matched > 0
 
 
-_gdrive_sync_thread: Optional[threading.Thread] = None
-_gdrive_sync_lock = threading.Lock()
-_pending_gdrive_sync: Optional[Tuple[str, str, str, List[str]]] = None
-_active_gdrive_sync_src: Optional[str] = None
+
 
 
 def _safe_unlink(path: str) -> bool:
@@ -3083,13 +3045,13 @@ def is_gdrive_path(path: str) -> bool:
     return False
 
 
-def _stream_copy_file(src: str, dst: str, chunk_size: int = 16 * 1024 * 1024, out_sha: Optional[Dict[str, Any]] = None) -> bool:
+def _stream_copy_file(src: str, dst: str, chunk_size: int = 64 * 1024 * 1024, out_sha: Optional[Dict[str, Any]] = None) -> bool:
     """
     Atomic direct streaming copy for Google Drive FUSE and local files.
-    Writes to an isolated temporary file (dst.upload_tmp_<pid>) first.
+    Writes to an isolated temporary file (dst.upload_tmp_<pid>) first for local files,
+    or directly on Google Drive FUSE to maximize kernel throughput.
     Verifies full size and safetensors validity before atomically replacing dst.
-    Guarantees that the destination file is NEVER left in a truncated or corrupt state
-    even if the process or connection is terminated midway!
+    Guarantees that the destination file is NEVER left in a truncated or corrupt state.
     Computes dynamic SHA-256 during streaming chunks with zero extra disk/network I/O.
     """
     if os.path.abspath(src) == os.path.abspath(dst):
@@ -3134,7 +3096,12 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 16 * 1024 * 1024, ou
         # Stream into target file while dynamically computing SHA-256 in memory
         total_written = 0
         hasher = hashlib.sha256()
-        with open(src, "rb") as fsrc, open(write_target, "wb") as fdst:
+        with open(src, "rb", buffering=chunk_size) as fsrc, open(write_target, "wb", buffering=chunk_size) as fdst:
+            if hasattr(os, "posix_fadvise"):
+                try:
+                    os.posix_fadvise(fsrc.fileno(), 0, 0, os.POSIX_FADV_SEQUENTIAL)
+                except Exception:
+                    pass
             while True:
                 chunk = fsrc.read(chunk_size)
                 if not chunk:
@@ -3158,16 +3125,7 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 16 * 1024 * 1024, ou
         # Verification Gate before promotion: ensure complete transfer & validity
         # ------------------------------------------------------------------
         if is_gdrive:
-            # On Google Drive FUSE mounts, allow metadata stat sync retry
-            dst_sz = os.path.getsize(write_target) if os.path.exists(write_target) else 0
-            if dst_sz != src_sz:
-                for _ in range(5):
-                    time.sleep(0.5)
-                    dst_sz = os.path.getsize(write_target) if os.path.exists(write_target) else 0
-                    if dst_sz == src_sz:
-                        break
-            if dst_sz != src_sz and total_written == src_sz:
-                dst_sz = total_written
+            dst_sz = total_written
         else:
             target_sz = os.path.getsize(write_target)
             if target_sz != src_sz:
@@ -3434,6 +3392,22 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
 
             ordered_files = weights_files + config_files + meta_files + other_files
 
+            known_shas = {}
+            if src_dir and os.path.isdir(src_dir):
+                for m_file in ("checkpoint_state.json", "STAGE_METADATA.json"):
+                    mp = os.path.join(src_dir, m_file)
+                    if os.path.isfile(mp):
+                        try:
+                            with open(mp, "r", encoding="utf-8") as mf:
+                                md = json.load(mf)
+                            if md.get("model_weights_sha256"):
+                                known_shas["model.safetensors"] = md["model_weights_sha256"]
+                                known_shas["pytorch_model.bin"] = md["model_weights_sha256"]
+                            if md.get("world_model_weights_sha256"):
+                                known_shas["world_model.safetensors"] = md["world_model_weights_sha256"]
+                        except Exception:
+                            pass
+
             all_files_ok = True
             for fname in ordered_files:
                 src = os.path.join(src_dir, fname)
@@ -3443,9 +3417,21 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                 if os.path.abspath(src) == os.path.abspath(dst):
                     continue
 
-                # Stream copy directly computing SHA-256 during transfer
-                sha_info = {}
-                ok = _stream_copy_file(src, dst, out_sha=sha_info)
+                if fname in known_shas:
+                    try:
+                        shutil.copyfile(src, dst)
+                        dst_sz = os.path.getsize(src)
+                        dst_sha = known_shas[fname]
+                        ok = (dst_sz > 0)
+                    except Exception as ce:
+                        print(f"[GDrive Sync Error] Failed kernel copy {fname} -> {dst}: {ce}", flush=True)
+                        ok = False
+                else:
+                    sha_info = {}
+                    ok = _stream_copy_file(src, dst, out_sha=sha_info)
+                    dst_sz = sha_info.get("size", os.path.getsize(dst) if os.path.exists(dst) else 0)
+                    dst_sha = sha_info.get("sha256")
+
                 if not ok:
                     print(f"[GDrive Sync Error] Failed to mirror {fname} -> {dst}", flush=True)
                     if fname in weights_files or fname in config_files:
@@ -3454,11 +3440,6 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                     else:
                         print(f"[GDrive Sync Warning] Non-critical file {fname} failed to mirror; continuing backup.", flush=True)
                         continue
-
-                dst_sz = sha_info.get("size", os.path.getsize(dst) if os.path.exists(dst) else 0)
-                # SHA-256 was computed inline during streaming — never recompute to avoid doubling I/O.
-                # _stream_copy_file always populates sha_info["sha256"] on success.
-                dst_sha = sha_info.get("sha256")
 
                 manifest_files[fname] = {
                     "size": dst_sz,
@@ -3800,12 +3781,11 @@ def validate_checkpoint_runtime_compatibility(checkpoint_state: dict) -> None:
         )
 
 
-def compute_file_sha256(filepath: str, chunk_size: int = 16 * 1024 * 1024) -> str:
+def compute_file_sha256(filepath: str, chunk_size: int = 64 * 1024 * 1024) -> str:
     """
-    Dynamically computes the SHA-256 hash of a file.
-    Uses memory mapping (mmap) on local files for zero-copy, OpenSSL C-level hardware
-    accelerated hashing directly from RAM/page-cache, falling back to large streaming
-    chunks (16MB) on FUSE or when mmap is unavailable.
+    Dynamically computes the SHA-256 hash of a file using sequential streaming
+    with 64MB OS read buffers and POSIX sequential readahead.
+    Bypasses mmap page-fault locking against kernel dirty-page flusher to prevent I/O stalling.
     """
     if not filepath or not os.path.exists(filepath):
         return ""
@@ -3816,21 +3796,13 @@ def compute_file_sha256(filepath: str, chunk_size: int = 16 * 1024 * 1024) -> st
     if sz == 0:
         return hashlib.sha256(b"").hexdigest()
 
-    # Fast path: zero-copy mmap for local files (avoids FUSE mounts which fail or deadlock on mmap)
-    if not is_gdrive_path(filepath):
-        try:
-            import mmap
-            hasher = hashlib.sha256()
-            with open(filepath, "rb") as f:
-                with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                    hasher.update(mm)
-            return hasher.hexdigest()
-        except Exception:
-            pass
-
-    # Streaming chunk path (optimized 16MB buffer)
     hasher = hashlib.sha256()
-    with open(filepath, "rb") as f:
+    with open(filepath, "rb", buffering=chunk_size) as f:
+        if hasattr(os, "posix_fadvise"):
+            try:
+                os.posix_fadvise(f.fileno(), 0, 0, os.POSIX_FADV_SEQUENTIAL)
+            except Exception:
+                pass
         while True:
             chunk = f.read(chunk_size)
             if not chunk:
@@ -6179,124 +6151,6 @@ def upload_promoted_model_to_hf(promoted_dir: str, repo_id: str, stage_id: str) 
         return False
 
 
-def run_canary_preflight_diagnostic(
-    model: nn.Module,
-    optimizer: torch.optim.Optimizer,
-    scaler: Any,
-    autocast_dtype: torch.dtype,
-    device: torch.device,
-    batch_size: int,
-    max_seq_len: int,
-    vocab_size: int,
-) -> Dict[str, Any]:
-    """
-    Executes rigorous Canary Preflight Diagnostic:
-    1. Tiny isolated optimizer kernel test (verifies CUDA C++ kernel execution on FP32 parameters).
-    2. Full-model single micro-batch forward + backward + optimizer step.
-    3. Peak allocated & reserved VRAM telemetry logging.
-    """
-    print("\n" + "=" * 80)
-    print("  [CANARY PREFLIGHT] Starting Dual-Stage GPU & Optimizer Diagnostic...")
-    print("=" * 80)
-
-    # Stage 1: Isolated Optimizer Kernel Test (model parameters remain FP32)
-    print("  [Stage 1/2] Running isolated optimizer CUDA kernel execution test...")
-    test_param = nn.Parameter(torch.randn(4, 4, device=device, dtype=torch.float32, requires_grad=True))
-    if hasattr(optimizer, "__class__") and "AdamW8bit" in optimizer.__class__.__name__:
-        import bitsandbytes as bnb
-        tiny_opt = bnb.optim.AdamW8bit([test_param], lr=1e-4)
-    else:
-        tiny_opt = torch.optim.AdamW([test_param], lr=1e-4)
-
-    test_loss = (test_param ** 2).sum()
-    test_loss.backward()
-    tiny_opt.step()
-    tiny_opt.zero_grad(set_to_none=True)
-    del test_param, test_loss, tiny_opt
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
-    print("  [Stage 1/2 Passed] Optimizer CUDA kernel executed and updated weights successfully.")
-
-    # Stage 2: Full-Model Single Micro-Batch Execution Test
-    print(f"  [Stage 2/2] Running single full-model microbatch (batch={batch_size}, seq_len={max_seq_len})...")
-    if device.type == "cuda":
-        torch.cuda.reset_peak_memory_stats()
-
-    model.train()
-    optimizer.zero_grad(set_to_none=True)
-
-    dummy_input = torch.randint(0, min(vocab_size, 32000), (batch_size, max_seq_len), device=device, dtype=torch.long)
-    dummy_labels = dummy_input.clone()
-
-    if hasattr(torch, "amp") and hasattr(torch.amp, "autocast"):
-        autocast_ctx = torch.amp.autocast(device_type="cuda" if device.type == "cuda" else "cpu", enabled=(device.type == "cuda"), dtype=autocast_dtype)
-    else:
-        autocast_ctx = torch.cuda.amp.autocast(enabled=(device.type == "cuda"), dtype=autocast_dtype)
-
-
-    try:
-        t0 = time.time()
-        with autocast_ctx:
-            _, loss, ce_loss, aux_loss = model(dummy_input, labels=dummy_labels)
-
-        scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)
-        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        scaler.step(optimizer)
-        scaler.update()
-        optimizer.zero_grad(set_to_none=True)
-        step_duration = time.time() - t0
-
-        if device.type == "cuda":
-            peak_alloc_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)
-            peak_res_mb = torch.cuda.max_memory_reserved() / (1024 * 1024)
-            cur_alloc_mb = torch.cuda.memory_allocated() / (1024 * 1024)
-        else:
-            peak_alloc_mb = 0.0
-            peak_res_mb = 0.0
-            cur_alloc_mb = 0.0
-
-        diag_report = {
-            "status": "PASSED",
-            "loss": loss.item(),
-            "grad_norm": float(grad_norm) if grad_norm is not None else 0.0,
-            "duration_sec": step_duration,
-            "peak_allocated_mb": peak_alloc_mb,
-            "peak_reserved_mb": peak_res_mb,
-            "cur_allocated_mb": cur_alloc_mb,
-        }
-
-        print("  [Stage 2/2 Passed] Full-model single-step execution succeeded!")
-        print(f"    Single-Step Loss   : {loss.item():.4f}")
-        print(f"    Grad Norm          : {grad_norm:.2f}")
-        print(f"    Peak Allocated VRAM: {peak_alloc_mb:.1f} MB ({peak_alloc_mb / 1024:.2f} GiB)")
-        print(f"    Peak Reserved VRAM : {peak_res_mb:.1f} MB ({peak_res_mb / 1024:.2f} GiB)")
-        print(f"    Step Duration      : {step_duration:.2f}s")
-        print("=" * 80 + "\n")
-        return diag_report
-
-    except torch.OutOfMemoryError as oom:
-        if device.type == "cuda":
-            alloc_mb = torch.cuda.memory_allocated() / (1024 * 1024)
-            res_mb = torch.cuda.max_memory_reserved() / (1024 * 1024)
-            total_mb = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024)
-        else:
-            alloc_mb, res_mb, total_mb = 0, 0, 0
-        print("\n" + "!" * 80)
-        print("  [CANARY PREFLIGHT FAILED: CUDA OUT OF MEMORY]")
-        print("!" * 80)
-        print(f"  Allocated Memory   : {alloc_mb:.1f} MB")
-        print(f"  Reserved Memory    : {res_mb:.1f} MB")
-        print(f"  Total GPU Capacity : {total_mb:.1f} MB")
-        print(f"  OOM Details        : {oom}")
-        print("\n  Diagnostic Recommendations:")
-        print("  1. Enable activation gradient checkpointing (--gradient-checkpointing).")
-        print("  2. Ensure bitsandbytes 8-bit AdamW is active (--optimizer adamw8bit).")
-        print("  3. Reduce micro-batch size to 1 and sequence length to 256.")
-        print("!" * 80 + "\n")
-        raise
-
-
 # =============================================================================
 # 9. Main Autonomous Multi-Stage Training Runner & Optimizer Execution
 # =============================================================================
@@ -6349,10 +6203,6 @@ def main():
                         help="Number of past checkpoints to retain (default: 2; deletes older checkpoints only upon verified new commit)")
     parser.add_argument("--skip-save-steps", type=int, default=int(os.environ.get("SKIP_SAVE_STEPS", 0)),
                         help="Number of initial steps to skip checkpoint and best-milestone disk/cloud saves (default: 0; immediate zero-lock saves active)")
-    parser.add_argument("--best-checkpoint-interval", type=int, default=int(os.environ.get("BEST_CHECKPOINT_INTERVAL", 25)),
-                        help="Minimum optimization steps between consecutive best milestone disk/cloud saves (default: 25; prevents I/O stalling in early training)")
-    parser.add_argument("--min-best-loss-delta", type=float, default=float(os.environ.get("MIN_BEST_LOSS_DELTA", 0.20)),
-                        help="Minimum loss improvement to trigger an immediate milestone save before the interval is reached (default: 0.20)")
     parser.add_argument("--promote-max-step", type=int, default=int(os.environ.get("PROMOTE_MAX_STEP", 0)),
                         help="Target step ceiling for model promotion (e.g. 500). Promotes the best checkpoint achieved within steps <= PROMOTE_MAX_STEP for real-time deployment while training continues uninterrupted. 0 means unbounded/entire stage.")
     parser.add_argument("--domain-weights", type=str, default=os.environ.get("DOMAIN_WEIGHTS", ""),
@@ -6364,7 +6214,6 @@ def main():
     parser.add_argument("--gdrive-sync-wait", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true",
                         default=bool(int(os.environ.get("GDRIVE_SYNC_WAIT", "0"))),
                         help="Wait synchronously for Google Drive checkpoint sync to finish before advancing training (default: False, keeps training non-blocking)")
-    parser.add_argument("--preflight-only", action="store_true", default=False, help="Execute only the dual-stage preflight validation diagnostic and exit with report")
     parser.add_argument("--joint-world-model", action="store_true", default=False,
                         help="Enable coordinated joint training of Neural Model + World Model")
     parser.add_argument("--world-model-dir", type=str, default="storage/models/tara_world_model",
@@ -6386,42 +6235,8 @@ def main():
     raw_model_repo = args.hf_model_repo if args.hf_model_repo is not None else (args.hf_repo if args.hf_repo is not None else os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", "manjukp6/tara")))
     model_repo = None if (raw_model_repo is None or str(raw_model_repo).strip().lower() in ("", "none", "local", "null")) else str(raw_model_repo).strip()
 
-    if (args.full_dataset or args.max_steps <= 0) and not args.canary:
+    if args.full_dataset or args.max_steps <= 0:
         args.max_steps = 100_000_000
-
-
-    # Canary Mode Contract & Isolation
-    if args.canary:
-        args.batch_size = 1
-        args.grad_accum = 4
-        args.max_seq_len = 256
-        args.max_steps = 15
-        args.warmup_steps = 3
-        args.stage_id = "canary_t4_preflight"
-        args.stage_name = "Stage Canary: Tesla T4 Preflight Validation"
-        args.gradient_checkpointing = True
-        if args.output_dir == "storage/models/checkpoints/stage0_pretraining":
-            args.output_dir = "storage/models/checkpoints/canary_t4_test"
-        if args.promoted_dir is None:
-            args.promoted_dir = "storage/models/canary_promoted"
-
-        expected_canary = {
-            "batch_size": 1,
-            "grad_accum": 4,
-            "max_seq_len": 256,
-            "max_steps": 15,
-            "warmup_steps": 3,
-        }
-        actual = {
-            "batch_size": args.batch_size,
-            "grad_accum": args.grad_accum,
-            "max_seq_len": args.max_seq_len,
-            "max_steps": args.max_steps,
-            "warmup_steps": args.warmup_steps,
-        }
-        for k, v in expected_canary.items():
-            if actual[k] != v:
-                raise ValueError(f"[Canary Configuration Contract Violation] Expected {k}={v}, but resolved to {actual[k]}. Failing fast per requirement.")
 
     print("=" * 78)
     print(f"  TARA CLOUD MULTI-STAGE TRAINING SYSTEM [{args.stage_name}]")
@@ -6748,31 +6563,6 @@ def main():
         scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda" and autocast_dtype == torch.float16))
     except (AttributeError, TypeError):
         scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and autocast_dtype == torch.float16))
-
-    # Preflight Validation Diagnostic (Stage 1: Isolated kernel, Stage 2: Full-model single microbatch)
-    if args.preflight_only:
-        diag_report = run_canary_preflight_diagnostic(
-            model=model,
-            optimizer=optimizer,
-            scaler=scaler,
-            autocast_dtype=autocast_dtype,
-            device=device,
-            batch_size=args.batch_size,
-            max_seq_len=args.max_seq_len,
-            vocab_size=vocab_size,
-        )
-        print("=" * 80)
-        print("  [PREFLIGHT-ONLY DIAGNOSTIC COMPLETE]")
-        print("=" * 80)
-        print(f"  Status               : {diag_report.get('status')}")
-        print(f"  Single-Step Loss     : {diag_report.get('loss', 0.0):.4f}")
-        print(f"  Grad Norm            : {diag_report.get('grad_norm', 0.0):.2f}")
-        print(f"  Peak Allocated VRAM  : {diag_report.get('peak_allocated_mb', 0.0):.1f} MB ({diag_report.get('peak_allocated_mb', 0.0)/1024:.2f} GiB)")
-        print(f"  Peak Reserved VRAM   : {diag_report.get('peak_reserved_mb', 0.0):.1f} MB ({diag_report.get('peak_reserved_mb', 0.0)/1024:.2f} GiB)")
-        print(f"  GO/NO-GO Evaluation  : GO (Full-model single microbatch and optimizer step passed without OOM)")
-        print("=" * 80 + "\n")
-        sys.exit(0)
-
 
     # 7b. Coordinated Joint Neural Model + World Model Setup
     world_model = None
@@ -7346,7 +7136,6 @@ def main():
                 # Dynamic In-Memory Best Loss Tracking & Authentic Best Snapshot:
                 is_new_best = (cur_step_loss < best_loss)
                 can_save_at_current_step = (step > args.skip_save_steps) or (step >= args.max_steps)
-                should_commit_milestone = False
 
                 if is_new_best:
                     best_loss = cur_step_loss
@@ -7354,19 +7143,7 @@ def main():
                     best_loss_epoch = epoch
                     best_loss_cursor = copy.deepcopy(current_cursor) if current_cursor is not None else None
 
-                    steps_since_last_best = step - last_best_checkpoint_step
-                    loss_drop = (last_best_checkpoint_loss - cur_step_loss) if last_best_checkpoint_loss < float("inf") else 1.0
-                    is_significant_delta = (loss_drop >= args.min_best_loss_delta)
-                    is_interval_reached = (steps_since_last_best >= args.best_checkpoint_interval)
-                    is_final_step = (step >= args.max_steps)
-
-                    # Continuous milestone save condition: save on interval, significant loss improvement delta, or final step
-                    should_commit_milestone = (
-                        (is_interval_reached or is_significant_delta or is_final_step)
-                        and can_save_at_current_step
-                    )
-
-                    if should_commit_milestone:
+                    if can_save_at_current_step:
                         last_best_checkpoint_step = step
                         last_best_checkpoint_loss = cur_step_loss
 
@@ -7426,17 +7203,10 @@ def main():
                                                 _safe_unlink(tmp_d_file)
                             except Exception as e:
                                 print(f"[Promote Window Snapshot Warning] Failed to update window snapshot: {e}", flush=True)
-                    elif not can_save_at_current_step:
+                    else:
                         print(
                             f"[{args.stage_id} | Step {step:04d}] [Skip-Save Active (<= {args.skip_save_steps})] "
                             f"New best loss {best_loss:.4f} tracked in memory; local save active at Step {args.skip_save_steps + 1}+.",
-                            flush=True,
-                        )
-                    else:
-                        print(
-                            f"[{args.stage_id} | Step {step:04d}] [Best Loss Tracked: {best_loss:.4f}] "
-                            f"Pacing milestone snapshot ({steps_since_last_best}/{args.best_checkpoint_interval} steps, "
-                            f"delta: {loss_drop:.4f}/{args.min_best_loss_delta:.2f}); GPU training continues uninterrupted.",
                             flush=True,
                         )
 

@@ -1271,7 +1271,8 @@ def main():
 
             try:
                 with autocast_ctx:
-                    _, loss, ce_loss, aux_loss = model(inputs, labels=labels)
+                    attn_mask = (inputs != 0).long() if (inputs == 0).any() else None
+                    _, loss, ce_loss, aux_loss = model(inputs, labels=labels, attention_mask=attn_mask)
                     loss_scaled = loss / args.grad_accum
 
                 scaler.scale(loss_scaled).backward()
@@ -1295,7 +1296,8 @@ def main():
                     w_labels = w_labels.to(device, non_blocking=True)
 
                     with autocast_ctx:
-                        _, w_loss, _, _ = world_model(w_inputs, labels=w_labels)
+                        w_attn_mask = (w_inputs != 0).long() if (w_inputs == 0).any() else None
+                        _, w_loss, _, _ = world_model(w_inputs, labels=w_labels, attention_mask=w_attn_mask)
                         w_loss_scaled = (w_loss * args.lambda_world) / args.grad_accum
 
                     world_scaler.scale(w_loss_scaled).backward()

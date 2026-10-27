@@ -324,7 +324,7 @@ class TaraAttention(nn.Module):
         v = v.transpose(1, 2)
 
         # Flash / SDPA scaled dot product attention with guaranteed causality
-        if mask is not None:
+        if mask is not None and not (mask.dim() == 2 and mask.bool().all()):
             if mask.dim() == 2:
                 causal_mask = torch.triu(torch.full((seqlen, seqlen), float("-inf"), device=x.device, dtype=x.dtype), diagonal=1)
                 pad_mask = torch.zeros((bsz, 1, 1, seqlen), device=x.device, dtype=x.dtype)
@@ -393,7 +393,12 @@ class TaraModel(nn.Module):
         self.register_buffer("rope_cos", cos, persistent=False)
         self.register_buffer("rope_sin", sin, persistent=False)
 
-    def forward(self, input_ids: Optional[torch.Tensor] = None, inputs_embeds: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(
+        self,
+        input_ids: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         if input_ids is not None and input_ids.dim() == 1:
             input_ids = input_ids.unsqueeze(0)
         if inputs_embeds is not None and inputs_embeds.dim() == 2:
@@ -422,11 +427,11 @@ class TaraModel(nn.Module):
             if self.gradient_checkpointing and self.training:
                 def create_custom_forward(module):
                     def custom_forward(*inputs):
-                        return module(inputs[0], inputs[1], inputs[2])
+                        return module(inputs[0], inputs[1], inputs[2], inputs[3] if len(inputs) > 3 else None)
                     return custom_forward
-                h = torch.utils.checkpoint.checkpoint(create_custom_forward(layer), h, cos, sin, use_reentrant=False)
+                h = torch.utils.checkpoint.checkpoint(create_custom_forward(layer), h, cos, sin, attention_mask, use_reentrant=False)
             else:
-                h = layer(h, cos, sin)
+                h = layer(h, cos, sin, attention_mask)
 
         return self.norm(h)
 
@@ -598,6 +603,7 @@ class TaraForCausalLM(nn.Module):
         input_ids: Optional[torch.Tensor] = None,
         labels: Optional[torch.Tensor] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
         images: Optional[torch.Tensor] = None,
         audio: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]:
@@ -645,7 +651,7 @@ class TaraForCausalLM(nn.Module):
 
             inputs_embeds = embeds
 
-        hidden_states = self.model(inputs_embeds=inputs_embeds)
+        hidden_states = self.model(inputs_embeds=inputs_embeds, attention_mask=attention_mask)
 
         total_loss = None
         ce_loss = None

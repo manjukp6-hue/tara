@@ -3963,22 +3963,10 @@ def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: L
                                 }, bf, indent=2)
                         except Exception:
                             pass
-                        # Purge stale legacy best_checkpoint directory if older than current best
-                        legacy_best = os.path.join(stage_dir, "best_checkpoint")
-                        if os.path.isdir(legacy_best):
-                            try:
-                                l_st_file = os.path.join(legacy_best, "checkpoint_state.json")
-                                if os.path.isfile(l_st_file):
-                                    with open(l_st_file, "r", encoding="utf-8") as l_f:
-                                        l_st = json.load(l_f)
-                                    if int(l_st.get("step", -1)) < expected_step:
-                                        _safe_rmtree(legacy_best)
-                            except Exception:
-                                pass
 
-                # Enforce safe retention cleanup in Google Drive stage directory (protecting latest and best)
+                # Enforce safe retention cleanup in Google Drive stage directory (strictly keep_n >= 2, protecting latest and best)
                 if stage_dir and os.path.isdir(stage_dir):
-                    gdrive_keep = int(os.environ.get("KEEP_CHECKPOINTS", "1"))
+                    gdrive_keep = max(int(os.environ.get("KEEP_CHECKPOINTS", "2")), 2)
                     _cleanup_old_versioned_checkpoints(
                         parent_dir=stage_dir,
                         output_dir_basename=os.path.basename(stage_dir),
@@ -4981,21 +4969,24 @@ def save_checkpoint(
                 shutil.copytree(staging_dir, versioned_dir)
                 _safe_rmtree(staging_dir)
 
-            # Align active output_dir to latest versioned content
+            # Align active output_dir to latest versioned content safely via atomic replacement
             os.makedirs(output_dir, exist_ok=True)
             for fname in os.listdir(versioned_dir):
                 src = os.path.join(versioned_dir, fname)
                 dst = os.path.join(output_dir, fname)
                 if os.path.isfile(src):
-                    if os.path.exists(dst):
-                        try:
-                            os.remove(dst)
-                        except Exception:
-                            pass
+                    tmp_dst = os.path.join(output_dir, f".atomic_{fname}.{os.getpid()}_{int(time.time())}")
                     try:
-                        os.link(src, dst)
-                    except OSError:
-                        _stream_copy_file(src, dst)
+                        try:
+                            os.link(src, tmp_dst)
+                        except OSError:
+                            _stream_copy_file(src, tmp_dst)
+                        if os.path.exists(tmp_dst):
+                            os.replace(tmp_dst, dst)
+                    except Exception as align_err:
+                        print(f"[Checkpoint Align Notice] Notice updating {fname}: {align_err}", flush=True)
+                        if os.path.exists(tmp_dst):
+                            _safe_unlink(tmp_dst)
 
             committed_marker = os.path.join(versioned_dir, "COMMITTED")
             committed_payload = {"step": step, "is_best": is_best, "committed_utc": datetime.now(timezone.utc).isoformat()}
@@ -5438,7 +5429,7 @@ def _cleanup_old_versioned_checkpoints(
     - In-flight uploads (younger than min_abandoned_age_seconds without COMMITTED) are protected.
     - All deletions are logged explicitly.
     """
-    keep_n = max(int(keep_n), 1)
+    keep_n = max(int(keep_n), 2)
 
     prefix = output_dir_basename + ".step"
     staging_prefix = f".ckpt_staging_{output_dir_basename}_"
@@ -5576,7 +5567,16 @@ def _cleanup_old_versioned_checkpoints(
                 step_num = int(step_part)
             except (ValueError, IndexError):
                 step_num = -1
+        elif (entry.startswith("best_checkpoint.step") or entry.startswith("best_milestone.")) and not entry.startswith("."):
+            is_milestone = True
+            try:
+                step_part = entry.split(".step")[1].split("_")[0]
+                step_num = int(step_part)
+            except (ValueError, IndexError):
+                step_num = -1
         elif entry.startswith(prefix) and not entry.startswith("."):
+            if "best" in prefix.lower():
+                is_milestone = True
             try:
                 step_part = entry[len(prefix):].split("_")[0]
                 step_num = int(step_part)
@@ -5617,15 +5617,16 @@ def _cleanup_old_versioned_checkpoints(
                     legacy_step = int(json.load(lf).get("step", -1))
             except Exception:
                 pass
-        max_milestone_step = max((s for s, _, c, m in all_versioned if c and m), default=-1)
-        if max_milestone_step > legacy_step or (legacy_step >= 0 and max_milestone_step >= legacy_step) or max_milestone_step >= 0:
+        committed_milestones = [s for s, _, c, m in all_versioned if c and m]
+        # Never purge legacy_best unless at least keep_n (>=2) newer verified, fully committed milestones exist
+        if len(committed_milestones) >= keep_n and legacy_step >= 0 and min(committed_milestones) > legacy_step:
             if _safe_rmtree(legacy_best):
-                print(f"[Checkpoint Retention] Purged obsolete legacy best_checkpoint folder: {legacy_best} (Step {legacy_step} superseded by Step {max_milestone_step})", flush=True)
+                print(f"[Checkpoint Retention] Purged obsolete legacy best_checkpoint folder: {legacy_best} (Step {legacy_step} superseded by {len(committed_milestones)} verified milestones)", flush=True)
 
     # Separate candidates into Best Milestones and Regular Full Checkpoints
-    # Each pool independently enforces keep_n retention:
-    # 1. Best milestones: keep newest keep_n (default 1); purge older milestones unconditionally.
-    # 2. Regular checkpoints: keep newest keep_n (default 1); purge older checkpoints.
+    # Each pool independently enforces keep_n retention (strictly keep_n >= 2):
+    # 1. Best milestones: keep newest keep_n (default >= 2); purge older milestones beyond window.
+    # 2. Regular checkpoints: keep newest keep_n (default >= 2); purge older checkpoints.
     pools = [
         ("best milestone", [item for item in all_versioned if item[3]]),
         ("regular checkpoint", [item for item in all_versioned if not item[3]]),
@@ -6725,8 +6726,8 @@ def main():
                         help="Enable activation gradient checkpointing to save VRAM")
     parser.add_argument("--allow-unsafe-fp32-adamw", action="store_true", default=False,
                         help="Override memory preflight gate to allow FP32 AdamW on memory-constrained GPUs")
-    parser.add_argument("--keep-checkpoints", type=int, default=int(os.environ.get("KEEP_CHECKPOINTS", 1)),
-                        help="Number of past checkpoints to retain (default: 1; deletes older checkpoints upon verified new commit)")
+    parser.add_argument("--keep-checkpoints", type=int, default=int(os.environ.get("KEEP_CHECKPOINTS", 2)),
+                        help="Number of past checkpoints to retain (default: 2; deletes older checkpoints only upon verified new commit)")
     parser.add_argument("--skip-save-steps", type=int, default=int(os.environ.get("SKIP_SAVE_STEPS", 0)),
                         help="Number of initial steps to skip checkpoint and best-milestone disk/cloud saves (default: 0; immediate zero-lock saves active)")
     parser.add_argument("--promote-max-step", type=int, default=int(os.environ.get("PROMOTE_MAX_STEP", 0)),
@@ -7768,10 +7769,11 @@ def main():
                             is_best=True,
                             is_completed=False,
                             sync_to_gdrive=args.sync_all_to_gdrive,
-                            sync_optimizer=False,
+                            sync_optimizer=(optimizer is not None),
                             dataset=dataset,
                             shard_ledger=shard_ledger,
                             data_cursor=best_loss_cursor,
+                            keep_n=max(args.keep_checkpoints, 2),
                             world_model=world_model,
                             world_optimizer=world_optimizer,
                             world_scaler=world_scaler,
@@ -7785,12 +7787,17 @@ def main():
                                     s_file = os.path.join(best_cp_dir, item)
                                     d_file = os.path.join(window_best_source, item)
                                     if os.path.isfile(s_file):
+                                        tmp_d_file = os.path.join(window_best_source, f".tmp_{item}.{os.getpid()}")
                                         try:
-                                            if os.path.exists(d_file):
-                                                os.remove(d_file)
-                                            os.link(s_file, d_file)
+                                            try:
+                                                os.link(s_file, tmp_d_file)
+                                            except Exception:
+                                                shutil.copy2(s_file, tmp_d_file)
+                                            if os.path.exists(tmp_d_file):
+                                                os.replace(tmp_d_file, d_file)
                                         except Exception:
-                                            shutil.copy2(s_file, d_file)
+                                            if os.path.exists(tmp_d_file):
+                                                _safe_unlink(tmp_d_file)
                             except Exception as e:
                                 print(f"[Promote Window Snapshot Warning] Failed to update window snapshot: {e}", flush=True)
                     else:

@@ -83,11 +83,19 @@ def sync_checkpoint_file_atomic(src_path: str, dst_path: str, precomputed_src_sh
     src_sz = os.path.getsize(src_path)
     os.makedirs(os.path.dirname(os.path.abspath(dst_path)), exist_ok=True)
 
-    # Fast validation: if destination exists and matches size with precomputed hash, skip duplicate network transfer
-    if os.path.exists(dst_path) and os.path.getsize(dst_path) == src_sz and precomputed_src_sha:
-        return True
-
     src_sha = precomputed_src_sha or compute_file_sha256(src_path)
+
+    # Dynamic SHA-256 cache verification:
+    # Only skip transfer if destination exists, size matches, AND verified SHA-256 matches authentic source hash.
+    # Never skip on file size alone, as neural model weights have identical byte lengths across steps!
+    dst_sha_file = dst_path + ".sha256"
+    if os.path.exists(dst_path) and os.path.getsize(dst_path) == src_sz and os.path.isfile(dst_sha_file):
+        try:
+            with open(dst_sha_file, "r", encoding="utf-8") as dsf:
+                if dsf.read().strip() == src_sha:
+                    return True
+        except Exception:
+            pass
 
     tmp_path = dst_path + ".tmp"
     _safe_unlink(tmp_path)
@@ -116,6 +124,13 @@ def sync_checkpoint_file_atomic(src_path: str, dst_path: str, precomputed_src_sh
             # Google Drive FUSE mount fallback (rename often fails with Errno 95/18 on FUSE)
             shutil.copyfile(tmp_path, dst_path)
             _safe_unlink(tmp_path)
+        # Record authentic SHA-256 marker so subsequent identical checks are cryptographic-verified
+        try:
+            with open(dst_path + ".sha256", "w", encoding="utf-8") as dsf:
+                dsf.write(src_sha)
+        except Exception:
+            pass
+
         print(f"[GDrive Sync Verified] Authenticated SHA-256 ({src_sha[:12]}...) & updated: {os.path.basename(dst_path)}", flush=True)
         return True
     except Exception as e:

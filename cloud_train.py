@@ -5,7 +5,6 @@ TARA Autonomous Cloud Training Engine (Google Colab / Cloud GPU Runner)
 Strictly isolated to Cloud Pretraining only (pure native Rust isolation for runtime systems).
 Features:
 1. Dynamic Best-Model Checkpointing (tracks historical minimum loss & perplexity).
-2. Automatic Google Drive Mirroring & Disaster Recovery.
 3. Seamless Mid-Way Resumption (restores model weights, optimizer, scaler, step).
 4. Live Loss, Perplexity (PPL), BF16/FP16 precision, LR, GradNorm, Throughput.
 5. Unbounded Extensible Multi-Stage Pipeline (Stages 0..N with dynamic handoff).
@@ -849,7 +848,7 @@ class ShardLedger:
     Tracks completed shards, runtime dynamic SHA-256 digests, and active
     intra-shard progress across an unlimited number of incremental training
     stages. Persisted to local checkpoint directory and mirrored continuously
-    to Google Drive.
+    locally.
 
     Schema version 3.0 adds explicit stage identity and per-shard training-unit
     accounting required for Stage 0 → Stage 1 → Stage N incremental workflows:
@@ -957,7 +956,6 @@ class ShardLedger:
         }
         # Write to local temporary file first, then atomically move to authoritative local ledger file.
         # Checkpoints and ledgers write exclusively to local NVMe/SSD to guarantee zero-latency execution;
-        # Google Drive mirroring is handled strictly via asynchronous background workers.
         tmp_dir = tempfile.gettempdir()
         tmp_ledger = os.path.join(tmp_dir, f"shard_ledger_{os.getpid()}_{int(time.time())}.json")
         try:
@@ -2907,7 +2905,7 @@ def collate_fn(batch):
 
 
 # =============================================================================
-# 4. Storage, Google Drive FUSE Transport & Background Sync Engine
+# 4. Storage & Local Checkpoint Engine
 # =============================================================================
 
 def load_candidate_weights(model: nn.Module, model_dir: str) -> bool:
@@ -2968,7 +2966,7 @@ def _safe_unlink(path: str) -> bool:
 def _safe_rmtree(dir_path: str) -> bool:
     """
     Robust directory tree removal that succeeds on both local filesystem
-    and Google Drive / FUSE mounts, handling locked handles and retry logic.
+    handling locked handles and retry logic.
     """
     if not os.path.exists(dir_path) and not os.path.islink(dir_path):
         return True
@@ -2980,7 +2978,7 @@ def _safe_rmtree(dir_path: str) -> bool:
         pass
 
     # Step 1: On Linux / Colab / FUSE mounts, execute rm -rf directly first.
-    # Single-command directory removal eliminates hundreds of sequential HTTP round-trips over Google Drive FUSE!
+    # Single-command directory removal eliminates hundreds of sequential round-trips.
     if os.name != "nt":
         try:
             import subprocess
@@ -3025,34 +3023,12 @@ def _safe_rmtree(dir_path: str) -> bool:
     return not os.path.exists(dir_path) and not os.path.islink(dir_path)
 
 
-def is_gdrive_path(path: str) -> bool:
-    """
-    Checks if a given path is located on a Google Drive FUSE mount or remote storage.
-    """
-    if not path:
-        return False
-    norm = os.path.abspath(path).replace("\\", "/")
-    if norm.startswith("/content/drive") or "TARA_CHECKPOINTS" in norm:
-        return True
-    try:
-        gdrive_root = _resolve_gdrive_root()
-        if gdrive_root:
-            g_norm = os.path.abspath(gdrive_root).replace("\\", "/")
-            if norm.startswith(g_norm):
-                return True
-    except Exception:
-        pass
-    return False
-
-
 def _stream_copy_file(src: str, dst: str, chunk_size: int = 64 * 1024 * 1024, out_sha: Optional[Dict[str, Any]] = None) -> bool:
     """
-    Atomic direct streaming copy for Google Drive FUSE and local files.
-    Writes to an isolated temporary file (dst.upload_tmp_<pid>) first for local files,
-    or directly on Google Drive FUSE to maximize kernel throughput.
-    Verifies full size and safetensors validity before atomically replacing dst.
-    Guarantees that the destination file is NEVER left in a truncated or corrupt state.
-    Computes dynamic SHA-256 during streaming chunks with zero extra disk/network I/O.
+    Atomic streaming copy for local files.
+    Writes to an isolated temporary file first, verifies complete size and validity,
+    and atomically replaces dst. Guarantees that dst is NEVER left in a truncated or corrupt state.
+    Computes dynamic SHA-256 during streaming chunks with zero extra disk I/O.
     """
     if os.path.abspath(src) == os.path.abspath(dst):
         if out_sha is not None:
@@ -3063,40 +3039,20 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 64 * 1024 * 1024, ou
         return False
     src_sz = os.path.getsize(src)
     if src_sz == 0:
-        print(f"[GDrive Safety Block] Refusing to mirror empty 0-byte file: {src} -> {dst}", flush=True)
-        return False
-
-    if src.endswith(".safetensors") and src_sz < 1_000_000:
-        print(f"[GDrive Safety Block] Refusing to mirror tiny or incomplete safetensors: {src} ({src_sz} bytes)", flush=True)
         return False
 
     dst_dir = os.path.dirname(dst)
     if dst_dir:
         os.makedirs(dst_dir, exist_ok=True)
 
-    # Pre-clean any accidental duplicate files in target folder before copy
-    base, ext = os.path.splitext(os.path.basename(dst))
-    if os.path.exists(dst_dir):
-        for f in os.listdir(dst_dir):
-            if f.startswith(base) and f.endswith(ext) and f != os.path.basename(dst) and "(" in f:
-                try:
-                    _safe_unlink(os.path.join(dst_dir, f))
-                except Exception:
-                    pass
-
-    # Non-hidden staging temp file with .upload_temp at the end of the filename (DriveFS compatible)
-    tmp_dst = os.path.join(dst_dir, f"{os.path.basename(dst)}.upload_temp_{os.getpid()}_{int(time.time())}")
-    is_gdrive = is_gdrive_path(dst)
-    # On Google Drive FUSE mounts, write directly to dst to avoid FUSE rename failures and lingering .upload_temp artifacts
-    write_target = dst if is_gdrive else tmp_dst
+    tmp_dst = os.path.join(dst_dir, f"{os.path.basename(dst)}.tmp_{os.getpid()}_{int(time.time())}")
     try:
-        if not is_gdrive and os.path.exists(tmp_dst):
+        if os.path.exists(tmp_dst):
             _safe_unlink(tmp_dst)
 
-        # Stream into target file while dynamically computing SHA-256 in memory
         total_written = 0
         hasher = hashlib.sha256()
-        with open(src, "rb", buffering=chunk_size) as fsrc, open(write_target, "wb", buffering=chunk_size) as fdst:
+        with open(src, "rb", buffering=chunk_size) as fsrc, open(tmp_dst, "wb", buffering=chunk_size) as fdst:
             if hasattr(os, "posix_fadvise"):
                 try:
                     os.posix_fadvise(fsrc.fileno(), 0, 0, os.POSIX_FADV_SEQUENTIAL)
@@ -3111,64 +3067,54 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 64 * 1024 * 1024, ou
                 total_written += len(chunk)
                 del chunk
             fdst.flush()
-            if not is_gdrive:
-                try:
-                    os.fsync(fdst.fileno())
-                except Exception:
-                    pass
+            try:
+                os.fsync(fdst.fileno())
+            except Exception:
+                pass
         computed_sha = hasher.hexdigest()
 
         if total_written != src_sz:
             raise IOError(f"Incomplete streaming read: expected {src_sz} bytes from source, wrote {total_written} bytes")
 
-        # ------------------------------------------------------------------
-        # Verification Gate before promotion: ensure complete transfer & validity
-        # ------------------------------------------------------------------
-        if is_gdrive:
-            dst_sz = total_written
-        else:
-            target_sz = os.path.getsize(write_target)
-            if target_sz != src_sz:
-                raise IOError(f"Incomplete streaming write: expected {src_sz} bytes, wrote {target_sz} bytes")
+        target_sz = os.path.getsize(tmp_dst)
+        if target_sz != src_sz:
+            raise IOError(f"Incomplete streaming write: expected {src_sz} bytes, wrote {target_sz} bytes")
 
-            # Local files can perform quick deserialization checks
-            if src.endswith(".safetensors"):
-                from safetensors import safe_open
-                with safe_open(write_target, framework="pt", device="cpu") as sf:
-                    if not sf.keys():
-                        raise IOError("Staged safetensors file contains 0 keys")
-            if src.endswith(".json"):
-                with open(write_target, "r", encoding="utf-8") as jf:
-                    json.load(jf)
+        if src.endswith(".safetensors"):
+            from safetensors import safe_open
+            with safe_open(tmp_dst, framework="pt", device="cpu") as sf:
+                if not sf.keys():
+                    raise IOError("Staged safetensors file contains 0 keys")
+        if src.endswith(".json"):
+            with open(tmp_dst, "r", encoding="utf-8") as jf:
+                json.load(jf)
 
-            # Promotion for local files: atomic replacement from tmp_dst to dst.
-            # Preserves dst intact until atomic replacement succeeds (new write -> verify -> atomic swap).
-            promoted = False
+        promoted = False
+        try:
+            os.replace(tmp_dst, dst)
+            promoted = True
+        except OSError:
             try:
-                os.replace(tmp_dst, dst)
+                if os.name == "nt" and os.path.exists(dst):
+                    for _ in range(3):
+                        try:
+                            os.remove(dst)
+                            break
+                        except Exception:
+                            time.sleep(0.1)
+                os.rename(tmp_dst, dst)
                 promoted = True
-            except OSError:
-                try:
-                    if os.name == "nt" and os.path.exists(dst):
-                        for _ in range(3):
-                            try:
-                                os.remove(dst)
-                                break
-                            except Exception:
-                                time.sleep(0.1)
-                    os.rename(tmp_dst, dst)
-                    promoted = True
-                except Exception as cp_err:
-                    raise IOError(f"Failed to align staged file to {dst}: {cp_err}")
+            except Exception as cp_err:
+                raise IOError(f"Failed to align staged file to {dst}: {cp_err}")
 
-            if not promoted or not os.path.exists(dst):
-                raise IOError(f"Target destination {dst} missing after alignment attempt")
+        if not promoted or not os.path.exists(dst):
+            raise IOError(f"Target destination {dst} missing after alignment attempt")
 
-            dst_sz = os.path.getsize(dst)
-            if dst_sz != src_sz:
-                raise IOError(f"Final aligned size mismatch: expected {src_sz}, got {dst_sz}")
+        dst_sz = os.path.getsize(dst)
+        if dst_sz != src_sz:
+            raise IOError(f"Final aligned size mismatch: expected {src_sz}, got {dst_sz}")
 
-        if not is_gdrive and os.path.exists(tmp_dst):
+        if os.path.exists(tmp_dst):
             _safe_unlink(tmp_dst)
 
         if out_sha is not None:
@@ -3177,555 +3123,10 @@ def _stream_copy_file(src: str, dst: str, chunk_size: int = 64 * 1024 * 1024, ou
 
         return True
     except Exception as e:
-        if not is_gdrive and os.path.exists(tmp_dst):
+        if os.path.exists(tmp_dst):
             _safe_unlink(tmp_dst)
         print(f"[Atomic Copy Notice] Streaming copy note for {os.path.basename(dst)}: {e}", flush=True)
         return False
-
-
-def is_real_gdrive_mount(mountpoint: str = "/content/drive") -> bool:
-    """
-    Verifies that the specified path is an authentic Google Drive FUSE mount,
-    not an unmounted local container directory.
-    """
-    clean_mp = os.path.abspath(mountpoint).rstrip("/\\")
-    if not os.path.exists(clean_mp):
-        return False
-    if os.path.ismount(clean_mp):
-        return True
-    try:
-        with open("/proc/mounts", "r", encoding="utf-8") as f:
-            for line in f:
-                parts = line.split()
-                if len(parts) >= 3 and os.path.abspath(parts[1]).rstrip("/\\") == clean_mp:
-                    fs_type = parts[2].lower()
-                    dev = parts[0].lower()
-                    if "drive" in fs_type or "fuse" in fs_type or "drive" in dev:
-                        return True
-    except Exception:
-        pass
-    return False
-
-
-def _resolve_gdrive_root() -> Optional[str]:
-    """
-    Dynamically discovers or auto-mounts the Google Drive checkpoint directory.
-    Supports both /content/drive/MyDrive and /content/drive/My Drive (with space),
-    Shared Drives (/content/drive/Shareddrives/*, /content/drive/Shared drives/*),
-    as well as custom GDRIVE_CHECKPOINT_DIR paths.
-    Strictly verifies authentic FUSE mount state to prevent silent local writes.
-    """
-    env_dir = os.environ.get("GDRIVE_CHECKPOINT_DIR")
-    if env_dir:
-        parent = os.path.dirname(env_dir)
-        if os.path.exists(parent):
-            if env_dir.startswith("/content/drive") and not is_real_gdrive_mount("/content/drive"):
-                pass  # Do not adopt unmounted local container paths
-            else:
-                return os.path.realpath(env_dir)
-
-    # In Colab environments where drive was not pre-mounted, attempt non-interactive mount
-    if os.path.exists("/content") and not is_real_gdrive_mount("/content/drive"):
-        try:
-            from google.colab import drive
-            drive.mount("/content/drive", force_remount=False)
-        except Exception:
-            pass
-
-    if not is_real_gdrive_mount("/content/drive"):
-        return None
-
-    candidate_bases = [
-        "/content/drive/MyDrive",
-        "/content/drive/My Drive",
-    ]
-    # Discover Google Shared Drives / Shortcuts
-    for sroot in ["/content/drive/Shareddrives", "/content/drive/Shared drives"]:
-        if os.path.isdir(sroot):
-            try:
-                for entry in os.listdir(sroot):
-                    full = os.path.join(sroot, entry)
-                    if os.path.isdir(full):
-                        candidate_bases.append(full)
-            except Exception:
-                pass
-
-    # First priority: check existing TARA_CHECKPOINTS directory or shortcut
-    for base in candidate_bases:
-        cand = os.path.join(base, "TARA_CHECKPOINTS")
-        if os.path.isdir(cand):
-            return os.path.realpath(cand)
-    # Second priority: default to MyDrive/TARA_CHECKPOINTS if MyDrive exists
-    for base in ["/content/drive/MyDrive", "/content/drive/My Drive"]:
-        if os.path.isdir(base):
-            return os.path.realpath(os.path.join(base, "TARA_CHECKPOINTS"))
-
-    return None
-
-
-def resolve_gdrive_stage_dir(output_dir: str, stage_id: Optional[str] = None) -> Optional[str]:
-    """
-    Computes the canonical target directory for a stage on Google Drive.
-    Guarantees that Checkpoints, Best Milestones, and ShardLedger ALWAYS share
-    the exact same directory path regardless of how --output-dir or --stage-id is specified.
-    """
-    gdrive_root = _resolve_gdrive_root()
-    if not gdrive_root:
-        return None
-
-    abs_out = os.path.abspath(output_dir)
-    abs_groot = os.path.abspath(gdrive_root)
-    if abs_out.startswith(abs_groot):
-        return abs_out
-
-    norm = output_dir.replace("\\", "/").rstrip("/")
-    lower_norm = norm.lower()
-    if "checkpoints/" in lower_norm:
-        idx = lower_norm.find("checkpoints/") + len("checkpoints/")
-        rel = norm[idx:].strip("/")
-    elif "/checkpoints" in lower_norm:
-        idx = lower_norm.find("/checkpoints") + len("/checkpoints")
-        rel = norm[idx:].strip("/")
-    else:
-        rel = os.path.basename(norm)
-
-    if not rel and stage_id:
-        rel = stage_id.strip()
-
-    return os.path.join(gdrive_root, rel) if rel else gdrive_root
-
-
-def _ensure_gdrive_target_dir(target_dir: str):
-    """
-    Ensures target directory exists on Google Drive even if parent paths
-    contain broken shortcuts or invalid symlinks. Automatically repairs them.
-    """
-    gdrive_root = _resolve_gdrive_root()
-    if not gdrive_root:
-        return
-
-    # Check if gdrive_root exists but is not a valid directory (e.g. broken shortcut or stale file)
-    if os.path.lexists(gdrive_root) and not os.path.isdir(gdrive_root):
-        try:
-            print(f"[GDrive Auto-Repair] Removing non-directory/broken shortcut at {gdrive_root}", flush=True)
-            if os.path.islink(gdrive_root):
-                os.unlink(gdrive_root)
-            else:
-                os.remove(gdrive_root)
-        except Exception:
-            pass
-
-    dup_shortcut = f"{gdrive_root} (1)"
-    if os.path.lexists(dup_shortcut) and not os.path.isdir(dup_shortcut):
-        try:
-            if os.path.islink(dup_shortcut):
-                os.unlink(dup_shortcut)
-            elif os.path.isfile(dup_shortcut):
-                os.remove(dup_shortcut)
-        except Exception:
-            pass
-
-    try:
-        os.makedirs(gdrive_root, exist_ok=True)
-        os.makedirs(target_dir, exist_ok=True)
-    except OSError:
-        try:
-            import subprocess
-            subprocess.run(["mkdir", "-p", target_dir], check=False, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
-        os.makedirs(target_dir, exist_ok=True)
-
-
-
-def _sync_to_gdrive_worker(src_dir: str, target_dir: str, tag: str, file_list: List[str], step: int = 0, is_best: bool = False, gdrive_stage_dir: Optional[str] = None, loss: Optional[float] = None):
-    global _pending_gdrive_sync, _active_gdrive_sync_src
-    last_synced_step = -1
-    while True:
-        with _gdrive_sync_lock:
-            _active_gdrive_sync_src = os.path.abspath(src_dir) if src_dir else None
-        try:
-            gdrive_root = _resolve_gdrive_root()
-            if not gdrive_root:
-                print(f"[GDrive Notice] Google Drive not mounted; skipping backup for [{tag}].", flush=True)
-                break
-
-            _ensure_gdrive_target_dir(target_dir)
-            synced = 0
-            t_start = time.time()
-            manifest_files = {}
-
-            # Read source metadata to confirm expected step and stage_id
-            src_state_file = os.path.join(src_dir, "checkpoint_state.json")
-            expected_step = step
-            expected_stage_id = ""
-            expected_loss = loss
-            expected_best_loss = loss
-            if os.path.isfile(src_state_file):
-                try:
-                    with open(src_state_file, "r", encoding="utf-8") as fs:
-                        st_info = json.load(fs)
-                        expected_step = int(st_info.get("step", step))
-                        expected_stage_id = st_info.get("stage_id", "")
-                        expected_loss = float(st_info.get("loss", loss if loss is not None else float("inf")))
-                        expected_best_loss = float(st_info.get("best_loss", expected_loss))
-                except Exception:
-                    pass
-
-            # Discover all files in src_dir dynamically so no model weights or configs are missed
-            if src_dir and os.path.isdir(src_dir):
-                src_files = set(os.listdir(src_dir))
-            else:
-                src_files = set()
-            # For best milestone syncs, never include optimizer_state.pt — it is large and not
-            # needed for inference recovery from a milestone; only full training checkpoints need it.
-            if is_best:
-                src_files.discard("optimizer_state.pt")
-                file_list = [f for f in file_list if f != "optimizer_state.pt"]
-            combined_files = list(dict.fromkeys(list(file_list) + [f for f in src_files if not f.startswith(".")]))
-
-            # Prioritize model weights FIRST, configs SECOND, metadata THIRD, optimizer LAST
-            weights_files = [f for f in combined_files if (f.endswith(".safetensors") or f == "pytorch_model.bin") and f != "optimizer_state.pt"]
-            config_files = [f for f in combined_files if f in ("config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json")]
-            meta_files = [f for f in combined_files if f in ("checkpoint_state.json", "STAGE_METADATA.json", "shard_ledger.json", "latest_checkpoint.json", "dataset_snapshot.json")]
-            other_files = [f for f in combined_files if f not in weights_files and f not in config_files and f not in meta_files and f not in ("COMMITTED", "optimizer_state.pt")]
-
-            ordered_files = weights_files + config_files + meta_files + other_files
-
-            known_shas = {}
-            if src_dir and os.path.isdir(src_dir):
-                for m_file in ("checkpoint_state.json", "STAGE_METADATA.json"):
-                    mp = os.path.join(src_dir, m_file)
-                    if os.path.isfile(mp):
-                        try:
-                            with open(mp, "r", encoding="utf-8") as mf:
-                                md = json.load(mf)
-                            if md.get("model_weights_sha256"):
-                                known_shas["model.safetensors"] = md["model_weights_sha256"]
-                                known_shas["pytorch_model.bin"] = md["model_weights_sha256"]
-                            if md.get("world_model_weights_sha256"):
-                                known_shas["world_model.safetensors"] = md["world_model_weights_sha256"]
-                        except Exception:
-                            pass
-
-            all_files_ok = True
-            for fname in ordered_files:
-                src = os.path.join(src_dir, fname)
-                dst = os.path.join(target_dir, fname)
-                if not os.path.exists(src):
-                    continue
-                if os.path.abspath(src) == os.path.abspath(dst):
-                    continue
-
-                if fname in known_shas:
-                    try:
-                        shutil.copyfile(src, dst)
-                        dst_sz = os.path.getsize(src)
-                        dst_sha = known_shas[fname]
-                        ok = (dst_sz > 0)
-                    except Exception as ce:
-                        print(f"[GDrive Sync Error] Failed kernel copy {fname} -> {dst}: {ce}", flush=True)
-                        ok = False
-                else:
-                    sha_info = {}
-                    ok = _stream_copy_file(src, dst, out_sha=sha_info)
-                    dst_sz = sha_info.get("size", os.path.getsize(dst) if os.path.exists(dst) else 0)
-                    dst_sha = sha_info.get("sha256")
-
-                if not ok:
-                    print(f"[GDrive Sync Error] Failed to mirror {fname} -> {dst}", flush=True)
-                    if fname in weights_files or fname in config_files:
-                        all_files_ok = False
-                        break
-                    else:
-                        print(f"[GDrive Sync Warning] Non-critical file {fname} failed to mirror; continuing backup.", flush=True)
-                        continue
-
-                manifest_files[fname] = {
-                    "size": dst_sz,
-                    "sha256": dst_sha,
-                }
-                synced += 1
-
-            # Safety check: if primary model weights or critical configs failed, abort and never commit
-            has_model_weights = any(
-                os.path.isfile(os.path.join(target_dir, mf)) and os.path.getsize(os.path.join(target_dir, mf)) > 0
-                for mf in ("model.safetensors", "pytorch_model.bin")
-            )
-
-            if not all_files_ok or not has_model_weights:
-                print(f"[GDrive Sync Abort] Candidate at {target_dir} failed integrity checks. Not committing.", flush=True)
-                _safe_rmtree(target_dir)
-            else:
-                # Durably write COMMITTED manifest in target_dir including all verified files and SHA-256 digests
-                committed_marker = os.path.join(target_dir, "COMMITTED")
-                src_committed = os.path.join(src_dir, "COMMITTED") if src_dir else None
-                committed_data = {
-                    "step": expected_step,
-                    "is_best": is_best,
-                    "stage_id": expected_stage_id,
-                    "loss": expected_loss,
-                    "committed_utc": datetime.now(timezone.utc).isoformat(),
-                    "files": manifest_files,
-                }
-                if src_committed and os.path.isfile(src_committed):
-                    try:
-                        with open(src_committed, "r", encoding="utf-8") as sc_f:
-                            s_cdata = json.load(sc_f)
-                            if isinstance(s_cdata, dict):
-                                s_cdata.update(committed_data)
-                                committed_data = s_cdata
-                    except Exception:
-                        pass
-                try:
-                    with open(committed_marker, "w", encoding="utf-8") as f:
-                        json.dump(committed_data, f, indent=2)
-                    synced += 1
-                except Exception as cm_err:
-                    print(f"[GDrive Mirror Notice] Notice writing COMMITTED manifest: {cm_err}", flush=True)
-
-                # Optional optimizer state copy after primary model weights and manifest are committed
-                if "optimizer_state.pt" in combined_files:
-                    src_opt = os.path.join(src_dir, "optimizer_state.pt")
-                    dst_opt = os.path.join(target_dir, "optimizer_state.pt")
-                    if os.path.exists(src_opt) and os.path.abspath(src_opt) != os.path.abspath(dst_opt):
-                        opt_sha_info = {}
-                        opt_ok = _stream_copy_file(src_opt, dst_opt, out_sha=opt_sha_info)
-                        if opt_ok:
-                            manifest_files["optimizer_state.pt"] = {
-                                "size": opt_sha_info.get("size", os.path.getsize(dst_opt) if os.path.exists(dst_opt) else 0),
-                                "sha256": opt_sha_info.get("sha256", compute_file_sha256(src_opt)),
-                            }
-                            synced += 1
-                            # COMMITTED manifest already written above after model weights were verified;
-                            # no second write needed here.
-                        else:
-                            print(f"[GDrive Mirror Notice] Optimizer state transfer skipped or incomplete; model weights and manifest remain safely committed.", flush=True)
-
-                # Step consistency verification: check checkpoint_state.json and STAGE_METADATA.json
-                dst_state = os.path.join(target_dir, "checkpoint_state.json")
-                if os.path.isfile(dst_state):
-                    try:
-                        with open(dst_state, "r", encoding="utf-8") as fd:
-                            dst_st = json.load(fd)
-                        if dst_st.get("step") != expected_step:
-                            print(f"[GDrive Sync Warning] Target checkpoint_state step mismatch! Expected {expected_step}, found {dst_st.get('step')}.", flush=True)
-                    except Exception:
-                        pass
-
-                last_synced_step = expected_step
-                elapsed = time.time() - t_start
-                print(f"[GDrive Mirror] Successfully backed up verified model checkpoint [{tag}] ({synced} files, {elapsed:.1f}s) -> {target_dir}", flush=True)
-
-                # Update lightweight pointer files in stage parent directory
-                stage_dir = gdrive_stage_dir or os.path.dirname(os.path.abspath(target_dir))
-                if stage_dir and os.path.isdir(stage_dir):
-                    ptr_file = os.path.join(stage_dir, "latest_checkpoint.json")
-                    try:
-                        with open(ptr_file, "w", encoding="utf-8") as pf:
-                            json.dump({
-                                "step": expected_step,
-                                "versioned_dir": target_dir,
-                                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                                "has_optimizer": "optimizer_state.pt" in manifest_files,
-                            }, pf, indent=2)
-                    except Exception:
-                        pass
-
-                    if is_best:
-                        best_ptr = os.path.join(stage_dir, "best_checkpoint.json")
-                        try:
-                            with open(best_ptr, "w", encoding="utf-8") as bf:
-                                json.dump({
-                                    "step": expected_step,
-                                    "loss": expected_loss,
-                                    "versioned_dir": target_dir,
-                                    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                                }, bf, indent=2)
-                        except Exception:
-                            pass
-
-                # Safety-ordered GDrive retention: verify new dir is complete BEFORE deleting any old dirs.
-                # Policy: write new → verify new → delete old (never delete before new is confirmed intact).
-                if stage_dir and os.path.isdir(stage_dir):
-                    new_dir_has_model = (
-                        os.path.isfile(os.path.join(target_dir, "model.safetensors"))
-                        and os.path.getsize(os.path.join(target_dir, "model.safetensors")) > 0
-                    )
-                    new_dir_committed = os.path.isfile(os.path.join(target_dir, "COMMITTED"))
-                    if new_dir_has_model and new_dir_committed:
-                        gdrive_keep = max(int(os.environ.get("KEEP_CHECKPOINTS", "2")), 2)
-                        _cleanup_old_versioned_checkpoints(
-                            parent_dir=stage_dir,
-                            output_dir_basename=os.path.basename(stage_dir),
-                            keep_n=gdrive_keep,
-                            force_keep_exact=True,
-                            protected_dirs=[target_dir],
-                        )
-                    else:
-                        print(
-                            f"[GDrive Retention] Skipping old-dir cleanup: new GDrive dir '{os.path.basename(target_dir)}' "
-                            f"did not pass verification (model exists: {new_dir_has_model}, committed: {new_dir_committed}). "
-                            f"Preserving all existing dirs until next successful backup.",
-                            flush=True,
-                        )
-
-        except Exception as e:
-            print(f"[GDrive Mirror Notice] Non-fatal background backup notice: {e}", flush=True)
-        finally:
-            with _gdrive_sync_lock:
-                _active_gdrive_sync_src = None
-            if src_dir and (os.path.basename(src_dir).startswith("sync_snap_") or os.path.basename(src_dir).startswith(".best_sync_snap_")) and os.path.isdir(src_dir):
-                _safe_rmtree(src_dir)
-
-        with _gdrive_sync_lock:
-            if _pending_gdrive_sync is not None:
-                p_src, p_dst, p_tag, p_flist, p_step, p_is_best, p_stg, p_loss = _pending_gdrive_sync
-                _pending_gdrive_sync = None
-                if p_step <= last_synced_step and last_synced_step >= 0:
-                    print(f"[GDrive Mirror] Discarding stale queued sync for Step {p_step} (already completed Step {last_synced_step}).", flush=True)
-                    if p_src and (os.path.basename(p_src).startswith("sync_snap_") or os.path.basename(p_src).startswith(".best_sync_snap_")) and os.path.isdir(p_src):
-                        _safe_rmtree(p_src)
-                    break
-                src_dir = p_src
-                target_dir = p_dst
-                tag = p_tag
-                file_list = p_flist
-                step = p_step
-                is_best = p_is_best
-                gdrive_stage_dir = p_stg
-                loss = p_loss
-                print(f"[GDrive Mirror] Processing queued latest checkpoint sync: [{tag}] -> {target_dir}", flush=True)
-                continue
-            else:
-                break
-
-
-def sync_checkpoint_to_gdrive(
-    output_dir: str,
-    tag: str,
-    wait: bool = False,
-    sync_optimizer: bool = False,
-    source_dir: Optional[str] = None,
-    step: Optional[int] = None,
-    is_best: bool = False,
-    loss: Optional[float] = None,
-):
-    """
-    Mirrors verified local checkpoint files to an immutable, versioned folder on Google Drive.
-    Single-worker lock with pending queue ensures the latest checkpoint is ALWAYS uploaded without
-    stale overwrite collisions or race conditions.
-    """
-    global _gdrive_sync_thread, _pending_gdrive_sync
-    gdrive_root = _resolve_gdrive_root()
-    if not gdrive_root:
-        return
-
-    # If output_dir is already inside Google Drive (/content/drive or gdrive_root), do not duplicate mirror
-    try:
-        abs_output = os.path.abspath(output_dir)
-        if abs_output.startswith(os.path.abspath("/content/drive")) or (gdrive_root and abs_output.startswith(os.path.abspath(gdrive_root))):
-            return
-    except Exception:
-        pass
-
-    actual_src = source_dir if (source_dir and os.path.isdir(source_dir)) else output_dir
-
-    # Extract step, is_best, and loss from source checkpoint_state.json if not provided
-    st_file = os.path.join(actual_src, "checkpoint_state.json")
-    if os.path.isfile(st_file):
-        try:
-            with open(st_file, "r", encoding="utf-8") as sf:
-                st_meta = json.load(sf)
-            if step is None:
-                step = int(st_meta.get("step", 0))
-            if not is_best and "is_best" in st_meta:
-                is_best = bool(st_meta.get("is_best", False))
-            if loss is None:
-                loss = float(st_meta.get("loss", float("inf")))
-        except Exception:
-            pass
-    if step is None:
-        step = 0
-
-    # Compute canonical stage root directory on Google Drive preserving stage hierarchy
-    gdrive_stage_dir = resolve_gdrive_stage_dir(output_dir)
-    if not gdrive_stage_dir:
-        return
-    if os.path.basename(gdrive_stage_dir) == "best_checkpoint":
-        gdrive_stage_dir = os.path.dirname(gdrive_stage_dir)
-
-    # Reuse an existing committed GDrive dir for this exact step/type instead of creating a duplicate.
-    # Policy: one GDrive dir per (step, is_best) — if a committed one already exists, skip re-upload.
-    folder_prefix = "best_milestone" if is_best else "checkpoint"
-    existing_step_dir: Optional[str] = None
-    if os.path.isdir(gdrive_stage_dir):
-        step_str = f"{folder_prefix}_step_{step:08d}"
-        for entry in os.listdir(gdrive_stage_dir):
-            if entry.startswith(step_str) and os.path.isdir(os.path.join(gdrive_stage_dir, entry)):
-                cand = os.path.join(gdrive_stage_dir, entry)
-                if os.path.isfile(os.path.join(cand, "COMMITTED")):
-                    existing_step_dir = cand
-                    break
-    if existing_step_dir:
-        print(
-            f"[GDrive Mirror] Step {step} {'best milestone' if is_best else 'checkpoint'} already committed at "
-            f"'{os.path.basename(existing_step_dir)}'. Skipping duplicate upload.",
-            flush=True,
-        )
-        return
-    target_dir = os.path.join(gdrive_stage_dir, f"{folder_prefix}_step_{step:08d}_{int(time.time())}")
-
-    file_list = [
-        "config.json", "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
-        "model.safetensors", "world_model.safetensors", "checkpoint_state.json", "STAGE_METADATA.json",
-        "shard_ledger.json", "dataset_snapshot.json",
-    ]
-    if sync_optimizer:
-        file_list.append("optimizer_state.pt")
-
-    thread_to_wait_prev = None
-    with _gdrive_sync_lock:
-        if _gdrive_sync_thread and _gdrive_sync_thread.is_alive():
-            if wait:
-                thread_to_wait_prev = _gdrive_sync_thread
-            else:
-                # Discard if already queued job is newer
-                if _pending_gdrive_sync is not None and _pending_gdrive_sync[4] >= step:
-                    print(f"[GDrive Mirror] Active sync in progress; Step {step} is not newer than queued Step {_pending_gdrive_sync[4]}. Skipping queue.", flush=True)
-                    if actual_src and os.path.basename(actual_src).startswith("sync_snap_") and os.path.isdir(actual_src):
-                        _safe_rmtree(actual_src)
-                    return
-                # Purge previous superseded queued snapshot if it was a temporary snapshot
-                if _pending_gdrive_sync is not None:
-                    prev_snap = _pending_gdrive_sync[0]
-                    if prev_snap and os.path.basename(prev_snap).startswith("sync_snap_") and os.path.isdir(prev_snap):
-                        _safe_rmtree(prev_snap)
-
-                _pending_gdrive_sync = (actual_src, target_dir, tag, file_list, step, is_best, gdrive_stage_dir, loss)
-                print(f"[GDrive Mirror] Active sync in progress; queued [{tag}] as next GDrive update.", flush=True)
-                return
-
-    # Join previous thread OUTSIDE lock to eliminate deadlock
-    if thread_to_wait_prev is not None:
-        print(f"[GDrive Mirror] Waiting for previous sync to complete...", flush=True)
-        thread_to_wait_prev.join()
-
-    thread_to_wait_curr = None
-    with _gdrive_sync_lock:
-        _pending_gdrive_sync = None
-        _gdrive_sync_thread = threading.Thread(
-            target=_sync_to_gdrive_worker,
-            args=(actual_src, target_dir, tag, file_list, step, is_best, gdrive_stage_dir, loss),
-            daemon=True
-        )
-        _gdrive_sync_thread.start()
-        if wait:
-            thread_to_wait_curr = _gdrive_sync_thread
-
-    # Join current thread OUTSIDE lock so worker can acquire _gdrive_sync_lock immediately without deadlock
-    if thread_to_wait_curr is not None:
-        thread_to_wait_curr.join()
 
 
 # =============================================================================
@@ -3949,30 +3350,6 @@ def verify_checkpoint_integrity(
             print(f"[Verification Fail] STAGE_METADATA status is not COMPLETED: {meta.get('status')}")
             return False
 
-        # Direct model file verification: verify model files directly without requiring COMMITTED marker
-        if is_gdrive_path(checkpoint_dir):
-            model_file = os.path.join(checkpoint_dir, "model.safetensors")
-            bin_file = os.path.join(checkpoint_dir, "pytorch_model.bin")
-            has_m = (os.path.isfile(model_file) and os.path.getsize(model_file) > 1024 * 1024) or (os.path.isfile(bin_file) and os.path.getsize(bin_file) > 1024 * 1024)
-            if has_m:
-                print(f"[Verification Passed] Google Drive checkpoint {checkpoint_dir} verified via direct model file backup.")
-                return True
-            committed_file = os.path.join(checkpoint_dir, "COMMITTED")
-            if os.path.isfile(committed_file):
-                try:
-                    with open(committed_file, "r", encoding="utf-8") as cf:
-                        cm_info = json.load(cf)
-                    if isinstance(cm_info, dict) and "files" in cm_info:
-                        for m_name, m_spec in cm_info["files"].items():
-                            mp = os.path.join(checkpoint_dir, m_name)
-                            if not (os.path.exists(mp) and os.path.getsize(mp) == m_spec.get("size")):
-                                print(f"[Verification Fail] GDrive file {m_name} size mismatch against COMMITTED manifest in {checkpoint_dir}")
-                                return False
-                except Exception:
-                    pass
-                print(f"[Verification Passed] Google Drive checkpoint {checkpoint_dir} verified via manifest/metadata.")
-                return True
-
         # Deserialization test: ensure safetensors is not corrupted or truncated using memory-mapped header validation.
         # When precomputed_model_sha is already provided and validated, header re-open is bypassed to eliminate duplicate I/O.
         if HAS_SAFETENSORS and precomputed_model_sha is None:
@@ -4007,7 +3384,7 @@ def verify_checkpoint_integrity(
             computed_sha = precomputed_model_sha if precomputed_model_sha else compute_file_sha256(model_path)
             if computed_sha != recorded_sha:
                 print(
-                    f"[Verification Auto-Heal] Cross-account / GDrive sync SHA-256 drift in {checkpoint_dir}. "
+                    f"[Verification Auto-Heal] Model weights SHA-256 updated in {checkpoint_dir}. "
                     f"SafeTensors header & tensors verified 100% intact; updating recorded SHA to {computed_sha[:16]}... "
                     f"(replaces stale recorded {recorded_sha[:16]}...)",
                     flush=True,
@@ -4041,8 +3418,6 @@ def clean_stale_checkpoint_artifacts(checkpoint_dir: str, is_best: bool = False)
     """
     Cleans obsolete or temporary files from a verified checkpoint directory:
     - Removes stale .tmp files
-    - Cleans duplicate DriveFS numbered clones
-    - Enforces cleanup in both local directory and Google Drive mirror
     """
     if not os.path.exists(checkpoint_dir):
         return
@@ -4055,18 +3430,8 @@ def clean_stale_checkpoint_artifacts(checkpoint_dir: str, is_best: bool = False)
                 os.remove(fp)
             except Exception:
                 pass
-        # Delete duplicate numbered files/folders created by DriveFS: (1), (2), etc.
-        if " (" in f and ")" in f:
-            try:
-                if os.path.isdir(fp):
-                    _safe_rmtree(fp)
-                else:
-                    os.remove(fp)
-                print(f"[Hygiene] Removed duplicate clone from checkpoint directory: {f}", flush=True)
-            except Exception:
-                pass
 
-    # 2. Clean temporary files strictly belonging to TARA in system temp dirs (never touch system sockets or DriveFS state)
+    # 2. Clean temporary files strictly belonging to TARA in system temp dirs (never touch system sockets)
     for tmp_target in ["/tmp", "/var/tmp"]:
         if os.path.exists(tmp_target):
             try:
@@ -4090,7 +3455,7 @@ def clean_previous_training_checkpoints(previous_stage_dir: str, current_checkpo
     Enforces safety policy: Save first, verify next, delete last.
     Deletes heavy training checkpoint files (optimizer_state.pt, checkpoint_state.json)
     from previous stage ONLY IF the current checkpoint is verified 100% integral and complete.
-    Cleans both local storage and Google Drive mirror.
+    Cleans local storage.
     NEVER deletes promoted inference models.
     """
     if not os.path.exists(previous_stage_dir):
@@ -4116,23 +3481,7 @@ def clean_previous_training_checkpoints(previous_stage_dir: str, current_checkpo
                 except Exception as e:
                     print(f"[Hygiene Notice] Could not remove {p}: {e}")
 
-    # Clean Google Drive mirror of previous stage (targeted file checks to eliminate slow recursive FUSE walks)
-    gdrive_root = _resolve_gdrive_root()
-    if gdrive_root and os.path.exists(gdrive_root):
-        prev_basename = os.path.basename(previous_stage_dir)
-        gdrive_prev = os.path.join(gdrive_root, prev_basename)
-        if os.path.exists(gdrive_prev):
-            print(f"[Hygiene GDrive] Cleaning bulky training artifacts from previous stage in GDrive: {gdrive_prev}...")
-            for search_d in (gdrive_prev, os.path.join(gdrive_prev, "best_checkpoint")):
-                if os.path.isdir(search_d):
-                    for f in removable_patterns:
-                        p = os.path.join(search_d, f)
-                        if os.path.isfile(p):
-                            try:
-                                _safe_unlink(p)
-                                print(f"[Hygiene GDrive] Removed previous GDrive training state: {p}")
-                            except Exception as e:
-                                print(f"[Hygiene GDrive Notice] Could not remove {p}: {e}")
+
 
 
 _checkpoint_write_lock = threading.Lock()
@@ -4240,8 +3589,6 @@ def save_checkpoint(
     stage_id: str = "",
     is_best: bool = False,
     is_completed: bool = False,
-    sync_to_gdrive: bool = False,
-    sync_optimizer: bool = False,
     dataset: Optional[Any] = None,
     shard_ledger: Optional[Any] = None,
     data_cursor: Optional[Dict[str, Any]] = None,
@@ -4256,7 +3603,7 @@ def save_checkpoint(
     """
     Unified Crash-Safe Checkpoint Engine:
     Handles regular training checkpoints, completed stage models, and best milestone snapshots
-    with atomic verified staging, optimizer preservation, and background Google Drive sync.
+    with atomic verified staging and optimizer preservation.
     """
     tag = "BEST MILESTONE" if is_best else ("COMPLETED" if is_completed else f"STEP {step}")
     print(f"[Checkpoint] Snapshotting [{tag}] checkpoint at Step {step}... {get_memory_status_str()}", flush=True)
@@ -4636,22 +3983,7 @@ def save_checkpoint(
             # Step 6: Clean stale temp artifacts
             clean_stale_checkpoint_artifacts(output_dir, is_best=is_best)
 
-            # Step 7: Mirror verified checkpoint to Google Drive in background
-            if sync_to_gdrive:
-                sync_checkpoint_to_gdrive(
-                    output_dir=output_dir,
-                    tag=tag,
-                    wait=is_completed or (os.environ.get("GDRIVE_SYNC_WAIT", "0") == "1"),
-                    sync_optimizer=sync_optimizer,
-                    source_dir=versioned_dir,
-                    step=step,
-                    is_best=is_best,
-                    loss=loss,
-                )
-            else:
-                print(f"[GDrive Mirror] Skipped cloud sync for [{tag}] (sync_to_gdrive is False).", flush=True)
-
-            # Step 8: Retention cleanup
+            # Step 7: Retention cleanup
             prot_dirs = [versioned_dir] if versioned_dir else []
             if output_dir:
                 prot_dirs.append(output_dir)
@@ -4691,7 +4023,6 @@ def save_best_milestone(
     world_optimizer: Optional[torch.optim.Optimizer] = None,
     world_scaler: Optional[torch.cuda.amp.GradScaler] = None,
 
-    sync_to_gdrive: bool = False,
 ) -> bool:
     """Delegates to unified save_checkpoint with is_best=True to eliminate duplicate logic while preserving public API."""
     return save_checkpoint(
@@ -4708,7 +4039,6 @@ def save_best_milestone(
         stage_id=stage_id,
         is_best=True,
         is_completed=False,
-        sync_to_gdrive=sync_to_gdrive,
         sync_optimizer=False,
         dataset=dataset,
         shard_ledger=shard_ledger,
@@ -4810,20 +4140,6 @@ def promote_checkpoint(
 
     print(f"[Promotion] Successfully promoted clean inference model ({copied} files) -> {promoted_dir}", flush=True)
 
-    # Mirror promoted model to Google Drive if active
-    gdrive_root = _resolve_gdrive_root()
-    if gdrive_root:
-        gdrive_promoted = os.path.join(gdrive_root, os.path.basename(promoted_dir))
-        os.makedirs(gdrive_promoted, exist_ok=True)
-        for art in artifacts:
-            src = os.path.join(promoted_dir, art)
-            dst = os.path.join(gdrive_promoted, art)
-            if os.path.exists(src) and os.path.abspath(src) != os.path.abspath(dst):
-                try:
-                    _stream_copy_file(src, dst)
-                except Exception:
-                    pass
-        print(f"[GDrive Promotion Mirror] Promoted model synced to: {gdrive_promoted}", flush=True)
 
 
 def finalize_stage_and_promote(
@@ -4903,13 +4219,6 @@ def execute_per_shard_promotion(
         if os.path.exists(prev_promo_dir):
             print(f"[Per-Shard Promotion] Pruning previous shard promoted model directory: {prev_promo_dir}...", flush=True)
             _safe_rmtree(prev_promo_dir)
-        # Also prune in Google Drive if present
-        gdrive_root = _resolve_gdrive_root()
-        if gdrive_root:
-            gdrive_prev = os.path.join(gdrive_root, os.path.basename(prev_promo_dir))
-            if os.path.exists(gdrive_prev):
-                print(f"[Per-Shard Promotion] Pruning previous shard promoted mirror in Google Drive: {gdrive_prev}...", flush=True)
-                _safe_rmtree(gdrive_prev)
 
     # Update tracker
     try:
@@ -5006,20 +4315,6 @@ def _cleanup_old_versioned_checkpoints(
     if not os.path.isdir(parent_dir):
         return
 
-    # 0. Clean duplicate clone files/folders created by Google Drive / DriveFS in parent directory
-    try:
-        for entry in os.listdir(parent_dir):
-            if " (" in entry and ")" in entry:
-                clone_path = os.path.join(parent_dir, entry)
-                if os.path.isdir(clone_path):
-                    if _safe_rmtree(clone_path):
-                        print(f"[Checkpoint Retention] Purged duplicate Drive clone directory: {entry}", flush=True)
-                else:
-                    if _safe_unlink(clone_path):
-                        print(f"[Checkpoint Retention] Purged duplicate Drive clone file: {entry}", flush=True)
-    except Exception:
-        pass
-
     # 1. Resolve and protect latest_checkpoint.json and best_checkpoint.json pointer targets
     ptr_candidates = [
         os.path.join(parent_dir, output_dir_basename, "latest_checkpoint.json"),
@@ -5043,17 +4338,12 @@ def _cleanup_old_versioned_checkpoints(
             except Exception:
                 pass
 
-    # Protect active or pending GDrive sync source directories and explicitly protected dirs from deletion
+    # Protect explicitly protected dirs from deletion
     protected_sync_dirs = set()
     if protected_dirs:
         for pd in protected_dirs:
             if pd:
                 protected_sync_dirs.add(os.path.abspath(pd))
-    with _gdrive_sync_lock:
-        if _active_gdrive_sync_src:
-            protected_sync_dirs.add(os.path.abspath(_active_gdrive_sync_src))
-        if _pending_gdrive_sync and _pending_gdrive_sync[0]:
-            protected_sync_dirs.add(os.path.abspath(_pending_gdrive_sync[0]))
 
     active_staging_abs = os.path.abspath(active_staging_dir) if active_staging_dir else None
     now = time.time()
@@ -5321,7 +4611,6 @@ def try_resume_from_checkpoint(
        when the pointer file itself is absent or corrupt).
     3. output_dir itself — accepted only when it passes full integrity verification,
        as a last-resort fallback for checkpoints created by the legacy code path.
-    4. Google Drive mirror of checkpoint_dir.
 
     Strictly EXCLUDES inference-only best_checkpoint directories to protect optimizer continuity.
     Fails closed on tokenizer fingerprint mismatch when current runtime tokenizer is provided.
@@ -5373,17 +4662,10 @@ def try_resume_from_checkpoint(
 
                 if ptr_vdir and not os.path.isdir(ptr_vdir):
                     v_base = os.path.basename(ptr_vdir)
-                    gdrive_root_check = _resolve_gdrive_root()
                     alt_dirs = [
                         os.path.join(parent_dir, v_base),
                         os.path.join(checkpoint_dir, v_base),
                     ]
-                    if gdrive_root_check:
-                        canon_gd = resolve_gdrive_stage_dir(checkpoint_dir, expected_stage_id)
-                        if canon_gd:
-                            alt_dirs.append(os.path.join(canon_gd, v_base))
-                            alt_dirs.append(os.path.join(os.path.dirname(canon_gd), v_base))
-                        alt_dirs.append(os.path.join(gdrive_root_check, v_base))
                     for alt in alt_dirs:
                         if os.path.isdir(alt):
                             ptr_vdir = alt
@@ -5435,50 +4717,6 @@ def try_resume_from_checkpoint(
         candidate_dirs.append(checkpoint_dir)
     elif os.path.isdir(checkpoint_dir) and checkpoint_dir not in candidate_dirs:
         candidate_dirs.append(checkpoint_dir)
-
-    # 4. Google Drive mirror
-    gdrive_root = _resolve_gdrive_root()
-    canonical_gdrive = None
-    if gdrive_root:
-        canonical_gdrive = resolve_gdrive_stage_dir(checkpoint_dir, expected_stage_id)
-        if canonical_gdrive and canonical_gdrive not in candidate_dirs:
-            candidate_dirs.append(canonical_gdrive)
-        if expected_stage_id:
-            s_cand = os.path.join(gdrive_root, expected_stage_id)
-            if s_cand not in candidate_dirs:
-                candidate_dirs.append(s_cand)
-        stage_name = output_dir_basename
-        gdrive_stage = os.path.join(gdrive_root, stage_name)
-        if gdrive_stage not in candidate_dirs:
-            candidate_dirs.append(gdrive_stage)
-
-    # 5. Add best_checkpoint directories as first-class candidates
-    best_cands = [
-        os.path.join(checkpoint_dir, "best_checkpoint"),
-        os.path.join(parent_dir, "best_checkpoint"),
-    ]
-    if gdrive_root:
-        if canonical_gdrive:
-            best_cands.append(os.path.join(canonical_gdrive, "best_checkpoint"))
-        if expected_stage_id:
-            best_cands.append(os.path.join(gdrive_root, expected_stage_id, "best_checkpoint"))
-        best_cands.append(os.path.join(gdrive_root, output_dir_basename, "best_checkpoint"))
-
-    for bc in best_cands:
-        if os.path.isdir(bc) and bc not in candidate_dirs:
-            candidate_dirs.append(bc)
-
-    # 6. Also discover versioned checkpoint directories from Google Drive
-    if gdrive_root:
-        gd_search_dirs = []
-        if canonical_gdrive:
-            gd_search_dirs.extend([os.path.dirname(canonical_gdrive), canonical_gdrive])
-        gd_search_dirs.append(gdrive_root)
-        for gd_dir in gd_search_dirs:
-            if os.path.isdir(gd_dir):
-                for vdir in _collect_versioned_checkpoint_dirs(gd_dir, output_dir_basename):
-                    if vdir not in candidate_dirs:
-                        candidate_dirs.append(vdir)
 
     best_cand_dir = None
     best_cand_step = -1
@@ -5609,7 +4847,6 @@ def try_resume_from_checkpoint(
             cand_basename = os.path.basename(os.path.normpath(cand))
             is_direct_output = (os.path.abspath(cand) == os.path.abspath(checkpoint_dir))
             is_versioned_match = cand_basename.startswith(output_dir_basename + ".step")
-            is_gdrive_match = (cand_basename == output_dir_basename)
 
             cand_stage = s_data.get("stage_id", "")
             if expected_stage_id and cand_stage and cand_stage != expected_stage_id:
@@ -5620,7 +4857,7 @@ def try_resume_from_checkpoint(
                 )
                 continue
 
-            if not (is_direct_output or is_versioned_match or is_gdrive_match):
+            if not (is_direct_output or is_versioned_match):
                 # When expected_stage_id is provided and matches, accept it; otherwise reject scope mismatch
                 if expected_stage_id and cand_stage == expected_stage_id:
                     pass
@@ -5638,8 +4875,6 @@ def try_resume_from_checkpoint(
 
             cand_type_str = "complete" if has_cand_opt else "model-only"
             print(f"  -> Found valid {cand_type_str} candidate at {cand} (Step: {c_step}, Loss: {c_loss:.4f}) [VERIFIED HEALTHY]")
-            is_cand_local = not is_gdrive_path(cand)
-            is_best_local = not is_gdrive_path(best_cand_dir) if best_cand_dir else False
 
             should_update = False
             if c_step > best_cand_step:
@@ -5647,10 +4882,6 @@ def try_resume_from_checkpoint(
             elif c_step == best_cand_step:
                 if has_cand_opt and not best_cand_has_opt:
                     should_update = True
-                elif has_cand_opt == best_cand_has_opt:
-                    # Prefer local SSD candidate over remote Google Drive FUSE mount for the same step
-                    if is_cand_local and not is_best_local:
-                        should_update = True
 
             if should_update:
                 best_cand_step = c_step
@@ -5676,8 +4907,7 @@ def try_resume_from_checkpoint(
         print(f"  Data Cursor Offset  : {best_cand_cursor.get('active_shard_line_offset', 0):,}")
     print("=" * 78)
 
-    # 1. Sync healthy checkpoint files to local checkpoint_dir FIRST if restored from GDrive or external versioned dir.
-    # Single-pass transfer avoids duplicate multi-gigabyte reads over Google Drive FUSE mount!
+    # 1. Sync healthy checkpoint files to local checkpoint_dir FIRST if restored from external versioned dir.
     if os.path.abspath(best_cand_dir) != os.path.abspath(checkpoint_dir):
         os.makedirs(checkpoint_dir, exist_ok=True)
         print(f"[Resume] Aligning verified checkpoint artifacts from {best_cand_dir} -> {checkpoint_dir}...", flush=True)
@@ -5875,7 +5105,7 @@ def ensure_remote_assets_available(
     """
     High-Speed Cloud Asset Ingestion via Hugging Face Hub (Pure Python).
     Downloads base candidate model weights/config if missing.
-    Checks existing Google Drive / output_dir checkpoints first to avoid redundant downloads.
+    Checks existing output_dir checkpoints first to avoid redundant downloads.
     Dataset shards are streamed on-demand via single-shard JIT (download_single_shard_jit)
     during training, avoiding multi-gigabyte bulk downloads unless bulk_download_dataset is True.
     """
@@ -5893,21 +5123,12 @@ def ensure_remote_assets_available(
     config_file = os.path.join(model_dir, "config.json")
     safetensor_files = glob.glob(os.path.join(model_dir, "*.safetensors"))
 
-    # Before downloading from Hugging Face, check if a valid checkpoint already exists in output_dir or Google Drive
+    # Before downloading from Hugging Face, check if a valid checkpoint already exists in output_dir
     if not (os.path.exists(config_file) and len(safetensor_files) > 0):
         search_sources = []
         if output_dir:
             search_sources.append(output_dir)
             search_sources.append(os.path.join(output_dir, "best_checkpoint"))
-            gdrive_stage = resolve_gdrive_stage_dir(output_dir, stage_id)
-            if gdrive_stage:
-                search_sources.append(gdrive_stage)
-                search_sources.append(os.path.join(gdrive_stage, "best_checkpoint"))
-        gdrive_root = _resolve_gdrive_root()
-        if gdrive_root and stage_id:
-            search_sources.append(os.path.join(gdrive_root, stage_id))
-            search_sources.append(os.path.join(gdrive_root, stage_id, "best_checkpoint"))
-
         for src in search_sources:
             if not os.path.isdir(src):
                 continue
@@ -6206,13 +5427,6 @@ def main():
                         help="Target step ceiling for model promotion (e.g. 500). Promotes the best checkpoint achieved within steps <= PROMOTE_MAX_STEP for real-time deployment while training continues uninterrupted. 0 means unbounded/entire stage.")
     parser.add_argument("--domain-weights", type=str, default=os.environ.get("DOMAIN_WEIGHTS", ""),
                         help="Custom comma-separated domain weights (e.g. '01_mathematics_formal_logic=0.15,12_planning_reasoning_traces=0.20')")
-    parser.add_argument("--sync-all-to-gdrive", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true", default=True,
-                        help="Sync all intermediate training checkpoints to Google Drive (default: True)")
-    parser.add_argument("--sync-gdrive-optimizer", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true", default=True,
-                        help="Include heavy optimizer state when mirroring checkpoints to Google Drive (default: True)")
-    parser.add_argument("--gdrive-sync-wait", action=argparse.BooleanOptionalAction if hasattr(argparse, "BooleanOptionalAction") else "store_true",
-                        default=bool(int(os.environ.get("GDRIVE_SYNC_WAIT", "0"))),
-                        help="Wait synchronously for Google Drive checkpoint sync to finish before advancing training (default: False, keeps training non-blocking)")
     parser.add_argument("--joint-world-model", action="store_true", default=False,
                         help="Enable coordinated joint training of Neural Model + World Model")
     parser.add_argument("--world-model-dir", type=str, default="storage/models/tara_world_model",
@@ -6240,16 +5454,6 @@ def main():
     print("=" * 78)
     print(f"  TARA CLOUD MULTI-STAGE TRAINING SYSTEM [{args.stage_name}]")
     print("=" * 78)
-
-    # Strict Google Drive Mount Gate:
-    # If the output directory references /content/drive, verify that it is an authentic
-    # Google Drive FUSE mount. Fail-closed immediately if it is an unmounted local container path.
-    if args.output_dir.startswith("/content/drive") and not is_real_gdrive_mount("/content/drive"):
-        raise RuntimeError(
-            f"[GDrive Mount Gate Error] Output directory '{args.output_dir}' references Google Drive, "
-            f"but /content/drive is NOT an authentic mounted Google Drive (it is a local unmounted directory)! "
-            f"Mount Google Drive via drive.mount('/content/drive') before training to ensure genuine persistence."
-        )
 
     # 1. Idempotence Check
     if not args.force and check_stage_already_completed(args.output_dir):
@@ -6382,9 +5586,7 @@ def main():
 
 
     # 6. Initialize Authoritative Persistent Shard Ledger & Shard Discovery
-    gdrive_stage_dir = resolve_gdrive_stage_dir(args.output_dir, args.stage_id)
-    shard_ledger = ShardLedger(args.output_dir, gdrive_stage_dir,
-                               stage_id=args.stage_id, dataset_revision=args.dataset_prefix.strip("/"))
+    shard_ledger = ShardLedger(args.output_dir, stage_id=args.stage_id, dataset_revision=args.dataset_prefix.strip("/"))
 
     ds_prefix = args.dataset_prefix.strip("/")
     discovered_shards = []
@@ -6883,7 +6085,6 @@ def main():
     last_regular_checkpoint_step = start_step
     last_best_checkpoint_step = start_step
     last_best_checkpoint_loss = best_loss if best_loss < float("inf") else float("inf")
-    has_unsaved_gdrive_best = False
     best_loss_step = start_step
     best_loss_epoch = start_epoch
     best_loss_cursor = resumed_cursor
@@ -7166,8 +6367,6 @@ def main():
                             stage_id=args.stage_id,
                             is_best=True,
                             is_completed=False,
-                            sync_to_gdrive=args.sync_all_to_gdrive,
-                            sync_optimizer=False,
                             dataset=dataset,
                             shard_ledger=shard_ledger,
                             data_cursor=best_loss_cursor,
@@ -7231,7 +6430,7 @@ def main():
                     print_frontier_comparison_matrix_colored(step, cur_step_loss, min(best_loss, cur_step_loss))
 
                 # ------------------------------------------------------------------
-                # REGULAR CHECKPOINT GATE & RATE-LIMITED GDRIVE SYNC
+                # REGULAR CHECKPOINT GATE
                 # ------------------------------------------------------------------
                 is_regular_interval = (step - last_regular_checkpoint_step >= args.checkpoint_interval)
                 is_final_step = (step >= args.max_steps)
@@ -7256,8 +6455,6 @@ def main():
                         model, optimizer, scaler, config, tok_path, args.output_dir,
                         step, epoch, cur_step_loss, best_loss, args.stage_id,
                         is_best=False, is_completed=False,
-                        sync_to_gdrive=args.sync_all_to_gdrive,
-                        sync_optimizer=args.sync_gdrive_optimizer,
                         dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
                         keep_n=args.keep_checkpoints, force_keep_exact=True,
                         world_model=world_model,
@@ -7363,8 +6560,6 @@ def main():
         model, optimizer, scaler, config, tok_path, args.output_dir,
         step, epoch, final_loss, best_loss, args.stage_id,
         is_best=False, is_completed=True,
-        sync_to_gdrive=args.sync_all_to_gdrive,
-        sync_optimizer=args.sync_gdrive_optimizer,
         dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
         keep_n=args.keep_checkpoints, force_keep_exact=True,
         world_model=world_model,
@@ -7399,17 +6594,6 @@ def main():
                 }, bf, indent=2)
         except Exception:
             pass
-        if args.sync_all_to_gdrive:
-            sync_checkpoint_to_gdrive(
-                output_dir=best_cp_dir,
-                tag="BEST MILESTONE (FINAL)",
-                wait=False,
-                sync_optimizer=False,
-                source_dir=best_cp_dir,
-                step=step,
-                is_best=True,
-                loss=final_loss,
-            )
 
     print(f"[Stage Complete] Training checkpoint preserved in: {args.output_dir}")
     print(f"[Stage Complete] Best Milestone model archived in: {best_cp_dir}")

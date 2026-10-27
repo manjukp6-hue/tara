@@ -2,7 +2,7 @@
 # ==============================================================================
 # TARA Autonomous Google Colab Stage-Wise Training & Cloud Sync Pipeline
 # 100% Cloud Execution (0% Local PC usage)
-# Flow: Clone from GitHub -> Native Rust Training -> Sync to Google Drive -> Push to HF
+# Flow: Clone from GitHub -> Native Rust Training -> Push to HF
 # ==============================================================================
 
 set -euo pipefail
@@ -68,7 +68,6 @@ if [ -z "${TARA_ROPE_THETA:-}" ]; then
 fi
 export TARA_MAX_VAL_SAMPLES="${TARA_MAX_VAL_SAMPLES:-5}"
 export TARA_SKIP_PREFLIGHT_VAL="${TARA_SKIP_PREFLIGHT_VAL:-1}"
-export GDRIVE_CHECKPOINT_DIR="${GDRIVE_CHECKPOINT_DIR:-/content/drive/MyDrive/TARA_CHECKPOINTS}"
 export HF_DATASET_REPO="${HF_DATASET_REPO:-manjukp6/tara_dataset_v1}"
 export HF_MODEL_REPO="${HF_MODEL_REPO:-manjukp6/tara}"
 export HF_REPO="${HF_REPO:-${HF_MODEL_REPO}}"
@@ -159,16 +158,12 @@ if [ "$GRADIENT_CHECKPOINTING" = "1" ]; then
     GRAD_CHECKPOINT_FLAG="--gradient-checkpointing"
 fi
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-500}"
-SKIP_SAVE_STEPS="${SKIP_SAVE_STEPS:-0}"
+SKIP_SAVE_STEPS="${SKIP_SAVE_STEPS:-25}"
 export SKIP_SAVE_STEPS
 PROMOTE_MAX_STEP="${PROMOTE_MAX_STEP:-0}"
 export PROMOTE_MAX_STEP
 DOMAIN_WEIGHTS="${DOMAIN_WEIGHTS:-02_code:0.25,01_math:0.15,04_kannada:0.15,12_reasoning:0.15,03_stem:0.10,08_world_model:0.05,11_tool_use:0.05,13_debugging:0.02,sft:0.02,05_philosophy:0.012,06_social:0.012,07_engineering:0.012,09_audio:0.012,10_vision:0.012}"
 export DOMAIN_WEIGHTS
-GDRIVE_SYNC_FLAGS="--sync-all-to-gdrive --sync-gdrive-optimizer --keep-checkpoints ${KEEP_CHECKPOINTS:-2}"
-if [ "${GDRIVE_SYNC_WAIT:-0}" = "1" ]; then
-    GDRIVE_SYNC_FLAGS="$GDRIVE_SYNC_FLAGS --gdrive-sync-wait"
-fi
 JOINT_STEPS="${JOINT_STEPS:-200}"
 MAIN_DS_DIR="storage/datasets/main_dataset_v2"
 PROMOTED_BASE="storage/models/promoted"
@@ -263,264 +258,11 @@ fi
 echo "------------------------------------------------------------------------------"
 
 # ------------------------------------------------------------------------------
-# 2b. Early Checkpoint Discovery & Google Drive Restore (Zero Wasted HF Downloads)
+# 2b. Local Checkpoint Discovery (NVMe / SSD Storage)
 # ------------------------------------------------------------------------------
 ACTIVE_CP_DIR="storage/models/checkpoints"
 mkdir -p "$ACTIVE_CP_DIR"
 
-# Auto-detect or attempt mounting Google Drive if running in Google Colab environment
-if [ ! -d "/content/drive/MyDrive" ] && [ ! -d "/content/drive/My Drive" ] && [ ! -d "/content/drive/Shareddrives" ] && [ ! -d "/content/drive/Shared drives" ]; then
-    python3 -c "
-try:
-    from google.colab import drive
-    import os
-    if not any(os.path.exists(p) for p in ['/content/drive/MyDrive', '/content/drive/My Drive', '/content/drive/Shareddrives', '/content/drive/Shared drives']):
-        drive.mount('/content/drive', force_remount=False)
-except Exception:
-    pass
-" 2>/dev/null || true
-fi
-
-# Auto-link Google Drive if mounted under 'My Drive' with space
-if [ -d "/content/drive/My Drive" ] && [ ! -e "/content/drive/MyDrive" ]; then
-    ln -s "/content/drive/My Drive" "/content/drive/MyDrive" 2>/dev/null || true
-fi
-
-# Discover GDRIVE_CHECKPOINT_DIR across MyDrive and Shared Drives
-GDRIVE_CHECKPOINT_DIR=""
-if [ -n "${CUSTOM_GDRIVE_CHECKPOINT_DIR:-}" ] && [ -d "$CUSTOM_GDRIVE_CHECKPOINT_DIR" ]; then
-    GDRIVE_CHECKPOINT_DIR="$CUSTOM_GDRIVE_CHECKPOINT_DIR"
-elif [ -d "/content/drive/MyDrive/TARA_CHECKPOINTS" ]; then
-    GDRIVE_CHECKPOINT_DIR="/content/drive/MyDrive/TARA_CHECKPOINTS"
-elif [ -d "/content/drive/My Drive/TARA_CHECKPOINTS" ]; then
-    GDRIVE_CHECKPOINT_DIR="/content/drive/My Drive/TARA_CHECKPOINTS"
-else
-    # Search Shared Drives
-    for sroot in "/content/drive/Shareddrives" "/content/drive/Shared drives"; do
-        if [ -d "$sroot" ]; then
-            for sd in "$sroot"/*; do
-                if [ -d "$sd/TARA_CHECKPOINTS" ]; then
-                    GDRIVE_CHECKPOINT_DIR="$sd/TARA_CHECKPOINTS"
-                    echo "[GDRIVE] Discovered TARA_CHECKPOINTS in Shared Drive: $GDRIVE_CHECKPOINT_DIR"
-                    break 2
-                fi
-            done
-        fi
-    done
-fi
-
-if [ -z "$GDRIVE_CHECKPOINT_DIR" ]; then
-    if [ -d "/content/drive/MyDrive" ]; then
-        GDRIVE_CHECKPOINT_DIR="/content/drive/MyDrive/TARA_CHECKPOINTS"
-    elif [ -d "/content/drive/My Drive" ]; then
-        GDRIVE_CHECKPOINT_DIR="/content/drive/My Drive/TARA_CHECKPOINTS"
-    fi
-fi
-
-# Resolve shared folder shortcut symlinks cleanly to real path
-if [ -n "$GDRIVE_CHECKPOINT_DIR" ] && [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
-    REAL_GDRIVE=$(readlink -f "$GDRIVE_CHECKPOINT_DIR" 2>/dev/null || true)
-    if [ -n "$REAL_GDRIVE" ] && [ -d "$REAL_GDRIVE" ]; then
-        GDRIVE_CHECKPOINT_DIR="$REAL_GDRIVE"
-    fi
-fi
-export GDRIVE_CHECKPOINT_DIR
-
-# Proactive Google Drive healing: if GDRIVE_CHECKPOINT_DIR is a broken shortcut, unlink and recreate real folder
-if [ -L "$GDRIVE_CHECKPOINT_DIR" ] && [ ! -d "$GDRIVE_CHECKPOINT_DIR" ]; then
-    echo "[GDRIVE AUTO-REPAIR] Removing broken shortcut at $GDRIVE_CHECKPOINT_DIR..."
-    rm -f "$GDRIVE_CHECKPOINT_DIR" 2>/dev/null || true
-fi
-if [ -d "/content/drive/MyDrive" ] || [ -d "/content/drive/My Drive" ]; then
-    mkdir -p "$GDRIVE_CHECKPOINT_DIR" 2>/dev/null || true
-fi
-
-# Restore checkpoints from Google Drive mirror into local active storage
-if [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
-    echo "[GDRIVE CLEANUP] Purging stale temporary (.tmp) files from Google Drive (shallow scan)..."
-    find "$GDRIVE_CHECKPOINT_DIR" -maxdepth 2 -name "*.tmp*" -type f -delete 2>/dev/null || true
-    find "$ACTIVE_CP_DIR" -name "* (*)*" -type f -delete 2>/dev/null || true
-    rm -rf "$ACTIVE_CP_DIR/Colab Notebooks" 2>/dev/null || true
-
-    # Dynamically discover all stage directories in Google Drive (Unbounded N-Stage Support)
-    shopt -s nullglob
-    GDRIVE_STAGES=("$GDRIVE_CHECKPOINT_DIR"/*)
-    shopt -u nullglob
-
-    for GDRIVE_STAGE in "${GDRIVE_STAGES[@]}"; do
-        if [ ! -d "$GDRIVE_STAGE" ]; then
-            continue
-        fi
-        STAGE_SUBDIR=$(basename "$GDRIVE_STAGE")
-        # Ignore non-stage system directories created by Colab / Google Drive
-        case "$STAGE_SUBDIR" in
-            "world_joint"|"Colab Notebooks"|".*"|"__pycache__"|*notebook*|*ipynb*)
-                continue
-                ;;
-        esac
-        # Stage directory must either start with "stage" or contain authentic checkpoint artifacts
-        if [[ ! "$STAGE_SUBDIR" =~ ^stage ]] && [ ! -f "$GDRIVE_STAGE/checkpoint_state.json" ] && [ ! -f "$GDRIVE_STAGE/model.safetensors" ] && [ ! -d "$GDRIVE_STAGE/best_checkpoint" ]; then
-            continue
-        fi
-        LOCAL_STAGE="$ACTIVE_CP_DIR/$STAGE_SUBDIR"
-        mkdir -p "$LOCAL_STAGE"
-
-        echo "[RESUME SYNC] Evaluating Google Drive checkpoint vs local: $GDRIVE_STAGE -> $LOCAL_STAGE..."
-        python3 -c "
-import os, shutil, json
-
-src = '$GDRIVE_STAGE'
-dst = '$LOCAL_STAGE'
-
-canonical = {
-    'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json',
-    'model.safetensors', 'world_model.safetensors', 'checkpoint_state.json', 'STAGE_METADATA.json',
-    'optimizer_state.pt', 'shard_ledger.json', 'latest_checkpoint.json', 'dataset_snapshot.json',
-    'COMMITTED'
-}
-
-def get_step(dir_path):
-    st_file = os.path.join(dir_path, 'checkpoint_state.json')
-    if os.path.isfile(st_file):
-        try:
-            with open(st_file, 'r', encoding='utf-8') as f:
-                d = json.load(f)
-                return int(d.get('step', -1))
-        except Exception:
-            pass
-    return -1
-
-def is_valid_model(mpath):
-    if not mpath or not os.path.isfile(mpath):
-        return False
-    try:
-        sz = os.path.getsize(mpath)
-        if sz <= 100000000:
-            return False
-        # Avoid mmap / safe_open on Google Drive FUSE to prevent OS bus error or freezing
-        if '/content/drive' in mpath or 'TARA_CHECKPOINTS' in mpath:
-            with open(mpath, 'rb') as f:
-                hdr = f.read(8)
-                return len(hdr) == 8
-        import safetensors
-        with safetensors.safe_open(mpath, framework='pt', device='cpu') as sf:
-            return len(sf.keys()) > 0
-    except Exception:
-        return False
-
-def heal_upload_temp_files(dir_path):
-    if not dir_path or not os.path.isdir(dir_path):
-        return
-    try:
-        for fname in os.listdir(dir_path):
-            fpath = os.path.join(dir_path, fname)
-            if not os.path.isfile(fpath):
-                continue
-            for target in ('model.safetensors', 'optimizer_state.pt', 'world_model.safetensors'):
-                if fname.startswith(f'{target}.upload_temp_'):
-                    target_path = os.path.join(dir_path, target)
-                    if not os.path.exists(target_path):
-                        try:
-                            sz = os.path.getsize(fpath)
-                            if sz > 10000000:
-                                print(f'  -> [Auto-Heal] Recovered {target} from {fname} ({sz / (1024*1024):.1f} MB)...', flush=True)
-                                os.rename(fpath, target_path)
-                        except Exception as he:
-                            print(f'  -> [Auto-Heal Warning] Failed to recover {target}: {he}', flush=True)
-    except Exception:
-        pass
-
-if os.path.isdir(src):
-    os.makedirs(dst, exist_ok=True)
-    heal_upload_temp_files(src)
-    heal_upload_temp_files(os.path.join(src, 'best_checkpoint'))
-
-    local_step = max(get_step(dst), get_step(os.path.join(dst, 'best_checkpoint')))
-    local_has_model = is_valid_model(os.path.join(dst, 'model.safetensors')) or is_valid_model(os.path.join(dst, 'best_checkpoint', 'model.safetensors'))
-
-    # Discover single highest verified checkpoint on Google Drive
-    candidates = []
-
-    # 1. Pointers
-    for ptr_name in ('best_checkpoint.json', 'latest_checkpoint.json'):
-        ptr_file = os.path.join(src, ptr_name)
-        if os.path.isfile(ptr_file):
-            try:
-                with open(ptr_file, 'r', encoding='utf-8') as f:
-                    pdata = json.load(f)
-                vdir = pdata.get('versioned_dir')
-                if vdir and os.path.isdir(vdir):
-                    heal_upload_temp_files(vdir)
-                    if is_valid_model(os.path.join(vdir, 'model.safetensors')):
-                        candidates.append((get_step(vdir), vdir))
-            except Exception:
-                pass
-
-    # 2. Stage root & best_checkpoint
-    if is_valid_model(os.path.join(src, 'model.safetensors')):
-        candidates.append((get_step(src), src))
-    bc_dir = os.path.join(src, 'best_checkpoint')
-    if is_valid_model(os.path.join(bc_dir, 'model.safetensors')):
-        candidates.append((get_step(bc_dir), bc_dir))
-
-    # 3. Subdirectories (only valid ones)
-    for item in os.listdir(src):
-        sub = os.path.join(src, item)
-        if os.path.isdir(sub) and sub not in (bc_dir,):
-            heal_upload_temp_files(sub)
-            if is_valid_model(os.path.join(sub, 'model.safetensors')):
-                candidates.append((get_step(sub), sub))
-
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    best_src_step, best_src_dir = candidates[0] if candidates else (-1, None)
-
-    print(f'[RESUME SYNC] Step comparison: Local={local_step} (has_model={local_has_model}) vs Google Drive={best_src_step} (dir={os.path.basename(best_src_dir) if best_src_dir else \"None\"})', flush=True)
-
-    if best_src_dir and (best_src_step > local_step or not local_has_model):
-        print(f'  -> Single-Pass Restore: Copying verified Step {best_src_step} checkpoint from {os.path.basename(best_src_dir)} to {dst}...', flush=True)
-        def fast_copy(s_path, d_path):
-            try:
-                sz = os.path.getsize(s_path)
-                if sz > 10 * 1024 * 1024:
-                    with open(s_path, 'rb') as fin, open(d_path, 'wb') as fout:
-                        while True:
-                            buf = fin.read(16 * 1024 * 1024)
-                            if not buf:
-                                break
-                            fout.write(buf)
-                else:
-                    shutil.copy2(s_path, d_path)
-            except Exception:
-                shutil.copy2(s_path, d_path)
-
-        for f in os.listdir(best_src_dir):
-            if f in canonical:
-                sf = os.path.join(best_src_dir, f)
-                if os.path.isfile(sf):
-                    fast_copy(sf, os.path.join(dst, f))
-        
-        # Link or mirror best_checkpoint locally without duplicate bandwidth
-        local_best = os.path.join(dst, 'best_checkpoint')
-        os.makedirs(local_best, exist_ok=True)
-        for f in os.listdir(dst):
-            if f in canonical:
-                src_f = os.path.join(dst, f)
-                dst_f = os.path.join(local_best, f)
-                if os.path.isfile(src_f) and not os.path.exists(dst_f):
-                    try:
-                        os.link(src_f, dst_f)
-                    except Exception:
-                        shutil.copy2(src_f, dst_f)
-
-        print('[RESUME SYNC] Single-pass checkpoint mirror restore complete.', flush=True)
-    else:
-        if local_has_model and local_step >= best_src_step:
-            print(f'[RESUME SYNC] Local checkpoint is up to date (Step {local_step}); skipping restore.', flush=True)
-        else:
-            print(f'[RESUME SYNC] Directory {os.path.basename(src)} contains no valid model weights. Skipping.', flush=True)
-" 2>/dev/null || true
-    done
-fi
 
 # Zero-copy candidate model & world model seeding from restored local checkpoints
 mkdir -p storage/models/tara_candidate_v1
@@ -716,10 +458,6 @@ echo "=== [PRE-TRAINING GATE: DEDUPLICATION, TOKENIZER AUDIT & AUTHORIZATION] ==
     --model storage/models/tara_candidate_v1 \
     --dataset "$GATE_TARGET_DS"
 
-# Ensure pretraining_authorization.json is preserved locally and backed up to Google Drive
-if [ -f "storage/models/checkpoints/pretraining_authorization.json" ] && [ -d "$GDRIVE_CHECKPOINT_DIR" ]; then
-    cp "storage/models/checkpoints/pretraining_authorization.json" "$GDRIVE_CHECKPOINT_DIR/pretraining_authorization.json" 2>/dev/null || true
-fi
 echo "Pre-Training Authorization Gate Passed!"
 
 # 5a. Proactive Pre-Training Disk Space Reclamation: Reclaim 15-20 GB while keeping compiled release binaries
@@ -795,7 +533,6 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --exclude-shards "${TARA_EXCLUDE_SHARDS:-*shard_099*,*shard_098*,*indiccorp_v2*}" \
         --max-shard-bytes 0 \
         $JOINT_WORLD_FLAG \
-        $GDRIVE_SYNC_FLAGS \
         $FULL_DATASET_EXTRA \
         $GRAD_CHECKPOINT_FLAG
 
@@ -848,17 +585,6 @@ if [ "$TRAINER_MODE" = "rust" ] || [ "${RUN_MANUAL_TRAINER:-0}" = "1" ]; then
     echo "Neural & World Model Joint Training Completed Successfully!"
 else
     echo "[STEP 7 SKIPPED] Python trainer has already completed unified pretraining and Joint World Model co-training."
-fi
-
-# 8. Checkpoint Preservation to Google Drive (Rust Manual Trainer Checkpoints)
-if [ "$TRAINER_MODE" = "rust" ] && [ -d "/content/drive/MyDrive" ]; then
-    echo "------------------------------------------------------------------------------"
-    echo "[GDRIVE BACKUP] Syncing World Model & Joint checkpoints to Google Drive..."
-    mkdir -p "$GDRIVE_CHECKPOINT_DIR/world_joint"
-    if [ -d "manual_training/checkpoints" ] && [ -n "$(ls -A manual_training/checkpoints 2>/dev/null)" ]; then
-        cp -r manual_training/checkpoints/* "$GDRIVE_CHECKPOINT_DIR/world_joint/"
-    fi
-    echo "[GDRIVE BACKUP] All Neural and World Model checkpoints archived in: $GDRIVE_CHECKPOINT_DIR"
 fi
 
 # 9. Automatic Hugging Face Model Promotion & Upload (Native Rust Trainer Only - Python Trainer uploads directly)

@@ -1739,11 +1739,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut main_dataset_dir = PathBuf::from("storage/datasets/main_dataset_v2");
     let mut scale_dataset_dir = PathBuf::from("storage/datasets/main_dataset_v1");
     let mut adaptation_path = PathBuf::from("storage/persistence/experiential_lessons.jsonl");
-    let mut checkpoints_dir = env::var("GDRIVE_CHECKPOINT_DIR")
-        .ok()
-        .filter(|s| !s.trim().is_empty() && Path::new("/content/drive/MyDrive").exists())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("storage/models/checkpoints"));
+    let mut checkpoints_dir = PathBuf::from("storage/models/checkpoints");
     let mut device = "auto".to_string();
     let mut precision = "auto".to_string();
     let mut dry_run = false;
@@ -3352,7 +3348,7 @@ mod tests {
         let stage2_out = dir.join("stage2_out");
 
         write_minimal_working_model(&base_model, false, false);
-        // Stage 0 output exists on disk as an empty directory (e.g. created by Google Drive / cloud storage)
+        // Stage 0 output exists on disk as an empty directory
         fs::create_dir_all(&stage0_out).unwrap();
 
         let ds_file = dir.join("test_dataset.jsonl");

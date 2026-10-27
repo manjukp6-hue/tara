@@ -641,21 +641,6 @@ impl NativeSelfTrainer {
         }
     }
 
-    fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
-        fs::create_dir_all(dst)?;
-        for entry in fs::read_dir(src)? {
-            let entry = entry?;
-            let ft = entry.file_type()?;
-            let dest_path = dst.join(entry.file_name());
-            if ft.is_dir() {
-                Self::copy_dir_all(&entry.path(), &dest_path)?;
-            } else {
-                let _ = fs::copy(entry.path(), dest_path)?;
-            }
-        }
-        Ok(())
-    }
-
     /// Formats seconds into human-readable HH:MM:SS or MM:SS format.
     pub fn format_duration_hhmmss(total_seconds: f64) -> String {
         let total_secs = total_seconds.max(0.0) as u64;
@@ -669,43 +654,7 @@ impl NativeSelfTrainer {
         }
     }
 
-    /// Automatically synchronize checkpoint milestones to Google Drive if present.
-    pub fn sync_to_gdrive_if_present(source_dir: &Path) {
-        let mut targets = Vec::new();
-        if let Ok(env_dir) = std::env::var("GDRIVE_CHECKPOINT_DIR") {
-            if !env_dir.trim().is_empty() {
-                targets.push(PathBuf::from(env_dir));
-            }
-        }
-        targets.push(PathBuf::from("/content/drive/MyDrive/TARA_CHECKPOINTS"));
-
-        let folder_name = source_dir
-            .file_name()
-            .unwrap_or_else(|| std::ffi::OsStr::new("checkpoint"));
-
-        for target in targets {
-            if let Some(parent) = target.parent() {
-                if parent.exists() {
-                    let dest_dir = target.join(folder_name);
-                    if let Err(e) = Self::copy_dir_all(source_dir, &dest_dir) {
-                        eprintln!(
-                            "[GDrive Sync] Warning: failed to copy '{}' to '{}': {e}",
-                            source_dir.display(),
-                            dest_dir.display()
-                        );
-                    } else {
-                        println!(
-                            "[GDrive Sync] Milestone checkpoint synchronized to Google Drive: {}",
-                            dest_dir.display()
-                        );
-                    }
-                    break;
-                }
-            }
-        }
-    }
-
-    /// Persist an atomic sharded model checkpoint bundle, optimizer state, and metadata to disk and Google Drive.
+    /// Persist an atomic sharded model checkpoint bundle, optimizer state, and metadata to disk.
     pub fn save_checkpoint_state_bundle(
         bundle: CheckpointBundleConfig<'_>,
     ) -> Result<(), TrainerError> {
@@ -789,11 +738,9 @@ impl NativeSelfTrainer {
                 "[Checkpoint] ★ Dynamic milestone: New BEST checkpoint saved to '{}/best' (Validation Loss: {:.4})",
                 bundle.cp_dir, bundle.best_loss
             );
-            Self::sync_to_gdrive_if_present(&best_dir);
         }
 
         let _ = std::fs::remove_dir_all(&staging_cp);
-        Self::sync_to_gdrive_if_present(cp_path);
 
         let val_loss_str = bundle
             .current_eval_loss
@@ -2354,7 +2301,7 @@ impl NativeSelfTrainer {
                                 format!("{:.4}", best_loss)
                             };
                             println!(
-                                    "[{stage_label} | Checkpoint Saved] Step {} (Epoch {}) | Eval Loss: {} | Best Loss: {} | Path: {} | Sync: GDrive",
+                                    "[{stage_label} | Checkpoint Saved] Step {} (Epoch {}) | Eval Loss: {} | Best Loss: {} | Path: {}",
                                     optimizer_steps,
                                     epoch_idx + 1,
                                     eval_str,
@@ -2644,7 +2591,7 @@ impl NativeSelfTrainer {
                         format!("{:.4}", best_loss)
                     };
                     println!(
-                        "[{stage_label} | Checkpoint Saved] Step {} (Epoch {}) | Eval Loss: {} | Best Loss: {} | Path: {} | Sync: GDrive",
+                        "[{stage_label} | Checkpoint Saved] Step {} (Epoch {}) | Eval Loss: {} | Best Loss: {} | Path: {}",
                         optimizer_steps,
                         epoch_idx + 1,
                         eval_str,

@@ -1414,6 +1414,19 @@ class DatasetSnapshot:
         return recorded != current_sha
 
 
+def _count_stream_lines(stream) -> int:
+    """Robust buffered line counter handling missing trailing newline, empty files, and compressed streams."""
+    total = 0
+    last_byte = None
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        if not chunk:
+            break
+        total += chunk.count(b"\n")
+        last_byte = chunk[-1:]
+    if last_byte and last_byte != b"\n":
+        total += 1
+    return total
+
 class TaraStreamingJsonlDataset(IterableDataset):
     """
     High-Throughput Zero-Memory Streaming Dataset.
@@ -1984,18 +1997,15 @@ class TaraStreamingJsonlDataset(IterableDataset):
                 self.active_shard_total_lines = len(self._line_index.load(shard_sha))
             else:
                 # Format-aware ultra-fast buffered binary line counter for .jsonl, .txt, .csv, and compressed .gz
+                # Handles decompression streams, empty files, and lines lacking trailing newlines
                 try:
                     if ext in (".gz", ".tar.gz") or actual_fp.endswith(".gz"):
                         import gzip
                         with gzip.open(actual_fp, "rb") as gf:
-                            self.active_shard_total_lines = sum(
-                                chunk.count(b"\n") for chunk in iter(lambda: gf.read(1024 * 1024), b"")
-                            )
+                            self.active_shard_total_lines = _count_stream_lines(gf)
                     elif ext in (".jsonl", ".ndjson", ".txt", ".text", ".csv", ".tsv"):
                         with open(actual_fp, "rb") as f:
-                            self.active_shard_total_lines = sum(
-                                chunk.count(b"\n") for chunk in iter(lambda: f.read(1024 * 1024), b"")
-                            )
+                            self.active_shard_total_lines = _count_stream_lines(f)
                 except Exception:
                     pass
             if self.shard_ledger:

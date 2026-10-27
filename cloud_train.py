@@ -2710,7 +2710,7 @@ class AnchorReplayBuffer:
     linguistics, or tool execution capabilities.
     Uses reservoir sampling bounded to capacity (default 1500 samples/domain, < 35 MB CPU RAM).
     """
-    def __init__(self, capacity_per_domain: int = 1500, anchor_ratio: float = 0.15):
+    def __init__(self, capacity_per_domain: int = 32, anchor_ratio: float = 0.15):
         self.capacity = capacity_per_domain
         self.anchor_ratio = anchor_ratio
         self.buffers: Dict[str, List[Any]] = {}
@@ -2769,60 +2769,44 @@ class AnchorReplayBuffer:
 
     def get_state(self) -> Dict[str, Any]:
         """
-        Serializes anchor replay buffer into a compact, memory-efficient JSON dictionary (< 10 MB).
-        Uses single-character keys and label deduplication to minimize storage footprint.
+        Serializes anchor replay buffer into a lightweight, instant metadata dictionary (< 50 KB).
+        When domains are actively streaming, buffers are populated in memory without dumping millions
+        of token integers into checkpoint_state.json. If any domain is depleted, only a compact bounded
+        exemplar set is serialized.
         """
         serialized_buffers: Dict[str, List[Dict[str, Any]]] = {}
-        for dom, items in self.buffers.items():
-            serialized_items = []
-            for item in items:
-                if isinstance(item, dict):
-                    inp = item.get("input_ids", [])
-                    lab = item.get("labels", None)
-                    s_name = str(item.get("shard_name", ""))
-                    l_idx = int(item.get("line_idx", 0))
-                    b_off = int(item.get("byte_offset", 0))
-                    c_idx = int(item.get("chunk_idx", 0))
-                    is_last = bool(item.get("is_last", True))
-                elif hasattr(item, "input_ids") and hasattr(item, "labels"):
-                    inp = item.input_ids
-                    lab = item.labels
-                    s_name = str(getattr(item, "shard_name", ""))
-                    l_idx = int(getattr(item, "line_idx", 0))
-                    b_off = int(getattr(item, "byte_offset", 0))
-                    c_idx = int(getattr(item, "chunk_idx", 0))
-                    is_last = bool(getattr(item, "is_last", True))
-                elif isinstance(item, (tuple, list)) and len(item) >= 7:
-                    inp, lab, s_name, l_idx, b_off, c_idx, is_last = item[:7]
-                    s_name = str(s_name)
-                    l_idx = int(l_idx)
-                    b_off = int(b_off)
-                    c_idx = int(c_idx)
-                    is_last = bool(is_last)
-                else:
-                    inp = item if isinstance(item, (list, tuple, torch.Tensor)) else []
-                    lab = None
-                    s_name, l_idx, b_off, c_idx, is_last = "", 0, 0, 0, True
+        if self.depleted_domains:
+            for dom in self.depleted_domains:
+                items = self.buffers.get(dom, [])
+                serialized_items = []
+                for item in items[:32]:
+                    if isinstance(item, dict):
+                        inp = item.get("input_ids", [])
+                        s_name = str(item.get("shard_name", ""))
+                        l_idx = int(item.get("line_idx", 0))
+                        b_off = int(item.get("byte_offset", 0))
+                        c_idx = int(item.get("chunk_idx", 0))
+                        is_last = bool(item.get("is_last", True))
+                    elif hasattr(item, "input_ids"):
+                        inp = item.input_ids
+                        s_name = str(getattr(item, "shard_name", ""))
+                        l_idx = int(getattr(item, "line_idx", 0))
+                        b_off = int(getattr(item, "byte_offset", 0))
+                        c_idx = int(getattr(item, "chunk_idx", 0))
+                        is_last = bool(getattr(item, "is_last", True))
+                    else:
+                        continue
 
-                inp_list = inp.detach().cpu().tolist() if isinstance(inp, torch.Tensor) else (list(inp) if isinstance(inp, (list, tuple)) else [])
-                lab_list = lab.detach().cpu().tolist() if isinstance(lab, torch.Tensor) else (list(lab) if isinstance(lab, (list, tuple)) else None)
-
-                # Space optimization: if labels is identical to input_ids, store None to halve size
-                if lab_list == inp_list or lab_list is None:
-                    lab_val = None
-                else:
-                    lab_val = lab_list
-
-                serialized_items.append({
-                    "i": inp_list,
-                    "l": lab_val,
-                    "s": s_name,
-                    "n": l_idx,
-                    "b": b_off,
-                    "c": c_idx,
-                    "e": is_last,
-                })
-            serialized_buffers[dom] = serialized_items
+                    inp_list = inp.detach().cpu().tolist() if isinstance(inp, torch.Tensor) else (list(inp) if isinstance(inp, (list, tuple)) else [])
+                    serialized_items.append({
+                        "i": inp_list[:1024],
+                        "s": s_name,
+                        "n": l_idx,
+                        "b": b_off,
+                        "c": c_idx,
+                        "e": is_last,
+                    })
+                serialized_buffers[dom] = serialized_items
 
         return {
             "capacity": self.capacity,
@@ -3089,7 +3073,7 @@ class TaraMultiDomainScheduler(IterableDataset):
             if total_w > 0:
                 self.domain_weights = {d: norm_w.get(d, 0.0) / total_w for d in self.active_domains}
 
-        self.anchor_buffer = AnchorReplayBuffer(capacity_per_domain=1500, anchor_ratio=anchor_ratio)
+        self.anchor_buffer = AnchorReplayBuffer(capacity_per_domain=32, anchor_ratio=anchor_ratio)
         init_anchor_state = anchor_buffer_state or kwargs.get("anchor_buffer") or kwargs.get("anchor_buffer_state")
         if init_anchor_state and isinstance(init_anchor_state, dict):
             self.anchor_buffer.load_state(init_anchor_state)
@@ -3157,7 +3141,6 @@ class TaraMultiDomainScheduler(IterableDataset):
             "scheduler_deficits": copy.deepcopy(self.deficits),
             "depleted_domains": list(self.anchor_buffer.depleted_domains),
             "anchor_buffer": self.anchor_buffer.get_state(),
-            "anchor_buffer_state": self.anchor_buffer.get_state(),
         }
 
     def load_state(self, state: Dict[str, Any]):
@@ -4826,7 +4809,6 @@ def save_checkpoint(
                 data_cursor["domain_cursors"] = domain_cursors
             if anchor_buffer_state:
                 data_cursor["anchor_buffer"] = anchor_buffer_state
-                data_cursor["anchor_buffer_state"] = anchor_buffer_state
             if scheduler_deficits:
                 data_cursor["scheduler_deficits"] = scheduler_deficits
 
@@ -4848,7 +4830,6 @@ def save_checkpoint(
                 "domain_cursors": domain_cursors or {},
                 "scheduler_deficits": scheduler_deficits or {},
                 "anchor_buffer": anchor_buffer_state,
-                "anchor_buffer_state": anchor_buffer_state,
                 "active_shard": active_shard,
                 "active_shard_offset": active_offset,
                 "active_shard_line_offset": active_offset,
@@ -6730,6 +6711,10 @@ def main():
                         help="Number of past checkpoints to retain (default: 2; deletes older checkpoints only upon verified new commit)")
     parser.add_argument("--skip-save-steps", type=int, default=int(os.environ.get("SKIP_SAVE_STEPS", 0)),
                         help="Number of initial steps to skip checkpoint and best-milestone disk/cloud saves (default: 0; immediate zero-lock saves active)")
+    parser.add_argument("--best-checkpoint-interval", type=int, default=int(os.environ.get("BEST_CHECKPOINT_INTERVAL", 25)),
+                        help="Minimum optimization steps between consecutive best milestone disk/cloud saves (default: 25; prevents I/O stalling in early training)")
+    parser.add_argument("--min-best-loss-delta", type=float, default=float(os.environ.get("MIN_BEST_LOSS_DELTA", 0.20)),
+                        help="Minimum loss improvement to trigger an immediate milestone save before the interval is reached (default: 0.20)")
     parser.add_argument("--promote-max-step", type=int, default=int(os.environ.get("PROMOTE_MAX_STEP", 0)),
                         help="Target step ceiling for model promotion (e.g. 500). Promotes the best checkpoint achieved within steps <= PROMOTE_MAX_STEP for real-time deployment while training continues uninterrupted. 0 means unbounded/entire stage.")
     parser.add_argument("--domain-weights", type=str, default=os.environ.get("DOMAIN_WEIGHTS", ""),
@@ -7743,7 +7728,18 @@ def main():
                     best_loss_epoch = epoch
                     best_loss_cursor = copy.deepcopy(current_cursor) if current_cursor is not None else None
 
-                    if can_save_at_current_step:
+                    steps_since_last_best = step - last_best_checkpoint_step
+                    loss_drop = (last_best_checkpoint_loss - cur_step_loss) if last_best_checkpoint_loss < float("inf") else 1.0
+                    is_significant_delta = (loss_drop >= args.min_best_loss_delta)
+                    is_interval_reached = (steps_since_last_best >= args.best_checkpoint_interval)
+                    is_final_step = (step >= args.max_steps)
+
+                    should_commit_milestone = (
+                        (is_interval_reached or is_significant_delta or is_final_step)
+                        and can_save_at_current_step
+                    )
+
+                    if should_commit_milestone:
                         last_best_checkpoint_step = step
                         last_best_checkpoint_loss = cur_step_loss
 
@@ -7800,10 +7796,17 @@ def main():
                                                 _safe_unlink(tmp_d_file)
                             except Exception as e:
                                 print(f"[Promote Window Snapshot Warning] Failed to update window snapshot: {e}", flush=True)
-                    else:
+                    elif not can_save_at_current_step:
                         print(
                             f"[{args.stage_id} | Step {step:04d}] [Skip-Save Active (<= {args.skip_save_steps})] "
                             f"New best loss {best_loss:.4f} tracked in memory; local save active at Step {args.skip_save_steps + 1}+.",
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            f"[{args.stage_id} | Step {step:04d}] [Best Loss Tracked: {best_loss:.4f}] "
+                            f"Pacing milestone snapshot ({steps_since_last_best}/{args.best_checkpoint_interval} steps, "
+                            f"delta: {loss_drop:.4f}/{args.min_best_loss_delta:.2f}); GPU training continues uninterrupted.",
                             flush=True,
                         )
 

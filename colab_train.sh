@@ -174,6 +174,10 @@ fi
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-500}"
 SKIP_SAVE_STEPS="${SKIP_SAVE_STEPS:-0}"
 export SKIP_SAVE_STEPS
+BEST_CHECKPOINT_INTERVAL="${BEST_CHECKPOINT_INTERVAL:-25}"
+export BEST_CHECKPOINT_INTERVAL
+MIN_BEST_LOSS_DELTA="${MIN_BEST_LOSS_DELTA:-0.20}"
+export MIN_BEST_LOSS_DELTA
 PROMOTE_MAX_STEP="${PROMOTE_MAX_STEP:-0}"
 export PROMOTE_MAX_STEP
 DOMAIN_WEIGHTS="${DOMAIN_WEIGHTS:-02_code:0.25,01_math:0.15,04_kannada:0.15,12_reasoning:0.15,03_stem:0.10,08_world_model:0.05,11_tool_use:0.05,13_debugging:0.02,sft:0.02,05_philosophy:0.012,06_social:0.012,07_engineering:0.012,09_audio:0.012,10_vision:0.012}"
@@ -796,6 +800,8 @@ if [ "$TRAINER_MODE" = "python" ]; then
         --max-seq-len "$TARA_MAX_SEQ_LEN" \
         --checkpoint-interval "$CHECKPOINT_INTERVAL" \
         --skip-save-steps "$SKIP_SAVE_STEPS" \
+        --best-checkpoint-interval "$BEST_CHECKPOINT_INTERVAL" \
+        --min-best-loss-delta "$MIN_BEST_LOSS_DELTA" \
         --promote-max-step "$PROMOTE_MAX_STEP" \
         --domain-weights "$DOMAIN_WEIGHTS" \
         --hf-repo "$HF_DATASET_REPO" \

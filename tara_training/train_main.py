@@ -1355,7 +1355,7 @@ def main():
                             f"{scale_before} -> {scale_after}. Step skipped safely; resuming next window.",
                             flush=True,
                         )
-                    elif is_shock_detected:
+                    else:
                         print(
                             f"[Model Shock Guard] Step skipped safely to protect model stability; resuming next window.",
                             flush=True,

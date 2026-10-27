@@ -83,6 +83,7 @@ from gdrive_sync import (
     try_resume_from_checkpoint,
     check_stage_already_completed,
     resolve_gdrive_backup_dir,
+    resolve_gdrive_restore_dir,
     trigger_async_gdrive_sync,
     wait_for_gdrive_sync,
     upload_promoted_model_to_hf,
@@ -1054,7 +1055,7 @@ def main():
 
     if args.resume:
         # Check if local checkpoint directory has checkpoints; if NOT, try restoring from Google Drive!
-        gdrive_dir = resolve_gdrive_backup_dir()
+        gdrive_dir = resolve_gdrive_restore_dir() or resolve_gdrive_backup_dir()
         if gdrive_dir and not (check_model_weights_exist(args.output_dir) or os.path.exists(os.path.join(args.output_dir, "checkpoint_state.json"))):
             print(f"[GDrive Auto-Recovery] Local checkpoint missing in '{args.output_dir}'. Checking GDrive backup at '{gdrive_dir}'...", flush=True)
             restored = restore_checkpoint_from_gdrive(gdrive_dir, args.output_dir)

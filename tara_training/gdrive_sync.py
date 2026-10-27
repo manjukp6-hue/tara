@@ -633,14 +633,228 @@ def sync_best_milestone_to_gdrive(
         return False
 
 
+def find_all_gdrive_checkpoint_candidates() -> List[str]:
+    """
+    Discovers all candidate Google Drive checkpoint locations across accounts:
+    1. Explicit environment variables (TARA_SHARED_GDRIVE_DIR, GDRIVE_SHARED_DIR, GDRIVE_RESTORE_DIR, TARA_GDRIVE_DIR, GDRIVE_BACKUP_DIR)
+    2. Colab userdata secrets
+    3. Standard /content/drive/MyDrive/tara_checkpoints
+    4. Any shortcut or shared folder in /content/drive/MyDrive matching *checkpoint* or *tara*
+    5. Google Workspace Shared Drives (/content/drive/Shareddrives/*)
+    6. Colab shortcut targets (/content/drive/.shortcut-targets-by-id/*)
+    """
+    candidates: List[str] = []
+
+    # 1. Environment variables
+    for env_var in (
+        "TARA_SHARED_GDRIVE_DIR",
+        "GDRIVE_SHARED_DIR",
+        "GDRIVE_RESTORE_DIR",
+        "TARA_GDRIVE_DIR",
+        "GDRIVE_BACKUP_DIR",
+    ):
+        v = os.environ.get(env_var, "").strip()
+        if v and os.path.exists(v) and v not in candidates:
+            candidates.append(v)
+
+    # 2. Colab userdata secrets
+    try:
+        from google.colab import userdata
+        for secret_key in ("TARA_SHARED_GDRIVE_DIR", "GDRIVE_SHARED_DIR", "GDRIVE_RESTORE_DIR", "TARA_GDRIVE_DIR"):
+            try:
+                v = userdata.get(secret_key)
+                if v and os.path.exists(v) and v not in candidates:
+                    candidates.append(v)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 3. Standard Colab MyDrive path
+    std_path = "/content/drive/MyDrive/tara_checkpoints"
+    if os.path.exists(std_path) and std_path not in candidates:
+        candidates.append(std_path)
+
+    # 4. Search /content/drive/MyDrive for shortcuts/folders matching 'tara' or 'checkpoint'
+    mydrive = "/content/drive/MyDrive"
+    if os.path.exists(mydrive) and os.path.isdir(mydrive):
+        try:
+            for entry in os.listdir(mydrive):
+                low = entry.lower()
+                if "tara" in low or "checkpoint" in low:
+                    p = os.path.join(mydrive, entry)
+                    if os.path.isdir(p) and p not in candidates:
+                        candidates.append(p)
+        except Exception:
+            pass
+
+    # 5. Search /content/drive/Shareddrives for shared team drives
+    shareddrives = "/content/drive/Shareddrives"
+    if os.path.exists(shareddrives) and os.path.isdir(shareddrives):
+        try:
+            for sdrive in os.listdir(shareddrives):
+                sd_path = os.path.join(shareddrives, sdrive)
+                if os.path.isdir(sd_path):
+                    for sub in os.listdir(sd_path):
+                        low = sub.lower()
+                        if "tara" in low or "checkpoint" in low:
+                            p = os.path.join(sd_path, sub)
+                            if os.path.isdir(p) and p not in candidates:
+                                candidates.append(p)
+        except Exception:
+            pass
+
+    # 6. Colab internal shortcut targets
+    shortcut_root = "/content/drive/.shortcut-targets-by-id"
+    if os.path.exists(shortcut_root) and os.path.isdir(shortcut_root):
+        try:
+            for tid in os.listdir(shortcut_root):
+                target_base = os.path.join(shortcut_root, tid)
+                if os.path.isdir(target_base):
+                    if "tara" in tid.lower() or "checkpoint" in tid.lower():
+                        if target_base not in candidates:
+                            candidates.append(target_base)
+                    for sub in os.listdir(target_base):
+                        low = sub.lower()
+                        if "tara" in low or "checkpoint" in low:
+                            p = os.path.join(target_base, sub)
+                            if os.path.isdir(p) and p not in candidates:
+                                candidates.append(p)
+        except Exception:
+            pass
+
+    return candidates
+
+
+def get_checkpoint_dir_step(d: str) -> int:
+    """
+    Returns the highest step found in candidate directory `d`.
+    Returns -1 if no valid checkpoint exists.
+    """
+    if not os.path.isdir(d):
+        return -1
+
+    max_step = -1
+
+    def check_state_file(path: str) -> int:
+        if os.path.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return int(json.load(f).get("step", 0))
+            except Exception:
+                pass
+        return -1
+
+    # Check normal_checkpoint
+    norm_dir = os.path.join(d, "normal_checkpoint")
+    if os.path.isdir(norm_dir):
+        st = check_state_file(os.path.join(norm_dir, "checkpoint_state.json"))
+        if st >= 0:
+            max_step = max(max_step, st)
+        elif os.path.exists(os.path.join(norm_dir, "model.safetensors")) or os.path.exists(os.path.join(norm_dir, "pytorch_model.bin")):
+            max_step = max(max_step, 0)
+
+    # Check best_milestone subfolders
+    bm_dir = os.path.join(d, "best_milestone")
+    if os.path.isdir(bm_dir):
+        for sub in os.listdir(bm_dir):
+            sub_p = os.path.join(bm_dir, sub)
+            if os.path.isdir(sub_p) and not sub.startswith("."):
+                m = re.match(r"^step_(\d+)", sub)
+                if m:
+                    max_step = max(max_step, int(m.group(1)))
+                else:
+                    st = check_state_file(os.path.join(sub_p, "checkpoint_state.json"))
+                    if st >= 0:
+                        max_step = max(max_step, st)
+        st = check_state_file(os.path.join(bm_dir, "checkpoint_state.json"))
+        if st >= 0:
+            max_step = max(max_step, st)
+        elif os.path.exists(os.path.join(bm_dir, "model.safetensors")):
+            max_step = max(max_step, 0)
+
+    # Check root d directly
+    st = check_state_file(os.path.join(d, "checkpoint_state.json"))
+    if st >= 0:
+        max_step = max(max_step, st)
+    elif os.path.exists(os.path.join(d, "model.safetensors")) or os.path.exists(os.path.join(d, "pytorch_model.bin")):
+        max_step = max(max_step, 0)
+
+    return max_step
+
+
+def resolve_gdrive_restore_dir() -> Optional[str]:
+    """
+    Dynamically discovers and selects the best Google Drive checkpoint directory to restore from.
+    Evaluates:
+    - Shared Google Drive shortcuts from other accounts
+    - Environment variables (TARA_SHARED_GDRIVE_DIR, GDRIVE_SHARED_DIR, GDRIVE_RESTORE_DIR)
+    - Local user's own MyDrive tara_checkpoints
+    - Selects the directory possessing the highest verified training step.
+    """
+    candidates = find_all_gdrive_checkpoint_candidates()
+    if not candidates:
+        return None
+
+    best_dir = None
+    highest_step = -1
+
+    for c in candidates:
+        step_val = get_checkpoint_dir_step(c)
+        if step_val > highest_step:
+            highest_step = step_val
+            best_dir = c
+
+    if best_dir is not None and highest_step >= 0:
+        print(f"[GDrive Restore Discovery] Found verified checkpoint source at '{best_dir}' (step={highest_step}).", flush=True)
+        return best_dir
+
+    return candidates[0] if candidates else None
+
+
+def is_directory_writable(path: str) -> bool:
+    """Test if a directory is genuinely writable by attempting to create/delete a temporary test probe."""
+    if not os.path.exists(path):
+        try:
+            os.makedirs(path, exist_ok=True)
+            return True
+        except Exception:
+            return False
+    test_probe = os.path.join(path, f".write_probe_{os.getpid()}_{int(time.time())}")
+    try:
+        with open(test_probe, "w", encoding="utf-8") as f:
+            f.write("probe")
+        if os.path.exists(test_probe):
+            os.remove(test_probe)
+            return True
+        return False
+    except Exception:
+        return False
+
+
 def resolve_gdrive_backup_dir() -> Optional[str]:
-    """Dynamically resolve Google Drive backup directory from environment or standard Colab paths."""
+    """
+    Dynamically resolve Google Drive backup directory for writing checkpoints.
+    1. If TARA_GDRIVE_DIR or GDRIVE_BACKUP_DIR is explicitly configured, use it.
+    2. Check if a restored shared directory from another account is writable (Editor permission).
+       If writable, allows continuous collaborative synchronization back to the shared folder!
+    3. If the shared folder is read-only (Viewer permission), automatically falls back to
+       the current account's own MyDrive (/content/drive/MyDrive/tara_checkpoints) for writing.
+    """
     env_dir = os.environ.get("TARA_GDRIVE_DIR", os.environ.get("GDRIVE_BACKUP_DIR", "")).strip()
     if env_dir:
         return env_dir
+
     colab_default = "/content/drive/MyDrive/tara_checkpoints"
+
+    # Check if a shared restore directory exists and is writable
+    restore_dir = resolve_gdrive_restore_dir()
+    if restore_dir and is_directory_writable(restore_dir):
+        return restore_dir
+
     if os.path.exists("/content/drive/MyDrive"):
         return colab_default
+
     return None
 
 

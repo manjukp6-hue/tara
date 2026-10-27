@@ -164,10 +164,10 @@ mkdir -p "$ACTIVE_CP_DIR"
 if [ -n "${GDRIVE_BACKUP_DIR:-}" ] && [ -d "$GDRIVE_BACKUP_DIR" ]; then
     echo "[GDRIVE AUTO-RESTORE] Checking for existing durable checkpoints in Google Drive..."
     python3 -c "
-from gdrive_sync import restore_checkpoint_from_gdrive, resolve_gdrive_backup_dir
+from gdrive_sync import restore_checkpoint_from_gdrive, resolve_gdrive_restore_dir, resolve_gdrive_backup_dir
 import os, shutil
 
-gdir = resolve_gdrive_backup_dir()
+gdir = resolve_gdrive_restore_dir() or resolve_gdrive_backup_dir()
 cp_base = '${ACTIVE_CP_DIR}'
 cand_dir = 'storage/models/tara_candidate_v1'
 if gdir and os.path.exists(gdir):

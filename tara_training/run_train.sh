@@ -49,21 +49,25 @@ if [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 35000 ] 2>/dev/null; then
     DEFAULT_BATCH=8
     DEFAULT_ACCUM=4
     DEFAULT_OPTIM="adamw"
+    DEFAULT_SEQ_LEN=4096
 elif [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 20000 ] 2>/dev/null; then
     # L4 / A10G (24GB)
     DEFAULT_BATCH=4
     DEFAULT_ACCUM=8
     DEFAULT_OPTIM="adamw"
+    DEFAULT_SEQ_LEN=4096
 elif [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 12000 ] 2>/dev/null; then
-    # Tesla T4 / V100 (15GB - 16GB) - Strict VRAM Safeguard to eliminate step-1 OOM
+    # Tesla T4 / V100 (15GB - 16GB) - Strict VRAM Safeguard: 2048 seq len saves 75% attention VRAM
     DEFAULT_BATCH=2
     DEFAULT_ACCUM=16
     DEFAULT_OPTIM="adamw8bit"
+    DEFAULT_SEQ_LEN=2048
 else
     # CPU / Low-spec
     DEFAULT_BATCH=1
     DEFAULT_ACCUM=32
     DEFAULT_OPTIM="adamw"
+    DEFAULT_SEQ_LEN=1024
 fi
 
 TRAIN_BATCH_SIZE="${BATCH_SIZE:-$DEFAULT_BATCH}"
@@ -120,14 +124,17 @@ if ! python3 -c "import safetensors, tokenizers, torch, bitsandbytes" 2>/dev/nul
     pip install -q -r requirements.txt
 fi
 
-# 6. Dynamically resolve Max Sequence Length from model config if present
+# 6. Dynamically resolve Max Sequence Length bounded by hardware VRAM budget
 if [ -z "${TARA_MAX_SEQ_LEN:-}" ]; then
-    MODEL_MAX_POS=4096
+    MODEL_MAX_POS="${DEFAULT_SEQ_LEN:-2048}"
     for cfg in "storage/models/tara_candidate_v1/config.json" "storage/models/tara_base/config.json" "config.json"; do
         if [ -f "$cfg" ]; then
             RESOLVED_POS=$(python3 -c "import json; d=json.load(open('$cfg')); print(d.get('max_position_embeddings', ''))" 2>/dev/null || true)
             if [ -n "$RESOLVED_POS" ] && [ "$RESOLVED_POS" -gt 0 ] 2>/dev/null; then
-                MODEL_MAX_POS="$RESOLVED_POS"
+                # If model architecture specifies lower capacity, honor it; otherwise cap to hardware budget
+                if [ "$RESOLVED_POS" -lt "$MODEL_MAX_POS" ]; then
+                    MODEL_MAX_POS="$RESOLVED_POS"
+                fi
                 break
             fi
         fi

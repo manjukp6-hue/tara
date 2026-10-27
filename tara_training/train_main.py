@@ -1308,8 +1308,18 @@ def main():
                     # Store lightweight cursor metadata without forcing GPU-to-CPU tensor synchronization
                     accum_world_batches.append(w_cursors)
 
-            except torch.cuda.OutOfMemoryError:
-                print(f"\n[VRAM Self-Healing Guard] CUDA OutOfMemoryError caught at Step {step}, Micro-batch {batch_idx}! Reclaiming memory...", flush=True)
+            except torch.cuda.OutOfMemoryError as oom_err:
+                alloc_mb = torch.cuda.memory_allocated() / (1024 * 1024) if torch.cuda.is_available() else 0.0
+                res_mb = torch.cuda.memory_reserved() / (1024 * 1024) if torch.cuda.is_available() else 0.0
+                in_shape = tuple(inputs.shape) if ('inputs' in locals() and hasattr(inputs, 'shape')) else 'unknown'
+                in_seq = inputs.shape[1] if ('inputs' in locals() and hasattr(inputs, 'shape') and len(inputs.shape) > 1) else 'unknown'
+                print(
+                    f"\n[VRAM OOM Telemetry] CUDA OutOfMemoryError caught at Step {step}, Micro-batch {batch_idx}!\n"
+                    f"  -> Oversized Tensor Shape : {in_shape} (Batch: {in_shape[0] if isinstance(in_shape, tuple) else '?'}, SeqLen: {in_seq})\n"
+                    f"  -> Physical VRAM Status   : {alloc_mb:.1f} MiB allocated / {res_mb:.1f} MiB reserved\n"
+                    f"  -> Error Details          : {oom_err}",
+                    flush=True
+                )
                 optimizer.zero_grad(set_to_none=True)
                 if world_optimizer is not None:
                     world_optimizer.zero_grad(set_to_none=True)

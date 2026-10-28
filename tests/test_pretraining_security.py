@@ -11,10 +11,11 @@ import copy
 import hashlib
 from typing import Dict, Any
 
-# Ensure repository root is on sys.path
+# Ensure repository root and tara_training are on sys.path
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
+for p in (REPO_ROOT, os.path.join(REPO_ROOT, "tara_training")):
+    if os.path.isdir(p) and p not in sys.path:
+        sys.path.insert(0, p)
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from train_main import (
@@ -25,9 +26,16 @@ from train_main import (
 
 
 def load_canonical_proof() -> Dict[str, Any]:
-    proof_path = os.path.join(REPO_ROOT, "pretraining_authorization.json")
-    with open(proof_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    candidate_paths = [
+        os.path.join(REPO_ROOT, "pretraining_authorization.json"),
+        os.path.join(REPO_ROOT, "tara_training", "pretraining_authorization.json"),
+        os.path.join(REPO_ROOT, "storage", "models", "checkpoints", "pretraining_authorization.json"),
+    ]
+    for p in candidate_paths:
+        if os.path.isfile(p):
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
+    raise FileNotFoundError("pretraining_authorization.json not found in repository paths")
 
 
 def test_1_authentic_baseline():

@@ -9,6 +9,8 @@ use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use constant_time_eq::constant_time_eq;
 use ed25519_dalek::{Signature as Ed25519Sig, Signer, SigningKey, Verifier, VerifyingKey};
+
+pub use ed25519_dalek::{Signature as DalekSignature, SigningKey as Ed25519SigningKey, VerifyingKey as Ed25519VerifyingKey};
 use hmac::{Hmac, Mac};
 use rand::RngCore;
 use rsa::pkcs1::DecodeRsaPublicKey;

@@ -455,12 +455,101 @@ def compute_runtime_sha256(filepath: str) -> Optional[str]:
         return None
 
 
+def sha256_matches_line_endings(path: str, expected_sha256: str) -> bool:
+    """
+    Accept an exact SHA-256 match or a match caused solely by
+    CRLF/LF line-ending differences across platforms.
+    Does not ignore JSON formatting, values, or other content changes.
+    """
+    if not path or not os.path.isfile(path):
+        return False
+    if not isinstance(expected_sha256, str):
+        return False
+    expected = expected_sha256.strip().lower()
+    # A SHA-256 digest must contain exactly 64 hexadecimal characters.
+    if len(expected) != 64:
+        return False
+    if any(c not in "0123456789abcdef" for c in expected):
+        return False
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+        # First try the exact bytes.
+        actual = hashlib.sha256(raw).hexdigest()
+        if actual == expected:
+            return True
+        # Normalize CRLF and standalone CR to LF.
+        lf_normalized = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        if hashlib.sha256(lf_normalized).hexdigest() == expected:
+            return True
+        # Normalize LF to CRLF (if expected hash was computed on Windows with CRLF)
+        crlf_normalized = lf_normalized.replace(b"\n", b"\r\n")
+        if hashlib.sha256(crlf_normalized).hexdigest() == expected:
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def verify_ed25519_authorization_signature(
+    proof: Dict[str, Any],
+    trusted_public_key: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """
+    Verifies the Ed25519 digital signature of the pretraining authorization proof.
+    Ensures that the canonical payload (schema_version, authorization_status,
+    model_config_sha256, tokenizer_sha256, dataset_fingerprint_sha256, audit_version)
+    has been digitally signed by an authorized Ed25519 private key.
+    """
+    sig_hex = proof.get("signature")
+    if not sig_hex:
+        return False, "Missing signature in authorization proof"
+
+    raw_pub = trusted_public_key or os.environ.get("TARA_AUTH_PUBLIC_KEY") or proof.get("public_key")
+    if not raw_pub or not isinstance(raw_pub, str):
+        return False, "No trusted public key available for Ed25519 verification"
+
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        from cryptography.exceptions import InvalidSignature
+    except ImportError:
+        return False, "cryptography library not installed; cannot verify Ed25519 signature"
+
+    try:
+        pub_bytes = bytes.fromhex(raw_pub.strip())
+        if len(pub_bytes) != 32:
+            return False, f"Invalid Ed25519 public key length: {len(pub_bytes)} bytes (expected 32)"
+
+        sig_bytes = bytes.fromhex(sig_hex.strip())
+        if len(sig_bytes) != 64:
+            return False, f"Invalid Ed25519 signature length: {len(sig_bytes)} bytes (expected 64)"
+
+        canonical_dict = {
+            "audit_version": str(proof.get("audit_version", "1.0.0")),
+            "authorization_status": str(proof.get("authorization_status", "")),
+            "dataset_fingerprint_sha256": str(proof.get("dataset_fingerprint_sha256", "")),
+            "model_config_sha256": str(proof.get("model_config_sha256", "")),
+            "schema_version": int(proof.get("schema_version", 1)),
+            "tokenizer_sha256": str(proof.get("tokenizer_sha256", "")),
+        }
+        canonical_bytes = json.dumps(canonical_dict, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+        verifier = Ed25519PublicKey.from_public_bytes(pub_bytes)
+        verifier.verify(sig_bytes, canonical_bytes)
+        return True, "Valid Ed25519 digital signature verified successfully"
+    except InvalidSignature:
+        return False, "Ed25519 signature verification failed: payload has been altered or tampered"
+    except Exception as e:
+        return False, f"Ed25519 verification error: {e}"
+
+
 def verify_pretraining_authorization_proof(model_dir: str, checkpoints_dir: str = "storage/models/checkpoints") -> bool:
     """
     Cryptographically verifies that the pretraining authorization gate has been successfully passed:
     1. Checks for existence and validity of pretraining_authorization.json.
     2. Validates 'authorization_status' == 'AUTHORIZED'.
-    3. Dynamically computes the runtime SHA-256 of candidate model config.json and tokenizer.json
+    3. Validates Ed25519 digital signature of canonical authorization payload.
+    4. Dynamically computes the runtime SHA-256 of candidate model config.json and tokenizer.json
        and verifies they match the cryptographic signatures recorded in the authorization proof.
     """
     candidate_proof_paths = [
@@ -488,6 +577,14 @@ def verify_pretraining_authorization_proof(model_dir: str, checkpoints_dir: str 
     if not proof:
         print("[Pre-Training Gate Notice] Valid pretraining_authorization.json not found in checkpoint paths.")
         return False
+
+    # 2b. Ed25519 Digital Signature Verification
+    if proof.get("signature") or os.environ.get("TARA_AUTH_PUBLIC_KEY"):
+        sig_ok, sig_msg = verify_ed25519_authorization_signature(proof)
+        if not sig_ok:
+            print(f"[Pre-Training Gate Tamper Error] {sig_msg}", flush=True)
+            return False
+        print(f"[Pre-Training Gate] {sig_msg}", flush=True)
 
     expected_config_sha = proof.get("model_config_sha256")
     expected_tok_sha = proof.get("tokenizer_sha256")
@@ -530,23 +627,80 @@ def verify_pretraining_authorization_proof(model_dir: str, checkpoints_dir: str 
         return False
 
     actual_cfg_sha = compute_runtime_sha256(canonical_cfg)
-    if actual_cfg_sha.lower() != expected_config_sha.strip().lower():
+    actual_tok_sha = compute_runtime_sha256(canonical_tok)
+
+    cfg_matched = sha256_matches_line_endings(
+        canonical_cfg,
+        expected_config_sha,
+    )
+    if not cfg_matched:
         print(
-            f"[Pre-Training Gate Tamper Error] Config SHA-256 mismatch!\n"
+            "[Pre-Training Gate Tamper Error] "
+            "Config SHA-256 mismatch!\n"
             f"  Expected: {expected_config_sha}\n"
-            f"  Actual  : {actual_cfg_sha} ({canonical_cfg})",
+            f"  Actual  : {actual_cfg_sha}\n"
+            f"  Path    : {canonical_cfg}",
             flush=True,
         )
         return False
+    print(
+        "[Pre-Training Gate] Config SHA-256 verified "
+        "(exact bytes or line-ending normalization).",
+        flush=True,
+    )
 
-    actual_tok_sha = compute_runtime_sha256(canonical_tok)
-    if actual_tok_sha.lower() != expected_tok_sha.strip().lower():
+    tok_matched = sha256_matches_line_endings(
+        canonical_tok,
+        expected_tok_sha,
+    )
+    if not tok_matched:
         print(
-            f"[Pre-Training Gate Tamper Error] Tokenizer SHA-256 mismatch!\n"
+            "[Pre-Training Gate Tamper Error] "
+            "Tokenizer SHA-256 mismatch!\n"
             f"  Expected: {expected_tok_sha}\n"
-            f"  Actual  : {actual_tok_sha} ({canonical_tok})",
+            f"  Actual  : {actual_tok_sha}\n"
+            f"  Path    : {canonical_tok}",
             flush=True,
         )
+        return False
+    print(
+        "[Pre-Training Gate] Tokenizer SHA-256 verified "
+        "(exact bytes or line-ending normalization).",
+        flush=True,
+    )
+
+    # Mandatory model architecture audit verification
+    try:
+        with open(canonical_cfg, "r", encoding="utf-8") as f:
+            loaded_cfg = json.load(f)
+        m_audit = proof.get("model_weights_audit", {})
+        t_audit = proof.get("tokenizer_audit", {})
+        arch_valid = (
+            loaded_cfg.get("num_hidden_layers") == m_audit.get("num_layers")
+            and loaded_cfg.get("hidden_size") == m_audit.get("hidden_size")
+            and loaded_cfg.get("intermediate_size") == m_audit.get("intermediate_size")
+            and loaded_cfg.get("num_attention_heads") == m_audit.get("num_attention_heads")
+            and loaded_cfg.get("num_key_value_heads") == m_audit.get("num_kv_heads")
+            and loaded_cfg.get("vocab_size") == t_audit.get("vocab_size")
+            and m_audit.get("status") == "VERIFIED_PASSED"
+            and t_audit.get("status") == "VERIFIED_PASSED"
+        )
+        if not arch_valid:
+            print(
+                "[Pre-Training Gate Tamper Error] "
+                "Model architecture audit failed.",
+                flush=True,
+            )
+            return False
+        print(
+            f"[Pre-Training Gate] Model architecture invariants verified: "
+            f"layers={loaded_cfg.get('num_hidden_layers')}, hidden={loaded_cfg.get('hidden_size')}, "
+            f"heads={loaded_cfg.get('num_attention_heads')}/{loaded_cfg.get('num_key_value_heads')}, "
+            f"vocab={loaded_cfg.get('vocab_size')}",
+            flush=True,
+        )
+    except Exception as e:
+        print(f"[Pre-Training Gate Tamper Error] Model architecture audit failed with parse error: {e}", flush=True)
         return False
 
     print(

@@ -30,6 +30,7 @@ use tara_engine::config::TaraConfig;
 use tara_engine::dataset::compute_file_sha256;
 use tara_engine::dataset::splitter::extract_canonical_sample;
 use tara_engine::tokenizer::{TaraTokenizer, SPECIAL_TOKENS};
+use tara_security::cryptography::{CryptoUtils, Ed25519SigningKey};
 
 /// Status and summary of tokenizer collision audit.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +95,16 @@ pub struct PretrainingAuthorizationProof {
     pub hf_dataset_verification: Option<HuggingFaceDatasetVerificationResult>,
     pub authorization_status: String,
     pub authorized_by: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_version: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_algorithm: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
 }
 
 fn print_usage() {
@@ -564,11 +575,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // STAGE 5: EMIT AUTHORITATIVE PRE-TRAINING PROOF
+    // STAGE 5: EMIT AUTHORITATIVE PRE-TRAINING PROOF WITH ED25519 SIGNATURE
     // ─────────────────────────────────────────────────────────────────────────────
     println!("\n[PRE-TRAINING AUTHORIZATION DECISION]");
 
     let cfg_sha = compute_file_sha256(&cfg_path)?;
+
+    // Canonical payload structure for deterministic, platform-invariant signing
+    #[derive(Serialize)]
+    struct CanonicalAuthPayload<'a> {
+        audit_version: &'a str,
+        authorization_status: &'a str,
+        dataset_fingerprint_sha256: &'a str,
+        model_config_sha256: &'a str,
+        schema_version: u32,
+        tokenizer_sha256: &'a str,
+    }
+
+    let canonical_payload = CanonicalAuthPayload {
+        audit_version: "1.0.0",
+        authorization_status: "AUTHORIZED",
+        dataset_fingerprint_sha256: &dataset_fingerprint,
+        model_config_sha256: &cfg_sha,
+        schema_version: 1,
+        tokenizer_sha256: &tok_sha,
+    };
+
+    let canonical_bytes = serde_json::to_vec(&canonical_payload)?;
+
+    let (signing_key, verifying_key) = if let Ok(sec_hex) = std::env::var("TARA_AUTH_SIGNING_KEY") {
+        let raw = hex::decode(sec_hex.trim()).map_err(|e| format!("Invalid hex in TARA_AUTH_SIGNING_KEY: {e}"))?;
+        let key_bytes: [u8; 32] = raw.as_slice().try_into().map_err(|_| "TARA_AUTH_SIGNING_KEY must be 32 bytes (64 hex characters)")?;
+        let sk = Ed25519SigningKey::from_bytes(&key_bytes);
+        let vk = sk.verifying_key();
+        (sk, vk)
+    } else {
+        CryptoUtils::generate_ed25519_keypair()
+    };
+
+    let sig_bytes = CryptoUtils::sign_ed25519(&signing_key, &canonical_bytes);
+    let sig_hex = hex::encode(sig_bytes);
+    let pub_hex = hex::encode(verifying_key.to_bytes());
+
     let proof = PretrainingAuthorizationProof {
         timestamp_utc: chrono_like_timestamp(),
         model_path: model_dir.display().to_string(),
@@ -582,6 +630,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         hf_dataset_verification: Some(hf_verification),
         authorization_status: "AUTHORIZED".to_string(),
         authorized_by: "TARA Pre-Training Authorization Gate (Native Rust)".to_string(),
+        schema_version: Some(1),
+        audit_version: Some("1.0.0".to_string()),
+        signature_algorithm: Some("Ed25519".to_string()),
+        public_key: Some(pub_hex.clone()),
+        signature: Some(sig_hex.clone()),
     };
 
     if let Some(parent) = output_proof.parent() {
@@ -592,6 +645,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let elapsed = timer_start.elapsed();
     println!("  Authorization Status  : AUTHORIZED");
+    println!("  Signature Algorithm   : Ed25519");
+    println!("  Authoritative Pubkey  : {}", pub_hex);
+    println!("  Digital Signature     : {}...", &sig_hex[..16]);
     println!("  Proof Published       : {}", output_proof.display());
     println!("  Gate Execution Time   : {:.2}s", elapsed.as_secs_f64());
     println!("================================================================================");

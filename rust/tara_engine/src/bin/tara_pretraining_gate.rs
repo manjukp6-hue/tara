@@ -107,6 +107,17 @@ pub struct PretrainingAuthorizationProof {
     pub signature: Option<String>,
 }
 
+/// Canonical payload structure for deterministic, platform-invariant Ed25519 signing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CanonicalAuthPayload<'a> {
+    pub audit_version: &'a str,
+    pub authorization_status: &'a str,
+    pub dataset_fingerprint_sha256: &'a str,
+    pub model_config_sha256: &'a str,
+    pub schema_version: u32,
+    pub tokenizer_sha256: &'a str,
+}
+
 fn print_usage() {
     println!("Usage: tara_pretraining_gate [OPTIONS]");
     println!();
@@ -581,17 +592,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cfg_sha = compute_file_sha256(&cfg_path)?;
 
-    // Canonical payload structure for deterministic, platform-invariant signing
-    #[derive(Serialize)]
-    struct CanonicalAuthPayload<'a> {
-        audit_version: &'a str,
-        authorization_status: &'a str,
-        dataset_fingerprint_sha256: &'a str,
-        model_config_sha256: &'a str,
-        schema_version: u32,
-        tokenizer_sha256: &'a str,
-    }
-
     let canonical_payload = CanonicalAuthPayload {
         audit_version: "1.0.0",
         authorization_status: "AUTHORIZED",
@@ -609,8 +609,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let sk = Ed25519SigningKey::from_bytes(&key_bytes);
         let vk = sk.verifying_key();
         (sk, vk)
-    } else {
+    } else if std::env::var("TARA_ALLOW_EPHEMERAL_KEY").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false) {
+        println!("  [SECURITY NOTICE] TARA_ALLOW_EPHEMERAL_KEY enabled: Generating ephemeral test keypair.");
         CryptoUtils::generate_ed25519_keypair()
+    } else {
+        return Err(
+            "Production Security Invariant Violation: TARA_AUTH_SIGNING_KEY environment variable is not configured.              Refusing to emit an unauthenticated pretraining authorization proof.              Set TARA_AUTH_SIGNING_KEY with a 32-byte hex private key, or set              TARA_ALLOW_EPHEMERAL_KEY=1 strictly for offline development/ephemeral testing.".into()
+        );
     };
 
     let sig_bytes = CryptoUtils::sign_ed25519(&signing_key, &canonical_bytes);
@@ -695,5 +700,42 @@ fn verify_hf_dataset_uploaded(
         Ok(false)
     } else {
         Err(format!("Hugging Face returned HTTP status {status_code}").into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_canonical_auth_payload_serialization_matches_python() {
+        let payload = CanonicalAuthPayload {
+            audit_version: "1.0.0",
+            authorization_status: "AUTHORIZED",
+            dataset_fingerprint_sha256: "63249e272b913590e808546dca0d65e3e9b99e022784272b834f1e3d859b697d",
+            model_config_sha256: "85ceb6201a1dfa3fed00526722335f067ef2a3b7ee36fa1e5e3b57a3b8bca207",
+            schema_version: 1,
+            tokenizer_sha256: "007f91cd022ee262c37792fb095459e5625fc33d95f016dc79ce4739174850de",
+        };
+
+        let rust_bytes = serde_json::to_vec(&payload).expect("Serialization failed");
+        let rust_str = String::from_utf8(rust_bytes.clone()).expect("Invalid UTF-8");
+
+        // Canonical Python json.dumps(..., sort_keys=True, separators=(',', ':'))
+        let expected_json = r#"{"audit_version":"1.0.0","authorization_status":"AUTHORIZED","dataset_fingerprint_sha256":"63249e272b913590e808546dca0d65e3e9b99e022784272b834f1e3d859b697d","model_config_sha256":"85ceb6201a1dfa3fed00526722335f067ef2a3b7ee36fa1e5e3b57a3b8bca207","schema_version":1,"tokenizer_sha256":"007f91cd022ee262c37792fb095459e5625fc33d95f016dc79ce4739174850de"}"#;
+
+        assert_eq!(rust_str, expected_json);
+        assert_eq!(rust_bytes, expected_json.as_bytes());
+    }
+
+    #[test]
+    fn test_ephemeral_key_guard_fails_closed_in_production() {
+        std::env::remove_var("TARA_AUTH_SIGNING_KEY");
+        std::env::remove_var("TARA_ALLOW_EPHEMERAL_KEY");
+
+        let allow_ephemeral = std::env::var("TARA_ALLOW_EPHEMERAL_KEY")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        assert!(!allow_ephemeral);
     }
 }

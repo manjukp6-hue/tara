@@ -31,6 +31,7 @@ fi
 
 # 1. Environment Variables & CUDA Allocator Optimization
 export TARA_CLOUD_TRAINING="1"
+export PYTHONUNBUFFERED="1"
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export MALLOC_TRIM_THRESHOLD_=65536
 export HF_DATASET_REPO="${HF_DATASET_REPO:-${HF_REPO:-manjukp6/tara_dataset_v1}}"
@@ -126,6 +127,32 @@ else
     echo "[AUTH] No HF_TOKEN detected; running in unauthenticated public mode."
 fi
 
+# 4b. Resolve Authoritative Root Public Key for Pre-Training Signature Gate
+if [ -z "${TARA_AUTH_PUBLIC_KEY:-}" ]; then
+    RESOLVED_PUBKEY=$(python3 -c "
+import os, re
+try:
+    from google.colab import userdata
+    k = userdata.get('TARA_AUTH_PUBLIC_KEY')
+    if k and len(k.strip()) == 64:
+        print(k.strip())
+        exit(0)
+except Exception:
+    pass
+for f in ('model_config/tara_auth_pubkey.hex', 'storage/vault/tara_auth_pubkey.hex'):
+    if os.path.isfile(f):
+        with open(f, 'r') as fp:
+            c = fp.read().strip()
+            if len(c) == 64 and re.fullmatch(r'[0-9a-fA-F]{64}', c):
+                print(c)
+                exit(0)
+" 2>/dev/null || true)
+    if [ -n "$RESOLVED_PUBKEY" ]; then
+        export TARA_AUTH_PUBLIC_KEY="$RESOLVED_PUBKEY"
+        echo "[SECURITY] Authoritative Root Ed25519 authorization public key resolved."
+    fi
+fi
+
 # 5. Install Dependencies if needed
 if ! python3 -c "import safetensors, tokenizers, torch, bitsandbytes" 2>/dev/null; then
     echo "[SETUP] Installing required dependencies from requirements.txt..."
@@ -209,7 +236,7 @@ START_STAGE_IDX=0
 REQUESTED_STAGE="${1:-all}"
 if [ "$REQUESTED_STAGE" != "all" ]; then
     echo "[START] Executing single requested stage: $REQUESTED_STAGE..."
-    python3 train_main.py \
+    python3 -u train_main.py \
         --stage-id "$REQUESTED_STAGE" \
         --output-dir "$ACTIVE_CP_DIR/$REQUESTED_STAGE" \
         --batch-size "$TRAIN_BATCH_SIZE" \
@@ -255,7 +282,7 @@ for i in "${!STAGES[@]}"; do
     echo "  Optimizer       : $OPTIMIZER_TYPE"
     echo "------------------------------------------------------------------------------"
 
-    python3 train_main.py \
+    python3 -u train_main.py \
         --stage-id "$STAGE_ID" \
         --model-dir "$STAGE_MODEL_DIR" \
         --output-dir "$STAGE_OUTPUT_DIR" \

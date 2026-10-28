@@ -491,6 +491,55 @@ def sha256_matches_line_endings(path: str, expected_sha256: str) -> bool:
         return False
 
 
+def resolve_trusted_public_key(explicit_key: Optional[str] = None) -> Optional[str]:
+    """
+    Resolves the authoritative trusted Ed25519 public key.
+    Sources (in order of priority):
+    1. Explicit caller argument
+    2. TARA_AUTH_PUBLIC_KEY environment variable
+    3. Google Colab userdata secret
+    4. Authoritative trusted root key file on disk
+    """
+    if explicit_key and isinstance(explicit_key, str):
+        cleaned = explicit_key.strip().lower()
+        if len(cleaned) == 64 and re.fullmatch(r"[0-9a-fA-F]{64}", cleaned):
+            return cleaned
+
+    env_key = os.environ.get("TARA_AUTH_PUBLIC_KEY")
+    if env_key and isinstance(env_key, str):
+        cleaned = env_key.strip().lower()
+        if len(cleaned) == 64 and re.fullmatch(r"[0-9a-fA-F]{64}", cleaned):
+            return cleaned
+
+    try:
+        from google.colab import userdata
+        colab_key = userdata.get("TARA_AUTH_PUBLIC_KEY")
+        if colab_key and isinstance(colab_key, str):
+            cleaned = colab_key.strip().lower()
+            if len(cleaned) == 64 and re.fullmatch(r"[0-9a-fA-F]{64}", cleaned):
+                return cleaned
+    except Exception:
+        pass
+
+    trusted_key_paths = [
+        "model_config/tara_auth_pubkey.hex",
+        "storage/vault/tara_auth_pubkey.hex",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_config", "tara_auth_pubkey.hex"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "vault", "tara_auth_pubkey.hex"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "storage", "vault", "tara_auth_pubkey.hex"),
+    ]
+    for p in trusted_key_paths:
+        if os.path.isfile(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    content = f.read().strip().lower()
+                if len(content) == 64 and re.fullmatch(r"[0-9a-fA-F]{64}", content):
+                    return content
+            except Exception:
+                pass
+    return None
+
+
 def verify_ed25519_authorization_signature(
     proof: Dict[str, Any],
     trusted_public_key: Optional[str] = None,
@@ -500,14 +549,22 @@ def verify_ed25519_authorization_signature(
     Ensures that the canonical payload (schema_version, authorization_status,
     model_config_sha256, tokenizer_sha256, dataset_fingerprint_sha256, audit_version)
     has been digitally signed by an authorized Ed25519 private key.
+    Fails closed if trusted public key is not configured or if signature/key is missing or altered.
     """
     sig_hex = proof.get("signature")
-    if not sig_hex:
-        return False, "Missing signature in authorization proof"
+    if not sig_hex or not isinstance(sig_hex, str):
+        return False, "Missing or invalid signature in authorization proof"
 
-    raw_pub = trusted_public_key or os.environ.get("TARA_AUTH_PUBLIC_KEY") or proof.get("public_key")
+    raw_pub = resolve_trusted_public_key(trusted_public_key)
     if not raw_pub or not isinstance(raw_pub, str):
-        return False, "No trusted public key available for Ed25519 verification"
+        return False, "No externally trusted public key configured; refusing authorization"
+
+    proof_pub = proof.get("public_key")
+    if not proof_pub or not isinstance(proof_pub, str):
+        return False, "Missing public key in authorization proof"
+
+    if proof_pub.strip().lower() != raw_pub.strip().lower():
+        return False, "Proof public key does not match the configured trusted key"
 
     try:
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -578,13 +635,12 @@ def verify_pretraining_authorization_proof(model_dir: str, checkpoints_dir: str 
         print("[Pre-Training Gate Notice] Valid pretraining_authorization.json not found in checkpoint paths.")
         return False
 
-    # 2b. Ed25519 Digital Signature Verification
-    if proof.get("signature") or os.environ.get("TARA_AUTH_PUBLIC_KEY"):
-        sig_ok, sig_msg = verify_ed25519_authorization_signature(proof)
-        if not sig_ok:
-            print(f"[Pre-Training Gate Tamper Error] {sig_msg}", flush=True)
-            return False
-        print(f"[Pre-Training Gate] {sig_msg}", flush=True)
+    # 2b. Mandatory Ed25519 Digital Signature Verification (Fail-Closed)
+    sig_ok, sig_msg = verify_ed25519_authorization_signature(proof)
+    if not sig_ok:
+        print(f"[Pre-Training Gate Tamper Error] {sig_msg}", flush=True)
+        return False
+    print(f"[Pre-Training Gate] {sig_msg}", flush=True)
 
     expected_config_sha = proof.get("model_config_sha256")
     expected_tok_sha = proof.get("tokenizer_sha256")

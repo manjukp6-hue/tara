@@ -319,6 +319,13 @@ def execute_optimizer_step(
     """
     scaler.unscale_(optimizer)
 
+    # Mathematically exact token-level gradient normalization:
+    # Divides accumulated token-loss sum gradients by the exact total valid tokens across the window.
+    if accum_tokens is not None and accum_tokens > 0:
+        for p in model.parameters():
+            if p.grad is not None:
+                p.grad.div_(accum_tokens)
+
     grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
     grad_norm_val = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
     is_non_finite_grad = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
@@ -1643,13 +1650,15 @@ def main():
                     v_tokens = (labels[..., 1:] != -100).sum().clamp(min=1) if labels.dim() > 1 else (labels != -100).sum().clamp(min=1)
                     effective_tokens = v_tokens.item()
 
-                    # Standard numerical FP16-safe gradient accumulation:
-                    # Scales micro-batch loss by 1 / grad_accum to prevent float16 overflow (> 65,504)
-                    loss_scaled = loss / args.grad_accum
+                    # Mathematically exact token-weighted gradient scaling:
+                    # Backward with sum of token losses (loss * v_tokens).
+                    # Parameter gradients accumulate sum_{i,t} grad(l_{i,t}) across the window.
+                    # Normalization by total valid tokens occurs exactly at optimizer step after unscaling.
+                    loss_sum = loss * v_tokens
 
-                scaler.scale(loss_scaled).backward()
-                accum_loss += loss.item()
-                accum_ce += (ce_loss.item() if ce_loss is not None else loss.item())
+                scaler.scale(loss_sum).backward()
+                accum_loss += (loss.item() * effective_tokens)
+                accum_ce += ((ce_loss.item() if ce_loss is not None else loss.item()) * effective_tokens)
                 accum_aux += aux_loss.item() if aux_loss is not None else 0.0
                 accum_tokens += effective_tokens
 
@@ -1724,9 +1733,9 @@ def main():
                     for w_pg in world_optimizer.param_groups:
                         w_pg["lr"] = cur_lr
 
-                cur_window_loss = accum_loss / args.grad_accum
+                cur_window_loss = accum_loss / max(1, accum_tokens)
                 is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after = execute_optimizer_step(
-                    model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0, cur_loss=cur_window_loss, ema_loss=ema_loss
+                    model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0, cur_loss=cur_window_loss, ema_loss=ema_loss, accum_tokens=accum_tokens
                 )
 
                 if is_step_skipped:
@@ -1760,8 +1769,8 @@ def main():
                 window_samples = sum(len(c) for c in accum_batches)
                 total_samples_trained += window_samples
 
-                cur_step_loss = accum_loss / args.grad_accum
-                cur_step_ce = accum_ce / args.grad_accum
+                cur_step_loss = accum_loss / max(1, accum_tokens)
+                cur_step_ce = accum_ce / max(1, accum_tokens)
                 cur_step_aux = accum_aux / args.grad_accum
                 cur_step_world = (accum_world_loss / args.grad_accum) if world_model is not None else 0.0
                 cur_joint_loss = cur_step_loss + (args.lambda_world * cur_step_world if world_model is not None else 0.0)

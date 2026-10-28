@@ -496,9 +496,9 @@ def resolve_trusted_public_key(explicit_key: Optional[str] = None) -> Optional[s
     Resolves the authoritative trusted Ed25519 public key.
     Sources (in order of priority):
     1. Explicit caller argument
-    2. TARA_AUTH_PUBLIC_KEY environment variable
-    3. Google Colab userdata secret
-    4. Authoritative trusted root key file on disk
+    2. TARA_AUTH_PUBLIC_KEY environment variable (External Trust Anchor)
+    3. Google Colab userdata secret (Cloud Secret Trust Anchor)
+    4. Authoritative trusted root key file on disk (Repository Anchor - strict absolute paths, zero relative ambiguity, fail-closed on file conflicts)
     """
     if explicit_key and isinstance(explicit_key, str):
         cleaned = explicit_key.strip().lower()
@@ -521,23 +521,41 @@ def resolve_trusted_public_key(explicit_key: Optional[str] = None) -> Optional[s
     except Exception:
         pass
 
-    trusted_key_paths = [
-        "model_config/tara_auth_pubkey.hex",
-        "storage/vault/tara_auth_pubkey.hex",
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_config", "tara_auth_pubkey.hex"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "vault", "tara_auth_pubkey.hex"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "storage", "vault", "tara_auth_pubkey.hex"),
+    # Strictly anchor to script directory to avoid os.getcwd() relative path hijacking
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidate_key_files = [
+        os.path.join(script_dir, "model_config", "tara_auth_pubkey.hex"),
+        os.path.join(script_dir, "storage", "vault", "tara_auth_pubkey.hex"),
+        os.path.join(script_dir, "..", "storage", "vault", "tara_auth_pubkey.hex"),
+        os.path.join(script_dir, "..", "model_config", "tara_auth_pubkey.hex"),
     ]
-    for p in trusted_key_paths:
-        if os.path.isfile(p):
+
+    discovered_keys = {}
+    for p in candidate_key_files:
+        norm_p = os.path.abspath(p)
+        if os.path.isfile(norm_p) and norm_p not in discovered_keys:
             try:
-                with open(p, "r", encoding="utf-8") as f:
-                    content = f.read().strip().lower()
-                if len(content) == 64 and re.fullmatch(r"[0-9a-fA-F]{64}", content):
-                    return content
-            except Exception:
-                pass
-    return None
+                with open(norm_p, "r", encoding="utf-8") as f:
+                    raw = f.read().strip().lower()
+                if len(raw) == 64 and re.fullmatch(r"[0-9a-fA-F]{64}", raw):
+                    discovered_keys[norm_p] = raw
+                else:
+                    print(f"[Pre-Training Gate Tamper Error] Malformed key file at: {norm_p}", flush=True)
+                    return None
+            except Exception as e:
+                print(f"[Pre-Training Gate Tamper Error] Read failure at {norm_p}: {e}", flush=True)
+                return None
+
+    if not discovered_keys:
+        return None
+
+    # Fail closed if multiple root key files exist with conflicting keys
+    unique_keys = set(discovered_keys.values())
+    if len(unique_keys) > 1:
+        print(f"[Pre-Training Gate Tamper Error] Conflicting root public keys detected across repository files: {discovered_keys}", flush=True)
+        return None
+
+    return next(iter(unique_keys))
 
 
 def verify_ed25519_authorization_signature(
@@ -589,7 +607,7 @@ def verify_ed25519_authorization_signature(
             "schema_version": int(proof.get("schema_version", 1)),
             "tokenizer_sha256": str(proof.get("tokenizer_sha256", "")),
         }
-        canonical_bytes = json.dumps(canonical_dict, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        canonical_bytes = json.dumps(canonical_dict, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
         verifier = Ed25519PublicKey.from_public_bytes(pub_bytes)
         verifier.verify(sig_bytes, canonical_bytes)
@@ -757,6 +775,27 @@ def verify_pretraining_authorization_proof(model_dir: str, checkpoints_dir: str 
         )
     except Exception as e:
         print(f"[Pre-Training Gate Tamper Error] Model architecture audit failed with parse error: {e}", flush=True)
+        return False
+
+    # Mandatory payload fields & audit verification
+    schema_ver = proof.get("schema_version")
+    if schema_ver != 1:
+        print(f"[Pre-Training Gate Tamper Error] Unsupported or missing schema_version in proof: {schema_ver}", flush=True)
+        return False
+
+    audit_ver = proof.get("audit_version")
+    if audit_ver != "1.0.0":
+        print(f"[Pre-Training Gate Tamper Error] Unsupported or missing audit_version in proof: {audit_ver}", flush=True)
+        return False
+
+    ds_fp = proof.get("dataset_fingerprint_sha256")
+    if not is_valid_sha256(ds_fp):
+        print(f"[Pre-Training Gate Tamper Error] Missing or invalid 64-hex dataset_fingerprint_sha256 in proof: {ds_fp}", flush=True)
+        return False
+
+    dedup = proof.get("content_dedup", {})
+    if dedup.get("status") != "VERIFIED_PASSED":
+        print(f"[Pre-Training Gate Tamper Error] Content deduplication audit not verified passed: {dedup.get('status')}", flush=True)
         return False
 
     print(

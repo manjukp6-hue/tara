@@ -153,6 +153,13 @@ for f in ('model_config/tara_auth_pubkey.hex', 'storage/vault/tara_auth_pubkey.h
     fi
 fi
 
+# 4c. Production Ephemeral Key Safeguard (Fail-Closed)
+if [ "${TARA_ALLOW_EPHEMERAL_KEY:-0}" = "1" ] || [ "${TARA_ALLOW_EPHEMERAL_KEY:-0}" = "true" ]; then
+    echo "[SECURITY WARNING] TARA_ALLOW_EPHEMERAL_KEY was enabled! Disabling strictly for production pretraining..."
+    unset TARA_ALLOW_EPHEMERAL_KEY
+fi
+export TARA_ALLOW_EPHEMERAL_KEY="0"
+
 # 5. Install Dependencies if needed
 if ! python3 -c "import safetensors, tokenizers, torch, bitsandbytes" 2>/dev/null; then
     echo "[SETUP] Installing required dependencies from requirements.txt..."

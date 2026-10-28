@@ -2,7 +2,7 @@
   "timestamp_utc": "2026-10-24T20:47:33Z",
   "model_path": "storage/models/tara_candidate_v1",
   "dataset_path": "storage/datasets/curriculum",
-  "model_config_sha256": "98985b2706ad1442e608f012b4cf2256296834fa577cbb1bf80311e07c886750",
+  "model_config_sha256": "85ceb6201a1dfa3fed00526722335f067ef2a3b7ee36fa1e5e3b57a3b8bca207",
   "tokenizer_sha256": "007f91cd022ee262c37792fb095459e5625fc33d95f016dc79ce4739174850de",
   "dataset_fingerprint_sha256": "63249e272b913590e808546dca0d65e3e9b99e022784272b834f1e3d859b697d",
   "tokenizer_audit": {
@@ -47,5 +47,10 @@
     "status": "VERIFIED_LOCAL_PROVENANCE"
   },
   "authorization_status": "AUTHORIZED",
-  "authorized_by": "TARA Pre-Training Authorization Gate (Native Rust)"
+  "authorized_by": "TARA Pre-Training Authorization Gate (Native Rust)",
+  "schema_version": 1,
+  "audit_version": "1.0.0",
+  "signature_algorithm": "Ed25519",
+  "public_key": "f88384f57fc5c5f7978fc275521021a56642748d834999481a2382ebc727f310",
+  "signature": "bfab9af86266b10fd0d21e9ae53e823d4e424953affc7053d07927aa7c706a91441ffea48405f58186300ddfeeb15f93597ad7d4ccfd308c9108647c6c11c50a"
 }

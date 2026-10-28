@@ -201,6 +201,14 @@ if gdir and os.path.exists(gdir):
 " 2>/dev/null || true
 fi
 
+# 8b. Ensure candidate directory has baseline config and tokenizer from model_config if missing
+mkdir -p storage/models/tara_candidate_v1
+for f in config.json tokenizer.json tokenizer_config.json special_tokens_map.json; do
+    if [ -f "model_config/$f" ] && [ ! -f "storage/models/tara_candidate_v1/$f" ]; then
+        cp "model_config/$f" "storage/models/tara_candidate_v1/$f"
+    fi
+done
+
 # 9. Launch Autonomous Multi-Stage Pipeline Runner (Stages 0..5 extensible)
 STAGES=("stage0_pretraining" "stage1_unified" "stage2_abilities" "stage3_continual" "stage4_scale" "stage5_frontier")
 START_STAGE_IDX=0

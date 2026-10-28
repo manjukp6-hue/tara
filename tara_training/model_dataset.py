@@ -997,76 +997,6 @@ class ShardLedger:
         return total
 
 
-def _count_stream_json_array(stream) -> Optional[int]:
-    """
-    Streaming element counter for JSON arrays with O(1) memory.
-    BOM-safe, schema-agnostic (correctly counts objects, strings, lists, numbers, booleans, null),
-    and strictly returns 0 for empty array '[]'.
-    Returns None if the file content is not a JSON array.
-    """
-    lead = stream.read(3)
-    if lead != b"\xef\xbb\xbf":
-        stream.seek(0)
-
-    depth = 0
-    in_string = False
-    escape = False
-    has_elements = False
-    element_count = 0
-    saw_opening_bracket = False
-
-    while chunk := stream.read(64 * 1024):
-        for byte in chunk:
-            char = chr(byte)
-            if escape:
-                escape = False
-                continue
-            if char == "\\":
-                escape = True
-                continue
-            if char == '"':
-                in_string = not in_string
-                if saw_opening_bracket and depth == 1 and not has_elements:
-                    has_elements = True
-                    element_count = 1
-                continue
-            if in_string:
-                continue
-
-            if not saw_opening_bracket:
-                if char.isspace():
-                    continue
-                if char == "[":
-                    saw_opening_bracket = True
-                    depth = 1
-                    continue
-                else:
-                    return None
-
-            if char in "[{":
-                if depth == 1 and not has_elements:
-                    has_elements = True
-                    element_count = 1
-                depth += 1
-            elif char in "]}":
-                if depth == 1 and char == "]":
-                    depth = 0
-                    break
-                depth = max(1, depth - 1)
-            elif depth == 1:
-                if char == ",":
-                    element_count += 1
-                elif not char.isspace() and not has_elements:
-                    has_elements = True
-                    element_count = 1
-
-        if depth == 0 and saw_opening_bracket:
-            break
-
-    if not saw_opening_bracket:
-        return None
-    return element_count if has_elements else 0
-
     def is_completed(self, shard_name: str, local_path: Optional[str] = None, out_sha: Optional[dict] = None, verify_full_hash: bool = False) -> bool:
         """
         Fast authentic shard completion verification:
@@ -1497,6 +1427,77 @@ def _count_stream_lines(stream) -> int:
     if last_byte and last_byte != b"\n":
         total += 1
     return total
+
+
+def _count_stream_json_array(stream) -> Optional[int]:
+    """
+    Streaming element counter for JSON arrays with O(1) memory.
+    BOM-safe, schema-agnostic (correctly counts objects, strings, lists, numbers, booleans, null),
+    and strictly returns 0 for empty array '[]'.
+    Returns None if the file content is not a JSON array.
+    """
+    lead = stream.read(3)
+    if lead != b"\xef\xbb\xbf":
+        stream.seek(0)
+
+    depth = 0
+    in_string = False
+    escape = False
+    has_elements = False
+    element_count = 0
+    saw_opening_bracket = False
+
+    while chunk := stream.read(64 * 1024):
+        for byte in chunk:
+            char = chr(byte)
+            if escape:
+                escape = False
+                continue
+            if char == "\\":
+                escape = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                if saw_opening_bracket and depth == 1 and not has_elements:
+                    has_elements = True
+                    element_count = 1
+                continue
+            if in_string:
+                continue
+
+            if not saw_opening_bracket:
+                if char.isspace():
+                    continue
+                if char == "[":
+                    saw_opening_bracket = True
+                    depth = 1
+                    continue
+                else:
+                    return None
+
+            if char in "[{":
+                if depth == 1 and not has_elements:
+                    has_elements = True
+                    element_count = 1
+                depth += 1
+            elif char in "]}":
+                if depth == 1 and char == "]":
+                    depth = 0
+                    break
+                depth = max(1, depth - 1)
+            elif depth == 1:
+                if char == ",":
+                    element_count += 1
+                elif not char.isspace() and not has_elements:
+                    has_elements = True
+                    element_count = 1
+
+        if depth == 0 and saw_opening_bracket:
+            break
+
+    if not saw_opening_bracket:
+        return None
+    return element_count if has_elements else 0
 
 class TaraStreamingJsonlDataset(IterableDataset):
     """

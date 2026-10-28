@@ -221,25 +221,34 @@ gdir = resolve_gdrive_restore_dir() or resolve_gdrive_backup_dir()
 cp_base = '${ACTIVE_CP_DIR}'
 cand_dir = 'storage/models/tara_candidate_v1'
 if gdir and os.path.exists(gdir):
-    for sub in ['best_milestone', 'normal_checkpoint']:
-        src = os.path.join(gdir, sub)
-        if os.path.exists(src):
-            dst = os.path.join(cp_base, 'stage0_pretraining')
-            if not os.path.exists(os.path.join(dst, 'model.safetensors')):
-                print(f'[GDRIVE RESTORE] Restoring candidate model from {src} -> {dst}...')
-                restore_checkpoint_from_gdrive(src, dst)
-            os.makedirs(cand_dir, exist_ok=True)
-            if os.path.exists(os.path.join(dst, 'model.safetensors')) and not os.path.exists(os.path.join(cand_dir, 'model.safetensors')):
-                for f in os.listdir(dst):
-                    s = os.path.join(dst, f)
-                    d = os.path.join(cand_dir, f)
-                    if os.path.isfile(s) and not os.path.exists(d):
-                        try:
-                            os.link(s, d)
-                        except Exception:
-                            shutil.copy2(s, d)
-                print(f'[GDRIVE RESTORE] Seeded candidate directory {cand_dir} from restored checkpoint.')
-                break
+    def has_valid_model(d):
+        if not os.path.exists(d):
+            return False
+        if os.path.exists(os.path.join(d, 'checkpoint_state.json')) or \
+           os.path.exists(os.path.join(d, 'model.safetensors.index.json')) or \
+           os.path.exists(os.path.join(d, 'model.safetensors')):
+            return True
+        try:
+            return any(f.startswith('model-') and f.endswith('.safetensors') for f in os.listdir(d))
+        except Exception:
+            return False
+
+    dst = os.path.join(cp_base, 'stage0_pretraining')
+    if not has_valid_model(dst):
+        print(f'[GDRIVE RESTORE] Restoring highest verified candidate model from {gdir} -> {dst}...')
+        restore_checkpoint_from_gdrive(gdir, dst)
+
+    os.makedirs(cand_dir, exist_ok=True)
+    if has_valid_model(dst) and not has_valid_model(cand_dir):
+        for f in os.listdir(dst):
+            s = os.path.join(dst, f)
+            d = os.path.join(cand_dir, f)
+            if os.path.isfile(s) and not os.path.exists(d):
+                try:
+                    os.link(s, d)
+                except Exception:
+                    shutil.copy2(s, d)
+        print(f'[GDRIVE RESTORE] Seeded candidate directory {cand_dir} from restored checkpoint.')
 " 2>/dev/null || true
 fi
 
@@ -292,7 +301,7 @@ for i in "${!STAGES[@]}"; do
     if [ "$i" -gt 0 ]; then
         PREV_STAGE_ID="${STAGES[$((i-1))]}"
         PREV_OUTPUT_DIR="$ACTIVE_CP_DIR/$PREV_STAGE_ID"
-        if [ -f "$PREV_OUTPUT_DIR/model.safetensors" ]; then
+        if [ -f "$PREV_OUTPUT_DIR/model.safetensors" ] || [ -f "$PREV_OUTPUT_DIR/model.safetensors.index.json" ]; then
             STAGE_MODEL_DIR="$PREV_OUTPUT_DIR"
             echo "[STAGE HANDOFF] Seeding $STAGE_ID candidate weights from previous stage ($PREV_STAGE_ID)..."
         fi

@@ -996,6 +996,77 @@ class ShardLedger:
             total += int(meta.get("records_processed", 0))
         return total
 
+
+def _count_stream_json_array(stream) -> Optional[int]:
+    """
+    Streaming element counter for JSON arrays with O(1) memory.
+    BOM-safe, schema-agnostic (correctly counts objects, strings, lists, numbers, booleans, null),
+    and strictly returns 0 for empty array '[]'.
+    Returns None if the file content is not a JSON array.
+    """
+    lead = stream.read(3)
+    if lead != b"\xef\xbb\xbf":
+        stream.seek(0)
+
+    depth = 0
+    in_string = False
+    escape = False
+    has_elements = False
+    element_count = 0
+    saw_opening_bracket = False
+
+    while chunk := stream.read(64 * 1024):
+        for byte in chunk:
+            char = chr(byte)
+            if escape:
+                escape = False
+                continue
+            if char == "\\":
+                escape = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                if saw_opening_bracket and depth == 1 and not has_elements:
+                    has_elements = True
+                    element_count = 1
+                continue
+            if in_string:
+                continue
+
+            if not saw_opening_bracket:
+                if char.isspace():
+                    continue
+                if char == "[":
+                    saw_opening_bracket = True
+                    depth = 1
+                    continue
+                else:
+                    return None
+
+            if char in "[{":
+                if depth == 1 and not has_elements:
+                    has_elements = True
+                    element_count = 1
+                depth += 1
+            elif char in "]}":
+                if depth == 1 and char == "]":
+                    depth = 0
+                    break
+                depth = max(1, depth - 1)
+            elif depth == 1:
+                if char == ",":
+                    element_count += 1
+                elif not char.isspace() and not has_elements:
+                    has_elements = True
+                    element_count = 1
+
+        if depth == 0 and saw_opening_bracket:
+            break
+
+    if not saw_opening_bracket:
+        return None
+    return element_count if has_elements else 0
+
     def is_completed(self, shard_name: str, local_path: Optional[str] = None, out_sha: Optional[dict] = None, verify_full_hash: bool = False) -> bool:
         """
         Fast authentic shard completion verification:
@@ -2751,16 +2822,43 @@ class TaraMultiDomainScheduler(IterableDataset):
         self.dataset_snapshot = dataset_snapshot
 
         self.domain_weights = parse_domain_weights("", self.active_domains)
-        if domain_weights:
+        if domain_weights is not None:
             norm_w = {}
             for d in self.active_domains:
                 if d in domain_weights:
-                    norm_w[d] = float(domain_weights[d])
+                    try:
+                        val = float(domain_weights[d])
+                        if math.isfinite(val) and val > 0.0:
+                            norm_w[d] = val
+                        else:
+                            raise ValueError(f"Domain weight for '{d}' must be a positive finite float, got {domain_weights[d]}")
+                    except (ValueError, TypeError) as e:
+                        raise ValueError(f"Invalid domain weight for '{d}': {e}") from e
+                else:
+                    raise ValueError(f"Missing required domain weight for active domain '{d}' in {domain_weights}")
+            for d in domain_weights:
+                if d not in self.active_domains:
+                    raise ValueError(f"Unknown domain '{d}' specified in domain_weights; active domains are {self.active_domains}")
             total_w = sum(norm_w.values())
-            if total_w > 0:
-                self.domain_weights = {d: norm_w.get(d, 0.0) / total_w for d in self.active_domains}
+            if not math.isfinite(total_w) or total_w <= 0.0:
+                raise ValueError(f"Invalid sum of domain_weights: {total_w} (must be positive and finite)")
+            self.domain_weights = {d: norm_w[d] / total_w for d in self.active_domains}
 
+        # Checkpoint Resume Deficit Continuity: strict deficit validation from checkpoint
         self.deficits: Dict[str, float] = {d: 0.0 for d in self.active_domains}
+        if "scheduler_deficits" in kwargs and kwargs["scheduler_deficits"]:
+            s_def = kwargs["scheduler_deficits"]
+            if not isinstance(s_def, dict):
+                raise ValueError(f"Corrupted checkpoint state: 'scheduler_deficits' must be a dict, got {type(s_def)}")
+            for d, v in s_def.items():
+                if d in self.deficits:
+                    try:
+                        fval = float(v)
+                        if not math.isfinite(fval):
+                            raise ValueError(f"Non-finite deficit value '{v}' for domain '{d}' in checkpoint")
+                        self.deficits[d] = fval
+                    except (ValueError, TypeError) as err:
+                        raise ValueError(f"Corrupted deficit value for domain '{d}' in checkpoint: {err}") from err
         self.domain_cursors: Dict[str, Dict[str, Any]] = copy.deepcopy(domain_cursors) if domain_cursors else {}
         self.active_domain_idx: int = 0
 

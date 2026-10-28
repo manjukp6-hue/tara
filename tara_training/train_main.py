@@ -306,16 +306,26 @@ def execute_optimizer_step(
     max_grad_norm: float = 1.0,
     cur_loss: Optional[float] = None,
     ema_loss: Optional[float] = None,
+    accum_tokens: Optional[int] = None,
 ) -> Tuple[bool, float, float, float, float]:
     """
     Executes a unified optimizer step with comprehensive Model Shock & Gradient Explosion Protection:
     1. Unscales gradients.
-    2. Performs dynamic gradient norm clipping (max_grad_norm=1.0).
-    3. Detects catastrophic model shock (extreme gradient spike > 15x or sudden loss spike > 4x EMA).
-    4. Detects NaN/Inf gradient corruption.
-    5. Safely steps or skips optimizer to protect model weights from destructive parameter shock.
+    2. Exactly normalizes accumulated unscaled gradients by total valid tokens across accumulation window.
+    3. Performs dynamic gradient norm clipping (max_grad_norm=1.0).
+    4. Detects catastrophic model shock (extreme gradient spike > 15x or sudden loss spike > 4x EMA).
+    5. Detects NaN/Inf gradient corruption.
+    6. Safely steps or skips optimizer to protect model weights from destructive parameter shock.
     """
     scaler.unscale_(optimizer)
+
+    # Mathematically exact token-level gradient normalization:
+    # Divides accumulated token-loss sum gradients by the exact total valid tokens across the window.
+    if accum_tokens is not None and accum_tokens > 0:
+        for p in model.parameters():
+            if p.grad is not None:
+                p.grad.div_(accum_tokens)
+
     grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
     grad_norm_val = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
     is_non_finite_grad = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
@@ -431,25 +441,121 @@ def compute_scheduled_lr(step: int, warmup_steps: int, max_steps: int, base_lr: 
     return min_lr + 0.5 * (base_lr - min_lr) * (1.0 + math.cos(math.pi * progress))
 
 
+def compute_runtime_sha256(filepath: str) -> Optional[str]:
+    """Computes dynamic runtime SHA-256 hash of a file."""
+    if not os.path.exists(filepath):
+        return None
+    h = hashlib.sha256()
+    try:
+        with open(filepath, "rb") as f:
+            while chunk := f.read(1024 * 1024):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+
 def verify_pretraining_authorization_proof(model_dir: str, checkpoints_dir: str = "storage/models/checkpoints") -> bool:
-    """Verifies that the pretraining authorization gate has been successfully passed."""
+    """
+    Cryptographically verifies that the pretraining authorization gate has been successfully passed:
+    1. Checks for existence and validity of pretraining_authorization.json.
+    2. Validates 'authorization_status' == 'AUTHORIZED'.
+    3. Dynamically computes the runtime SHA-256 of candidate model config.json and tokenizer.json
+       and verifies they match the cryptographic signatures recorded in the authorization proof.
+    """
     candidate_proof_paths = [
         os.path.join(checkpoints_dir, "pretraining_authorization.json"),
         os.path.join(model_dir, "pretraining_authorization.json"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "pretraining_authorization.json"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "storage", "models", "checkpoints", "pretraining_authorization.json"),
         "storage/models/checkpoints/pretraining_authorization.json",
+        "pretraining_authorization.json",
     ]
+    proof = None
+    proof_path = None
     for cp in candidate_proof_paths:
         if os.path.exists(cp):
             try:
                 with open(cp, "r", encoding="utf-8") as f:
-                    proof = json.load(f)
-                if proof.get("authorization_status") == "AUTHORIZED":
-                    print(f"[Pre-Training Gate] Valid cryptographic authorization proof verified: {cp}")
-                    return True
+                    proof_data = json.load(f)
+                if proof_data.get("authorization_status") == "AUTHORIZED":
+                    proof = proof_data
+                    proof_path = cp
+                    break
             except Exception as e:
                 print(f"[Pre-Training Gate Warning] Proof parse warning in {cp}: {e}")
-    print("[Pre-Training Gate Notice] pretraining_authorization.json not found in checkpoint paths.")
-    return False
+
+    if not proof:
+        print("[Pre-Training Gate Notice] Valid pretraining_authorization.json not found in checkpoint paths.")
+        return False
+
+    expected_config_sha = proof.get("model_config_sha256")
+    expected_tok_sha = proof.get("tokenizer_sha256")
+
+    candidate_config_paths = [
+        os.path.join(model_dir, "config.json"),
+        "storage/models/tara_candidate_v1/config.json",
+        "config.json",
+    ]
+    candidate_tok_paths = [
+        os.path.join(model_dir, "tokenizer.json"),
+        "storage/models/tara_candidate_v1/tokenizer.json",
+        "tokenizer.json",
+    ]
+
+    config_fp = next((p for p in candidate_config_paths if os.path.exists(p)), None)
+    tok_fp = next((p for p in candidate_tok_paths if os.path.exists(p)), None)
+
+    # Strict 64-character hexadecimal validation helper
+    def is_valid_sha256(v: Any) -> bool:
+        return isinstance(v, str) and re.fullmatch(r"[0-9a-fA-F]{64}", v.strip()) is not None
+
+    if not is_valid_sha256(expected_config_sha):
+        print(f"[Pre-Training Gate Tamper Error] Missing or invalid 64-hex model_config_sha256 in proof: {expected_config_sha}", flush=True)
+        return False
+
+    if not is_valid_sha256(expected_tok_sha):
+        print(f"[Pre-Training Gate Tamper Error] Missing or invalid 64-hex tokenizer_sha256 in proof: {expected_tok_sha}", flush=True)
+        return False
+
+    # Strict canonical binding: must verify the exact files located in model_dir
+    canonical_cfg = os.path.join(model_dir, "config.json")
+    canonical_tok = os.path.join(model_dir, "tokenizer.json")
+
+    if not os.path.isfile(canonical_cfg):
+        print(f"[Pre-Training Gate Error] Canonical config.json missing at: {canonical_cfg}", flush=True)
+        return False
+    if not os.path.isfile(canonical_tok):
+        print(f"[Pre-Training Gate Error] Canonical tokenizer.json missing at: {canonical_tok}", flush=True)
+        return False
+
+    actual_cfg_sha = compute_runtime_sha256(canonical_cfg)
+    if actual_cfg_sha.lower() != expected_config_sha.strip().lower():
+        print(
+            f"[Pre-Training Gate Tamper Error] Config SHA-256 mismatch!\n"
+            f"  Expected: {expected_config_sha}\n"
+            f"  Actual  : {actual_cfg_sha} ({canonical_cfg})",
+            flush=True,
+        )
+        return False
+
+    actual_tok_sha = compute_runtime_sha256(canonical_tok)
+    if actual_tok_sha.lower() != expected_tok_sha.strip().lower():
+        print(
+            f"[Pre-Training Gate Tamper Error] Tokenizer SHA-256 mismatch!\n"
+            f"  Expected: {expected_tok_sha}\n"
+            f"  Actual  : {actual_tok_sha} ({canonical_tok})",
+            flush=True,
+        )
+        return False
+
+    print(
+        f"[Pre-Training Gate] Cryptographically verified authorization proof: {proof_path}\n"
+        f"  Model Config SHA : {actual_cfg_sha[:16]}... (MATCH)\n"
+        f"  Tokenizer SHA    : {actual_tok_sha[:16]}... (MATCH)",
+        flush=True,
+    )
+    return True
 
 
 # Note: upload_promoted_model_to_hf is imported from gdrive_sync
@@ -480,11 +586,12 @@ def main():
     parser.add_argument("--hf-model-repo", type=str, default=os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", None)), help="Hugging Face model repository for checkpoint and weight uploads")
     parser.add_argument("--hf-token", type=str, default=None, help="Hugging Face authentication token (or via HF_TOKEN / Colab secret 'tara_sync')")
     parser.add_argument("--verify-gate", action="store_true", default=True, help="Verify pretraining authorization proof before training")
+    parser.add_argument("--mask-prompt", action="store_true", default=False, help="Mask prompt tokens with -100 during instruction fine-tuning stages (default False for foundational pre-training)")
     parser.add_argument("--max-seq-len", type=int, default=int(os.environ.get("TARA_MAX_SEQ_LEN", 0)), help="Max sequence length (0 = dynamically resolve from model config)")
     parser.add_argument("--max-shards", type=int, default=0, help="Max shards to ingest (0 for all discovered shards)")
     parser.add_argument("--exclude-shards", type=str, default="*shard_099*,*shard_098*", help="Comma-separated patterns of shards strictly excluded from training (held-out validation)")
     parser.add_argument("--max-samples", type=int, default=0, help="Max samples to ingest across shards (0 for unlimited)")
-    parser.add_argument("--checkpoint-interval", type=int, default=int(os.environ.get("CHECKPOINT_INTERVAL", 500)), help="Optimizer step interval between checkpoint commits and cloud backups (default: 500)")
+    parser.add_argument("--checkpoint-interval", type=int, default=int(os.environ.get("CHECKPOINT_INTERVAL", 100)), help="Optimizer step interval between checkpoint commits and cloud backups (default: 100)")
     parser.add_argument("--optimizer", type=str, default="auto", choices=["auto", "adamw", "adamw8bit"], help="Optimizer choice ('adamw8bit' saves 5.5GB VRAM for Tesla T4)")
     parser.add_argument("--resume", action="store_true", default=True, help="Auto-resume from existing checkpoint if available")
     parser.add_argument("--force", action="store_true", default=False, help="Force training continuation even if stage is marked completed")
@@ -568,7 +675,13 @@ def main():
 
     # 2b. Pretraining Authorization Gate check
     if args.verify_gate:
-        verify_pretraining_authorization_proof(args.model_dir, os.path.dirname(args.output_dir))
+        gate_passed = verify_pretraining_authorization_proof(args.model_dir, os.path.dirname(args.output_dir))
+        if not gate_passed:
+            raise RuntimeError(
+                "[Pre-Training Gate FATAL] Pre-training authorization gate check failed: "
+                "Cryptographic pretraining_authorization.json proof is missing or authorization_status is not AUTHORIZED. "
+                "Autonomous pre-training cannot proceed until verified authorization proofs are satisfied."
+            )
 
     # 3. Hardware Inspection & Precision Selection (BF16 for Ampere+, FP16 for Tesla T4)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -1178,6 +1291,9 @@ def main():
 
     resumed_domain_cursors = resumed_cursor.get("domain_cursors", {}) if resumed_cursor else (shard_ledger.domain_cursors if shard_ledger else {})
 
+    is_pretraining = "stage0" in args.stage_id.lower() or "pretrain" in args.stage_id.lower()
+    effective_mask_prompt = args.mask_prompt if not is_pretraining else False
+
     if len(active_doms_with_shards) > 1:
         dataset = TaraMultiDomainScheduler(
             domain_shards=domain_shards,
@@ -1194,6 +1310,8 @@ def main():
             max_shard_bytes=args.max_shard_bytes,
             dataset_snapshot=dataset_snapshot,
             domain_cursors=resumed_domain_cursors,
+            scheduler_deficits=resumed_cursor.get("scheduler_deficits") if resumed_cursor else None,
+            mask_prompt=effective_mask_prompt,
         )
     else:
         dataset = TaraStreamingJsonlDataset(
@@ -1214,6 +1332,7 @@ def main():
             buffer_size=args.buffer_size,
             max_shard_bytes=args.max_shard_bytes,
             dataset_snapshot=dataset_snapshot,
+            mask_prompt=effective_mask_prompt,
         )
     dataloader = DataLoader(
         dataset,
@@ -1251,6 +1370,7 @@ def main():
     accum_ce = 0.0
     accum_aux = 0.0
     accum_world_loss = 0.0
+    accum_tokens = 0
     ema_loss = None
     ema_world_loss = None
     grad_norm_val = 0.0
@@ -1277,12 +1397,21 @@ def main():
                 with autocast_ctx:
                     attn_mask = (inputs != 0).long() if (inputs == 0).any() else None
                     _, loss, ce_loss, aux_loss = model(inputs, labels=labels, attention_mask=attn_mask)
-                    loss_scaled = loss / args.grad_accum
+                    # Causal LM predicts shifted labels: shift_labels = labels[..., 1:]
+                    v_tokens = (labels[..., 1:] != -100).sum().clamp(min=1) if labels.dim() > 1 else (labels != -100).sum().clamp(min=1)
+                    effective_tokens = v_tokens.item()
 
-                scaler.scale(loss_scaled).backward()
-                accum_loss += loss.item()
-                accum_ce += ce_loss.item() if ce_loss is not None else loss.item()
+                    # Mathematically exact token-weighted gradient scaling:
+                    # Backward with sum of token losses (loss * v_tokens).
+                    # Parameter gradients accumulate sum_{i,t} grad(l_{i,t}) across the window.
+                    # Normalization by total valid tokens occurs exactly at optimizer step after unscaling.
+                    loss_sum = loss * v_tokens
+
+                scaler.scale(loss_sum).backward()
+                accum_loss += (loss.item() * effective_tokens)
+                accum_ce += ((ce_loss.item() if ce_loss is not None else loss.item()) * effective_tokens)
                 accum_aux += aux_loss.item() if aux_loss is not None else 0.0
+                accum_tokens += effective_tokens
 
                 # Store only lightweight cursor metadata without forcing GPU-to-CPU tensor sync
                 accum_batches.append(cursors)
@@ -1337,6 +1466,7 @@ def main():
                 accum_ce = 0.0
                 accum_aux = 0.0
                 accum_world_loss = 0.0
+                accum_tokens = 0
                 accum_batches.clear()
                 accum_world_batches.clear()
                 gc.collect()
@@ -1354,9 +1484,9 @@ def main():
                     for w_pg in world_optimizer.param_groups:
                         w_pg["lr"] = cur_lr
 
-                cur_window_loss = accum_loss / args.grad_accum
+                cur_window_loss = accum_loss / max(1, accum_tokens)
                 is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after = execute_optimizer_step(
-                    model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0, cur_loss=cur_window_loss, ema_loss=ema_loss
+                    model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0, cur_loss=cur_window_loss, ema_loss=ema_loss, accum_tokens=accum_tokens
                 )
 
                 if is_step_skipped:
@@ -1378,6 +1508,7 @@ def main():
                     accum_ce = 0.0
                     accum_aux = 0.0
                     accum_world_loss = 0.0
+                    accum_tokens = 0
                     accum_batches.clear()
                     accum_world_batches.clear()
                     continue
@@ -1389,8 +1520,8 @@ def main():
                 window_samples = sum(len(c) for c in accum_batches)
                 total_samples_trained += window_samples
 
-                cur_step_loss = accum_loss / args.grad_accum
-                cur_step_ce = accum_ce / args.grad_accum
+                cur_step_loss = accum_loss / max(1, accum_tokens)
+                cur_step_ce = accum_ce / max(1, accum_tokens)
                 cur_step_aux = accum_aux / args.grad_accum
                 cur_step_world = (accum_world_loss / args.grad_accum) if world_model is not None else 0.0
                 cur_joint_loss = cur_step_loss + (args.lambda_world * cur_step_world if world_model is not None else 0.0)
@@ -1399,6 +1530,7 @@ def main():
                 accum_loss = 0.0
                 accum_ce = 0.0
                 accum_aux = 0.0
+                accum_tokens = 0
                 accum_world_loss = 0.0
 
                 # Proactive CPU RAM & Linux Memory Hygiene (releases unmapped heap back to OS)
@@ -1594,7 +1726,8 @@ def main():
                 # ------------------------------------------------------------------
                 # REGULAR CHECKPOINT GATE
                 # ------------------------------------------------------------------
-                is_regular_interval = (step - last_regular_checkpoint_step >= args.checkpoint_interval)
+                # Strict modulo boundary alignment to preserve uniform interval cadence across resumes
+                is_regular_interval = (args.checkpoint_interval > 0 and step % args.checkpoint_interval == 0 and step > last_regular_checkpoint_step)
                 is_final_step = (step >= args.max_steps)
                 should_save_regular = can_save_at_current_step and (is_regular_interval or is_final_step)
 
@@ -1664,7 +1797,7 @@ def main():
                     w_pg["lr"] = cur_lr
 
             is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after = execute_optimizer_step(
-                model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0
+                model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0, accum_tokens=accum_tokens
             )
 
             if is_step_skipped:
@@ -1691,13 +1824,14 @@ def main():
                 step += 1
                 window_samples = sum(len(c) for _, _, c in accum_batches)
                 total_samples_trained += window_samples
-                cur_step_loss = accum_loss / partial_count
-                cur_step_ce = accum_ce / partial_count
+                cur_step_loss = accum_loss / max(1, accum_tokens) if accum_tokens > 0 else (accum_loss / partial_count)
+                cur_step_ce = accum_ce / max(1, accum_tokens) if accum_tokens > 0 else (accum_ce / partial_count)
                 cur_step_aux = accum_aux / partial_count
                 running_loss += cur_step_loss
                 accum_loss = 0.0
                 accum_ce = 0.0
                 accum_aux = 0.0
+                accum_tokens = 0
                 accum_world_loss = 0.0
                 ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
 

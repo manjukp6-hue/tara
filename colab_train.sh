@@ -7,6 +7,13 @@
 
 set -euo pipefail
 
+# 0. Git Environment & Filemode Protection
+# Prevent git filemode permission changes (e.g. chmod +x) from causing dirty git status or merge conflicts
+git config core.filemode false 2>/dev/null || true
+if [ -d ".git" ]; then
+    git config core.filemode false 2>/dev/null || true
+fi
+
 echo "=============================================================================="
 echo "  TARA CLOUD TRAINING SYSTEM (GOOGLE COLAB AUTONOMOUS RUNNER)"
 echo "=============================================================================="
@@ -157,7 +164,7 @@ GRAD_CHECKPOINT_FLAG=""
 if [ "$GRADIENT_CHECKPOINTING" = "1" ]; then
     GRAD_CHECKPOINT_FLAG="--gradient-checkpointing"
 fi
-CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-500}"
+CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-100}"
 SKIP_SAVE_STEPS="${SKIP_SAVE_STEPS:-25}"
 export SKIP_SAVE_STEPS
 PROMOTE_MAX_STEP="${PROMOTE_MAX_STEP:-0}"

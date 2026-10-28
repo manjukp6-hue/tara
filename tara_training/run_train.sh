@@ -6,6 +6,13 @@
 
 set -euo pipefail
 
+# 0. Git Environment & Filemode Protection
+# Prevent git filemode permission changes (e.g. chmod +x) from causing dirty git status or merge conflicts
+git config core.filemode false 2>/dev/null || true
+if [ -d ".git" ]; then
+    git config core.filemode false 2>/dev/null || true
+fi
+
 echo "=============================================================================="
 echo "  TARA CLOUD TRAINING PIPELINE (AUTONOMOUS STANDALONE RUNNER)"
 echo "=============================================================================="
@@ -76,6 +83,7 @@ OPTIMIZER_TYPE="${OPTIMIZER:-$DEFAULT_OPTIM}"
 LR="${LR:-3e-4}"
 EPOCHS="${EPOCHS:-1}"
 STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-1000}"
+CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-100}"
 GRADIENT_CHECKPOINTING="${GRADIENT_CHECKPOINTING:-1}"
 GRAD_CHECKPOINT_FLAG=""
 if [ "$GRADIENT_CHECKPOINTING" = "1" ]; then
@@ -211,6 +219,7 @@ if [ "$REQUESTED_STAGE" != "all" ]; then
         --epochs "$EPOCHS" \
         --max-seq-len "$TARA_MAX_SEQ_LEN" \
         --max-steps "$STAGE_MAX_STEPS" \
+        --checkpoint-interval "$CHECKPOINT_INTERVAL" \
         --domain-weights "$DOMAIN_WEIGHTS" \
         $GRAD_CHECKPOINT_FLAG \
         --resume \
@@ -257,6 +266,7 @@ for i in "${!STAGES[@]}"; do
         --epochs "$EPOCHS" \
         --max-seq-len "$TARA_MAX_SEQ_LEN" \
         --max-steps "$STAGE_MAX_STEPS" \
+        --checkpoint-interval "$CHECKPOINT_INTERVAL" \
         --domain-weights "$DOMAIN_WEIGHTS" \
         $GRAD_CHECKPOINT_FLAG \
         --resume

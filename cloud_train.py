@@ -972,6 +972,77 @@ class ShardLedger:
             total += int(meta.get("records_processed", 0))
         return total
 
+
+def _count_stream_json_array(stream) -> Optional[int]:
+    """
+    Streaming element counter for JSON arrays with O(1) memory.
+    BOM-safe, schema-agnostic (correctly counts objects, strings, lists, numbers, booleans, null),
+    and strictly returns 0 for empty array '[]'.
+    Returns None if the file content is not a JSON array.
+    """
+    lead = stream.read(3)
+    if lead != b"\xef\xbb\xbf":
+        stream.seek(0)
+
+    depth = 0
+    in_string = False
+    escape = False
+    has_elements = False
+    element_count = 0
+    saw_opening_bracket = False
+
+    while chunk := stream.read(64 * 1024):
+        for byte in chunk:
+            char = chr(byte)
+            if escape:
+                escape = False
+                continue
+            if char == "\\":
+                escape = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                if saw_opening_bracket and depth == 1 and not has_elements:
+                    has_elements = True
+                    element_count = 1
+                continue
+            if in_string:
+                continue
+
+            if not saw_opening_bracket:
+                if char.isspace():
+                    continue
+                if char == "[":
+                    saw_opening_bracket = True
+                    depth = 1
+                    continue
+                else:
+                    return None
+
+            if char in "[{":
+                if depth == 1 and not has_elements:
+                    has_elements = True
+                    element_count = 1
+                depth += 1
+            elif char in "]}":
+                if depth == 1 and char == "]":
+                    depth = 0
+                    break
+                depth = max(1, depth - 1)
+            elif depth == 1:
+                if char == ",":
+                    element_count += 1
+                elif not char.isspace() and not has_elements:
+                    has_elements = True
+                    element_count = 1
+
+        if depth == 0 and saw_opening_bracket:
+            break
+
+    if not saw_opening_bracket:
+        return None
+    return element_count if has_elements else 0
+
     def is_completed(self, shard_name: str, local_path: Optional[str] = None, out_sha: Optional[dict] = None) -> bool:
         """
         Verifies shard completion: checks ledger registration AND verifies content SHA-256
@@ -1200,7 +1271,7 @@ class ShardLineIndex:
         Binary formats (.parquet, .arrow, etc.) are skipped.
         """
         ext = os.path.splitext(shard_path)[1].lower()
-        if ext in (".parquet", ".arrow", ".bin"):
+        if ext in (".parquet", ".arrow", ".bin", ".json"):
             return {}
         offsets: Dict[int, int] = {}
         try:
@@ -1238,7 +1309,7 @@ class ShardLineIndex:
         building on demand if the cached index is absent or stale.
         """
         ext = os.path.splitext(shard_path)[1].lower()
-        if ext in (".parquet", ".arrow", ".bin"):
+        if ext in (".parquet", ".arrow", ".bin", ".json"):
             return {}
         cached = self.load(shard_sha256)
         if cached is not None:
@@ -1433,6 +1504,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
         buffer_size: int = 1,
         max_shard_bytes: int = 0,
         dataset_snapshot: Optional["DatasetSnapshot"] = None,
+        mask_prompt: bool = False,
     ):
         self.file_paths = list(file_paths)
         self.tokenizer = tokenizer
@@ -1455,6 +1527,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
         self._line_index: Optional[ShardLineIndex] = ShardLineIndex(dataset_dir) if dataset_dir else None
         # Dataset snapshot for content-change detection across sessions.
         self._snapshot: Optional[DatasetSnapshot] = dataset_snapshot
+        self.mask_prompt: bool = mask_prompt
         # Strict deterministic line cursor streaming: buffer_size = 1 guarantees zero duplicate and zero lost samples.
         # buffer_size > 1 introduces per-shard random shuffling of items in a rolling window.  When a resume cursor
         # is active (resume_shard is set), items from multiple positions are mixed in the buffer before being yielded,
@@ -1955,22 +2028,38 @@ class TaraStreamingJsonlDataset(IterableDataset):
                         f"[Parquet Row Count Warning] {actual_fp}: {count_err}",
                         flush=True,
                     )
-            elif ext in (".jsonl", ".ndjson") and self._line_index is not None:
+            elif ext == ".json":
                 try:
-                    # Fast-path: check if index is already cached on disk without re-scanning
-                    cached_idx = self._line_index.load(shard_sha)
-                    if cached_idx is not None:
-                        self.active_shard_total_lines = len(cached_idx)
-                    elif is_resume_target:
-                        # Only build full byte-offset index on-demand if this shard is the active resume seek target
-                        idx_map = self._line_index.get_or_build(actual_fp, shard_sha)
-                        self.active_shard_total_lines = len(idx_map)
-                except Exception as idx_err:
-                    print(
-                        f"[ShardLineIndex Warning] Could not index "
-                        f"'{actual_fp}': {idx_err}",
-                        flush=True,
-                    )
+                    with open(actual_fp, "rb") as bf:
+                        arr_count = _count_stream_json_array(bf)
+                        if arr_count is not None:
+                            self.active_shard_total_lines = arr_count
+                        else:
+                            bf.seek(0)
+                            self.active_shard_total_lines = _count_stream_lines(bf)
+                except Exception as json_err:
+                    print(f"[Dataset Shard Warning] Error counting records in '{actual_fp}': {json_err}", flush=True)
+            elif ext in (".jsonl", ".ndjson", ".txt", ".text", ".csv", ".tsv"):
+                if self._line_index is not None:
+                    try:
+                        cached_idx = self._line_index.load(shard_sha)
+                        if cached_idx is not None:
+                            self.active_shard_total_lines = len(cached_idx)
+                        elif is_resume_target:
+                            idx_map = self._line_index.get_or_build(actual_fp, shard_sha)
+                            self.active_shard_total_lines = len(idx_map)
+                    except Exception as idx_err:
+                        print(
+                            f"[ShardLineIndex Warning] Could not index "
+                            f"'{actual_fp}': {idx_err}",
+                            flush=True,
+                        )
+                if self.active_shard_total_lines == 0:
+                    try:
+                        with open(actual_fp, "rb") as f:
+                            self.active_shard_total_lines = _count_stream_lines(f)
+                    except Exception:
+                        pass
             if self.shard_ledger:
                 self.shard_ledger.active_shard_total_lines = (
                     self.active_shard_total_lines
@@ -2009,8 +2098,8 @@ class TaraStreamingJsonlDataset(IterableDataset):
                             enc_o = self.tokenizer.encode(out_text)
                             enc_inp = enc_i.ids if hasattr(enc_i, "ids") else list(enc_i)
                             enc_out = enc_o.ids if hasattr(enc_o, "ids") else list(enc_o)
-                            target_start = len(enc_inp)
                             full_ids = enc_inp + enc_out
+                            target_start = len(enc_inp) if getattr(self, "mask_prompt", False) else 0
                         else:
                             continue
 
@@ -2043,6 +2132,10 @@ class TaraStreamingJsonlDataset(IterableDataset):
                             labels = input_ids.clone()
                             if chunk_target_start > 0:
                                 labels[:chunk_target_start] = -100
+
+                            valid_label_count = (labels != -100).sum().item()
+                            if valid_label_count < 4:
+                                continue
 
                             self.active_shard_offset = line_idx
                             self.active_shard_byte_offset = line_byte_offset
@@ -2694,8 +2787,12 @@ class TaraMultiDomainScheduler(IterableDataset):
         max_shard_bytes: int = 0,
         dataset_snapshot: Optional[Any] = None,
         domain_cursors: Optional[Dict[str, Dict[str, Any]]] = None,
+        mask_prompt: bool = False,
+        loop_domains: bool = True,
         **kwargs,
     ):
+        self.mask_prompt = mask_prompt
+        self.loop_domains = loop_domains
         self.domain_shards = {d: list(s) for d, s in domain_shards.items() if s}
         self.active_domains = sorted(self.domain_shards.keys())
         self.tokenizer = tokenizer
@@ -2712,16 +2809,46 @@ class TaraMultiDomainScheduler(IterableDataset):
         self.dataset_snapshot = dataset_snapshot
 
         self.domain_weights = parse_domain_weights("", self.active_domains)
-        if domain_weights:
+        if domain_weights is not None:
             norm_w = {}
             for d in self.active_domains:
                 if d in domain_weights:
-                    norm_w[d] = float(domain_weights[d])
+                    try:
+                        val = float(domain_weights[d])
+                        if math.isfinite(val) and val > 0.0:
+                            norm_w[d] = val
+                        else:
+                            raise ValueError(f"Domain weight for '{d}' must be a positive finite float, got {domain_weights[d]}")
+                    except (ValueError, TypeError) as e:
+                        raise ValueError(f"Invalid domain weight for '{d}': {e}") from e
+                else:
+                    raise ValueError(f"Missing required domain weight for active domain '{d}' in {domain_weights}")
+            for d in domain_weights:
+                if d not in self.active_domains:
+                    raise ValueError(f"Unknown domain '{d}' specified in domain_weights; active domains are {self.active_domains}")
             total_w = sum(norm_w.values())
-            if total_w > 0:
-                self.domain_weights = {d: norm_w.get(d, 0.0) / total_w for d in self.active_domains}
+            if not math.isfinite(total_w) or total_w <= 0.0:
+                raise ValueError(f"Invalid sum of domain_weights: {total_w} (must be positive and finite)")
+            self.domain_weights = {d: norm_w[d] / total_w for d in self.active_domains}
+        else:
+            uniform_w = 1.0 / max(1, len(self.active_domains))
+            self.domain_weights = {d: uniform_w for d in self.active_domains}
 
+        # Checkpoint Resume Deficit Continuity: strict deficit validation from checkpoint
         self.deficits: Dict[str, float] = {d: 0.0 for d in self.active_domains}
+        if "scheduler_deficits" in kwargs and kwargs["scheduler_deficits"]:
+            s_def = kwargs["scheduler_deficits"]
+            if not isinstance(s_def, dict):
+                raise ValueError(f"Corrupted checkpoint state: 'scheduler_deficits' must be a dict, got {type(s_def)}")
+            for d, v in s_def.items():
+                if d in self.deficits:
+                    try:
+                        fval = float(v)
+                        if not math.isfinite(fval):
+                            raise ValueError(f"Non-finite deficit value '{v}' for domain '{d}' in checkpoint")
+                        self.deficits[d] = fval
+                    except (ValueError, TypeError) as err:
+                        raise ValueError(f"Corrupted deficit value for domain '{d}' in checkpoint: {err}") from err
         self.domain_cursors: Dict[str, Dict[str, Any]] = copy.deepcopy(domain_cursors) if domain_cursors else {}
         self.active_domain_idx: int = 0
 
@@ -2753,6 +2880,7 @@ class TaraMultiDomainScheduler(IterableDataset):
                 buffer_size=buffer_size,
                 max_shard_bytes=max_shard_bytes,
                 dataset_snapshot=dataset_snapshot,
+                mask_prompt=self.mask_prompt,
             )
 
     @property
@@ -2809,6 +2937,7 @@ class TaraMultiDomainScheduler(IterableDataset):
                         buffer_size=self.buffer_size,
                         max_shard_bytes=self.max_shard_bytes,
                         dataset_snapshot=self.dataset_snapshot,
+                        mask_prompt=self.mask_prompt,
                     )
         if "active_domain_idx" in state:
             self.active_domain_idx = state["active_domain_idx"]
@@ -2821,14 +2950,20 @@ class TaraMultiDomainScheduler(IterableDataset):
         active_candidates = list(self.active_domains)
 
         while active_candidates:
+            sum_active_w = sum(self.domain_weights.get(d, 0.0) for d in active_candidates)
+            norm_w = {
+                d: (self.domain_weights.get(d, 0.0) / sum_active_w) if sum_active_w > 0 else (1.0 / len(active_candidates))
+                for d in active_candidates
+            }
+
             for d in active_candidates:
-                self.deficits[d] += self.domain_weights.get(d, 0.0)
+                self.deficits[d] += norm_w[d]
 
             best_d = max(active_candidates, key=lambda d: self.deficits[d])
-            self.deficits[best_d] -= 1.0
 
             try:
                 raw_item = next(domain_iters[best_d])
+                self.deficits[best_d] -= 1.0
                 input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last = raw_item
 
                 item = TaraDomainBatchItem(
@@ -2867,8 +3002,51 @@ class TaraMultiDomainScheduler(IterableDataset):
                     return
 
             except StopIteration:
-                if best_d in active_candidates:
-                    active_candidates.remove(best_d)
+                if getattr(self, "loop_domains", True) and len(active_candidates) > 1:
+                    domain_iters[best_d] = iter(self.domain_datasets[best_d])
+                    try:
+                        raw_item = next(domain_iters[best_d])
+                        self.deficits[best_d] -= 1.0
+                        input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last = raw_item
+                        item = TaraDomainBatchItem(
+                            input_ids, labels, shard_name, line_idx, byte_offset, chunk_idx, is_last,
+                            domain=best_d
+                        )
+                        self.active_domain = best_d
+                        self.current_active_shard = shard_name
+                        self.active_shard_offset = line_idx
+                        self.active_shard_byte_offset = byte_offset
+                        self.active_chunk_idx = chunk_idx
+                        self.active_shard_total_lines = getattr(self.domain_datasets[best_d], "active_shard_total_lines", 0)
+
+                        if best_d not in self.domain_cursors:
+                            self.domain_cursors[best_d] = {}
+                        self.domain_cursors[best_d]["active_shard"] = shard_name
+                        self.domain_cursors[best_d]["line_offset"] = line_idx
+                        self.domain_cursors[best_d]["byte_offset"] = byte_offset
+                        self.domain_cursors[best_d]["chunk_idx"] = chunk_idx
+                        self.domain_cursors[best_d]["total_lines"] = self.active_shard_total_lines
+
+                        if self.shard_ledger:
+                            self.shard_ledger.update_domain_cursor(
+                                domain=best_d,
+                                active_shard=shard_name,
+                                line_offset=line_idx,
+                                byte_offset=byte_offset,
+                                chunk_idx=chunk_idx,
+                                total_lines=self.active_shard_total_lines,
+                            )
+
+                        yield item
+                        emitted += 1
+                        if 0 < self.max_samples <= emitted:
+                            return
+                    except StopIteration:
+                        if best_d in active_candidates:
+                            active_candidates.remove(best_d)
+                else:
+                    if best_d in active_candidates:
+                        active_candidates.remove(best_d)
 
 
 def collate_fn(batch):
@@ -5221,6 +5399,9 @@ def execute_optimizer_step(
     world_optimizer: Optional[torch.optim.Optimizer] = None,
     world_scaler: Optional[Any] = None,
     max_grad_norm: float = 1.0,
+    cur_loss: Optional[float] = None,
+    ema_loss: Optional[float] = None,
+    accum_tokens: Optional[int] = None,
 ) -> Tuple[bool, float, float, float, float]:
     """
     Executes a unified optimizer step: gradient unscaling, norm clipping,
@@ -5230,6 +5411,13 @@ def execute_optimizer_step(
         (is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after)
     """
     scaler.unscale_(optimizer)
+
+    # Mathematically exact token-level gradient normalization across accumulation window
+    if accum_tokens is not None and accum_tokens > 0:
+        for p in model.parameters():
+            if p.grad is not None:
+                p.grad.div_(accum_tokens)
+
     grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
     grad_norm_val = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
     is_non_finite_grad = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
@@ -5315,25 +5503,119 @@ def compute_scheduled_lr(step: int, warmup_steps: int, max_steps: int, base_lr: 
     return min_lr + 0.5 * (base_lr - min_lr) * (1.0 + math.cos(math.pi * progress))
 
 
+def compute_runtime_sha256(filepath: str) -> Optional[str]:
+    """Computes dynamic runtime SHA-256 hash of a file."""
+    if not os.path.exists(filepath):
+        return None
+    h = hashlib.sha256()
+    try:
+        with open(filepath, "rb") as f:
+            while chunk := f.read(1024 * 1024):
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+
 def verify_pretraining_authorization_proof(model_dir: str, checkpoints_dir: str = "storage/models/checkpoints") -> bool:
-    """Verifies that the pretraining authorization gate has been successfully passed."""
+    """
+    Cryptographically verifies that the pretraining authorization gate has been successfully passed:
+    1. Checks for existence and validity of pretraining_authorization.json.
+    2. Validates 'authorization_status' == 'AUTHORIZED'.
+    3. Dynamically computes the runtime SHA-256 of candidate model config.json and tokenizer.json
+       and verifies they match the cryptographic signatures recorded in the authorization proof.
+    """
     candidate_proof_paths = [
         os.path.join(checkpoints_dir, "pretraining_authorization.json"),
         os.path.join(model_dir, "pretraining_authorization.json"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "pretraining_authorization.json"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "storage", "models", "checkpoints", "pretraining_authorization.json"),
         "storage/models/checkpoints/pretraining_authorization.json",
+        "pretraining_authorization.json",
     ]
+    proof = None
+    proof_path = None
     for cp in candidate_proof_paths:
         if os.path.exists(cp):
             try:
                 with open(cp, "r", encoding="utf-8") as f:
-                    proof = json.load(f)
-                if proof.get("authorization_status") == "AUTHORIZED":
-                    print(f"[Pre-Training Gate] Valid cryptographic authorization proof verified: {cp}")
-                    return True
+                    proof_data = json.load(f)
+                if proof_data.get("authorization_status") == "AUTHORIZED":
+                    proof = proof_data
+                    proof_path = cp
+                    break
             except Exception as e:
                 print(f"[Pre-Training Gate Warning] Proof parse warning in {cp}: {e}")
-    print("[Pre-Training Gate Notice] pretraining_authorization.json not found in checkpoint paths.")
-    return False
+
+    if not proof:
+        print("[Pre-Training Gate Notice] Valid pretraining_authorization.json not found in checkpoint paths.")
+        return False
+
+    expected_config_sha = proof.get("model_config_sha256")
+    expected_tok_sha = proof.get("tokenizer_sha256")
+
+    candidate_config_paths = [
+        os.path.join(model_dir, "config.json"),
+        "storage/models/tara_candidate_v1/config.json",
+        "config.json",
+    ]
+    candidate_tok_paths = [
+        os.path.join(model_dir, "tokenizer.json"),
+        "storage/models/tara_candidate_v1/tokenizer.json",
+        "tokenizer.json",
+    ]
+
+    config_fp = next((p for p in candidate_config_paths if os.path.exists(p)), None)
+    tok_fp = next((p for p in candidate_tok_paths if os.path.exists(p)), None)
+
+    def is_valid_sha256(v: Any) -> bool:
+        return isinstance(v, str) and re.fullmatch(r"[0-9a-fA-F]{64}", v.strip()) is not None
+
+    if not is_valid_sha256(expected_config_sha):
+        print(f"[Pre-Training Gate Tamper Error] Missing or invalid 64-hex model_config_sha256 in proof: {expected_config_sha}", flush=True)
+        return False
+
+    if not is_valid_sha256(expected_tok_sha):
+        print(f"[Pre-Training Gate Tamper Error] Missing or invalid 64-hex tokenizer_sha256 in proof: {expected_tok_sha}", flush=True)
+        return False
+
+    canonical_cfg = os.path.join(model_dir, "config.json")
+    canonical_tok = os.path.join(model_dir, "tokenizer.json")
+
+    if not os.path.isfile(canonical_cfg):
+        print(f"[Pre-Training Gate Error] Canonical config.json missing at: {canonical_cfg}", flush=True)
+        return False
+    if not os.path.isfile(canonical_tok):
+        print(f"[Pre-Training Gate Error] Canonical tokenizer.json missing at: {canonical_tok}", flush=True)
+        return False
+
+    actual_cfg_sha = compute_runtime_sha256(canonical_cfg)
+    if actual_cfg_sha.lower() != expected_config_sha.strip().lower():
+        print(
+            f"[Pre-Training Gate Tamper Error] Config SHA-256 mismatch!\n"
+            f"  Expected: {expected_config_sha}\n"
+            f"  Actual  : {actual_cfg_sha} ({canonical_cfg})",
+            flush=True,
+        )
+        return False
+
+    actual_tok_sha = compute_runtime_sha256(canonical_tok)
+    if actual_tok_sha.lower() != expected_tok_sha.strip().lower():
+        print(
+            f"[Pre-Training Gate Tamper Error] Tokenizer SHA-256 mismatch!\n"
+            f"  Expected: {expected_tok_sha}\n"
+            f"  Actual  : {actual_tok_sha} ({canonical_tok})",
+            flush=True,
+        )
+        return False
+
+    print(
+        f"[Pre-Training Gate] Cryptographically verified authorization proof: {proof_path}\n"
+        f"  Model Config SHA : {actual_cfg_sha[:16]}... (MATCH)\n"
+        f"  Tokenizer SHA    : {actual_tok_sha[:16]}... (MATCH)",
+        flush=True,
+    )
+    return True
 
 
 def upload_promoted_model_to_hf(promoted_dir: str, repo_id: str, stage_id: str) -> bool:
@@ -5401,7 +5683,7 @@ def main():
     parser.add_argument("--max-shards", type=int, default=0, help="Max shards to ingest (0 for all discovered shards)")
     parser.add_argument("--exclude-shards", type=str, default="*shard_099*,*shard_098*", help="Comma-separated patterns of shards strictly excluded from training (held-out validation)")
     parser.add_argument("--max-samples", type=int, default=0, help="Max samples to ingest across shards (0 for unlimited)")
-    parser.add_argument("--checkpoint-interval", type=int, default=int(os.environ.get("CHECKPOINT_INTERVAL", 500)), help="Optimizer step interval between checkpoint commits and cloud backups (default: 500)")
+    parser.add_argument("--checkpoint-interval", type=int, default=int(os.environ.get("CHECKPOINT_INTERVAL", 100)), help="Optimizer step interval between checkpoint commits and cloud backups (default: 100)")
     parser.add_argument("--optimizer", type=str, default="auto", choices=["auto", "adamw", "adamw8bit"], help="Optimizer choice ('adamw8bit' saves 5.5GB VRAM for Tesla T4)")
     parser.add_argument("--resume", action="store_true", default=True, help="Auto-resume from existing checkpoint if available")
     parser.add_argument("--force", action="store_true", default=False, help="Force training continuation even if stage is marked completed")
@@ -5480,7 +5762,13 @@ def main():
 
     # 2b. Pretraining Authorization Gate check
     if args.verify_gate:
-        verify_pretraining_authorization_proof(args.model_dir, os.path.dirname(args.output_dir))
+        gate_passed = verify_pretraining_authorization_proof(args.model_dir, os.path.dirname(args.output_dir))
+        if not gate_passed:
+            raise RuntimeError(
+                "[Pre-Training Gate FATAL] Pre-training authorization gate check failed: "
+                "Cryptographic pretraining_authorization.json proof is missing or authorization_status is not AUTHORIZED. "
+                "Autonomous pre-training cannot proceed until verified authorization proofs are satisfied."
+            )
 
     # 3. Hardware Inspection & Precision Selection (BF16 for Ampere+, FP16 for Tesla T4)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -6103,6 +6391,7 @@ def main():
     accum_loss = 0.0
     accum_ce = 0.0
     accum_aux = 0.0
+    accum_tokens = 0
     accum_world_loss = 0.0
     ema_loss = None
     ema_world_loss = None
@@ -6128,10 +6417,13 @@ def main():
 
             with autocast_ctx:
                 _, loss, ce_loss, aux_loss = model(inputs, labels=labels)
-                loss_scaled = loss / args.grad_accum
+                v_tokens = (labels[..., 1:] != -100).sum().clamp(min=1) if labels.dim() > 1 else (labels != -100).sum().clamp(min=1)
+                effective_tokens = v_tokens.item()
+                loss_sum = loss * v_tokens
 
-            scaler.scale(loss_scaled).backward()
-            accum_loss += loss.item()
+            scaler.scale(loss_sum).backward()
+            accum_loss += (loss.item() * effective_tokens)
+            accum_tokens += effective_tokens
             accum_ce += ce_loss.item() if ce_loss is not None else loss.item()
             accum_aux += aux_loss.item() if aux_loss is not None else 0.0
 
@@ -6167,7 +6459,7 @@ def main():
                         w_pg["lr"] = cur_lr
 
                 is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after = execute_optimizer_step(
-                    model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0
+                    model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0, accum_tokens=accum_tokens
                 )
 
                 if is_step_skipped:
@@ -6228,7 +6520,7 @@ def main():
                     window_samples = sum(len(c) for _, _, c in accum_batches)
                     total_samples_trained += window_samples
 
-                    cur_step_loss = accum_loss / args.grad_accum
+                    cur_step_loss = accum_loss / max(1, accum_tokens)
                     cur_step_ce = accum_ce / args.grad_accum
                     cur_step_aux = accum_aux / args.grad_accum
                     cur_step_world = (accum_world_loss / args.grad_accum) if world_model is not None else 0.0
@@ -6335,6 +6627,7 @@ def main():
                 # Dynamic In-Memory Best Loss Tracking & Authentic Best Snapshot:
                 is_new_best = (cur_step_loss < best_loss)
                 can_save_at_current_step = (step > args.skip_save_steps) or (step >= args.max_steps)
+                committed_milestone_this_step = False
 
                 if is_new_best:
                     best_loss = cur_step_loss
@@ -6343,6 +6636,7 @@ def main():
                     best_loss_cursor = copy.deepcopy(current_cursor) if current_cursor is not None else None
 
                     if can_save_at_current_step:
+                        committed_milestone_this_step = True
                         last_best_checkpoint_step = step
                         last_best_checkpoint_loss = cur_step_loss
 
@@ -6432,7 +6726,8 @@ def main():
                 # ------------------------------------------------------------------
                 # REGULAR CHECKPOINT GATE
                 # ------------------------------------------------------------------
-                is_regular_interval = (step - last_regular_checkpoint_step >= args.checkpoint_interval)
+                # Strict modulo boundary alignment to preserve uniform interval cadence across resumes
+                is_regular_interval = (args.checkpoint_interval > 0 and step % args.checkpoint_interval == 0 and step > last_regular_checkpoint_step)
                 is_final_step = (step >= args.max_steps)
                 should_save_regular = can_save_at_current_step and (is_regular_interval or is_final_step)
 
@@ -6441,7 +6736,7 @@ def main():
                 # the milestone already wrote all weights, configs, and metadata to disk.
                 # The regular interval counter is still advanced so the next interval starts from
                 # this step, preventing an immediate double-save on the very next interval step.
-                if should_save_regular and should_commit_milestone:
+                if should_save_regular and committed_milestone_this_step:
                     last_regular_checkpoint_step = step
                     print(
                         f"[{args.stage_id} | Step {step:04d}] Regular checkpoint skipped: "
@@ -6483,15 +6778,6 @@ def main():
         # we rescale the accumulated gradients by (args.grad_accum / partial_count).
         if accum_batches:
             partial_count = len(accum_batches)
-            rescale_factor = float(args.grad_accum) / float(partial_count)
-
-            for p in model.parameters():
-                if p.grad is not None:
-                    p.grad.mul_(rescale_factor)
-            if world_model is not None:
-                for p in world_model.parameters():
-                    if p.grad is not None:
-                        p.grad.mul_(rescale_factor)
 
             cur_lr = compute_scheduled_lr(step, args.warmup_steps, args.max_steps, args.lr, args.min_lr)
             for pg in optimizer.param_groups:
@@ -6501,7 +6787,7 @@ def main():
                     w_pg["lr"] = cur_lr
 
             is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after = execute_optimizer_step(
-                model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0
+                model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0, accum_tokens=accum_tokens
             )
 
             if is_step_skipped:
@@ -6535,6 +6821,7 @@ def main():
                 accum_loss = 0.0
                 accum_ce = 0.0
                 accum_aux = 0.0
+                accum_tokens = 0
                 accum_world_loss = 0.0
                 ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
 

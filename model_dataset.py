@@ -740,24 +740,37 @@ def _resolve_hf_token(cli_token: Optional[str] = None) -> Optional[str]:
 
     if cli_token and cli_token.strip():
         resolved = cli_token.strip()
-        os.environ["HF_TOKEN"] = resolved
     elif os.environ.get("HF_TOKEN") and os.environ.get("HF_TOKEN").strip():
         resolved = os.environ.get("HF_TOKEN").strip()
+    elif os.environ.get("HUGGING_FACE_HUB_TOKEN") and os.environ.get("HUGGING_FACE_HUB_TOKEN").strip():
+        resolved = os.environ.get("HUGGING_FACE_HUB_TOKEN").strip()
     else:
-        # Check Google Colab userdata secrets if running in Colab
-        try:
-            from google.colab import userdata
-            for secret_key in ("tara_sync", "HF_TOKEN"):
+        # Check token cache files directly
+        for token_file in ("/root/.cache/huggingface/token", os.path.expanduser("~/.cache/huggingface/token")):
+            if os.path.isfile(token_file):
                 try:
-                    colab_token = userdata.get(secret_key)
-                    if colab_token and colab_token.strip():
-                        resolved = colab_token.strip()
-                        os.environ["HF_TOKEN"] = resolved
-                        break
+                    with open(token_file, "r", encoding="utf-8") as tf:
+                        tok = tf.read().strip()
+                        if tok:
+                            resolved = tok
+                            break
                 except Exception:
                     pass
-        except Exception:
-            pass
+
+        # Check Google Colab userdata secrets if running in Colab
+        if not resolved:
+            try:
+                from google.colab import userdata
+                for secret_key in ("tara_sync", "HF_TOKEN", "hf_token"):
+                    try:
+                        colab_token = userdata.get(secret_key)
+                        if colab_token and colab_token.strip():
+                            resolved = colab_token.strip()
+                            break
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
         if not resolved:
             try:
@@ -765,9 +778,17 @@ def _resolve_hf_token(cli_token: Optional[str] = None) -> Optional[str]:
                 cached = get_token()
                 if cached and cached.strip():
                     resolved = cached.strip()
-                    os.environ["HF_TOKEN"] = resolved
             except Exception:
                 pass
+
+    if resolved:
+        os.environ["HF_TOKEN"] = resolved
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = resolved
+        try:
+            from huggingface_hub import login
+            login(token=resolved, add_to_git_credential=False)
+        except Exception:
+            pass
 
     if not _token_logged:
         _token_logged = True

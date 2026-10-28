@@ -20,7 +20,7 @@ echo "==========================================================================
 # 0. Proactive Disk Hygiene
 echo "[DISK CLEANUP] Reclaiming disk space from caches and temporary files..."
 rm -rf /tmp/tara_* /tmp/tmp_tara_* 2>/dev/null || true
-rm -rf /root/.cache/pip /root/.cache/torch /root/.cache/huggingface 2>/dev/null || true
+rm -rf /root/.cache/pip /root/.cache/torch /root/.cache/huggingface/hub 2>/dev/null || true
 if command -v apt-get >/dev/null 2>&1; then
     apt-get clean 2>/dev/null || true
     rm -rf /var/lib/apt/lists/* 2>/dev/null || true
@@ -108,9 +108,15 @@ import os
 candidates = []
 if os.environ.get('HF_TOKEN'):
     candidates.append(os.environ.get('HF_TOKEN'))
+for token_file in ('/root/.cache/huggingface/token', os.path.expanduser('~/.cache/huggingface/token')):
+    if os.path.isfile(token_file):
+        try:
+            tok = open(token_file).read().strip()
+            if tok: candidates.append(tok)
+        except Exception: pass
 try:
     from google.colab import userdata
-    for k in ('HF_TOKEN', 'hf_token', 'tara_sync'):
+    for k in ('tara_sync', 'HF_TOKEN', 'hf_token'):
         try:
             val = userdata.get(k)
             if val: candidates.append(val)
@@ -119,9 +125,12 @@ except Exception: pass
 print(candidates[0] if candidates else '')
 " 2>/dev/null || true)
 
+HF_TOKEN_FLAG=""
 if [ -n "$RESOLVED_HF_TOKEN" ]; then
     export HF_TOKEN="$RESOLVED_HF_TOKEN"
-    echo "[AUTH] HF_TOKEN resolved securely."
+    export HUGGING_FACE_HUB_TOKEN="$RESOLVED_HF_TOKEN"
+    HF_TOKEN_FLAG="--hf-token $RESOLVED_HF_TOKEN"
+    echo "[AUTH] HF_TOKEN resolved securely (length: ${#RESOLVED_HF_TOKEN})."
 else
     echo "[AUTH] No HF_TOKEN detected; running in unauthenticated public mode."
 fi
@@ -263,6 +272,7 @@ if [ "$REQUESTED_STAGE" != "all" ]; then
         --checkpoint-interval "$CHECKPOINT_INTERVAL" \
         --domain-weights "$DOMAIN_WEIGHTS" \
         $GRAD_CHECKPOINT_FLAG \
+        $HF_TOKEN_FLAG \
         --resume \
         "$@"
     echo "[COMPLETE] Single stage $REQUESTED_STAGE finished successfully."
@@ -310,6 +320,7 @@ for i in "${!STAGES[@]}"; do
         --checkpoint-interval "$CHECKPOINT_INTERVAL" \
         --domain-weights "$DOMAIN_WEIGHTS" \
         $GRAD_CHECKPOINT_FLAG \
+        $HF_TOKEN_FLAG \
         --resume
 
     PIPELINE_STATUS=$?

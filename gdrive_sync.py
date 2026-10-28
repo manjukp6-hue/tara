@@ -116,14 +116,17 @@ def sync_checkpoint_file_atomic(src_path: str, dst_path: str, precomputed_src_sh
             return False
 
         # 3. Atomically overwrite destination file (with Google Drive FUSE fallback)
-        if os.path.exists(dst_path):
-            _safe_unlink(dst_path)
+        # Never pre-delete dst_path before replacement to prevent zero-backup gap!
         try:
-            os.rename(tmp_path, dst_path)
+            os.replace(tmp_path, dst_path)
         except OSError:
-            # Google Drive FUSE mount fallback (rename often fails with Errno 95/18 on FUSE)
-            shutil.copyfile(tmp_path, dst_path)
-            _safe_unlink(tmp_path)
+            try:
+                os.rename(tmp_path, dst_path)
+            except OSError:
+                # Google Drive FUSE mount fallback (rename often fails with Errno 95/18 on FUSE):
+                # Safely copy verified tmp into dst_path directly over destination without an early unlink window.
+                shutil.copyfile(tmp_path, dst_path)
+                _safe_unlink(tmp_path)
         # Record authentic SHA-256 marker so subsequent identical checks are cryptographic-verified
         try:
             with open(dst_path + ".sha256", "w", encoding="utf-8") as dsf:
@@ -415,6 +418,23 @@ def restore_checkpoint_from_gdrive(gdrive_dir: str, local_ckpt_dir: str) -> bool
     if not os.path.exists(gdrive_dir):
         return False
 
+    def resolve_normal_checkpoint_folder(norm_path: str) -> str:
+        if not os.path.isdir(norm_path):
+            return norm_path
+        subdirs = []
+        for d in os.listdir(norm_path):
+            p = os.path.join(norm_path, d)
+            if os.path.isdir(p) and not d.startswith("."):
+                m = re.match(r"^(?:step_)?(\d+)", d)
+                if m:
+                    subdirs.append((int(m.group(1)), p))
+        if subdirs:
+            subdirs.sort(key=lambda x: x[0], reverse=True)
+            chosen = subdirs[0][1]
+            print(f"[GDrive Restore] Resolved latest normal checkpoint directory: {os.path.basename(chosen)} (step {subdirs[0][0]})", flush=True)
+            return chosen
+        return norm_path
+
     def resolve_best_milestone_folder(bm_path: str) -> str:
         if not os.path.isdir(bm_path):
             return bm_path
@@ -440,7 +460,7 @@ def restore_checkpoint_from_gdrive(gdrive_dir: str, local_ckpt_dir: str) -> bool
     has_best = os.path.exists(os.path.join(gdrive_dir, "best_milestone"))
 
     if has_normal or has_best:
-        normal_cand = os.path.join(gdrive_dir, "normal_checkpoint") if has_normal else None
+        normal_cand = resolve_normal_checkpoint_folder(os.path.join(gdrive_dir, "normal_checkpoint")) if has_normal else None
         best_cand = resolve_best_milestone_folder(os.path.join(gdrive_dir, "best_milestone")) if has_best else None
 
         def get_dir_step(d: Optional[str]) -> int:
@@ -471,6 +491,8 @@ def restore_checkpoint_from_gdrive(gdrive_dir: str, local_ckpt_dir: str) -> bool
             source_dir = best_cand
     elif os.path.basename(os.path.normpath(gdrive_dir)) == "best_milestone":
         source_dir = resolve_best_milestone_folder(gdrive_dir)
+    elif os.path.basename(os.path.normpath(gdrive_dir)) == "normal_checkpoint":
+        source_dir = resolve_normal_checkpoint_folder(gdrive_dir)
 
     try:
         os.makedirs(local_ckpt_dir, exist_ok=True)
@@ -495,11 +517,11 @@ def restore_checkpoint_from_gdrive(gdrive_dir: str, local_ckpt_dir: str) -> bool
         return False
 
 
-def prune_gdrive_checkpoints(gdrive_base_dir: str, keep_n: int = 1):
+def prune_gdrive_checkpoints(gdrive_base_dir: str, keep_n: int = 2):
     """
     Strict Google Drive Storage Quota Protection:
     Ensures Google Drive NEVER accumulates duplicate or stale normal step checkpoints.
-    Keeps strictly the latest `keep_n` normal step checkpoints (default 1).
+    Keeps strictly the latest `keep_n` normal step checkpoints (default 2).
     Best milestone ('best_milestone') is strictly managed separately by prune_gdrive_best_milestones.
     """
     if not os.path.exists(gdrive_base_dir):
@@ -576,6 +598,84 @@ def prune_gdrive_best_milestones(best_base_dir: str, keep_n: int = 2):
         print(f"[GDrive Retention Warning] Error during best milestone pruning: {e}", flush=True)
 
 
+def sync_normal_checkpoint_to_gdrive(
+    local_source_dir: str,
+    normal_base_dir: str,
+    step: int,
+    keep_n: int = 2,
+) -> bool:
+    """
+    Synchronizes regular normal training checkpoint into Google Drive under:
+        normal_checkpoint/step_{step}/
+    and aligns top-level normal_checkpoint for immediate legacy resume compatibility.
+
+    Rolling 2-Copy Architecture:
+    1. Writes to root-level staging directory (.tmp_staging_normal_step_{step}_{ts})
+    2. Verifies all files and authentic SHA-256 markers.
+    3. Atomically promotes to step_{step} directory (no pre-delete).
+    4. Aligns top-level normal_checkpoint files (COMMITTED, model.safetensors, etc.)
+    5. Safely prunes older normal checkpoints beyond keep_n (strictly preserving latest 2).
+    """
+    if not os.path.exists(local_source_dir):
+        return False
+    try:
+        os.makedirs(normal_base_dir, exist_ok=True)
+        target_name = f"step_{step}"
+        final_target_dir = os.path.join(normal_base_dir, target_name)
+        staging_dir = os.path.join(
+            normal_base_dir, f".tmp_staging_normal_step_{step}_{int(time.time())}_{random.randint(1000, 9999)}"
+        )
+        os.makedirs(staging_dir, exist_ok=True)
+
+        # Sync files to staging directory with full SHA-256 validation
+        success = sync_checkpoint_to_gdrive(local_source_dir, staging_dir)
+        if not success:
+            print(f"[GDrive Normal Checkpoint Warning] Sync to staging failed: {staging_dir}", flush=True)
+            _safe_rmtree(staging_dir)
+            return False
+
+        # Atomic promotion into final step directory (never pre-delete)
+        if os.path.exists(final_target_dir):
+            try:
+                os.replace(staging_dir, final_target_dir)
+            except OSError:
+                tmp_old = final_target_dir + f".old_{int(time.time())}_{os.getpid()}"
+                try:
+                    os.rename(final_target_dir, tmp_old)
+                    shutil.move(staging_dir, final_target_dir)
+                    _safe_rmtree(tmp_old)
+                except Exception:
+                    for f in os.listdir(staging_dir):
+                        s_f = os.path.join(staging_dir, f)
+                        d_f = os.path.join(final_target_dir, f)
+                        if os.path.isfile(s_f):
+                            sync_checkpoint_file_atomic(s_f, d_f)
+                    _safe_rmtree(staging_dir)
+        else:
+            try:
+                os.replace(staging_dir, final_target_dir)
+            except OSError:
+                shutil.move(staging_dir, final_target_dir)
+
+        # Also align top-level normal_checkpoint root directory for seamless legacy access
+        for f in os.listdir(final_target_dir):
+            if f.endswith(".tmp") or f.startswith("."):
+                continue
+            s_f = os.path.join(final_target_dir, f)
+            d_f = os.path.join(normal_base_dir, f)
+            if os.path.isfile(s_f):
+                sync_checkpoint_file_atomic(s_f, d_f)
+
+        print(f"[GDrive Normal Checkpoint] Promoted verified checkpoint -> {final_target_dir}", flush=True)
+
+        # Maintain rolling window of keep_n (strictly 2) normal step checkpoints
+        prune_gdrive_checkpoints(normal_base_dir, keep_n=keep_n)
+        return True
+    except Exception as e:
+        print(f"[GDrive Normal Checkpoint Error] Failed sync for Step {step}: {e}", flush=True)
+        return False
+
+
 def sync_best_milestone_to_gdrive(
     local_source_dir: str,
     best_milestone_base_dir: str,
@@ -614,13 +714,28 @@ def sync_best_milestone_to_gdrive(
             return False
 
         # Atomic promotion into final target directory
+        # Never pre-delete final_target_dir before replacement to prevent zero-backup gap!
         if os.path.exists(final_target_dir):
-            _safe_rmtree(final_target_dir)
-
-        try:
-            os.replace(staging_dir, final_target_dir)
-        except OSError:
-            shutil.move(staging_dir, final_target_dir)
+            try:
+                os.replace(staging_dir, final_target_dir)
+            except OSError:
+                tmp_old = final_target_dir + f".old_{int(time.time())}_{os.getpid()}"
+                try:
+                    os.rename(final_target_dir, tmp_old)
+                    shutil.move(staging_dir, final_target_dir)
+                    _safe_rmtree(tmp_old)
+                except Exception:
+                    for f in os.listdir(staging_dir):
+                        s_f = os.path.join(staging_dir, f)
+                        d_f = os.path.join(final_target_dir, f)
+                        if os.path.isfile(s_f):
+                            sync_checkpoint_file_atomic(s_f, d_f)
+                    _safe_rmtree(staging_dir)
+        else:
+            try:
+                os.replace(staging_dir, final_target_dir)
+            except OSError:
+                shutil.move(staging_dir, final_target_dir)
 
         print(f"[GDrive Best Milestone] Promoted verified milestone -> {final_target_dir}", flush=True)
 
@@ -929,12 +1044,15 @@ class BackgroundGDriveSyncWorker:
                     tag = f"Step {step}"
                     print(f"[GDrive Worker] Starting background transfer for [{tag}] -> {gdrive_dir}...", flush=True)
                     t0 = time.time()
-                    success = sync_checkpoint_to_gdrive(local_dir, gdrive_dir)
+                    success = sync_normal_checkpoint_to_gdrive(
+                        local_source_dir=local_dir,
+                        normal_base_dir=gdrive_dir,
+                        step=step,
+                        keep_n=2,
+                    )
                     elapsed = time.time() - t0
                     if success:
                         print(f"[GDrive Worker] Completed background upload for [{tag}] in {elapsed:.1f}s.", flush=True)
-                        # Storage Quota Guard: Auto-prune older normal step checkpoints on GDrive
-                        prune_gdrive_checkpoints(os.path.dirname(gdrive_dir), keep_n=1)
                     else:
                         print(f"[GDrive Worker Warning] Background upload failed or incomplete for [{tag}].", flush=True)
 
@@ -2597,6 +2715,15 @@ def _cleanup_old_versioned_checkpoints(
         if step_num is not None:
             committed_marker = os.path.join(full_path, "COMMITTED")
             is_committed = os.path.isfile(committed_marker)
+
+            # Recognize valid checkpoint with model weights and state even if COMMITTED marker file is missing
+            if not is_committed:
+                cand_state = os.path.join(full_path, "checkpoint_state.json")
+                cand_model = os.path.join(full_path, "model.safetensors")
+                cand_idx = os.path.join(full_path, "model.safetensors.index.json")
+                cand_bin = os.path.join(full_path, "pytorch_model.bin")
+                if os.path.isfile(cand_state) and (os.path.isfile(cand_model) or os.path.isfile(cand_idx) or os.path.isfile(cand_bin)):
+                    is_committed = True
 
             # Check if this checkpoint is an in-flight sync (younger than min_abandoned_age_seconds)
             if not is_committed:

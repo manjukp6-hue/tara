@@ -1440,11 +1440,13 @@ def main():
 
         # Cleanup obsolete duplicate runs or clone remnants from previous sessions in parent_dir
         parent_ckpt_dir = os.path.dirname(os.path.abspath(args.output_dir)) or "."
+        prot_startup = [args.output_dir] if os.path.isdir(args.output_dir) else []
         _cleanup_old_versioned_checkpoints(
             parent_ckpt_dir,
             os.path.basename(args.output_dir),
-            keep_n=args.keep_checkpoints,
+            keep_n=max(int(args.keep_checkpoints), 2),
             force_keep_exact=True,
+            protected_dirs=prot_startup,
         )
         if start_step >= args.max_steps:
             print(f"[Resume] Training already completed all {args.max_steps} steps. Finishing.")

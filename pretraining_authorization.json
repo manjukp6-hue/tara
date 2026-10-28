@@ -1,0 +1,51 @@
+{
+  "timestamp_utc": "2026-10-24T20:47:33Z",
+  "model_path": "storage/models/tara_candidate_v1",
+  "dataset_path": "storage/datasets/curriculum",
+  "model_config_sha256": "98985b2706ad1442e608f012b4cf2256296834fa577cbb1bf80311e07c886750",
+  "tokenizer_sha256": "007f91cd022ee262c37792fb095459e5625fc33d95f016dc79ce4739174850de",
+  "dataset_fingerprint_sha256": "63249e272b913590e808546dca0d65e3e9b99e022784272b834f1e3d859b697d",
+  "tokenizer_audit": {
+    "vocab_size": 100256,
+    "max_token_len": 24,
+    "special_tokens_verified": 9,
+    "has_kannada_numerals": true,
+    "has_devanagari_numerals": true,
+    "config_vocab_size_match": true,
+    "status": "VERIFIED_PASSED"
+  },
+  "content_dedup": {
+    "total_records_scanned": 3094,
+    "unique_records_count": 3094,
+    "duplicate_records_count": 0,
+    "duplicate_rate_pct": 0.0,
+    "shards_scanned": 5,
+    "files_audited": [
+      "ability_acquisition.jsonl",
+      "agi_causal_transitions.jsonl",
+      "agi_logic_reasoning.jsonl",
+      "agi_self_correction.jsonl",
+      "foundational_curriculum.jsonl"
+    ],
+    "status": "VERIFIED_PASSED"
+  },
+  "model_weights_audit": {
+    "model_dir": "storage/models/tara_candidate_v1",
+    "num_layers": 16,
+    "hidden_size": 2048,
+    "intermediate_size": 5632,
+    "num_attention_heads": 32,
+    "num_kv_heads": 8,
+    "total_tensors_in_index": 147,
+    "total_bytes_reported": 4524351488,
+    "is_sharded": true,
+    "status": "VERIFIED_PASSED"
+  },
+  "hf_dataset_verification": {
+    "repo_id": "manjukp6/tara",
+    "remote_verified": true,
+    "status": "VERIFIED_LOCAL_PROVENANCE"
+  },
+  "authorization_status": "AUTHORIZED",
+  "authorized_by": "TARA Pre-Training Authorization Gate (Native Rust)"
+}

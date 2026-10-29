@@ -1827,6 +1827,24 @@ def main():
     else:
         print(f"[Hardware Device] Running in single-device mode ({device.type.upper()}).")
 
+    if torch.cuda.is_available() and is_main_process:
+        alloc_mb = torch.cuda.memory_allocated(device) / (1024 * 1024)
+        res_mb = torch.cuda.memory_reserved(device) / (1024 * 1024)
+        print(f"[VRAM Pre-Flight Audit] Rank {rank} Startup VRAM: {alloc_mb:.1f} MiB allocated / {res_mb:.1f} MiB reserved")
+        import gc
+        tensors_by_size = []
+        for obj in gc.get_objects():
+            try:
+                if torch.is_tensor(obj) and obj.is_cuda and obj.device.index == local_rank:
+                    tensors_by_size.append((obj.numel() * obj.element_size(), tuple(obj.shape), str(obj.dtype)))
+            except Exception:
+                pass
+        tensors_by_size.sort(key=lambda x: x[0], reverse=True)
+        total_tracked = sum(x[0] for x in tensors_by_size) / (1024 * 1024)
+        print(f"[VRAM Pre-Flight Audit] Tracked {len(tensors_by_size)} CUDA tensors totaling {total_tracked:.1f} MiB:")
+        for sz, shp, dt in tensors_by_size[:10]:
+            print(f"  -> {sz / (1024*1024):.1f} MiB | Shape: {shp} | Dtype: {dt}")
+
     print(f"[Training] Launching Training: Epochs={args.epochs}, Batch={args.batch_size}, Accum={args.grad_accum}, Precision={precision_str}, Steps={start_step}..{args.max_steps}")
     model.train()
     if world_model is not None:

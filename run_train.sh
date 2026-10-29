@@ -71,11 +71,11 @@ elif [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 12000 ] 2>/dev/null; then
     if [ "$GPU_COUNT" -ge 2 ] 2>/dev/null; then
         # Multi-GPU (e.g. Kaggle dual Tesla T4 x 2):
         # 927M param model + DDP NCCL gradient buffers fill ~13 GB per GPU at seq=2048.
-        # seq_len=1024 halves activation memory, eliminating OOM on 15 GB T4 with DDP.
+        # seq_len=2048: NCCL no_sync() fix freed 372MB headroom, allowing full seq_len on 2xT4.
         # Effective batch = 1 micro * 2 GPUs * accum 16 = 32 samples per optimizer step.
         DEFAULT_BATCH=1
         DEFAULT_ACCUM=16
-        DEFAULT_SEQ_LEN=1024
+        DEFAULT_SEQ_LEN=2048
         echo "[HARDWARE] Multi-GPU ($GPU_COUNT x $GPU_NAME) detected. Micro-Batch=$DEFAULT_BATCH/GPU Accum=$DEFAULT_ACCUM SeqLen=$DEFAULT_SEQ_LEN."
     else
         # Single GPU (e.g. Google Colab free Tesla T4):

@@ -85,8 +85,13 @@ from gdrive_sync import (
     resolve_gdrive_backup_dir,
     resolve_gdrive_restore_dir,
     trigger_async_gdrive_sync,
+    trigger_async_cloud_backup,
     wait_for_gdrive_sync,
+    wait_for_cloud_sync,
     upload_promoted_model_to_hf,
+    probe_hf_checkpoint_step,
+    restore_checkpoint_from_hf,
+    resolve_and_auto_select_checkpoint,
 )
 
 # Import Model, Tokenizer and Dataset helpers
@@ -912,14 +917,21 @@ def probe_model_generation(
             for _ in range(max_new_tokens):
                 inp = torch.tensor([generated_ids], dtype=torch.long, device=device)
                 out = model(input_ids=inp)
-                logits = out.logits if hasattr(out, "logits") and out.logits is not None else out[0]
-                next_token_id = int(torch.argmax(logits[0, -1, :], dim=-1).item())
+                logits = out.logits if hasattr(out, "logits") and out.logits is not None else (out[0] if isinstance(out, (tuple, list)) else out)
+                if logits.dim() == 2:
+                    next_token_id = int(torch.argmax(logits[-1, :], dim=-1).item())
+                else:
+                    next_token_id = int(torch.argmax(logits[0, -1, :], dim=-1).item())
                 if eos_id is not None and next_token_id == eos_id:
                     break
                 generated_ids.append(next_token_id)
 
             continuation = tokenizer.decode(generated_ids[len(prompt_ids):])
-            clean_cont = continuation.replace("\n", "\\n").strip()
+            clean_cont = continuation.replace("\n", "\\n")
+            if not clean_cont.strip():
+                clean_cont = repr(continuation) if continuation else f"<tokens: {generated_ids[len(prompt_ids):]}>"
+            else:
+                clean_cont = clean_cont.strip()
             print(f"  [{tag:9s}] \"{prompt}\" -> {CLR_GREEN}{clean_cont}{CLR_RESET}", flush=True)
         except Exception as pe:
             print(f"  [{tag:9s}] Probe warning: {pe}", flush=True)
@@ -1542,13 +1554,18 @@ def main():
         print("[Training Scope] FULL DATASET ROLLING TRAINING ACTIVE. Training continuously across all shards until full dataset is exhausted!", flush=True)
 
     if args.resume:
-        # Check if local checkpoint directory has checkpoints; if NOT, try restoring from Google Drive!
+        # Autonomous Unified Multi-Cloud Checkpoint Discovery & Auto-Selection (GDrive vs HF vs Local)
+        # Audits Local Disk, Google Drive, and Hugging Face repository in parallel.
+        # Whichever source possesses the highest/latest verified step is auto-selected!
+        # If Google Drive is not mounted or not found, Hugging Face is auto-selected seamlessly.
         gdrive_dir = resolve_gdrive_restore_dir() or resolve_gdrive_backup_dir()
-        if gdrive_dir and not (check_model_weights_exist(args.output_dir) or os.path.exists(os.path.join(args.output_dir, "checkpoint_state.json"))):
-            print(f"[GDrive Auto-Recovery] Local checkpoint missing in '{args.output_dir}'. Checking GDrive backup at '{gdrive_dir}'...", flush=True)
-            restored = restore_checkpoint_from_gdrive(gdrive_dir, args.output_dir)
-            if restored:
-                print(f"[GDrive Auto-Recovery] Successfully restored checkpoint from Google Drive into '{args.output_dir}'!", flush=True)
+        chosen_source, chosen_step = resolve_and_auto_select_checkpoint(
+            local_ckpt_dir=args.output_dir,
+            stage_id=args.stage_id,
+            gdrive_base_dir=gdrive_dir,
+            hf_repo_id=model_repo,
+            hf_token=_resolve_hf_token(),
+        )
 
         start_step, start_epoch, best_loss, was_resumed, resumed_cursor = try_resume_from_checkpoint(
             args.output_dir, model, optimizer, scaler,

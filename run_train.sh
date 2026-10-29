@@ -212,47 +212,40 @@ fi
 ACTIVE_CP_DIR="${ACTIVE_CP_DIR:-storage/models/checkpoints}"
 mkdir -p "$ACTIVE_CP_DIR"
 
-# 8. Check Google Drive for Checkpoints to Auto-Restore if local disk is empty
-if [ -n "${GDRIVE_BACKUP_DIR:-}" ] && [ -d "$GDRIVE_BACKUP_DIR" ]; then
-    echo "[GDRIVE AUTO-RESTORE] Checking for existing durable checkpoints in Google Drive..."
-    python3 -c "
-from gdrive_sync import restore_checkpoint_from_gdrive, resolve_gdrive_restore_dir, resolve_gdrive_backup_dir
+# 8. Multi-Cloud Checkpoint Discovery & Auto-Restore (Google Drive vs Hugging Face vs Local)
+echo "[MULTI-CLOUD RESTORE] Auditing Google Drive and Hugging Face for latest durable checkpoints..."
+python3 -c "
+from gdrive_sync import resolve_and_auto_select_checkpoint, resolve_gdrive_restore_dir, resolve_gdrive_backup_dir, check_model_weights_exist
 import os, shutil
 
-gdir = resolve_gdrive_restore_dir() or resolve_gdrive_backup_dir()
 cp_base = '${ACTIVE_CP_DIR}'
 cand_dir = 'storage/models/tara_candidate_v1'
-if gdir and os.path.exists(gdir):
-    def has_valid_model(d):
-        if not os.path.exists(d):
-            return False
-        if os.path.exists(os.path.join(d, 'checkpoint_state.json')) or \
-           os.path.exists(os.path.join(d, 'model.safetensors.index.json')) or \
-           os.path.exists(os.path.join(d, 'model.safetensors')):
-            return True
-        try:
-            return any(f.startswith('model-') and f.endswith('.safetensors') for f in os.listdir(d))
-        except Exception:
-            return False
+dst = os.path.join(cp_base, 'stage0_pretraining')
+gdir = resolve_gdrive_restore_dir() or resolve_gdrive_backup_dir()
+hf_repo = os.environ.get('HF_MODEL_REPO', os.environ.get('HF_REPO', None))
+hf_tok = os.environ.get('HF_TOKEN', None)
 
-    dst = os.path.join(cp_base, 'stage0_pretraining')
-    if not has_valid_model(dst):
-        print(f'[GDRIVE RESTORE] Restoring highest verified candidate model from {gdir} -> {dst}...')
-        restore_checkpoint_from_gdrive(gdir, dst)
+if not check_model_weights_exist(dst):
+    resolve_and_auto_select_checkpoint(
+        local_ckpt_dir=dst,
+        stage_id='stage0_pretraining',
+        gdrive_base_dir=gdir,
+        hf_repo_id=hf_repo,
+        hf_token=hf_tok,
+    )
 
-    os.makedirs(cand_dir, exist_ok=True)
-    if has_valid_model(dst) and not has_valid_model(cand_dir):
-        for f in os.listdir(dst):
-            s = os.path.join(dst, f)
-            d = os.path.join(cand_dir, f)
-            if os.path.isfile(s) and not os.path.exists(d):
-                try:
-                    os.link(s, d)
-                except Exception:
-                    shutil.copy2(s, d)
-        print(f'[GDRIVE RESTORE] Seeded candidate directory {cand_dir} from restored checkpoint.')
+os.makedirs(cand_dir, exist_ok=True)
+if check_model_weights_exist(dst) and not check_model_weights_exist(cand_dir):
+    for f in os.listdir(dst):
+        s = os.path.join(dst, f)
+        d = os.path.join(cand_dir, f)
+        if os.path.isfile(s) and not os.path.exists(d):
+            try:
+                os.link(s, d)
+            except Exception:
+                shutil.copy2(s, d)
+    print(f'[MULTI-CLOUD RESTORE] Seeded candidate directory {cand_dir} from restored checkpoint.')
 " 2>/dev/null || true
-fi
 
 # 8b. Ensure candidate directory has baseline config and tokenizer from model_config if missing
 mkdir -p storage/models/tara_candidate_v1

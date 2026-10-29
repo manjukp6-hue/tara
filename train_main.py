@@ -811,6 +811,126 @@ def verify_pretraining_authorization_proof(model_dir: str, checkpoints_dir: str 
 
 
 # =============================================================================
+# 8c. Non-Blocking Asynchronous Model Deployment & Real-Time Generation Probing
+# =============================================================================
+
+_active_hf_upload_thread: Optional[threading.Thread] = None
+
+
+def trigger_async_hf_upload(promoted_dir: str, repo_id: str, stage_id: str, step: int) -> Optional[threading.Thread]:
+    """
+    Launches Hugging Face model deployment in a non-blocking background daemon thread.
+    Ensures GPU training loop execution continues uninterrupted at 100% throughput.
+    """
+    global _active_hf_upload_thread
+    if not repo_id:
+        return None
+
+    if _active_hf_upload_thread is not None and _active_hf_upload_thread.is_alive():
+        print(f"[{stage_id} | Step {step:04d}] [HF Async Sync] Prior Hugging Face upload thread still running. Waiting briefly...", flush=True)
+        _active_hf_upload_thread.join(timeout=5.0)
+
+    # Isolated snapshot directory prevents race conditions with concurrent training checkpoints
+    parent_dir = os.path.dirname(os.path.abspath(promoted_dir)) or "."
+    step_snapshot_dir = os.path.join(parent_dir, f".hf_upload_step_{step}_{os.getpid()}")
+    try:
+        if os.path.exists(step_snapshot_dir):
+            _safe_rmtree(step_snapshot_dir)
+        shutil.copytree(promoted_dir, step_snapshot_dir)
+    except Exception as copy_err:
+        print(f"[{stage_id} | Step {step:04d}] [HF Async Sync Snapshot Notice] Direct sync fallback: {copy_err}", flush=True)
+        step_snapshot_dir = promoted_dir
+
+    def _worker():
+        try:
+            print(f"[{stage_id} | Step {step:04d}] [HF Async Sync] Background deployment to Hugging Face initiated...", flush=True)
+            success = upload_promoted_model_to_hf(step_snapshot_dir, repo_id, stage_id)
+            if success:
+                print(f"[{stage_id} | Step {step:04d}] [HF Async Sync] Background Hugging Face deployment completed successfully!", flush=True)
+            else:
+                print(f"[{stage_id} | Step {step:04d}] [HF Async Sync] Background upload notice: skipped or unauthenticated.", flush=True)
+        except Exception as e:
+            print(f"[{stage_id} | Step {step:04d} | ERROR] Background HF upload thread failed: {e}", flush=True)
+        finally:
+            if step_snapshot_dir != promoted_dir and os.path.exists(step_snapshot_dir):
+                _safe_rmtree(step_snapshot_dir)
+
+    t = threading.Thread(target=_worker, name=f"HF-Upload-Step-{step}", daemon=True)
+    t.start()
+    _active_hf_upload_thread = t
+    return t
+
+
+def wait_for_hf_upload(timeout: Optional[float] = 120.0) -> bool:
+    """Waits for any active background Hugging Face upload thread to complete before shutdown."""
+    global _active_hf_upload_thread
+    if _active_hf_upload_thread is not None and _active_hf_upload_thread.is_alive():
+        print("[HF Async Sync] Waiting for active background upload thread to finalize...", flush=True)
+        _active_hf_upload_thread.join(timeout=timeout)
+        return not _active_hf_upload_thread.is_alive()
+    return True
+
+
+@torch.no_grad()
+def probe_model_generation(
+    model: nn.Module,
+    tokenizer: TaraNativeTokenizer,
+    device: torch.device,
+    step: int,
+    stage_id: str,
+    max_new_tokens: int = 30,
+) -> None:
+    """
+    Evaluates real-time text synthesis by probing the active model with canonical benchmark prompts.
+    Provides immediate human-observable truth on model learning progression without training disruption.
+    """
+    was_training = model.training
+    model.eval()
+
+    test_probes = [
+        ("Kannada", "ಕರ್ನಾಟಕದ "),
+        ("Reasoning", "The sun rises in the "),
+        ("Code", "def add(a, b):\n    return "),
+    ]
+
+    print(f"\n{CLR_CYAN}{'=' * 80}{CLR_RESET}", flush=True)
+    print(f"  {CLR_BOLD}{CLR_CYAN}TARA LIVE MODEL GENERATION PROBE (Step {step:04d} | {stage_id}){CLR_RESET}", flush=True)
+    print(f"{CLR_CYAN}{'=' * 80}{CLR_RESET}", flush=True)
+
+    eos_id = getattr(tokenizer, "eos_id", None)
+    if eos_id is None and hasattr(tokenizer, "token_to_id"):
+        eos_id = tokenizer.token_to_id.get("<|endoftext|>", tokenizer.token_to_id.get("</s>", None))
+
+    for tag, prompt in test_probes:
+        try:
+            tok_out = tokenizer.encode(prompt)
+            prompt_ids = list(tok_out.ids)
+            if not prompt_ids:
+                continue
+
+            generated_ids = list(prompt_ids)
+            for _ in range(max_new_tokens):
+                inp = torch.tensor([generated_ids], dtype=torch.long, device=device)
+                out = model(input_ids=inp)
+                logits = out.logits if hasattr(out, "logits") and out.logits is not None else out[0]
+                next_token_id = int(torch.argmax(logits[0, -1, :], dim=-1).item())
+                if eos_id is not None and next_token_id == eos_id:
+                    break
+                generated_ids.append(next_token_id)
+
+            continuation = tokenizer.decode(generated_ids[len(prompt_ids):])
+            clean_cont = continuation.replace("\n", "\\n").strip()
+            print(f"  [{tag:9s}] \"{prompt}\" -> {CLR_GREEN}{clean_cont}{CLR_RESET}", flush=True)
+        except Exception as pe:
+            print(f"  [{tag:9s}] Probe warning: {pe}", flush=True)
+
+    print(f"{CLR_CYAN}{'=' * 80}{CLR_RESET}\n", flush=True)
+
+    if was_training:
+        model.train()
+
+
+# =============================================================================
 # 9. Main Autonomous Multi-Stage Training Runner & Optimizer Execution
 # =============================================================================
 
@@ -841,6 +961,10 @@ def main():
     parser.add_argument("--exclude-shards", type=str, default="*shard_099*,*shard_098*", help="Comma-separated patterns of shards strictly excluded from training (held-out validation)")
     parser.add_argument("--max-samples", type=int, default=0, help="Max samples to ingest across shards (0 for unlimited)")
     parser.add_argument("--checkpoint-interval", type=int, default=int(os.environ.get("CHECKPOINT_INTERVAL", 100)), help="Optimizer step interval between checkpoint commits and cloud backups (default: 100)")
+    parser.add_argument("--eval-interval", type=int, default=int(os.environ.get("EVAL_INTERVAL", 100)),
+                        help="Optimizer step interval to probe model generation with live sample prompts (default: 100; 0 to disable)")
+    parser.add_argument("--promote-interval", type=int, default=int(os.environ.get("PROMOTE_INTERVAL", 1000)),
+                        help="Optimizer step interval for periodic model promotion and non-blocking Hugging Face upload (default: 1000; 0 to disable)")
     parser.add_argument("--optimizer", type=str, default="auto", choices=["auto", "adamw", "adamw8bit"], help="Optimizer choice ('adamw8bit' saves 5.5GB VRAM for Tesla T4)")
     parser.add_argument("--resume", action="store_true", default=True, help="Auto-resume from existing checkpoint if available")
     parser.add_argument("--force", action="store_true", default=False, help="Force training continuation even if stage is marked completed")
@@ -981,6 +1105,8 @@ def main():
     steps_label = f"{args.max_steps} (Continuous Full Dataset)" if (args.full_dataset or args.max_steps >= 100_000_000) else str(args.max_steps)
     print(f"  Optimization Steps    : {steps_label}")
     print(f"  Checkpoint Interval   : {args.checkpoint_interval}")
+    print(f"  Eval Probe Interval   : {args.eval_interval if args.eval_interval > 0 else 'Disabled'}")
+    print(f"  Promote Interval      : {args.promote_interval if args.promote_interval > 0 else 'Disabled'}")
     print(f"  Checkpoints Retained  : {args.keep_checkpoints}")
     print(f"  Skip Save Steps       : {args.skip_save_steps}")
     print(f"  Promote Max Step      : {args.promote_max_step if args.promote_max_step > 0 else 'Unbounded (Stage Completion)'}")
@@ -1605,6 +1731,8 @@ def main():
     best_loss_step = start_step
     best_loss_epoch = start_epoch
     best_loss_cursor = resumed_cursor
+    last_eval_step = start_step
+    last_promote_step = start_step
     current_cursor = resumed_cursor
     committed_domain_cursors = copy.deepcopy(resumed_domain_cursors) if resumed_domain_cursors else {}
 
@@ -1966,13 +2094,19 @@ def main():
                     try:
                         promote_checkpoint(src_cand, promoted_target, args.stage_id)
                         if target_model_repo:
-                            upload_promoted_model_to_hf(promoted_target, target_model_repo, args.stage_id)
+                            trigger_async_hf_upload(promoted_target, target_model_repo, args.stage_id, step)
                     except Exception as pe:
                         print(f"[{args.stage_id} | ERROR] Target step model promotion failed: {pe}", flush=True)
 
                 # Periodic Benchmark Matrix Display
                 if step % 25 == 0 or step == start_step + 1 or is_new_best:
                     print_frontier_comparison_matrix_colored(step, cur_step_loss, min(best_loss, cur_step_loss))
+
+                # Live Model Generation Evaluation Probe
+                is_eval_interval = (args.eval_interval > 0 and step % args.eval_interval == 0 and step > last_eval_step)
+                if is_eval_interval:
+                    last_eval_step = step
+                    probe_model_generation(model, tokenizer, device, step, args.stage_id)
 
                 # ------------------------------------------------------------------
                 # REGULAR CHECKPOINT GATE
@@ -2009,6 +2143,38 @@ def main():
                         per_shard_promotion=args.per_shard_promotion,
                         max_shard_mb=args.max_shard_mb,
                     )
+
+                # ------------------------------------------------------------------
+                # PERIODIC MODEL PROMOTION & NON-BLOCKING HF UPLOAD GATE
+                # ------------------------------------------------------------------
+                is_periodic_promote = (args.promote_interval > 0 and step % args.promote_interval == 0 and step > last_promote_step)
+                if is_periodic_promote:
+                    last_promote_step = step
+                    if not should_save_regular and not committed_milestone_this_step:
+                        save_checkpoint(
+                            model, optimizer, scaler, config, tok_path, args.output_dir,
+                            step, epoch, cur_step_loss, best_loss, args.stage_id,
+                            is_best=False, is_completed=False,
+                            dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
+                            keep_n=args.keep_checkpoints, force_keep_exact=True,
+                            world_model=world_model,
+                            world_optimizer=world_optimizer,
+                            world_scaler=world_scaler,
+                            per_shard_promotion=args.per_shard_promotion,
+                            max_shard_mb=args.max_shard_mb,
+                        )
+                    src_cand = best_cp_dir if check_model_weights_exist(best_cp_dir) else args.output_dir
+                    print(f"\n{CLR_GREEN}{'=' * 80}{CLR_RESET}", flush=True)
+                    print(f"[{args.stage_id} | Step {step:04d}] >>> PERIODIC MODEL PROMOTION (Interval: {args.promote_interval}) <<<", flush=True)
+                    print(f"[{args.stage_id}] Promoting verified inference model to: {promoted_target}", flush=True)
+                    print(f"[{args.stage_id}] [TRAINING CONTINUES UNINTERRUPTED ON GPU]", flush=True)
+                    print(f"{CLR_GREEN}{'=' * 80}{CLR_RESET}\n", flush=True)
+                    try:
+                        promote_checkpoint(src_cand, promoted_target, args.stage_id)
+                        if target_model_repo:
+                            trigger_async_hf_upload(promoted_target, target_model_repo, args.stage_id, step)
+                    except Exception as pe:
+                        print(f"[{args.stage_id} | ERROR] Periodic model promotion failed: {pe}", flush=True)
 
                 # Reset step timer after all checkpoint I/O, verification, and promotion
                 # so that checkpoint disk/network serialization is not conflated with GPU step speed
@@ -2173,6 +2339,7 @@ def main():
 
     print(f"[Promotion Complete] Deployment model ready at: {promoted_target}")
     print("[Success] All weights are 100% compatible with native Rust TARA inference & serving!")
+    wait_for_hf_upload(timeout=180.0)
 
 
 if __name__ == "__main__":

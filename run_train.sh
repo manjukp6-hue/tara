@@ -84,6 +84,8 @@ LR="${LR:-3e-4}"
 EPOCHS="${EPOCHS:-1}"
 STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-1000}"
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-100}"
+EVAL_INTERVAL="${EVAL_INTERVAL:-100}"
+PROMOTE_INTERVAL="${PROMOTE_INTERVAL:-1000}"
 GRADIENT_CHECKPOINTING="${GRADIENT_CHECKPOINTING:-1}"
 GRAD_CHECKPOINT_FLAG=""
 if [ "$GRADIENT_CHECKPOINTING" = "1" ]; then
@@ -92,7 +94,7 @@ fi
 DOMAIN_WEIGHTS="${DOMAIN_WEIGHTS:-02_code:0.25,01_math:0.15,04_kannada:0.15,12_reasoning:0.15,03_stem:0.10,08_world_model:0.05,11_tool_use:0.05,13_debugging:0.02,sft:0.02,05_philosophy:0.012,06_social:0.012,07_engineering:0.012,09_audio:0.012,10_vision:0.012}"
 export DOMAIN_WEIGHTS
 
-echo "[DYNAMIC CONFIG] Batch Size: $TRAIN_BATCH_SIZE | Grad Accum: $GRAD_ACCUM | Optimizer: $OPTIMIZER_TYPE | LR: $LR | Grad Checkpointing: $GRADIENT_CHECKPOINTING"
+echo "[DYNAMIC CONFIG] Batch Size: $TRAIN_BATCH_SIZE | Grad Accum: $GRAD_ACCUM | Optimizer: $OPTIMIZER_TYPE | LR: $LR | Grad Checkpointing: $GRADIENT_CHECKPOINTING | Eval Interval: $EVAL_INTERVAL | Promote Interval: $PROMOTE_INTERVAL"
 
 # 3. Mount Google Drive if in Colab & Configure Checkpoint Sync
 if [ -d "/content" ]; then
@@ -279,6 +281,8 @@ if [ "$REQUESTED_STAGE" != "all" ]; then
         --max-seq-len "$TARA_MAX_SEQ_LEN" \
         --max-steps "$STAGE_MAX_STEPS" \
         --checkpoint-interval "$CHECKPOINT_INTERVAL" \
+        --eval-interval "$EVAL_INTERVAL" \
+        --promote-interval "$PROMOTE_INTERVAL" \
         --domain-weights "$DOMAIN_WEIGHTS" \
         $GRAD_CHECKPOINT_FLAG \
         $HF_TOKEN_FLAG \
@@ -327,6 +331,8 @@ for i in "${!STAGES[@]}"; do
         --max-seq-len "$TARA_MAX_SEQ_LEN" \
         --max-steps "$STAGE_MAX_STEPS" \
         --checkpoint-interval "$CHECKPOINT_INTERVAL" \
+        --eval-interval "$EVAL_INTERVAL" \
+        --promote-interval "$PROMOTE_INTERVAL" \
         --domain-weights "$DOMAIN_WEIGHTS" \
         $GRAD_CHECKPOINT_FLAG \
         $HF_TOKEN_FLAG \

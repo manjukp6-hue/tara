@@ -852,60 +852,84 @@ def download_single_shard_jit(
                 )
         return target_path
 
-    token = _resolve_hf_token()
-    remote_path = f"{prefix}/{shard_name}" if (prefix and not shard_name.startswith(f"{prefix}/")) else shard_name
-    print(f"[JIT Downloader] Fetching single shard '{remote_path}' from https://huggingface.co/{repo_id}...", flush=True)
+    # In Multi-Process / Multi-GPU DDP environments, wrap download in an inter-process FileLock.
+    # The first process (Rank 0) performs the download while other processes (Rank 1, etc.) wait.
+    # Once the lock is released, waiting processes find the verified file immediately without re-downloading.
+    lock_file = target_path + ".lock"
+    try:
+        from filelock import FileLock
+        lock_ctx = FileLock(lock_file, timeout=3600)
+    except Exception:
+        import contextlib
+        lock_ctx = contextlib.nullcontext()
 
-    max_retries = 5
-    tmp_path: Optional[str] = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            from huggingface_hub import hf_hub_download
-            dl_path = hf_hub_download(
-                repo_id=repo_id,
-                repo_type="dataset",
-                filename=remote_path,
-                local_dir=local_dir,
-                token=token,
-            )
-            tmp_path = dl_path if dl_path != target_path else None
+    with lock_ctx:
+        # Re-check existence inside lock in case another rank already finished downloading it
+        if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+            if max_shard_bytes > 0:
+                existing_size = os.path.getsize(target_path)
+                if existing_size > max_shard_bytes:
+                    raise RuntimeError(
+                        f"[JIT Downloader] Cached shard '{shard_name}' ({existing_size:,} bytes) exceeds "
+                        f"enforced maximum shard size ({max_shard_bytes:,} bytes). "
+                        f"Remove the oversized file from '{target_path}' and adjust --max-shard-bytes."
+                    )
+            return target_path
 
-            # Enforce maximum shard size BEFORE promoting to the target path.
-            # Only TARA-owned temporary download files are removed on violation;
-            # original dataset files and user files are never deleted.
-            if max_shard_bytes > 0 and os.path.exists(dl_path):
-                dl_size = os.path.getsize(dl_path)
-                if dl_size > max_shard_bytes:
-                    if tmp_path and os.path.exists(tmp_path) and os.path.abspath(tmp_path) != os.path.abspath(target_path):
+        token = _resolve_hf_token()
+        remote_path = f"{prefix}/{shard_name}" if (prefix and not shard_name.startswith(f"{prefix}/")) else shard_name
+        print(f"[JIT Downloader] Fetching single shard '{remote_path}' from https://huggingface.co/{repo_id}...", flush=True)
+
+        max_retries = 5
+        tmp_path: Optional[str] = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                from huggingface_hub import hf_hub_download
+                dl_path = hf_hub_download(
+                    repo_id=repo_id,
+                    repo_type="dataset",
+                    filename=remote_path,
+                    local_dir=local_dir,
+                    token=token,
+                )
+                tmp_path = dl_path if dl_path != target_path else None
+
+                # Enforce maximum shard size BEFORE promoting to the target path.
+                # Only TARA-owned temporary download files are removed on violation;
+                # original dataset files and user files are never deleted.
+                if max_shard_bytes > 0 and os.path.exists(dl_path):
+                    dl_size = os.path.getsize(dl_path)
+                    if dl_size > max_shard_bytes:
+                        if tmp_path and os.path.exists(tmp_path) and os.path.abspath(tmp_path) != os.path.abspath(target_path):
+                            try:
+                                os.remove(tmp_path)
+                            except Exception:
+                                pass
+                        raise RuntimeError(
+                            f"[JIT Downloader] Shard '{shard_name}' ({dl_size:,} bytes) exceeds enforced "
+                            f"maximum shard size ({max_shard_bytes:,} bytes). "
+                            f"Download aborted; incomplete temporary file removed. "
+                            f"Adjust --max-shard-bytes or choose a smaller shard."
+                        )
+
+                if dl_path != target_path and os.path.exists(dl_path):
+                    shutil.move(dl_path, target_path)
+                    sub_dir = os.path.dirname(dl_path)
+                    if sub_dir != local_dir and os.path.exists(sub_dir) and not os.listdir(sub_dir):
                         try:
-                            os.remove(tmp_path)
+                            os.rmdir(sub_dir)
                         except Exception:
                             pass
-                    raise RuntimeError(
-                        f"[JIT Downloader] Shard '{shard_name}' ({dl_size:,} bytes) exceeds enforced "
-                        f"maximum shard size ({max_shard_bytes:,} bytes). "
-                        f"Download aborted; incomplete temporary file removed. "
-                        f"Adjust --max-shard-bytes or choose a smaller shard."
-                    )
+                if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+                    print(f"[JIT Downloader] Shard '{shard_name}' verified ({os.path.getsize(target_path)/(1024*1024):.1f} MB).", flush=True)
+                    return target_path
+            except RuntimeError:
+                raise  # Re-raise size-bound violations without retry
+            except Exception as err:
+                print(f"[JIT Downloader Warning] Attempt {attempt}/{max_retries} failed to download '{shard_name}': {err}", flush=True)
+                time.sleep(attempt * 4)
 
-            if dl_path != target_path and os.path.exists(dl_path):
-                shutil.move(dl_path, target_path)
-                sub_dir = os.path.dirname(dl_path)
-                if sub_dir != local_dir and os.path.exists(sub_dir) and not os.listdir(sub_dir):
-                    try:
-                        os.rmdir(sub_dir)
-                    except Exception:
-                        pass
-            if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
-                print(f"[JIT Downloader] Shard '{shard_name}' verified ({os.path.getsize(target_path)/(1024*1024):.1f} MB).", flush=True)
-                return target_path
-        except RuntimeError:
-            raise  # Re-raise size-bound violations without retry
-        except Exception as err:
-            print(f"[JIT Downloader Warning] Attempt {attempt}/{max_retries} failed to download '{shard_name}': {err}", flush=True)
-            time.sleep(attempt * 4)
-
-    raise RuntimeError(f"[JIT Downloader Fatal] Failed to download {shard_name} after {max_retries} attempts.")
+        raise RuntimeError(f"[JIT Downloader Fatal] Failed to download {shard_name} after {max_retries} attempts.")
 
 
 class ShardLedger:
@@ -2100,6 +2124,9 @@ class TaraStreamingJsonlDataset(IterableDataset):
                     self.managed_downloaded_shards.add(os.path.abspath(actual_fp))
                 else:
                     continue
+
+            if not os.path.exists(actual_fp) or os.path.getsize(actual_fp) == 0:
+                continue
 
             # Reuse SHA computed during ledger verification above; only compute fresh if no SHA was
             # captured (ledger miss, no recorded SHA, or file was just downloaded after the ledger check).

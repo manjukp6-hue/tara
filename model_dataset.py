@@ -543,6 +543,11 @@ class CausalLMOutput(tuple):
     3. A dict-like container with ["loss"], ["logits"], etc.
     """
     def __new__(cls, logits, total_loss=None, ce_loss=None, aux_loss=None):
+        if total_loss is None and ce_loss is None and aux_loss is None and hasattr(logits, "__iter__") and not hasattr(logits, "shape"):
+            items = list(logits)
+            while len(items) < 4:
+                items.append(None)
+            return super().__new__(cls, tuple(items[:4]))
         return super().__new__(cls, (logits, total_loss, ce_loss, aux_loss))
 
     @property

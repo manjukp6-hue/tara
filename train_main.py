@@ -1825,13 +1825,24 @@ def main():
             try:
                 with autocast_ctx:
                     attn_mask = (inputs != 0).long() if (inputs == 0).any() else None
-                    _, loss, ce_loss, aux_loss = model(inputs, labels=labels, attention_mask=attn_mask)
+                    outputs = model(inputs, labels=labels, attention_mask=attn_mask)
+                    if hasattr(outputs, "loss") and outputs.loss is not None:
+                        loss = outputs.loss
+                        ce_loss = getattr(outputs, "ce_loss", loss)
+                        aux_loss = getattr(outputs, "aux_loss", None)
+                    elif isinstance(outputs, (tuple, list)) and len(outputs) >= 2:
+                        loss = outputs[1]
+                        ce_loss = outputs[2] if len(outputs) > 2 else loss
+                        aux_loss = outputs[3] if len(outputs) > 3 else None
+                    else:
+                        loss = outputs
+
                     # DataParallel gathers scalar losses from each GPU into 1D tensors; reduce across devices with mean
-                    if loss is not None and loss.dim() > 0:
+                    if loss is not None and hasattr(loss, "dim") and loss.dim() > 0:
                         loss = loss.mean()
-                    if ce_loss is not None and ce_loss.dim() > 0:
+                    if ce_loss is not None and hasattr(ce_loss, "dim") and ce_loss.dim() > 0:
                         ce_loss = ce_loss.mean()
-                    if aux_loss is not None and aux_loss.dim() > 0:
+                    if aux_loss is not None and hasattr(aux_loss, "dim") and aux_loss.dim() > 0:
                         aux_loss = aux_loss.mean()
                     # Causal LM predicts shifted labels: shift_labels = labels[..., 1:]
                     v_tokens = (labels[..., 1:] != -100).sum().clamp(min=1) if labels.dim() > 1 else (labels != -100).sum().clamp(min=1)
@@ -1866,8 +1877,14 @@ def main():
 
                     with autocast_ctx:
                         w_attn_mask = (w_inputs != 0).long() if (w_inputs == 0).any() else None
-                        _, w_loss, _, _ = world_model(w_inputs, labels=w_labels, attention_mask=w_attn_mask)
-                        if w_loss is not None and w_loss.dim() > 0:
+                        w_outputs = world_model(w_inputs, labels=w_labels, attention_mask=w_attn_mask)
+                        if hasattr(w_outputs, "loss") and w_outputs.loss is not None:
+                            w_loss = w_outputs.loss
+                        elif isinstance(w_outputs, (tuple, list)) and len(w_outputs) >= 2:
+                            w_loss = w_outputs[1]
+                        else:
+                            w_loss = w_outputs
+                        if w_loss is not None and hasattr(w_loss, "dim") and w_loss.dim() > 0:
                             w_loss = w_loss.mean()
                         w_loss_scaled = (w_loss * args.lambda_world) / args.grad_accum
 

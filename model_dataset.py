@@ -3074,7 +3074,8 @@ def load_candidate_weights(model: nn.Module, model_dir: str) -> bool:
         return False
 
     print(f"[Weights] Ingesting {len(safetensors_files)} existing SafeTensors shard(s) from {model_dir}...")
-    model_sd = model.state_dict()
+    target_model = getattr(model, "module", model)
+    model_sd = target_model.state_dict()
     matched = 0
     for sf in safetensors_files:
         shard_tensors = load_file(sf, device="cpu")

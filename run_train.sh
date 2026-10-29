@@ -41,16 +41,19 @@ echo "--------------------------------------------------------------------------
 echo "[HARDWARE] Inspecting Cloud GPU Acceleration..."
 GPU_MEM_MB=0
 GPU_NAME=""
+GPU_COUNT=0
 if command -v nvidia-smi >/dev/null 2>&1; then
     nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader || true
     GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1 || echo "")
     GPU_MEM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -d ' ' || echo "0")
+    GPU_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | wc -l || echo "1")
+    GPU_COUNT=$(echo "$GPU_COUNT" | tr -d ' ')
 else
     echo "[HARDWARE] No GPU detected. Defaulting to Cloud CPU execution."
 fi
 echo "------------------------------------------------------------------------------"
 
-# Dynamic Batch Size & Gradient Accumulation based on physical VRAM
+# Dynamic Batch Size & Gradient Accumulation based on physical VRAM and GPU count
 if [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 35000 ] 2>/dev/null; then
     # A100 / H100 (40GB / 80GB)
     DEFAULT_BATCH=8
@@ -64,9 +67,17 @@ elif [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 20000 ] 2>/dev/null; then
     DEFAULT_OPTIM="adamw"
     DEFAULT_SEQ_LEN=4096
 elif [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 12000 ] 2>/dev/null; then
-    # Tesla T4 / V100 (15GB - 16GB) - Strict VRAM Safeguard: 2048 seq len saves 75% attention VRAM
-    DEFAULT_BATCH=2
-    DEFAULT_ACCUM=16
+    # Tesla T4 / V100 (15GB - 16GB)
+    if [ "$GPU_COUNT" -ge 2 ] 2>/dev/null; then
+        # Multi-GPU (e.g. Kaggle dual T4 x 2)
+        DEFAULT_BATCH=4
+        DEFAULT_ACCUM=8
+        echo "[HARDWARE] Multi-GPU ($GPU_COUNT x $GPU_NAME) detected. Configured Micro-Batch: $DEFAULT_BATCH, Grad Accum: $DEFAULT_ACCUM."
+    else
+        # Single GPU (e.g. Google Colab free T4)
+        DEFAULT_BATCH=2
+        DEFAULT_ACCUM=16
+    fi
     DEFAULT_OPTIM="adamw8bit"
     DEFAULT_SEQ_LEN=2048
 else

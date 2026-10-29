@@ -284,9 +284,11 @@ def save_safetensors_sharded(
 def load_model_weights_dir(target_module: nn.Module, model_dir: str, prefix: str = "model") -> bool:
     """
     Loads weights from directory supporting single safetensors, sharded index + shards, or fallback.
+    Automatically unwraps nn.DataParallel if present.
     """
     if not os.path.isdir(model_dir):
         return False
+    target_module = getattr(target_module, "module", target_module)
     # Check for index file first
     index_file = os.path.join(model_dir, f"{prefix}.safetensors.index.json")
     if os.path.isfile(index_file):
@@ -2082,8 +2084,10 @@ def save_checkpoint(
             )
 
             # 3. Model weights staging (single file or canonical part-wise shards)
+            # Unwrap DataParallel if active to ensure clean parameter keys without 'module.' prefix
+            raw_model = getattr(model, "module", model)
             max_shard_bytes = resolve_max_shard_size_bytes(max_shard_mb)
-            state_dict = {k: v.detach().to("cpu") for k, v in model.state_dict().items()}
+            state_dict = {k: v.detach().to("cpu") for k, v in raw_model.state_dict().items()}
             m_shas: Dict[str, str] = {}
             if HAS_SAFETENSORS:
                 m_files, m_shas, weights_sha256 = save_safetensors_sharded(
@@ -2105,7 +2109,8 @@ def save_checkpoint(
             world_weights_sha256 = None
             wm_shas: Optional[Dict[str, str]] = None
             if world_model is not None:
-                wm_sd = {k: v.detach().to("cpu") for k, v in world_model.state_dict().items()}
+                raw_world_model = getattr(world_model, "module", world_model)
+                wm_sd = {k: v.detach().to("cpu") for k, v in raw_world_model.state_dict().items()}
                 if HAS_SAFETENSORS:
                     wm_files, wm_shas, world_weights_sha256 = save_safetensors_sharded(
                         wm_sd, staging_dir, max_shard_size_bytes=max_shard_bytes, prefix="world_model"

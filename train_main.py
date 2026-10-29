@@ -913,10 +913,11 @@ def probe_model_generation(
             if not prompt_ids:
                 continue
 
+eval_model = getattr(model, "module", model)
             generated_ids = list(prompt_ids)
             for _ in range(max_new_tokens):
                 inp = torch.tensor([generated_ids], dtype=torch.long, device=device)
-                out = model(input_ids=inp)
+                out = eval_model(input_ids=inp)
                 logits = out.logits if hasattr(out, "logits") and out.logits is not None else (out[0] if isinstance(out, (tuple, list)) else out)
                 if logits.dim() == 2:
                     next_token_id = int(torch.argmax(logits[-1, :], dim=-1).item())
@@ -1069,7 +1070,8 @@ def main():
             )
 
     # 3. Hardware Inspection & Precision Selection (BF16 for Ampere+, FP16 for Tesla T4)
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    num_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    device = torch.device("cuda:0" if num_gpus > 0 else "cpu")
     precision_str = "FP32"
     autocast_dtype = torch.float32
     model_dtype = torch.float32  # Model parameters MUST remain FP32 for torch.amp.GradScaler
@@ -1077,7 +1079,7 @@ def main():
     total_vram_gb = 0.0
     major_cap, minor_cap = 0, 0
 
-    if torch.cuda.is_available():
+    if num_gpus > 0:
         gpu_name = torch.cuda.get_device_name(0)
         vram_mb = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024)
         total_vram_gb = vram_mb / 1024.0
@@ -1090,13 +1092,26 @@ def main():
         else:
             autocast_dtype = torch.float16
             precision_str = "FP16 (AMP)"
-        print(f"[Hardware] GPU: {gpu_name} (sm_{major_cap}{minor_cap}) | VRAM: {vram_mb:.1f} MB | Selected Precision: {precision_str} with FP32 Master Parameters")
+        print(f"[Hardware] Primary GPU: {gpu_name} (sm_{major_cap}{minor_cap}) | VRAM: {vram_mb:.1f} MB | Selected Precision: {precision_str} with FP32 Master Parameters")
         if major_cap >= 8:
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
         if total_vram_gb <= 16.5 and not args.gradient_checkpointing:
             args.gradient_checkpointing = True
             print(f"[Hardware Optimization] Memory-constrained GPU ({total_vram_gb:.1f} GiB VRAM) detected: Auto-enabled activation gradient checkpointing to eliminate CUDA OOM.")
+
+        if num_gpus > 1:
+            total_all_gpus_vram_gb = sum(torch.cuda.get_device_properties(i).total_memory / (1024 * 1024 * 1024) for i in range(num_gpus))
+            print(f"[Hardware Multi-GPU] {num_gpus} CUDA GPUs detected! (Combined Aggregate VRAM: {total_all_gpus_vram_gb:.1f} GiB)")
+            for i in range(num_gpus):
+                d_name = torch.cuda.get_device_name(i)
+                d_vram = torch.cuda.get_device_properties(i).total_memory / (1024 * 1024 * 1024)
+                print(f"  -> GPU [{i}]: {d_name} ({d_vram:.2f} GiB VRAM)")
+
+            if args.batch_size < num_gpus:
+                old_bs = args.batch_size
+                args.batch_size = num_gpus
+                print(f"[Hardware Multi-GPU] Auto-adjusted micro-batch size from {old_bs} -> {args.batch_size} so all {num_gpus} GPUs receive data.")
     else:
         print("[Hardware] No GPU detected. Defaulting to CPU (FP32).")
 
@@ -1106,8 +1121,17 @@ def main():
     print("=" * 80)
     print(f"  Stage ID              : {args.stage_id}")
     print(f"  Stage Name            : {args.stage_name}")
-    print(f"  Device Selected       : {device.type.upper()}" + (f" ({gpu_name}, sm_{major_cap}{minor_cap})" if device.type == "cuda" else ""))
-    print(f"  Total GPU VRAM        : {total_vram_gb:.2f} GiB" if device.type == "cuda" else "  Total GPU VRAM        : N/A (CPU)")
+    if num_gpus > 1:
+        dev_label = f"CUDA MULTI-GPU ({num_gpus}x {gpu_name})"
+        vram_label = f"{total_all_gpus_vram_gb:.2f} GiB (Aggregate across {num_gpus} GPUs)"
+    elif num_gpus == 1:
+        dev_label = f"CUDA SINGLE-GPU ({gpu_name}, sm_{major_cap}{minor_cap})"
+        vram_label = f"{total_vram_gb:.2f} GiB"
+    else:
+        dev_label = "CPU"
+        vram_label = "N/A (CPU)"
+    print(f"  Device Selected       : {dev_label}")
+    print(f"  Total GPU VRAM        : {vram_label}")
     print(f"  Effective Precision   : {precision_str} (Model Parameters: FP32)")
     print(f"  Optimizer Selection   : {args.optimizer}")
     print(f"  Micro-Batch Size      : {args.batch_size}")
@@ -1756,6 +1780,15 @@ def main():
     total_samples_trained = int(resumed_cursor.get("total_samples_trained", 0)) if resumed_cursor else 0
     samples_consumed = int(resumed_cursor.get("samples_consumed", total_samples_trained)) if resumed_cursor else 0
 
+    # Multi-GPU DataParallel Auto-Configuration
+    if num_gpus > 1:
+        print(f"[Hardware Multi-GPU] Auto-activating torch.nn.DataParallel across {num_gpus} devices for distributed parallel training.")
+        model = nn.DataParallel(model)
+        if world_model is not None:
+            world_model = nn.DataParallel(world_model)
+    else:
+        print(f"[Hardware Device] Running in single-device mode ({device.type.upper()}).")
+
     print(f"[Training] Launching Training: Epochs={args.epochs}, Batch={args.batch_size}, Accum={args.grad_accum}, Precision={precision_str}, Steps={start_step}..{args.max_steps}")
     model.train()
     if world_model is not None:
@@ -1793,6 +1826,13 @@ def main():
                 with autocast_ctx:
                     attn_mask = (inputs != 0).long() if (inputs == 0).any() else None
                     _, loss, ce_loss, aux_loss = model(inputs, labels=labels, attention_mask=attn_mask)
+                    # DataParallel gathers scalar losses from each GPU into 1D tensors; reduce across devices with mean
+                    if loss is not None and loss.dim() > 0:
+                        loss = loss.mean()
+                    if ce_loss is not None and ce_loss.dim() > 0:
+                        ce_loss = ce_loss.mean()
+                    if aux_loss is not None and aux_loss.dim() > 0:
+                        aux_loss = aux_loss.mean()
                     # Causal LM predicts shifted labels: shift_labels = labels[..., 1:]
                     v_tokens = (labels[..., 1:] != -100).sum().clamp(min=1) if labels.dim() > 1 else (labels != -100).sum().clamp(min=1)
                     effective_tokens = v_tokens.item()
@@ -1827,6 +1867,8 @@ def main():
                     with autocast_ctx:
                         w_attn_mask = (w_inputs != 0).long() if (w_inputs == 0).any() else None
                         _, w_loss, _, _ = world_model(w_inputs, labels=w_labels, attention_mask=w_attn_mask)
+                        if w_loss is not None and w_loss.dim() > 0:
+                            w_loss = w_loss.mean()
                         w_loss_scaled = (w_loss * args.lambda_world) / args.grad_accum
 
                     world_scaler.scale(w_loss_scaled).backward()

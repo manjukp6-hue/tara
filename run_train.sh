@@ -75,7 +75,7 @@ elif [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 12000 ] 2>/dev/null; then
         # Effective batch = 1 micro * 2 GPUs * accum 16 = 32 samples per optimizer step.
         DEFAULT_BATCH=1
         DEFAULT_ACCUM=16
-        DEFAULT_SEQ_LEN=2048
+        DEFAULT_SEQ_LEN=1024
         echo "[HARDWARE] Multi-GPU ($GPU_COUNT x $GPU_NAME) detected. Micro-Batch=$DEFAULT_BATCH/GPU Accum=$DEFAULT_ACCUM SeqLen=$DEFAULT_SEQ_LEN."
     else
         # Single GPU (e.g. Google Colab free Tesla T4):

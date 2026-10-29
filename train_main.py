@@ -1129,6 +1129,12 @@ def main():
             print(f"[Hardware Optimization] Memory-constrained GPU ({total_vram_gb:.1f} GiB VRAM) detected: Auto-enabled activation gradient checkpointing to eliminate CUDA OOM.")
         if is_distributed:
             print(f"[Hardware DDP] Active DistributedDataParallel rank {rank}/{world_size} on device {device}")
+            if total_vram_gb <= 16.5 and args.batch_size > 1:
+                old_bs = args.batch_size
+                args.batch_size = 1
+                if is_main_process:
+                    print(f"[Hardware Multi-GPU DDP Optimization] Memory-constrained GPU ({total_vram_gb:.1f} GiB) detected: "
+                          f"Auto-adjusted per-GPU micro-batch from {old_bs} -> {args.batch_size} (1 per GPU) to guarantee zero CUDA OOM.", flush=True)
     else:
         print("[Hardware] No GPU detected. Defaulting to CPU (FP32).")
 
@@ -1151,9 +1157,10 @@ def main():
     print(f"  Total GPU VRAM        : {vram_label}")
     print(f"  Effective Precision   : {precision_str} (Model Parameters: FP32)")
     print(f"  Optimizer Selection   : {args.optimizer}")
-    print(f"  Micro-Batch Size      : {args.batch_size}")
+    print(f"  Micro-Batch Size      : {args.batch_size} ({'per GPU' if is_distributed else 'single GPU'})")
     print(f"  Gradient Accumulation : {args.grad_accum}")
-    print(f"  Effective Batch Size  : {args.batch_size * args.grad_accum}")
+    eff_batch_size = (world_size if is_distributed else 1) * args.batch_size * args.grad_accum
+    print(f"  Effective Batch Size  : {eff_batch_size}")
     print(f"  Max Sequence Length   : {args.max_seq_len}")
     steps_label = f"{args.max_steps} (Continuous Full Dataset)" if (args.full_dataset or args.max_steps >= 100_000_000) else str(args.max_steps)
     print(f"  Optimization Steps    : {steps_label}")
@@ -2048,7 +2055,7 @@ def main():
                 # Real-Time Telemetry Logging (LIVE on EVERY SINGLE STEP with immediate stdout flush)
                 step_duration = max(time.time() - step_last_time, 1e-4) if 'step_last_time' in locals() else 0.5
                 step_last_time = time.time()
-                step_tokens = args.batch_size * args.grad_accum * args.max_seq_len
+                step_tokens = (world_size if is_distributed else 1) * args.batch_size * args.grad_accum * args.max_seq_len
                 step_speed = step_tokens / step_duration
 
                 ppl = math.exp(min(cur_step_loss, 20.0))

@@ -359,11 +359,26 @@ def execute_optimizer_step(
         if math.isnan(w_grad_norm_val) or math.isinf(w_grad_norm_val):
             is_non_finite_grad = True
 
+    # ── DDP: broadcast skip decision so ALL ranks agree ──────────────────────
+    # If any rank detects shock/NaN, ALL must skip. Otherwise one rank calls
+    # scaler.step() while another skips → NCCL all_reduce deadlock.
+    _should_skip_local = int(is_non_finite_grad or is_shock_detected)
+    try:
+        import torch.distributed as _dist_local
+        if _dist_local.is_available() and _dist_local.is_initialized():
+            _skip_flag = torch.tensor(_should_skip_local, dtype=torch.int32,
+                                      device=next(model.parameters()).device)
+            _dist_local.all_reduce(_skip_flag, op=_dist_local.ReduceOp.MAX)
+            _should_skip_local = _skip_flag.item()
+    except Exception:
+        pass
+    is_global_skip = bool(_should_skip_local)
+
     if (is_non_finite_grad or is_shock_detected) and not scaler.is_enabled():
         is_step_skipped = True
         scale_before = 1.0
         scale_after = 1.0
-    elif is_shock_detected:
+    elif is_global_skip:
         optimizer.zero_grad(set_to_none=True)
         if world_optimizer is not None:
             world_optimizer.zero_grad(set_to_none=True)
@@ -1864,6 +1879,10 @@ def main():
     t0 = time.time()
     step_last_time = time.time()
 
+    # DDP OOM flag: tensor shared across the all_reduce call so all ranks
+    # skip a batch when ANY single rank runs out of memory.
+    _ddp_oom_flag = torch.zeros(1, device=device) if torch.cuda.is_available() else None
+
     for epoch in range(start_epoch, args.epochs):
         optimizer.zero_grad(set_to_none=True)
         if world_optimizer is not None:
@@ -1881,6 +1900,18 @@ def main():
                 autocast_ctx = torch.amp.autocast(device_type="cuda" if device.type == "cuda" else "cpu", enabled=(device.type == "cuda"), dtype=autocast_dtype)
             else:
                 autocast_ctx = torch.cuda.amp.autocast(enabled=(device.type == "cuda"), dtype=autocast_dtype)
+
+            # DDP OOM sync: if any rank hit OOM last iteration, all ranks skip this batch.
+            if is_distributed and _ddp_oom_flag is not None:
+                import torch.distributed as _dist_oom
+                _dist_oom.all_reduce(_ddp_oom_flag, op=_dist_oom.ReduceOp.MAX)
+                if _ddp_oom_flag.item() > 0:
+                    _ddp_oom_flag.zero_()
+                    optimizer.zero_grad(set_to_none=True)
+                    if world_optimizer is not None:
+                        world_optimizer.zero_grad(set_to_none=True)
+                    continue
+                _ddp_oom_flag.zero_()
 
             # DDP gradient accumulation: suppress NCCL All-Reduce on intermediate
             # micro-batches; only sync at the final step of each accumulation window.
@@ -1951,6 +1982,9 @@ def main():
                     accum_world_batches.append(w_cursors)
 
             except torch.cuda.OutOfMemoryError as oom_err:
+                # Signal all DDP ranks to skip this batch (prevents NCCL deadlock)
+                if is_distributed and _ddp_oom_flag is not None:
+                    _ddp_oom_flag.fill_(1.0)
                 alloc_mb = torch.cuda.memory_allocated() / (1024 * 1024) if torch.cuda.is_available() else 0.0
                 res_mb = torch.cuda.memory_reserved() / (1024 * 1024) if torch.cuda.is_available() else 0.0
                 in_shape = tuple(inputs.shape) if ('inputs' in locals() and hasattr(inputs, 'shape')) else 'unknown'
@@ -2235,11 +2269,12 @@ def main():
                 if step % 25 == 0 or step == start_step + 1 or is_new_best:
                     print_frontier_comparison_matrix_colored(step, cur_step_loss, min(best_loss, cur_step_loss))
 
-                # Live Model Generation Evaluation Probe
+                # Live Model Generation Evaluation Probe (main rank only)
                 is_eval_interval = (args.eval_interval > 0 and step % args.eval_interval == 0 and step > last_eval_step)
                 if is_eval_interval:
                     last_eval_step = step
-                    probe_model_generation(model, tokenizer, device, step, args.stage_id)
+                    if is_main_process:
+                        probe_model_generation(model, tokenizer, device, step, args.stage_id)
 
                 # ------------------------------------------------------------------
                 # REGULAR CHECKPOINT GATE
@@ -2392,6 +2427,11 @@ def main():
             accum_world_batches.clear()
             optimizer.zero_grad(set_to_none=True)
 
+        # DDP: synchronise ranks at end of each batch so no rank races ahead
+        if is_distributed:
+            import torch.distributed as _dist_barrier
+            _dist_barrier.barrier()
+
         if step >= args.max_steps:
             break
 
@@ -2401,9 +2441,13 @@ def main():
     print(f"[{args.stage_id} FINISHED] Completed {step} steps in {total_time:.1f}s | Final Loss: {final_loss:.4f} | Best Loss: {best_loss:.4f}")
     print("=" * 78)
 
-    # Final Checkpoint Save with COMPLETED status
+    # Final Checkpoint Save with COMPLETED status (main rank only)
+    if is_distributed:
+        import torch.distributed as _dist_final
+        _dist_final.barrier()
     final_cursor = current_cursor if current_cursor is not None else resumed_cursor
-    save_checkpoint(
+    if is_main_process:
+     save_checkpoint(
         model, optimizer, scaler, config, tok_path, args.output_dir,
         step, epoch, final_loss, best_loss, args.stage_id,
         is_best=False, is_completed=True,

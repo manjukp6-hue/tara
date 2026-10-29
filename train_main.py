@@ -1871,8 +1871,9 @@ def main():
         accum_batches = []
         accum_world_batches = []
         for batch_idx, (inputs, labels, cursors) in enumerate(dataloader):
-            if is_distributed and (batch_idx % world_size != rank):
-                continue
+            # NOTE: DDP requires ALL ranks to process EVERY batch.
+            # The old batch_idx % world_size != rank skip caused NCCL deadlock.
+            # Batch distribution to GPUs is handled by DistributedSampler in the DataLoader.
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
 
@@ -1881,8 +1882,13 @@ def main():
             else:
                 autocast_ctx = torch.cuda.amp.autocast(enabled=(device.type == "cuda"), dtype=autocast_dtype)
 
+            # DDP gradient accumulation: suppress NCCL All-Reduce on intermediate
+            # micro-batches; only sync at the final step of each accumulation window.
+            _is_last_accum = ((batch_idx + 1) % args.grad_accum == 0)
+            _ddp_sync_ctx = contextlib.nullcontext() if (not is_distributed or _is_last_accum) else model.no_sync()
             try:
-                with autocast_ctx:
+                with _ddp_sync_ctx:
+                  with autocast_ctx:
                     attn_mask = (inputs != 0).long() if (inputs == 0).any() else None
                     outputs = model(inputs, labels=labels, attention_mask=attn_mask)
                     if hasattr(outputs, "loss") and outputs.loss is not None:
@@ -1905,7 +1911,9 @@ def main():
                     # Normalization by total valid tokens occurs exactly at optimizer step after unscaling.
                     loss_sum = loss * v_tokens
 
-                scaler.scale(loss_sum).backward()
+                  # backward() inside no_sync() context so NCCL only syncs
+                  # at the last accumulation step (when _ddp_sync_ctx is nullcontext)
+                  scaler.scale(loss_sum).backward()
                 accum_loss += (loss.item() * effective_tokens)
                 accum_ce += ((ce_loss.item() if ce_loss is not None else loss.item()) * effective_tokens)
                 accum_aux += aux_loss.item() if aux_loss is not None else 0.0

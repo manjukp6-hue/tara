@@ -68,18 +68,8 @@ elif [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 20000 ] 2>/dev/null; then
     DEFAULT_SEQ_LEN=4096
 elif [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 12000 ] 2>/dev/null; then
     # Tesla T4 / V100 (15GB - 16GB)
-    if [ "$GPU_COUNT" -ge 2 ] 2>/dev/null; then
-        # Multi-GPU (e.g. Kaggle dual T4 x 2):
-        # DataParallel master overhead on GPU 0 requires 1 sample per GPU (batch 2 total)
-        # with accum 16 to guarantee zero OOM while keeping effective batch size identical (32).
-        DEFAULT_BATCH=2
-        DEFAULT_ACCUM=16
-        echo "[HARDWARE] Multi-GPU ($GPU_COUNT x $GPU_NAME) detected. Configured Micro-Batch: $DEFAULT_BATCH (1 per GPU), Grad Accum: $DEFAULT_ACCUM."
-    else
-        # Single GPU (e.g. Google Colab free T4)
-        DEFAULT_BATCH=2
-        DEFAULT_ACCUM=16
-    fi
+    DEFAULT_BATCH=2
+    DEFAULT_ACCUM=16
     DEFAULT_OPTIM="adamw8bit"
     DEFAULT_SEQ_LEN=2048
 else
@@ -221,6 +211,15 @@ if [ -z "${TARA_ROPE_THETA:-}" ]; then
     done
 fi
 
+# 6b. Configure High-Performance DDP Launcher for Multi-GPU
+if [ "$GPU_COUNT" -ge 2 ] 2>/dev/null; then
+    PY_CMD="torchrun --nproc_per_node=$GPU_COUNT"
+    echo "[LAUNCHER DDP] Multi-GPU ($GPU_COUNT x $GPU_NAME) detected. Using PyTorch DDP launcher: $PY_CMD"
+else
+    PY_CMD="python3"
+    echo "[LAUNCHER] Single GPU / CPU detected. Using standard launcher: $PY_CMD"
+fi
+
 # 7. Checkpoint Directory Setup
 ACTIVE_CP_DIR="${ACTIVE_CP_DIR:-storage/models/checkpoints}"
 mkdir -p "$ACTIVE_CP_DIR"
@@ -276,7 +275,7 @@ START_STAGE_IDX=0
 REQUESTED_STAGE="${1:-all}"
 if [ "$REQUESTED_STAGE" != "all" ]; then
     echo "[START] Executing single requested stage: $REQUESTED_STAGE..."
-    python3 train_main.py \
+    $PY_CMD train_main.py \
         --stage-id "$REQUESTED_STAGE" \
         --output-dir "$ACTIVE_CP_DIR/$REQUESTED_STAGE" \
         --batch-size "$TRAIN_BATCH_SIZE" \
@@ -325,7 +324,7 @@ for i in "${!STAGES[@]}"; do
     echo "  Optimizer       : $OPTIMIZER_TYPE"
     echo "------------------------------------------------------------------------------"
 
-    python3 train_main.py \
+    $PY_CMD train_main.py \
         --stage-id "$STAGE_ID" \
         --model-dir "$STAGE_MODEL_DIR" \
         --output-dir "$STAGE_OUTPUT_DIR" \

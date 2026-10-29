@@ -677,7 +677,7 @@ class TaraForCausalLM(nn.Module):
 
             if total_valid > 0:
                 loss_sum = torch.tensor(0.0, device=flat_hidden.device, dtype=torch.float32)
-                # Chunk size 1024 eliminates kernel launch storm (4x fewer launches) while keeping logits VRAM safely bounded (~300MB)
+                # Chunk size 1024 preserves high throughput while keeping logits VRAM bounded (~300MB)
                 chunk_sz = 1024
                 for chunk_start in range(0, flat_hidden.size(0), chunk_sz):
                     chunk_end = min(chunk_start + chunk_sz, flat_hidden.size(0))
@@ -689,6 +689,7 @@ class TaraForCausalLM(nn.Module):
                     c_logits = self.lm_head(c_h)
                     c_loss = F.cross_entropy(c_logits.float(), c_l, reduction="sum")
                     loss_sum = loss_sum + c_loss
+                    del c_logits, c_h, c_l
                 ce_loss = loss_sum / total_valid.clamp(min=1)
             else:
                 ce_loss = torch.tensor(0.0, device=flat_hidden.device, requires_grad=True)
@@ -771,6 +772,22 @@ def _resolve_hf_token(cli_token: Optional[str] = None) -> Optional[str]:
                         colab_token = userdata.get(secret_key)
                         if colab_token and colab_token.strip():
                             resolved = colab_token.strip()
+                            break
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        # Check Kaggle UserSecretsClient if running in Kaggle
+        if not resolved:
+            try:
+                from kaggle_secrets import UserSecretsClient
+                user_secrets = UserSecretsClient()
+                for secret_key in ("tara_sync", "HF_TOKEN", "hf_token"):
+                    try:
+                        k_token = user_secrets.get_secret(secret_key)
+                        if k_token and k_token.strip():
+                            resolved = k_token.strip()
                             break
                     except Exception:
                         pass

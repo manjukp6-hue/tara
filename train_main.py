@@ -20,6 +20,7 @@ import hashlib
 import json
 import math
 import os
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 import random
 import re
 import shutil
@@ -1019,6 +1020,34 @@ def main():
                         help="Maximum size per SafeTensors shard in MB (default: 480 MB, <= 500 MB canonical)")
     args = parser.parse_args()
 
+    # 0. Distributed Data Parallel (DDP) Initialization & Auto-Detection
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    rank = int(os.environ.get("RANK", "0"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    is_distributed = (world_size > 1) or ("RANK" in os.environ)
+
+    # Auto-relaunch under torchrun if multi-GPU is detected without DDP environment
+    if not is_distributed and torch.cuda.is_available() and torch.cuda.device_count() > 1 and os.environ.get("TARA_NO_AUTO_DDP", "0") != "1":
+        n_gpus = torch.cuda.device_count()
+        print(f"[Hardware Multi-GPU DDP] Detected {n_gpus} CUDA GPUs! Auto-activating high-efficiency PyTorch DDP engine across {n_gpus} processes...", flush=True)
+        import subprocess
+        cmd = [sys.executable, "-m", "torch.distributed.run", f"--nproc_per_node={n_gpus}"] + sys.argv
+        sys.exit(subprocess.call(cmd))
+
+    if is_distributed:
+        if not torch.distributed.is_initialized():
+            torch.distributed.init_process_group(backend="nccl", init_method="env://")
+        torch.cuda.set_device(local_rank)
+        device = torch.device(f"cuda:{local_rank}")
+    else:
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    is_main_process = (rank == 0)
+
+    # Suppress non-critical stdout for worker ranks so terminal output remains single-stream and clean
+    if is_distributed and not is_main_process:
+        sys.stdout = open(os.devnull, "w")
+
     # Pre-resolve and export HF_TOKEN across runtime
     _resolve_hf_token(args.hf_token)
 
@@ -1070,61 +1099,33 @@ def main():
             )
 
     # 3. Hardware Inspection & Precision Selection (BF16 for Ampere+, FP16 for Tesla T4)
-    num_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
-    device = torch.device("cuda:0" if num_gpus > 0 else "cpu")
     precision_str = "FP32"
     autocast_dtype = torch.float32
-    model_dtype = torch.float32  # Model parameters MUST remain FP32 for torch.amp.GradScaler
+    model_dtype = torch.float32  # Model parameters remain FP32 master storage
     gpu_name = "N/A"
     total_vram_gb = 0.0
     major_cap, minor_cap = 0, 0
 
-    if num_gpus > 0:
-        gpu_name = torch.cuda.get_device_name(0)
-        vram_mb = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024)
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(device)
+        vram_mb = torch.cuda.get_device_properties(device).total_memory / (1024 * 1024)
         total_vram_gb = vram_mb / 1024.0
-        major_cap, minor_cap = torch.cuda.get_device_capability(0)
-        # Ampere (sm_80)+ has native hardware BF16 tensor core acceleration.
-        # Turing (T4 / sm_75) only supports FP16/INT8 hardware tensor cores.
+        major_cap, minor_cap = torch.cuda.get_device_capability(device)
         if major_cap >= 8 and torch.cuda.is_bf16_supported():
             autocast_dtype = torch.bfloat16
             precision_str = "BF16 (AMP)"
         else:
             autocast_dtype = torch.float16
             precision_str = "FP16 (AMP)"
-        print(f"[Hardware] Primary GPU: {gpu_name} (sm_{major_cap}{minor_cap}) | VRAM: {vram_mb:.1f} MB | Selected Precision: {precision_str} with FP32 Master Parameters")
+        print(f"[Hardware] GPU [{local_rank}]: {gpu_name} (sm_{major_cap}{minor_cap}) | VRAM: {vram_mb:.1f} MB | Selected Precision: {precision_str} with FP32 Master Parameters")
         if major_cap >= 8:
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
         if total_vram_gb <= 16.5 and not args.gradient_checkpointing:
             args.gradient_checkpointing = True
             print(f"[Hardware Optimization] Memory-constrained GPU ({total_vram_gb:.1f} GiB VRAM) detected: Auto-enabled activation gradient checkpointing to eliminate CUDA OOM.")
-
-        if num_gpus > 1:
-            total_all_gpus_vram_gb = sum(torch.cuda.get_device_properties(i).total_memory / (1024 * 1024 * 1024) for i in range(num_gpus))
-            print(f"[Hardware Multi-GPU] {num_gpus} CUDA GPUs detected! (Combined Aggregate VRAM: {total_all_gpus_vram_gb:.1f} GiB)")
-            for i in range(num_gpus):
-                d_name = torch.cuda.get_device_name(i)
-                d_vram = torch.cuda.get_device_properties(i).total_memory / (1024 * 1024 * 1024)
-                print(f"  -> GPU [{i}]: {d_name} ({d_vram:.2f} GiB VRAM)")
-
-            # In DataParallel, GPU 0 acts as master (holding model, optimizer moments, and gathered buffers).
-            # On memory-constrained GPUs (<= 16.5 GiB, e.g. dual Tesla T4), 1 sample per GPU (batch_size = num_gpus)
-            # is mathematically optimal to guarantee zero OOM while keeping effective batch size identical.
-            if total_vram_gb <= 16.5 and args.batch_size > num_gpus:
-                old_bs = args.batch_size
-                old_accum = args.grad_accum
-                eff_target = old_bs * old_accum
-                args.batch_size = num_gpus
-                args.grad_accum = max(1, eff_target // args.batch_size)
-                print(f"[Hardware Multi-GPU Optimization] Memory-constrained GPU ({total_vram_gb:.1f} GiB) with {num_gpus} GPUs detected:")
-                print(f"  -> Auto-adjusted micro-batch size from {old_bs} -> {args.batch_size} (1 sample per GPU)")
-                print(f"  -> Auto-adjusted grad accumulation from {old_accum} -> {args.grad_accum}")
-                print(f"  -> Effective batch size preserved exactly at {args.batch_size * args.grad_accum} (Zero VRAM OOM Guaranteed).")
-            elif args.batch_size < num_gpus:
-                old_bs = args.batch_size
-                args.batch_size = num_gpus
-                print(f"[Hardware Multi-GPU] Auto-adjusted micro-batch size from {old_bs} -> {args.batch_size} so all {num_gpus} GPUs receive data.")
+        if is_distributed:
+            print(f"[Hardware DDP] Active DistributedDataParallel rank {rank}/{world_size} on device {device}")
     else:
         print("[Hardware] No GPU detected. Defaulting to CPU (FP32).")
 
@@ -1134,10 +1135,10 @@ def main():
     print("=" * 80)
     print(f"  Stage ID              : {args.stage_id}")
     print(f"  Stage Name            : {args.stage_name}")
-    if num_gpus > 1:
-        dev_label = f"CUDA MULTI-GPU ({num_gpus}x {gpu_name})"
-        vram_label = f"{total_all_gpus_vram_gb:.2f} GiB (Aggregate across {num_gpus} GPUs)"
-    elif num_gpus == 1:
+    if is_distributed:
+        dev_label = f"CUDA MULTI-GPU DDP ({world_size}x {gpu_name}, Rank {rank})"
+        vram_label = f"{total_vram_gb:.2f} GiB (per rank across {world_size} ranks)"
+    elif torch.cuda.is_available():
         dev_label = f"CUDA SINGLE-GPU ({gpu_name}, sm_{major_cap}{minor_cap})"
         vram_label = f"{total_vram_gb:.2f} GiB"
     else:
@@ -1793,12 +1794,23 @@ def main():
     total_samples_trained = int(resumed_cursor.get("total_samples_trained", 0)) if resumed_cursor else 0
     samples_consumed = int(resumed_cursor.get("samples_consumed", total_samples_trained)) if resumed_cursor else 0
 
-    # Multi-GPU DataParallel Auto-Configuration
-    if num_gpus > 1:
-        print(f"[Hardware Multi-GPU] Auto-activating torch.nn.DataParallel across {num_gpus} devices for distributed parallel training.")
-        model = nn.DataParallel(model)
+    # Distributed Data Parallel (DDP) Model Auto-Configuration
+    if is_distributed:
+        from torch.nn.parallel import DistributedDataParallel as DDP
+        model = DDP(
+            model,
+            device_ids=[local_rank],
+            output_device=local_rank,
+            find_unused_parameters=False,
+        )
         if world_model is not None:
-            world_model = nn.DataParallel(world_model)
+            world_model = DDP(
+                world_model,
+                device_ids=[local_rank],
+                output_device=local_rank,
+                find_unused_parameters=False,
+            )
+        print(f"[Hardware DDP] Attached DistributedDataParallel on rank {rank} (local_rank {local_rank}) across {world_size} GPUs.")
     else:
         print(f"[Hardware Device] Running in single-device mode ({device.type.upper()}).")
 
@@ -1827,6 +1839,8 @@ def main():
         accum_batches = []
         accum_world_batches = []
         for batch_idx, (inputs, labels, cursors) in enumerate(dataloader):
+            if is_distributed and (batch_idx % world_size != rank):
+                continue
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
 
@@ -1849,14 +1863,6 @@ def main():
                         aux_loss = outputs[3] if len(outputs) > 3 else None
                     else:
                         loss = outputs
-
-                    # DataParallel gathers scalar losses from each GPU into 1D tensors; reduce across devices with mean
-                    if loss is not None and hasattr(loss, "dim") and loss.dim() > 0:
-                        loss = loss.mean()
-                    if ce_loss is not None and hasattr(ce_loss, "dim") and ce_loss.dim() > 0:
-                        ce_loss = ce_loss.mean()
-                    if aux_loss is not None and hasattr(aux_loss, "dim") and aux_loss.dim() > 0:
-                        aux_loss = aux_loss.mean()
                     # Causal LM predicts shifted labels: shift_labels = labels[..., 1:]
                     v_tokens = (labels[..., 1:] != -100).sum().clamp(min=1) if labels.dim() > 1 else (labels != -100).sum().clamp(min=1)
                     effective_tokens = v_tokens.item()
@@ -1897,8 +1903,6 @@ def main():
                             w_loss = w_outputs[1]
                         else:
                             w_loss = w_outputs
-                        if w_loss is not None and hasattr(w_loss, "dim") and w_loss.dim() > 0:
-                            w_loss = w_loss.mean()
                         w_loss_scaled = (w_loss * args.lambda_world) / args.grad_accum
 
                     world_scaler.scale(w_loss_scaled).backward()

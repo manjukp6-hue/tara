@@ -284,7 +284,7 @@ def save_safetensors_sharded(
 def load_model_weights_dir(target_module: nn.Module, model_dir: str, prefix: str = "model") -> bool:
     """
     Loads weights from directory supporting single safetensors, sharded index + shards, or fallback.
-    Automatically unwraps nn.DataParallel if present.
+    Automatically unwraps DDP / module wrapper if present.
     """
     if not os.path.isdir(model_dir):
         return False
@@ -1281,6 +1281,9 @@ def trigger_async_cloud_backup(
     - If both are available, mirrors asynchronously to both Google Drive and Hugging Face.
     - Non-blocking daemon execution: never stalls GPU backpropagation or training iterations.
     """
+    if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
+        return
+
     gdrive_base = resolve_gdrive_backup_dir()
     gdrive_available = bool(gdrive_base and os.path.exists(gdrive_base))
     gdrive_sub = os.path.join(gdrive_base, "best_milestone" if is_best else "normal_checkpoint") if gdrive_available else None
@@ -2041,6 +2044,9 @@ def save_checkpoint(
     Handles regular training checkpoints, completed stage models, and best milestone snapshots
     with atomic verified staging and optimizer preservation.
     """
+    if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
+        return True
+
     tag = "BEST MILESTONE" if is_best else ("COMPLETED" if is_completed else f"STEP {step}")
     print(f"[Checkpoint] Snapshotting [{tag}] checkpoint at Step {step}... {get_memory_status_str()}", flush=True)
 
@@ -2084,7 +2090,7 @@ def save_checkpoint(
             )
 
             # 3. Model weights staging (single file or canonical part-wise shards)
-            # Unwrap DataParallel if active to ensure clean parameter keys without 'module.' prefix
+            # Unwrap DDP / module wrapper if active to ensure clean parameter keys without 'module.' prefix
             raw_model = getattr(model, "module", model)
             max_shard_bytes = resolve_max_shard_size_bytes(max_shard_mb)
             state_dict = {k: v.detach().to("cpu") for k, v in raw_model.state_dict().items()}
@@ -2620,6 +2626,15 @@ def _resolve_hf_token_standalone(provided_token: Optional[str] = None) -> Option
         for key in ("HF_TOKEN", "hf_token", "tara_sync", "HF_API_KEY"):
             try:
                 val = userdata.get(key)
+                if val: candidates.append(val)
+            except Exception: pass
+    except Exception: pass
+    try:
+        from kaggle_secrets import UserSecretsClient
+        user_secrets = UserSecretsClient()
+        for key in ("HF_TOKEN", "hf_token", "tara_sync", "HF_API_KEY"):
+            try:
+                val = user_secrets.get_secret(key)
                 if val: candidates.append(val)
             except Exception: pass
     except Exception: pass
@@ -3787,10 +3802,30 @@ def try_resume_from_checkpoint(
         try:
             opt_data = torch.load(opt_file, map_location="cpu")
             if optimizer and "optimizer" in opt_data:
-                optimizer.load_state_dict(opt_data["optimizer"])
+                is_8bit_opt = ("8bit" in optimizer.__class__.__name__.lower() or hasattr(optimizer, "is_paged"))
+                raw_opt_state = opt_data["optimizer"]
+                
+                # Check for FP32 vs 8-bit compatibility:
+                # If resuming an FP32 checkpoint into an 8-bit optimizer, strip legacy uncompressed exp_avg/exp_avg_sq
+                # tensors to prevent dumping 7.1 GB of useless zombie FP32 tensors into GPU 0 VRAM!
+                if is_8bit_opt and "state" in raw_opt_state:
+                    has_legacy_fp32 = False
+                    for p_state in raw_opt_state["state"].values():
+                        if "exp_avg" in p_state or "exp_avg_sq" in p_state:
+                            has_legacy_fp32 = True
+                            p_state.pop("exp_avg", None)
+                            p_state.pop("exp_avg_sq", None)
+                    if has_legacy_fp32:
+                        print("[Resume VRAM Protection] Detected legacy FP32 optimizer tensors in checkpoint. "
+                              "Safely purged uncompressed moments to reclaim ~5.5-7.1 GB GPU VRAM for 8-bit optimizer.", flush=True)
+
+                optimizer.load_state_dict(raw_opt_state)
                 # Move optimizer state tensors to model parameter device to prevent device mismatch errors
                 target_device = next(model.parameters()).device if hasattr(model, "parameters") else "cpu"
                 for state in optimizer.state.values():
+                    if is_8bit_opt:
+                        state.pop("exp_avg", None)
+                        state.pop("exp_avg_sq", None)
                     for sk, sv in state.items():
                         if isinstance(sv, torch.Tensor):
                             state[sk] = sv.to(target_device)
@@ -3799,7 +3834,16 @@ def try_resume_from_checkpoint(
             if "torch_rng" in opt_data and opt_data["torch_rng"] is not None:
                 torch.set_rng_state(opt_data["torch_rng"])
             if "cuda_rng" in opt_data and torch.cuda.is_available() and opt_data["cuda_rng"] is not None:
-                torch.cuda.set_rng_state_all(opt_data["cuda_rng"])
+                try:
+                    c_rng = opt_data["cuda_rng"]
+                    dev_cnt = torch.cuda.device_count()
+                    if isinstance(c_rng, (list, tuple)):
+                        for d_idx in range(min(len(c_rng), dev_cnt)):
+                            torch.cuda.set_rng_state(c_rng[d_idx], d_idx)
+                    else:
+                        torch.cuda.set_rng_state(c_rng, 0)
+                except Exception as rng_err:
+                    print(f"[Resume Notice] Non-fatal CUDA RNG state notice across GPU topology: {rng_err}", flush=True)
             if "py_rng" in opt_data and opt_data["py_rng"] is not None:
                 random.setstate(opt_data["py_rng"])
 

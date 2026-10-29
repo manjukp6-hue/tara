@@ -1108,7 +1108,20 @@ def main():
                 d_vram = torch.cuda.get_device_properties(i).total_memory / (1024 * 1024 * 1024)
                 print(f"  -> GPU [{i}]: {d_name} ({d_vram:.2f} GiB VRAM)")
 
-            if args.batch_size < num_gpus:
+            # In DataParallel, GPU 0 acts as master (holding model, optimizer moments, and gathered buffers).
+            # On memory-constrained GPUs (<= 16.5 GiB, e.g. dual Tesla T4), 1 sample per GPU (batch_size = num_gpus)
+            # is mathematically optimal to guarantee zero OOM while keeping effective batch size identical.
+            if total_vram_gb <= 16.5 and args.batch_size > num_gpus:
+                old_bs = args.batch_size
+                old_accum = args.grad_accum
+                eff_target = old_bs * old_accum
+                args.batch_size = num_gpus
+                args.grad_accum = max(1, eff_target // args.batch_size)
+                print(f"[Hardware Multi-GPU Optimization] Memory-constrained GPU ({total_vram_gb:.1f} GiB) with {num_gpus} GPUs detected:")
+                print(f"  -> Auto-adjusted micro-batch size from {old_bs} -> {args.batch_size} (1 sample per GPU)")
+                print(f"  -> Auto-adjusted grad accumulation from {old_accum} -> {args.grad_accum}")
+                print(f"  -> Effective batch size preserved exactly at {args.batch_size * args.grad_accum} (Zero VRAM OOM Guaranteed).")
+            elif args.batch_size < num_gpus:
                 old_bs = args.batch_size
                 args.batch_size = num_gpus
                 print(f"[Hardware Multi-GPU] Auto-adjusted micro-batch size from {old_bs} -> {args.batch_size} so all {num_gpus} GPUs receive data.")

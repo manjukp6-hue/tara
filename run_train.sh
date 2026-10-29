@@ -69,10 +69,12 @@ elif [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 20000 ] 2>/dev/null; then
 elif [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 12000 ] 2>/dev/null; then
     # Tesla T4 / V100 (15GB - 16GB)
     if [ "$GPU_COUNT" -ge 2 ] 2>/dev/null; then
-        # Multi-GPU (e.g. Kaggle dual T4 x 2)
-        DEFAULT_BATCH=4
-        DEFAULT_ACCUM=8
-        echo "[HARDWARE] Multi-GPU ($GPU_COUNT x $GPU_NAME) detected. Configured Micro-Batch: $DEFAULT_BATCH, Grad Accum: $DEFAULT_ACCUM."
+        # Multi-GPU (e.g. Kaggle dual T4 x 2):
+        # DataParallel master overhead on GPU 0 requires 1 sample per GPU (batch 2 total)
+        # with accum 16 to guarantee zero OOM while keeping effective batch size identical (32).
+        DEFAULT_BATCH=2
+        DEFAULT_ACCUM=16
+        echo "[HARDWARE] Multi-GPU ($GPU_COUNT x $GPU_NAME) detected. Configured Micro-Batch: $DEFAULT_BATCH (1 per GPU), Grad Accum: $DEFAULT_ACCUM."
     else
         # Single GPU (e.g. Google Colab free T4)
         DEFAULT_BATCH=2

@@ -1916,13 +1916,10 @@ def main():
                     continue
                 _ddp_oom_flag.zero_()
 
-            # DDP gradient accumulation: suppress NCCL All-Reduce on intermediate
-            # micro-batches; only sync at the final step of each accumulation window.
-            _is_last_accum = ((batch_idx + 1) % args.grad_accum == 0)
-            _ddp_sync_ctx = contextlib.nullcontext() if (not is_distributed or _is_last_accum) else model.no_sync()
+            # DDP syncs each backward via 10 MB buckets (no no_sync).
+            # NCCL workspace per bucket ~20 MB vs 392 MB for full model.
             try:
-                with _ddp_sync_ctx:
-                  with autocast_ctx:
+                with autocast_ctx:
                     attn_mask = (inputs != 0).long() if (inputs == 0).any() else None
                     outputs = model(inputs, labels=labels, attention_mask=attn_mask)
                     if hasattr(outputs, "loss") and outputs.loss is not None:
@@ -1945,9 +1942,7 @@ def main():
                     # Normalization by total valid tokens occurs exactly at optimizer step after unscaling.
                     loss_sum = loss * v_tokens
 
-                  # backward() inside no_sync() context so NCCL only syncs
-                  # at the last accumulation step (when _ddp_sync_ctx is nullcontext)
-                  scaler.scale(loss_sum).backward()
+                scaler.scale(loss_sum).backward()
                 accum_loss += (loss.item() * effective_tokens)
                 accum_ce += ((ce_loss.item() if ce_loss is not None else loss.item()) * effective_tokens)
                 accum_aux += aux_loss.item() if aux_loss is not None else 0.0

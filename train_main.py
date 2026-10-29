@@ -1832,6 +1832,7 @@ def main():
             output_device=local_rank,
             find_unused_parameters=False,
             gradient_as_bucket_view=True,
+            bucket_cap_mb=10,
         )
         if world_model is not None:
             world_model = DDP(
@@ -1840,6 +1841,7 @@ def main():
                 output_device=local_rank,
                 find_unused_parameters=False,
                 gradient_as_bucket_view=True,
+                bucket_cap_mb=10,
             )
         print(f"[Hardware DDP] Attached DistributedDataParallel on rank {rank} (local_rank {local_rank}) across {world_size} GPUs.")
     else:

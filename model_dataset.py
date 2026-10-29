@@ -678,7 +678,7 @@ class TaraForCausalLM(nn.Module):
             if total_valid > 0:
                 loss_sum = torch.tensor(0.0, device=flat_hidden.device, dtype=torch.float32)
                 # Chunk size 1024 preserves high throughput while keeping logits VRAM bounded (~300MB)
-                chunk_sz = 1024
+                chunk_sz = 256
                 for chunk_start in range(0, flat_hidden.size(0), chunk_sz):
                     chunk_end = min(chunk_start + chunk_sz, flat_hidden.size(0))
                     c_mask = valid_mask[chunk_start:chunk_end]

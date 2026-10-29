@@ -70,19 +70,20 @@ elif [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 12000 ] 2>/dev/null; then
     # Tesla T4 / V100 (15GB - 16GB)
     if [ "$GPU_COUNT" -ge 2 ] 2>/dev/null; then
         # Multi-GPU (e.g. Kaggle dual Tesla T4 x 2):
-        # Per-GPU micro-batch: 1 per GPU * 2 GPUs * accum 16 = exactly 32 effective batch size.
-        # Micro-batch 1 uses ~9.5 GB VRAM per GPU, leaving 5+ GB free headroom (Zero OOM Guaranteed).
+        # 927M param model + DDP NCCL gradient buffers fill ~13 GB per GPU at seq=2048.
+        # seq_len=1024 halves activation memory, eliminating OOM on 15 GB T4 with DDP.
+        # Effective batch = 1 micro * 2 GPUs * accum 16 = 32 samples per optimizer step.
         DEFAULT_BATCH=1
         DEFAULT_ACCUM=16
-        echo "[HARDWARE] Multi-GPU ($GPU_COUNT x $GPU_NAME) detected. Configured Micro-Batch: $DEFAULT_BATCH (1 per GPU), Grad Accum: $DEFAULT_ACCUM."
+        DEFAULT_SEQ_LEN=1024
+        echo "[HARDWARE] Multi-GPU ($GPU_COUNT x $GPU_NAME) detected. Micro-Batch=$DEFAULT_BATCH/GPU Accum=$DEFAULT_ACCUM SeqLen=$DEFAULT_SEQ_LEN."
     else
         # Single GPU (e.g. Google Colab free Tesla T4):
-        # 1 GPU * batch 2 * accum 16 = 32 effective batch size.
         DEFAULT_BATCH=2
         DEFAULT_ACCUM=16
+        DEFAULT_SEQ_LEN=2048
     fi
     DEFAULT_OPTIM="adamw8bit"
-    DEFAULT_SEQ_LEN=2048
 else
     # CPU / Low-spec
     DEFAULT_BATCH=1

@@ -891,6 +891,7 @@ def probe_model_generation(
     """
     was_training = model.training
     model.eval()
+    eval_model = getattr(model, "module", model)
 
     test_probes = [
         ("Kannada", "ಕರ್ನಾಟಕದ "),
@@ -913,7 +914,6 @@ def probe_model_generation(
             if not prompt_ids:
                 continue
 
-eval_model = getattr(model, "module", model)
             generated_ids = list(prompt_ids)
             for _ in range(max_new_tokens):
                 inp = torch.tensor([generated_ids], dtype=torch.long, device=device)

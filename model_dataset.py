@@ -962,6 +962,7 @@ class ShardLedger:
         self.committed_optimizer_step: int = 0
         self.checkpoint_identity: str = ""
         self.domain_cursors: Dict[str, Dict[str, Any]] = {}
+        self.domain_cycles: Dict[str, int] = {}
         self.active_domain_idx: int = 0
         self.load()
 
@@ -997,6 +998,7 @@ class ShardLedger:
             self.committed_optimizer_step = loaded_data.get("committed_optimizer_step", 0)
             self.checkpoint_identity = loaded_data.get("checkpoint_identity", "")
             self.domain_cursors = loaded_data.get("domain_cursors", {})
+            self.domain_cycles = loaded_data.get("domain_cycles", {})
             self.active_domain_idx = loaded_data.get("active_domain_idx", 0)
 
     def save(self):
@@ -1018,6 +1020,7 @@ class ShardLedger:
             "committed_optimizer_step": self.committed_optimizer_step,
             "checkpoint_identity": self.checkpoint_identity,
             "domain_cursors": self.domain_cursors,
+            "domain_cycles": self.domain_cycles,
             "active_domain_idx": self.active_domain_idx,
             "last_updated_utc": datetime.now(timezone.utc).isoformat(),
         }
@@ -1119,6 +1122,8 @@ class ShardLedger:
 
         if cursor.get("domain_cursors"):
             self.domain_cursors = copy.deepcopy(cursor.get("domain_cursors", {}))
+        if cursor.get("domain_cycles"):
+            self.domain_cycles = copy.deepcopy(cursor.get("domain_cycles", {}))
         if "active_domain_idx" in cursor:
             self.active_domain_idx = cursor.get("active_domain_idx", 0)
 
@@ -1151,6 +1156,12 @@ class ShardLedger:
         self.domain_cursors[domain]["chunk_idx"] = chunk_idx
         if total_lines > 0:
             self.domain_cursors[domain]["total_lines"] = total_lines
+
+    def update_domain_cycle(self, domain: str, cycle: int):
+        if not domain:
+            return
+        self.domain_cycles[domain] = cycle
+        self.save()
 
     def update_active_cursor(
         self,
@@ -1586,12 +1597,14 @@ class TaraStreamingJsonlDataset(IterableDataset):
         buffer_size: int = 1,
         max_shard_bytes: int = 0,
         dataset_snapshot: Optional["DatasetSnapshot"] = None,
+        seed: Optional[int] = None,
     ):
         self.file_paths = list(file_paths)
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
         self.max_samples = max_samples
         self.shuffle_shards = shuffle_shards
+        self.seed = seed
         self.resume_shard = resume_shard
         self.resume_line_offset = resume_line_offset
         self.resume_byte_offset = resume_byte_offset
@@ -2006,7 +2019,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
     def __iter__(self):
         fps = list(self.file_paths)
         if self.shuffle_shards:
-            r = random.Random(42)
+            r = random.Random(self.seed if self.seed is not None else 42)
             r.shuffle(fps)
 
         emitted = 0
@@ -2210,7 +2223,8 @@ class TaraStreamingJsonlDataset(IterableDataset):
                             else:
                                 buffer.append(item)
                                 if len(buffer) >= buffer_size:
-                                    idx = random.randrange(len(buffer))
+                                    r_buf = random.Random(self.seed) if self.seed is not None else random
+                                    idx = r_buf.randrange(len(buffer))
                                     yield buffer.pop(idx)
                                     emitted += 1
                                     if 0 < self.max_samples <= emitted:
@@ -2221,7 +2235,8 @@ class TaraStreamingJsonlDataset(IterableDataset):
 
                 # Drain remaining buffer for this shard before signalling EOF
                 while buffer:
-                    idx = random.randrange(len(buffer)) if buffer_size > 1 else 0
+                    r_buf = random.Random(self.seed) if self.seed is not None else random
+                    idx = r_buf.randrange(len(buffer)) if buffer_size > 1 else 0
                     yield buffer.pop(idx)
                     emitted += 1
                     if 0 < self.max_samples <= emitted:
@@ -2904,6 +2919,16 @@ class TaraMultiDomainScheduler(IterableDataset):
                     except (ValueError, TypeError) as err:
                         raise ValueError(f"Corrupted deficit value for domain '{d}' in checkpoint: {err}") from err
         self.domain_cursors: Dict[str, Dict[str, Any]] = copy.deepcopy(domain_cursors) if domain_cursors else {}
+        self.max_domain_cycles: int = int(kwargs.get("max_domain_cycles", 3))
+        self.domain_cycles: Dict[str, int] = {d: 0 for d in self.active_domains}
+        if "domain_cycles" in kwargs and kwargs["domain_cycles"] and isinstance(kwargs["domain_cycles"], dict):
+            for d, c in kwargs["domain_cycles"].items():
+                if d in self.domain_cycles:
+                    self.domain_cycles[d] = int(c)
+        elif self.shard_ledger and hasattr(self.shard_ledger, "domain_cycles") and self.shard_ledger.domain_cycles:
+            for d, c in self.shard_ledger.domain_cycles.items():
+                if d in self.domain_cycles:
+                    self.domain_cycles[d] = int(c)
         self.active_domain_idx: int = 0
 
         self.current_active_shard: Optional[str] = None
@@ -2961,6 +2986,7 @@ class TaraMultiDomainScheduler(IterableDataset):
     def get_state(self) -> Dict[str, Any]:
         return {
             "domain_cursors": copy.deepcopy(self.domain_cursors),
+            "domain_cycles": copy.deepcopy(self.domain_cycles),
             "active_domain_idx": self.active_domain_idx,
             "scheduler_deficits": copy.deepcopy(self.deficits),
         }
@@ -2968,6 +2994,10 @@ class TaraMultiDomainScheduler(IterableDataset):
     def load_state(self, state: Dict[str, Any]):
         if not state:
             return
+        if "domain_cycles" in state and isinstance(state["domain_cycles"], dict):
+            for d, c in state["domain_cycles"].items():
+                if d in self.domain_cycles:
+                    self.domain_cycles[d] = int(c)
         if "domain_cursors" in state:
             self.domain_cursors = copy.deepcopy(state["domain_cursors"])
             for d, cur in self.domain_cursors.items():
@@ -3048,8 +3078,47 @@ class TaraMultiDomainScheduler(IterableDataset):
                     return
 
             except StopIteration:
-                if best_d in active_candidates:
-                    active_candidates.remove(best_d)
+                cur_cycle = self.domain_cycles.get(best_d, 0)
+                if cur_cycle + 1 < self.max_domain_cycles:
+                    self.domain_cycles[best_d] = cur_cycle + 1
+                    next_cycle = self.domain_cycles[best_d]
+                    if self.shard_ledger:
+                        self.shard_ledger.update_domain_cycle(best_d, next_cycle)
+                    cycle_seed = 42 + next_cycle * 1000 + (abs(hash(best_d)) % 1000)
+                    print(
+                        f"[Balanced Domain Cycling] Domain '{best_d}' completed Cycle {cur_cycle + 1}/{self.max_domain_cycles}. "
+                        f"Re-cycling with randomized shuffle (seed={cycle_seed}) to preserve retention without overfitting.",
+                        flush=True,
+                    )
+                    self.domain_datasets[best_d] = TaraStreamingJsonlDataset(
+                        file_paths=self.domain_shards[best_d],
+                        tokenizer=self.tokenizer,
+                        max_seq_len=self.max_seq_len,
+                        max_samples=self.max_samples,
+                        shuffle_shards=True,
+                        seed=cycle_seed,
+                        resume_shard=None,
+                        resume_line_offset=-1,
+                        resume_byte_offset=0,
+                        resume_chunk_idx=0,
+                        shard_ledger=None,
+                        keep_shards=self.keep_shards,
+                        dataset_dir=self.dataset_dir,
+                        repo_id=self.repo_id,
+                        prefix=self.prefix,
+                        buffer_size=max(self.buffer_size, 32),
+                        max_shard_bytes=self.max_shard_bytes,
+                        dataset_snapshot=self.dataset_snapshot,
+                    )
+                    domain_iters[best_d] = iter(self.domain_datasets[best_d])
+                else:
+                    if best_d in active_candidates:
+                        active_candidates.remove(best_d)
+                        print(
+                            f"[Balanced Domain Cycling] Domain '{best_d}' reached max cycle cap ({self.max_domain_cycles} cycles). "
+                            f"Safely retired from active sampling to eliminate overfitting.",
+                            flush=True,
+                        )
 
 
 def collate_fn(batch):

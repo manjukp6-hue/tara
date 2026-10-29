@@ -2180,8 +2180,18 @@ def save_checkpoint(
             elif hasattr(dataset, "deficits"):
                 scheduler_deficits = getattr(dataset, "deficits", None)
 
+            domain_cycles = None
+            if data_cursor and data_cursor.get("domain_cycles"):
+                domain_cycles = data_cursor["domain_cycles"]
+            elif hasattr(dataset, "get_state"):
+                domain_cycles = dataset.get_state().get("domain_cycles")
+            elif shard_ledger and hasattr(shard_ledger, "domain_cycles"):
+                domain_cycles = shard_ledger.domain_cycles
+
             if domain_cursors:
                 data_cursor["domain_cursors"] = domain_cursors
+            if domain_cycles:
+                data_cursor["domain_cycles"] = domain_cycles
             if scheduler_deficits:
                 data_cursor["scheduler_deficits"] = scheduler_deficits
 
@@ -2203,6 +2213,7 @@ def save_checkpoint(
                 "written_by_runtime": "python",
                 "data_cursor": data_cursor,
                 "domain_cursors": domain_cursors or {},
+                "domain_cycles": domain_cycles or {},
                 "scheduler_deficits": scheduler_deficits or {},
                 "active_shard": active_shard,
                 "active_shard_offset": active_offset,
@@ -3406,6 +3417,7 @@ def extract_data_cursor_from_state(s_data: dict) -> dict:
             "samples_consumed": s_data.get("samples_consumed", s_data.get("total_completed_records", 0)),
             "completed_shards": s_data.get("completed_shards", []),
             "domain_cursors": s_data.get("domain_cursors", {}),
+            "domain_cycles": s_data.get("domain_cycles", {}),
             "scheduler_deficits": s_data.get("scheduler_deficits", {}),
         }
     else:
@@ -3420,6 +3432,8 @@ def extract_data_cursor_from_state(s_data: dict) -> dict:
             cursor["samples_consumed"] = s_data.get("samples_consumed", cursor["total_samples_trained"])
         if "domain_cursors" not in cursor and "domain_cursors" in s_data:
             cursor["domain_cursors"] = s_data["domain_cursors"]
+        if "domain_cycles" not in cursor and "domain_cycles" in s_data:
+            cursor["domain_cycles"] = s_data["domain_cycles"]
         if "scheduler_deficits" not in cursor and "scheduler_deficits" in s_data:
             cursor["scheduler_deficits"] = s_data["scheduler_deficits"]
     return cursor

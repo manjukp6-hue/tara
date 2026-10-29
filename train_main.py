@@ -430,6 +430,7 @@ def extract_accumulated_data_cursor(
         "samples_consumed": samples_consumed,
         "completed_shards": list(shard_ledger.completed_shards) if shard_ledger else [],
         "domain_cursors": copy.deepcopy(committed_domain_cursors),
+        "domain_cycles": copy.deepcopy(getattr(dataset, "domain_cycles", {})),
         "scheduler_deficits": copy.deepcopy(getattr(dataset, "deficits", {})),
     }
 
@@ -1004,6 +1005,8 @@ def main():
                         help="Target step ceiling for model promotion (e.g. 500). Promotes the best checkpoint achieved within steps <= PROMOTE_MAX_STEP for real-time deployment while training continues uninterrupted. 0 means unbounded/entire stage.")
     parser.add_argument("--domain-weights", type=str, default=os.environ.get("DOMAIN_WEIGHTS", ""),
                         help="Custom comma-separated domain weights (e.g. '01_mathematics_formal_logic=0.15,12_planning_reasoning_traces=0.20')")
+    parser.add_argument("--max-domain-cycles", type=int, default=int(os.environ.get("MAX_DOMAIN_CYCLES", 3)),
+                        help="Maximum training cycles (epochs) per domain before retirement to prevent catastrophic forgetting while avoiding overfitting (default: 3)")
     parser.add_argument("--joint-world-model", action="store_true", default=False,
                         help="Enable coordinated joint training of Neural Model + World Model")
     parser.add_argument("--world-model-dir", type=str, default="storage/models/tara_world_model",
@@ -1722,6 +1725,7 @@ def main():
     print(f"[Multi-Domain DRR Weights] Normalized domain weights: {domain_weights_map}", flush=True)
 
     resumed_domain_cursors = resumed_cursor.get("domain_cursors", {}) if resumed_cursor else (shard_ledger.domain_cursors if shard_ledger else {})
+    resumed_domain_cycles = resumed_cursor.get("domain_cycles", {}) if resumed_cursor else (getattr(shard_ledger, "domain_cycles", {}) if shard_ledger else {})
 
     is_pretraining = "stage0" in args.stage_id.lower() or "pretrain" in args.stage_id.lower()
     effective_mask_prompt = args.mask_prompt if not is_pretraining else False
@@ -1742,6 +1746,8 @@ def main():
             max_shard_bytes=args.max_shard_bytes,
             dataset_snapshot=dataset_snapshot,
             domain_cursors=resumed_domain_cursors,
+            domain_cycles=resumed_domain_cycles,
+            max_domain_cycles=args.max_domain_cycles,
             scheduler_deficits=resumed_cursor.get("scheduler_deficits") if resumed_cursor else None,
             mask_prompt=effective_mask_prompt,
         )

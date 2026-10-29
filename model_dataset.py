@@ -885,13 +885,22 @@ def download_single_shard_jit(
         for attempt in range(1, max_retries + 1):
             try:
                 from huggingface_hub import hf_hub_download
-                dl_path = hf_hub_download(
-                    repo_id=repo_id,
-                    repo_type="dataset",
-                    filename=remote_path,
-                    local_dir=local_dir,
-                    token=token,
-                )
+                # Suppress HF tqdm bars -- they flood stdout with hundreds of lines for tiny shards
+                _prev_hf_prog = os.environ.get("HF_HUB_DISABLE_PROGRESS_BARS")
+                os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+                try:
+                    dl_path = hf_hub_download(
+                        repo_id=repo_id,
+                        repo_type="dataset",
+                        filename=remote_path,
+                        local_dir=local_dir,
+                        token=token,
+                    )
+                finally:
+                    if _prev_hf_prog is None:
+                        os.environ.pop("HF_HUB_DISABLE_PROGRESS_BARS", None)
+                    else:
+                        os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = _prev_hf_prog
                 tmp_path = dl_path if dl_path != target_path else None
 
                 # Enforce maximum shard size BEFORE promoting to the target path.

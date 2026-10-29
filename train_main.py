@@ -1038,10 +1038,10 @@ def main():
         sys.exit(subprocess.call(cmd))
 
     if is_distributed:
-        if not torch.distributed.is_initialized():
-            torch.distributed.init_process_group(backend="nccl", init_method="env://")
         torch.cuda.set_device(local_rank)
         device = torch.device(f"cuda:{local_rank}")
+        if not torch.distributed.is_initialized():
+            torch.distributed.init_process_group(backend="nccl", init_method="env://")
     else:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -1815,6 +1815,7 @@ def main():
             device_ids=[local_rank],
             output_device=local_rank,
             find_unused_parameters=False,
+            gradient_as_bucket_view=True,
         )
         if world_model is not None:
             world_model = DDP(
@@ -1822,6 +1823,7 @@ def main():
                 device_ids=[local_rank],
                 output_device=local_rank,
                 find_unused_parameters=False,
+                gradient_as_bucket_view=True,
             )
         print(f"[Hardware DDP] Attached DistributedDataParallel on rank {rank} (local_rank {local_rank}) across {world_size} GPUs.")
     else:
@@ -1831,7 +1833,6 @@ def main():
         alloc_mb = torch.cuda.memory_allocated(device) / (1024 * 1024)
         res_mb = torch.cuda.memory_reserved(device) / (1024 * 1024)
         print(f"[VRAM Pre-Flight Audit] Rank {rank} Startup VRAM: {alloc_mb:.1f} MiB allocated / {res_mb:.1f} MiB reserved")
-        import gc
         tensors_by_size = []
         for obj in gc.get_objects():
             try:

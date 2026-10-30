@@ -132,15 +132,19 @@ fi
 # 4. Resolve Hugging Face Authentication Token
 RESOLVED_HF_TOKEN=$(python3 -c "
 import os, sys
-
-# 1. Check environment variables
+try:
+    from gdrive_sync import _resolve_hf_token_standalone
+    tok = _resolve_hf_token_standalone()
+    if tok:
+        print(tok)
+        sys.exit(0)
+except Exception:
+    pass
 for k in ('HF_TOKEN', 'HUGGING_FACE_HUB_TOKEN'):
     v = os.environ.get(k)
     if v and v.strip():
         print(v.strip())
         sys.exit(0)
-
-# 2. Check Hugging Face CLI cache files
 for tf in ('/root/.cache/huggingface/token', os.path.expanduser('~/.cache/huggingface/token')):
     if os.path.isfile(tf):
         try:
@@ -150,26 +154,22 @@ for tf in ('/root/.cache/huggingface/token', os.path.expanduser('~/.cache/huggin
                 sys.exit(0)
         except Exception:
             pass
-
-# 3. Check Kaggle Secrets
 try:
     from kaggle_secrets import UserSecretsClient
     sec = UserSecretsClient()
-    for k in ('HF_TOKEN', 'hf_token', 'HUGGING_FACE_TOKEN', 'HUGGINGFACE_TOKEN', 'huggingface', 'tara_sync', 'HF_API_KEY'):
+    for k in ('HF_TOKEN', 'hf_token', 'tara_sync', 'HF_API_KEY'):
         try:
             val = sec.get_secret(k)
             if val and str(val).strip():
                 print(str(val).strip())
                 sys.exit(0)
-        except Exception as e:
+        except Exception:
             pass
-except Exception as kaggle_err:
-    sys.stderr.write(f'[AUTH NOTICE] Kaggle UserSecretsClient unavailable or not attached: {kaggle_err}\n')
-
-# 4. Check Google Colab secrets
+except Exception:
+    pass
 try:
     from google.colab import userdata
-    for k in ('tara_sync', 'HF_TOKEN', 'hf_token', 'HUGGING_FACE_TOKEN'):
+    for k in ('tara_sync', 'HF_TOKEN', 'hf_token'):
         try:
             val = userdata.get(k)
             if val and str(val).strip():
@@ -179,7 +179,7 @@ try:
             pass
 except Exception:
     pass
-")
+" 2>/dev/null || true)
 
 HF_TOKEN_FLAG=""
 if [ -n "$RESOLVED_HF_TOKEN" ]; then

@@ -6,17 +6,7 @@
 
 set -euo pipefail
 
-# 0. Automatically Resolve Script Directory & Working Directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
-if [ -d "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/train_main.py" ]; then
-    cd "$SCRIPT_DIR"
-elif [ -d "tara" ] && [ -f "tara/train_main.py" ]; then
-    cd "tara"
-elif [ -d "taracore" ] && [ -f "taracore/train_main.py" ]; then
-    cd "taracore"
-fi
-
-# 0b. Git Environment & Filemode Protection
+# 0. Git Environment & Filemode Protection
 # Prevent git filemode permission changes (e.g. chmod +x) from causing dirty git status or merge conflicts
 git config core.filemode false 2>/dev/null || true
 if [ -d ".git" ]; then
@@ -131,54 +121,25 @@ fi
 
 # 4. Resolve Hugging Face Authentication Token
 RESOLVED_HF_TOKEN=$(python3 -c "
-import os, sys
-try:
-    from gdrive_sync import _resolve_hf_token_standalone
-    tok = _resolve_hf_token_standalone()
-    if tok:
-        print(tok)
-        sys.exit(0)
-except Exception:
-    pass
-for k in ('HF_TOKEN', 'HUGGING_FACE_HUB_TOKEN'):
-    v = os.environ.get(k)
-    if v and v.strip():
-        print(v.strip())
-        sys.exit(0)
-for tf in ('/root/.cache/huggingface/token', os.path.expanduser('~/.cache/huggingface/token')):
-    if os.path.isfile(tf):
+import os
+candidates = []
+if os.environ.get('HF_TOKEN'):
+    candidates.append(os.environ.get('HF_TOKEN'))
+for token_file in ('/root/.cache/huggingface/token', os.path.expanduser('~/.cache/huggingface/token')):
+    if os.path.isfile(token_file):
         try:
-            tok = open(tf, 'r').read().strip()
-            if tok:
-                print(tok)
-                sys.exit(0)
-        except Exception:
-            pass
-try:
-    from kaggle_secrets import UserSecretsClient
-    sec = UserSecretsClient()
-    for k in ('HF_TOKEN', 'hf_token', 'tara_sync', 'HF_API_KEY'):
-        try:
-            val = sec.get_secret(k)
-            if val and str(val).strip():
-                print(str(val).strip())
-                sys.exit(0)
-        except Exception:
-            pass
-except Exception:
-    pass
+            tok = open(token_file).read().strip()
+            if tok: candidates.append(tok)
+        except Exception: pass
 try:
     from google.colab import userdata
     for k in ('tara_sync', 'HF_TOKEN', 'hf_token'):
         try:
             val = userdata.get(k)
-            if val and str(val).strip():
-                print(str(val).strip())
-                sys.exit(0)
-        except Exception:
-            pass
-except Exception:
-    pass
+            if val: candidates.append(val)
+        except Exception: pass
+except Exception: pass
+print(candidates[0] if candidates else '')
 " 2>/dev/null || true)
 
 HF_TOKEN_FLAG=""
@@ -226,23 +187,8 @@ export TARA_ALLOW_EPHEMERAL_KEY="0"
 
 # 5. Install Dependencies if needed
 if ! python3 -c "import safetensors, tokenizers, torch, bitsandbytes" 2>/dev/null; then
-    echo "[SETUP] Installing required dependencies..."
-    if [ -f "requirements.txt" ]; then
-        echo "[SETUP] Installing dependencies from requirements.txt..."
-        pip install -q -r requirements.txt
-    elif [ -n "${SCRIPT_DIR:-}" ] && [ -f "$SCRIPT_DIR/requirements.txt" ]; then
-        echo "[SETUP] Installing dependencies from $SCRIPT_DIR/requirements.txt..."
-        pip install -q -r "$SCRIPT_DIR/requirements.txt"
-    else
-        echo "[SETUP] requirements.txt not found. Installing dependencies directly via pip..."
-        pip install -q torch safetensors tokenizers huggingface_hub requests tqdm bitsandbytes cryptography
-    fi
-fi
-
-if [ ! -f "train_main.py" ]; then
-    echo "[FATAL ERROR] train_main.py not found in current directory ($(pwd))!"
-    echo "Please ensure you have cloned or downloaded the complete repository and switched into it."
-    exit 1
+    echo "[SETUP] Installing required dependencies from requirements.txt..."
+    pip install -q -r requirements.txt
 fi
 
 # 6. Dynamically resolve Max Sequence Length bounded by hardware VRAM budget

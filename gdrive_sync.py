@@ -2199,6 +2199,22 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
                                 except Exception:
                                     pass
 
+                # Purge duplicate local best_checkpoint weights (backed up on Hugging Face)
+                for b_cand in (
+                    os.path.join(check_path, "storage/models/checkpoints/stage0_pretraining/best_checkpoint"),
+                    os.path.join(check_path, "tara/storage/models/checkpoints/stage0_pretraining/best_checkpoint"),
+                    "storage/models/checkpoints/stage0_pretraining/best_checkpoint",
+                ):
+                    if os.path.isdir(b_cand):
+                        for f in os.listdir(b_cand):
+                            if f.endswith((".safetensors", ".pt", ".bin")):
+                                fp = os.path.join(b_cand, f)
+                                try:
+                                    os.remove(fp)
+                                    print(f"[Kaggle Disk Guard] Reclaimed duplicate local best_checkpoint weight: {f}", flush=True)
+                                except Exception:
+                                    pass
+
                 # Purge obsolete local backup directories if space is critically low
                 redundant_backup_candidates = [
                     os.path.join(check_path, "tara/storage/backup"),
@@ -2822,6 +2838,10 @@ def save_checkpoint(
                 src = os.path.join(versioned_dir, fname)
                 dst = os.path.join(output_dir, fname)
                 if os.path.isfile(src):
+                    # On Kaggle: Best milestones are backed up directly to Hugging Face.
+                    # Do NOT store a duplicate 3.7 GB copy of model weights in local best_checkpoint!
+                    if _is_kaggle_environment() and is_best and fname.endswith((".safetensors", ".pt", ".bin")):
+                        continue
                     tmp_dst = os.path.join(output_dir, f".atomic_{fname}.{os.getpid()}_{int(time.time())}")
                     try:
                         try:

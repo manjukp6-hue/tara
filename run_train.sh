@@ -129,8 +129,16 @@ fi
 if [ "$IS_KAGGLE_ENV" = "0" ] && [ -d "/content" ]; then
     echo "[GDRIVE] Checking Google Drive mount in Colab..."
     python3 -c "from gdrive_sync import mount_google_drive; mount_google_drive()" 2>/dev/null || true
-    export GDRIVE_BACKUP_DIR="${GDRIVE_BACKUP_DIR:-/content/drive/MyDrive/tara_checkpoints}"
-    mkdir -p "$GDRIVE_BACKUP_DIR"
+    if [ -z "${GDRIVE_BACKUP_DIR:-}" ]; then
+        if [ -d "/content/drive/MyDrive" ]; then
+            export GDRIVE_BACKUP_DIR="/content/drive/MyDrive/tara_checkpoints"
+        elif [ -d "/content/drive/My Drive" ]; then
+            export GDRIVE_BACKUP_DIR="/content/drive/My Drive/tara_checkpoints"
+        else
+            export GDRIVE_BACKUP_DIR="/content/drive/MyDrive/tara_checkpoints"
+        fi
+    fi
+    mkdir -p "$GDRIVE_BACKUP_DIR" 2>/dev/null || true
 elif [ "$IS_KAGGLE_ENV" = "1" ]; then
     unset GDRIVE_BACKUP_DIR TARA_GDRIVE_DIR 2>/dev/null || true
     rm -rf /content/drive 2>/dev/null || true

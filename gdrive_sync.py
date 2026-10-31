@@ -89,6 +89,45 @@ def mount_google_drive(mount_point: str = '/content/drive') -> Optional[str]:
         return None
 
 
+def resolve_colab_gdrive_root() -> Optional[str]:
+    """
+    Dynamically discovers the genuine user root inside Google Drive in Colab.
+    Handles both '/content/drive/MyDrive' (no space) and '/content/drive/My Drive' (with space).
+    """
+    if _is_kaggle_environment():
+        return None
+    for cand in ("/content/drive/MyDrive", "/content/drive/My Drive"):
+        if os.path.isdir(cand):
+            return cand
+    if os.path.isdir("/content/drive"):
+        try:
+            for entry in os.listdir("/content/drive"):
+                if entry.lower() in ("mydrive", "my drive"):
+                    p = os.path.join("/content/drive", entry)
+                    if os.path.isdir(p):
+                        return p
+        except Exception:
+            pass
+    return None
+
+
+def is_gdrive_mounted(mount_point: str = '/content/drive') -> bool:
+    """Check if Google Drive is genuinely mounted in the filesystem."""
+    if _is_kaggle_environment():
+        return False
+    if resolve_colab_gdrive_root() is not None:
+        return True
+    if os.path.exists(mount_point) and os.path.isdir(mount_point):
+        try:
+            if hasattr(os.path, 'ismount') and os.path.ismount(mount_point):
+                return True
+            entries = os.listdir(mount_point)
+            return any(e.lower() in ("mydrive", "my drive", "shareddrives", ".shortcut-targets-by-id") for e in entries)
+        except Exception:
+            pass
+    return False
+
+
 def sync_checkpoint_file_atomic(src_path: str, dst_path: str, precomputed_src_sha: Optional[str] = None) -> bool:
     """
     Atomically synchronizes a single file to destination:
@@ -800,19 +839,26 @@ def find_all_gdrive_checkpoint_candidates() -> List[str]:
     except Exception:
         pass
 
-    # 3. Standard Colab MyDrive path
-    std_path = "/content/drive/MyDrive/tara_checkpoints"
-    if os.path.exists(std_path) and std_path not in candidates:
-        candidates.append(std_path)
+    # 3. Standard Colab MyDrive / My Drive path (supports both space and no-space)
+    groot = resolve_colab_gdrive_root()
+    search_roots = []
+    if groot and groot not in search_roots:
+        search_roots.append(groot)
+    for p in ("/content/drive/MyDrive", "/content/drive/My Drive"):
+        if os.path.isdir(p) and p not in search_roots:
+            search_roots.append(p)
 
-    # 4. Search /content/drive/MyDrive for shortcuts/folders matching 'tara' or 'checkpoint'
-    mydrive = "/content/drive/MyDrive"
-    if os.path.exists(mydrive) and os.path.isdir(mydrive):
+    for r in search_roots:
+        std_path = os.path.join(r, "tara_checkpoints")
+        if os.path.exists(std_path) and std_path not in candidates:
+            candidates.append(std_path)
+
+        # 4. Search for shortcuts/folders matching 'tara' or 'checkpoint'
         try:
-            for entry in os.listdir(mydrive):
+            for entry in os.listdir(r):
                 low = entry.lower()
                 if "tara" in low or "checkpoint" in low:
-                    p = os.path.join(mydrive, entry)
+                    p = os.path.join(r, entry)
                     if os.path.isdir(p) and p not in candidates:
                         candidates.append(p)
         except Exception:
@@ -983,7 +1029,7 @@ def resolve_gdrive_backup_dir() -> Optional[str]:
     2. Active on Colab and single GPU environments where Google Drive is genuinely mounted.
     3. If TARA_GDRIVE_DIR or GDRIVE_BACKUP_DIR is explicitly configured, use it.
     4. Check if a restored shared directory from another account is writable (Editor permission).
-    5. Automatically falls back to /content/drive/MyDrive/tara_checkpoints in Colab / single GPU.
+    5. Dynamically falls back to <gdrive_root>/tara_checkpoints in Colab / single GPU (handles MyDrive and My Drive).
     """
     if _is_kaggle_environment():
         return None
@@ -992,15 +1038,17 @@ def resolve_gdrive_backup_dir() -> Optional[str]:
     if env_dir:
         return env_dir
 
-    colab_default = "/content/drive/MyDrive/tara_checkpoints"
-
     # Check if a shared restore directory exists and is writable
     restore_dir = resolve_gdrive_restore_dir()
     if restore_dir and is_directory_writable(restore_dir):
         return restore_dir
 
-    if os.path.exists("/content/drive/MyDrive"):
-        return colab_default
+    groot = resolve_colab_gdrive_root()
+    if groot:
+        return os.path.join(groot, "tara_checkpoints")
+
+    if is_gdrive_mounted():
+        return "/content/drive/MyDrive/tara_checkpoints"
 
     return None
 
@@ -3427,8 +3475,9 @@ def resolve_and_auto_select_checkpoint(
                     local_alt_source = alt_loc
 
     # 2. Google Drive Step
-    gdrive_dir = resolve_gdrive_restore_dir() or gdrive_base_dir
+    gdrive_dir = resolve_gdrive_restore_dir() or gdrive_base_dir or resolve_gdrive_backup_dir()
     gdrive_step = get_checkpoint_dir_step(gdrive_dir) if (gdrive_dir and os.path.exists(gdrive_dir)) else -1
+    gdrive_is_mounted = is_gdrive_mounted() or (gdrive_dir is not None and os.path.exists(os.path.dirname(os.path.abspath(gdrive_dir))))
 
     # 3. Hugging Face Step
     hf_step = -1
@@ -3454,7 +3503,14 @@ def resolve_and_auto_select_checkpoint(
 
     gd_str = f"Step {gdrive_step:04d}" if gdrive_step >= 0 else "Unavailable"
     gd_color = CLR_GREEN if gdrive_step >= 0 else CLR_RESET
-    print(f"  {'2. Google Drive':<20} {'Mounted' if gdrive_step >= 0 else 'Not Found':<15} {gd_color}{gd_str:<18}{CLR_RESET} {gdrive_dir or 'Not Mounted'}", flush=True)
+    if gdrive_is_mounted:
+        gd_status = "Connected" if gdrive_step >= 0 else "Mounted (Empty)"
+        resolved_root = resolve_colab_gdrive_root() or "/content/drive"
+        gd_loc = gdrive_dir or os.path.join(resolved_root, "tara_checkpoints")
+    else:
+        gd_status = "Not Mounted"
+        gd_loc = "Unavailable"
+    print(f"  {'2. Google Drive':<20} {gd_status:<15} {gd_color}{gd_str:<18}{CLR_RESET} {gd_loc}", flush=True)
 
     hf_str = f"Step {hf_step:04d}" if hf_step >= 0 else "Unavailable"
     hf_color = CLR_GREEN if hf_step >= 0 else CLR_RESET

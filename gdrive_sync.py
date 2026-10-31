@@ -2174,6 +2174,15 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
                 if os.path.exists(cdir):
                     shutil.rmtree(cdir, ignore_errors=True)
 
+            # Purge models--* cache from HF hub (restored model weights) while strictly keeping datasets--*
+            for hf_hub in ("/root/.cache/huggingface/hub", os.path.expanduser("~/.cache/huggingface/hub")):
+                if os.path.isdir(hf_hub):
+                    for item in os.listdir(hf_hub):
+                        if item.startswith("models--"):
+                            mpath = os.path.join(hf_hub, item)
+                            _safe_rmtree(mpath)
+                            print(f"[Kaggle Disk Guard] Purged HF model hub restore cache (5.2 GB): {item}", flush=True)
+
             # 2. On Kaggle: clean any phantom /content/drive directory and prune old versioned snapshots
             if _is_kaggle_environment():
                 phantom_gdrive = "/content/drive"

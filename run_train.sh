@@ -25,11 +25,13 @@ if [ -d "/kaggle/working" ] || [ -n "${KAGGLE_URL_BASE:-}" ]; then
     echo "[KAGGLE DISK CLEANUP] Purging all obsolete local checkpoint copies and phantom directories on Kaggle..."
     rm -rf /kaggle/working/tara_checkpoints /kaggle/working/tara/tara_checkpoints /content/drive 2>/dev/null || true
     rm -rf /kaggle/working/tara/storage/backup /kaggle/working/storage/backup 2>/dev/null || true
-    # Purge redundant candidate weights if checkpoint weights exist
-    if [ -f "storage/models/checkpoints/stage0_pretraining/model.safetensors" ] || [ -f "/kaggle/working/tara/storage/models/checkpoints/stage0_pretraining/model.safetensors" ]; then
-        rm -f storage/models/tara_candidate_v1/*.safetensors storage/models/tara_candidate_v1/*.pt 2>/dev/null || true
-        rm -f /kaggle/working/tara/storage/models/tara_candidate_v1/*.safetensors /kaggle/working/tara/storage/models/tara_candidate_v1/*.pt 2>/dev/null || true
-    fi
+    # Purge redundant candidate weights and local best_checkpoint duplicates
+    rm -f storage/models/tara_candidate_v1/*.safetensors storage/models/tara_candidate_v1/*.pt 2>/dev/null || true
+    rm -f /kaggle/working/tara/storage/models/tara_candidate_v1/*.safetensors /kaggle/working/tara/storage/models/tara_candidate_v1/*.pt 2>/dev/null || true
+    rm -f storage/models/checkpoints/*/best_checkpoint/*.safetensors storage/models/checkpoints/*/best_checkpoint/*.pt 2>/dev/null || true
+    rm -f /kaggle/working/tara/storage/models/checkpoints/*/best_checkpoint/*.safetensors 2>/dev/null || true
+    # Purge HF model restore cache (frees 5.2 GB while keeping datasets)
+    rm -rf /root/.cache/huggingface/hub/models--* ~/.cache/huggingface/hub/models--* 2>/dev/null || true
     python3 -c "from gdrive_sync import _kaggle_prune_old_versioned_snapshots; _kaggle_prune_old_versioned_snapshots('/kaggle/working')" 2>/dev/null || true
 fi
 if command -v apt-get >/dev/null 2>&1; then

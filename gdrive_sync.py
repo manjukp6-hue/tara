@@ -976,11 +976,35 @@ def resolve_gdrive_backup_dir() -> Optional[str]:
     return None
 
 
+def _is_kaggle_environment() -> bool:
+    """
+    Detects whether the current runtime is a Kaggle notebook (T4 x2 or any GPU tier).
+    Kaggle working disk is ~20 GB — far smaller than Colab's ~200 GB ephemeral disk.
+    Detection uses the canonical KAGGLE_URL_BASE env-var set by every Kaggle kernel.
+    """
+    if os.environ.get("KAGGLE_URL_BASE") or os.environ.get("KAGGLE_DATA_PROXY_URL"):
+        return True
+    if os.path.isdir("/kaggle/working") or os.path.isdir("/kaggle/input"):
+        return True
+    try:
+        from kaggle_secrets import UserSecretsClient  # noqa: F401
+        return True
+    except Exception:
+        pass
+    return False
+
+
 class BackgroundGDriveSyncWorker:
     """
     Dedicated Asynchronous Daemon Worker for Google Drive Synchronization.
     Runs on a separate background thread so 8-10 GB checkpoint transfers
     and FUSE network I/O NEVER block GPU training or stall backpropagation.
+
+    Kaggle Disk-Space Safety:
+    Kaggle /kaggle/working is only ~20 GB. After a verified HF upload the local
+    versioned checkpoint snapshot is automatically deleted so the second (and
+    subsequent) backup can write its own staging directory without hitting
+    "No space left on device".
     """
     _instance: Optional["BackgroundGDriveSyncWorker"] = None
     _lock = threading.Lock()
@@ -1008,6 +1032,7 @@ class BackgroundGDriveSyncWorker:
         step: int = 0,
         loss: float = 0.0,
         hf_token: Optional[str] = None,
+        delete_local_after_upload: bool = False,
     ):
         task = {
             "local_ckpt_dir": local_ckpt_dir,
@@ -1019,6 +1044,9 @@ class BackgroundGDriveSyncWorker:
             "loss": loss,
             "hf_token": hf_token,
             "timestamp": time.time(),
+            # On Kaggle (20 GB disk) delete the local versioned snapshot after a
+            # verified cloud upload so the next backup's staging dir can fit.
+            "delete_local_after_upload": delete_local_after_upload,
         }
         try:
             self.task_queue.put_nowait(task)
@@ -1046,8 +1074,13 @@ class BackgroundGDriveSyncWorker:
                 step = task["step"]
                 loss = task.get("loss", 0.0)
                 hf_token = task.get("hf_token")
+                delete_local_after_upload = task.get("delete_local_after_upload", False)
 
                 tag = f"BEST MILESTONE (step {step}, loss {loss:.4f})" if is_best else f"Step {step:04d}"
+
+                # Track whether at least one cloud target confirmed a successful upload.
+                # Used to gate the Kaggle post-upload local disk reclamation.
+                any_cloud_upload_succeeded = False
 
                 # 1. Google Drive Background Transfer (if configured & mounted)
                 if gdrive_dir:
@@ -1072,6 +1105,7 @@ class BackgroundGDriveSyncWorker:
                         elapsed = time.time() - t0
                         if success:
                             print(f"[GDrive Worker] Completed background upload for [{tag}] in {elapsed:.1f}s.", flush=True)
+                            any_cloud_upload_succeeded = True
                         else:
                             print(f"[GDrive Worker Warning] Background upload failed or incomplete for [{tag}].", flush=True)
                     except Exception as ge:
@@ -1082,7 +1116,7 @@ class BackgroundGDriveSyncWorker:
                     try:
                         t0 = time.time()
                         if is_best:
-                            sync_best_milestone_to_hf(
+                            hf_ok = sync_best_milestone_to_hf(
                                 local_source_dir=local_dir,
                                 repo_id=hf_repo,
                                 step=step,
@@ -1091,15 +1125,54 @@ class BackgroundGDriveSyncWorker:
                                 hf_token=hf_token,
                             )
                         else:
-                            sync_normal_checkpoint_to_hf(
+                            hf_ok = sync_normal_checkpoint_to_hf(
                                 local_source_dir=local_dir,
                                 repo_id=hf_repo,
                                 step=step,
                                 keep_n=2,
                                 hf_token=hf_token,
                             )
+                        if hf_ok:
+                            any_cloud_upload_succeeded = True
                     except Exception as hfe:
                         print(f"[HF Checkpoint Worker Warning] HF background upload error: {hfe}", flush=True)
+
+                # 3. Kaggle Disk Reclamation: delete local versioned snapshot after verified cloud backup.
+                #    Kaggle /kaggle/working has only ~20 GB, so keeping the old versioned dir means
+                #    the next backup's staging dir cannot fit → "No space left on device" on 2nd backup.
+                #    This mirrors the Colab single-GPU auto-delete behaviour but applies on Kaggle only.
+                if delete_local_after_upload and any_cloud_upload_succeeded:
+                    try:
+                        if os.path.isdir(local_dir):
+                            print(
+                                f"[Kaggle Disk Guard] Verified cloud backup succeeded for [{tag}]. "
+                                f"Reclaiming local versioned snapshot: {local_dir}",
+                                flush=True,
+                            )
+                            _safe_rmtree(local_dir)
+                            # Log post-deletion free space so users can see the reclaim worked.
+                            try:
+                                free_after = shutil.disk_usage("/kaggle/working").free / (1024 ** 3)
+                                print(
+                                    f"[Kaggle Disk Guard] Local snapshot deleted. "
+                                    f"Free disk space now: {free_after:.2f} GB",
+                                    flush=True,
+                                )
+                            except Exception:
+                                pass
+                        else:
+                            print(
+                                f"[Kaggle Disk Guard] Local dir no longer exists (already cleaned): {local_dir}",
+                                flush=True,
+                            )
+                    except Exception as kde:
+                        print(f"[Kaggle Disk Guard Warning] Could not delete local snapshot after upload: {kde}", flush=True)
+                elif delete_local_after_upload and not any_cloud_upload_succeeded:
+                    print(
+                        f"[Kaggle Disk Guard] Skipping local deletion for [{tag}]: "
+                        f"no cloud upload confirmed successful — preserving local snapshot as safety fallback.",
+                        flush=True,
+                    )
 
                 self.task_queue.task_done()
                 self.active_transfers -= 1
@@ -1314,6 +1387,10 @@ def trigger_async_cloud_backup(
         step=step,
         loss=loss,
         hf_token=token,
+        # On Kaggle the working disk is only ~20 GB (dual T4 and single GPU alike).
+        # After a confirmed cloud upload the local versioned snapshot is deleted so
+        # the next backup's staging directory can fit without "No space left on device".
+        delete_local_after_upload=_is_kaggle_environment(),
     )
 
 
@@ -1937,12 +2014,19 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
     """
     Proactively reclaims disk space from caches and intermediate build directories
     if available disk space drops below min_free_gb, completely preventing 'No space left on device'.
+
+    On Kaggle (dual T4 or single GPU) the working disk is only ~20 GB.
+    The threshold is automatically raised to 10 GB and old versioned checkpoint
+    snapshots (*.step<N>_*) are pruned so the next staging write can succeed.
     """
     try:
-        usage = shutil.disk_usage(".")
+        # Kaggle working dir takes priority for disk checks
+        check_path = "/kaggle/working" if _is_kaggle_environment() and os.path.isdir("/kaggle/working") else "."
+        effective_min_free_gb = max(min_free_gb, 10.0) if _is_kaggle_environment() else min_free_gb
+        usage = shutil.disk_usage(check_path)
         free_gb = usage.free / (1024 ** 3)
-        if free_gb < min_free_gb:
-            print(f"[DISK HYGIENE] Low free disk space detected ({free_gb:.2f} GB < {min_free_gb:.1f} GB). Reclaiming caches...", flush=True)
+        if free_gb < effective_min_free_gb:
+            print(f"[DISK HYGIENE] Low free disk space detected ({free_gb:.2f} GB < {effective_min_free_gb:.1f} GB). Reclaiming caches...", flush=True)
             # 1. Purge huggingface, pip, and torch caches
             cache_dirs = [
                 "/root/.cache/huggingface",
@@ -1956,6 +2040,13 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
                 if os.path.exists(cdir):
                     shutil.rmtree(cdir, ignore_errors=True)
 
+            # 2. On Kaggle: prune old versioned checkpoint snapshots (*.step<N>_*) from
+            #    the working directory.  These are created per-checkpoint by save_checkpoint
+            #    and can collectively consume 10–15 GB on a 20 GB disk.
+            #    Only snapshots that are NOT the very newest (highest step) are removed.
+            if _is_kaggle_environment():
+                _kaggle_prune_old_versioned_snapshots(check_path)
+
             # 3. Clean temporary files in /tmp
             for p in glob.glob("/tmp/tara_*") + glob.glob("/tmp/tmp_tara_*") + glob.glob("/tmp/tmptara*"):
                 try:
@@ -1966,11 +2057,67 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
                 except Exception:
                     pass
 
-            after_usage = shutil.disk_usage(".")
+            after_usage = shutil.disk_usage(check_path)
             after_free = after_usage.free / (1024 ** 3)
             print(f"[DISK HYGIENE] Reclamation complete! Available disk space: {after_free:.2f} GB free.", flush=True)
     except Exception as e:
         print(f"[DISK HYGIENE Notice] Disk check notice: {e}", flush=True)
+
+
+def _kaggle_prune_old_versioned_snapshots(search_root: str) -> None:
+    """
+    Scans `search_root` recursively (up to 2 levels) for versioned checkpoint snapshot
+    directories created by save_checkpoint (pattern: <basename>.step<N>_<timestamp>).
+    Keeps only the highest-step snapshot per basename and deletes the rest to free disk
+    space on the Kaggle 20 GB working disk before the next staging write.
+
+    Safety guarantees:
+    - Never deletes the snapshot with the highest step number (the most recent backup).
+    - Only deletes directories that have a COMMITTED marker (i.e. fully written).
+    - Skips directories that are younger than 5 minutes (may be in-flight upload).
+    """
+    import re as _re
+    versioned_pattern = _re.compile(r"^(.+)\.step(\d+)_(\d+)$")
+    now = time.time()
+    # Map basename -> list of (step, mtime, path)
+    grouped: Dict[str, List[Tuple[int, float, str]]] = {}
+    try:
+        for entry in os.listdir(search_root):
+            full = os.path.join(search_root, entry)
+            if not os.path.isdir(full):
+                continue
+            m = versioned_pattern.match(entry)
+            if not m:
+                continue
+            base = m.group(1)
+            step_num = int(m.group(2))
+            # Must have COMMITTED marker — only fully-written snapshots are prunable
+            if not os.path.isfile(os.path.join(full, "COMMITTED")):
+                continue
+            try:
+                mtime = os.path.getmtime(full)
+            except Exception:
+                mtime = 0.0
+            # Protect snapshots younger than 5 minutes (in-flight upload window)
+            if now - mtime < 300:
+                continue
+            grouped.setdefault(base, []).append((step_num, mtime, full))
+    except Exception as scan_err:
+        print(f"[Kaggle Disk Guard] Snapshot scan notice: {scan_err}", flush=True)
+        return
+
+    for base, snapshots in grouped.items():
+        if len(snapshots) <= 1:
+            continue
+        # Keep only the highest step
+        snapshots.sort(key=lambda x: x[0], reverse=True)
+        to_delete = snapshots[1:]  # everything except the newest
+        for step_num, _, snap_path in to_delete:
+            print(
+                f"[Kaggle Disk Guard] Pruning old versioned snapshot (step {step_num}): {os.path.basename(snap_path)}",
+                flush=True,
+            )
+            _safe_rmtree(snap_path)
 
 
 # =============================================================================

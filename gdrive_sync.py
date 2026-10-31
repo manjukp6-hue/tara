@@ -1189,6 +1189,22 @@ class BackgroundGDriveSyncWorker:
                                     flush=True,
                                 )
                                 _safe_rmtree(local_dir)
+                                if is_best:
+                                    # Also clean duplicate model weights in local best_checkpoint directory
+                                    parent_ckpt_dir = os.path.dirname(os.path.abspath(local_dir))
+                                    for b_cand in [
+                                        os.path.join(parent_ckpt_dir, "best_checkpoint"),
+                                        "/kaggle/working/tara/storage/models/checkpoints/stage0_pretraining/best_checkpoint",
+                                        "storage/models/checkpoints/stage0_pretraining/best_checkpoint",
+                                    ]:
+                                        if os.path.isdir(b_cand):
+                                            for f in os.listdir(b_cand):
+                                                if f.endswith((".safetensors", ".pt", ".bin")):
+                                                    try:
+                                                        os.remove(os.path.join(b_cand, f))
+                                                        print(f"[Kaggle Disk Guard] Reclaimed duplicate best_checkpoint weight after verified HF upload: {f}", flush=True)
+                                                    except Exception:
+                                                        pass
                                 # Log post-deletion free space so users can see the reclaim worked.
                                 try:
                                     free_after = shutil.disk_usage("/kaggle/working").free / (1024 ** 3)

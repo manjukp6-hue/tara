@@ -21,6 +21,12 @@ echo "==========================================================================
 echo "[DISK CLEANUP] Reclaiming disk space from caches and temporary files..."
 rm -rf /tmp/tara_* /tmp/tmp_tara_* 2>/dev/null || true
 rm -rf /root/.cache/pip /root/.cache/torch /root/.cache/huggingface/hub 2>/dev/null || true
+if [ -d "/kaggle/working" ] || [ -n "${KAGGLE_URL_BASE:-}" ]; then
+    echo "[KAGGLE DISK CLEANUP] Purging all obsolete local checkpoint copies and phantom directories on Kaggle..."
+    rm -rf /kaggle/working/tara_checkpoints /kaggle/working/tara/tara_checkpoints /content/drive 2>/dev/null || true
+    rm -rf /kaggle/working/tara/storage/backup /kaggle/working/storage/backup 2>/dev/null || true
+    rm -rf /root/.cache/huggingface/hub ~/.cache/huggingface/hub 2>/dev/null || true
+fi
 if command -v apt-get >/dev/null 2>&1; then
     apt-get clean 2>/dev/null || true
     rm -rf /var/lib/apt/lists/* 2>/dev/null || true
@@ -276,8 +282,17 @@ if check_model_weights_exist(dst) and not check_model_weights_exist(cand_dir):
             try:
                 os.link(s, d)
             except Exception:
-                shutil.copy2(s, d)
+                try:
+                    os.symlink(os.path.abspath(s), d)
+                except Exception:
+                    shutil.copy2(s, d)
     print(f'[MULTI-CLOUD RESTORE] Seeded candidate directory {cand_dir} from restored checkpoint.')
+
+if check_model_weights_exist(dst):
+    for hf_cache in ('/root/.cache/huggingface/hub', os.path.expanduser('~/.cache/huggingface/hub')):
+        if os.path.isdir(hf_cache):
+            shutil.rmtree(hf_cache, ignore_errors=True)
+            print(f'[DISK CLEANUP] Reclaimed HF restore cache: {hf_cache}')
 " 2>/dev/null || true
 
 # 8b. Ensure candidate directory has baseline config and tokenizer from model_config if missing

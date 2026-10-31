@@ -2204,34 +2204,70 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
 
 def _kaggle_prune_old_versioned_snapshots(search_root: str) -> None:
     """
-    Scans `search_root` recursively (up to 2 levels) for versioned checkpoint snapshot
-    directories created by save_checkpoint (pattern: <basename>.step<N>_<timestamp>).
-    Keeps only the highest-step snapshot per basename and deletes the rest to free disk
-    space on the Kaggle 20 GB working disk before the next staging write.
-
-    Safety guarantees:
-    - Never deletes the snapshot with the highest step number (the most recent backup).
-    - Only deletes directories that have a COMMITTED marker (i.e. fully written).
-    - Skips directories that are younger than 5 minutes (may be in-flight upload).
+    Kaggle Deep Storage Guard:
+    Scans search_root and all known checkpoint directories for:
+    1. Versioned checkpoint directories: <basename>.step<N>_<timestamp>
+    2. Milestone directories: step_<N>_loss_<loss> or step_<N>
+       (e.g., tara_checkpoints/best_milestone/step_2121_loss_1.7231)
+    3. Obsolete local tara_checkpoints and staging directories
+    Keeps only the highest-step snapshot and deletes older ones to prevent
+    'No space left on device' on Kaggle's 20 GB working disk.
     """
     import re as _re
     versioned_pattern = _re.compile(r"^(.+)\.step(\d+)_(\d+)$")
+    milestone_pattern = _re.compile(r"^step_(\d+)(?:_loss_([\d\.]+))?$")
     now = time.time()
-    # Map basename -> list of (step, mtime, path)
-    grouped: Dict[str, List[Tuple[int, float, str]]] = {}
-    # Collect candidate search directories
+
     search_dirs = [
         search_root,
         os.path.join(search_root, "tara"),
+        os.path.join(search_root, "tara_checkpoints"),
+        os.path.join(search_root, "tara_checkpoints", "best_milestone"),
+        os.path.join(search_root, "tara_checkpoints", "normal_checkpoint"),
+        os.path.join(search_root, "tara", "tara_checkpoints"),
+        os.path.join(search_root, "tara", "tara_checkpoints", "best_milestone"),
+        os.path.join(search_root, "tara", "tara_checkpoints", "normal_checkpoint"),
         os.path.join(search_root, "storage", "models", "checkpoints"),
         os.path.join(search_root, "tara", "storage", "models", "checkpoints"),
         os.path.join("storage", "models", "checkpoints"),
+        "tara_checkpoints",
+        os.path.join("tara_checkpoints", "best_milestone"),
+        os.path.join("tara_checkpoints", "normal_checkpoint"),
+        "/kaggle/working/tara_checkpoints",
+        "/kaggle/working/tara_checkpoints/best_milestone",
+        "/kaggle/working/tara_checkpoints/normal_checkpoint",
+        "/kaggle/working/tara/tara_checkpoints",
+        "/kaggle/working/tara/tara_checkpoints/best_milestone",
+        "/kaggle/working/tara/tara_checkpoints/normal_checkpoint",
+        "/content/drive/MyDrive/tara_checkpoints",
+        "/content/drive/MyDrive/tara_checkpoints/best_milestone",
+        "/content/drive/MyDrive/tara_checkpoints/normal_checkpoint",
     ]
-    seen_dirs: Set[str] = set()
+
     try:
-        for sdir in search_dirs:
-            if not os.path.isdir(sdir):
-                continue
+        if os.path.isdir(search_root):
+            for root, dirs, _ in os.walk(search_root):
+                rel = os.path.relpath(root, search_root)
+                depth = len(rel.split(os.sep)) if rel != "." else 0
+                if depth > 4:
+                    dirs.clear()
+                    continue
+                for d in dirs:
+                    if d in ("best_milestone", "normal_checkpoint", "tara_checkpoints"):
+                        full_d = os.path.join(root, d)
+                        if full_d not in search_dirs:
+                            search_dirs.append(full_d)
+    except Exception:
+        pass
+
+    seen_dirs: Set[str] = set()
+    grouped_versioned: Dict[str, List[Tuple[int, float, str]]] = {}
+    milestones_by_parent: Dict[str, List[Tuple[int, float, str]]] = {}
+
+    for sdir in search_dirs:
+        if not os.path.isdir(sdir):
+            continue
+        try:
             for entry in os.listdir(sdir):
                 full = os.path.join(sdir, entry)
                 if not os.path.isdir(full):
@@ -2240,38 +2276,58 @@ def _kaggle_prune_old_versioned_snapshots(search_root: str) -> None:
                 if full_abs in seen_dirs:
                     continue
                 seen_dirs.add(full_abs)
-                m = versioned_pattern.match(entry)
-                if not m:
-                    continue
-                base = m.group(1)
-                step_num = int(m.group(2))
-                # Must have COMMITTED marker — only fully-written snapshots are prunable
-                if not os.path.isfile(os.path.join(full, "COMMITTED")):
-                    continue
-                try:
-                    mtime = os.path.getmtime(full)
-                except Exception:
-                    mtime = 0.0
-                # Protect snapshots younger than 5 minutes (in-flight upload window)
-                if now - mtime < 300:
-                    continue
-                grouped.setdefault(base, []).append((step_num, mtime, full))
-    except Exception as scan_err:
-        print(f"[Kaggle Disk Guard] Snapshot scan notice: {scan_err}", flush=True)
-        return
 
-    for base, snapshots in grouped.items():
+                if entry.startswith((".ckpt_staging_", ".tmp_staging_", ".hf_restore_staging_")):
+                    try:
+                        mtime = os.path.getmtime(full)
+                    except Exception:
+                        mtime = 0.0
+                    if now - mtime > 120:
+                        print(f"[Kaggle Disk Guard] Purging stale staging directory: {entry}", flush=True)
+                        _safe_rmtree(full)
+                    continue
+
+                m_ver = versioned_pattern.match(entry)
+                if m_ver:
+                    base = m_ver.group(1)
+                    step_num = int(m_ver.group(2))
+                    try:
+                        mtime = os.path.getmtime(full)
+                    except Exception:
+                        mtime = 0.0
+                    if now - mtime >= 120:
+                        grouped_versioned.setdefault(base, []).append((step_num, mtime, full))
+                    continue
+
+                m_mile = milestone_pattern.match(entry)
+                if m_mile:
+                    step_num = int(m_mile.group(1))
+                    try:
+                        mtime = os.path.getmtime(full)
+                    except Exception:
+                        mtime = 0.0
+                    milestones_by_parent.setdefault(sdir, []).append((step_num, mtime, full))
+                    continue
+        except Exception:
+            pass
+
+    for base, snapshots in grouped_versioned.items():
         if len(snapshots) <= 1:
             continue
-        # Keep only the highest step
         snapshots.sort(key=lambda x: x[0], reverse=True)
-        to_delete = snapshots[1:]  # everything except the newest
+        to_delete = snapshots[1:]
         for step_num, _, snap_path in to_delete:
-            print(
-                f"[Kaggle Disk Guard] Pruning old versioned snapshot (step {step_num}): {os.path.basename(snap_path)}",
-                flush=True,
-            )
+            print(f"[Kaggle Disk Guard] Pruning old versioned snapshot (step {step_num}): {os.path.basename(snap_path)}", flush=True)
             _safe_rmtree(snap_path)
+
+    for parent_dir, milestones in milestones_by_parent.items():
+        if len(milestones) <= 1:
+            continue
+        milestones.sort(key=lambda x: x[0], reverse=True)
+        to_delete = milestones[1:]
+        for step_num, _, m_path in to_delete:
+            print(f"[Kaggle Disk Guard] Pruning obsolete milestone directory (step {step_num}): {os.path.basename(m_path)} from {parent_dir}", flush=True)
+            _safe_rmtree(m_path)
 
 
 # =============================================================================
@@ -3169,6 +3225,11 @@ def restore_checkpoint_from_hf(
                 shutil.copytree(s_f, d_f)
 
         _safe_rmtree(staging_restore_dir)
+        if _is_kaggle_environment():
+            for hf_cache in ("/root/.cache/huggingface/hub", os.path.expanduser("~/.cache/huggingface/hub")):
+                if os.path.isdir(hf_cache):
+                    _safe_rmtree(hf_cache)
+                    print(f"[Kaggle Disk Guard] Purged HF restore download cache to reclaim 5 GB: {hf_cache}", flush=True)
         print(f"[HF Restore] Checkpoint successfully verified and synchronized from Hugging Face into '{local_ckpt_dir}'!", flush=True)
         return True
     except Exception as e:

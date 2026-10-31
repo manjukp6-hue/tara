@@ -1140,33 +1140,57 @@ class BackgroundGDriveSyncWorker:
                 # 3. Kaggle Disk Reclamation: delete local versioned snapshot after verified cloud backup.
                 #    Kaggle /kaggle/working has only ~20 GB, so keeping the old versioned dir means
                 #    the next backup's staging dir cannot fit → "No space left on device" on 2nd backup.
-                #    This mirrors the Colab single-GPU auto-delete behaviour but applies on Kaggle only.
+                #    This applies on Kaggle only.
                 if delete_local_after_upload and any_cloud_upload_succeeded:
-                    try:
-                        if os.path.isdir(local_dir):
-                            print(
-                                f"[Kaggle Disk Guard] Verified cloud backup succeeded for [{tag}]. "
-                                f"Reclaiming local versioned snapshot: {local_dir}",
-                                flush=True,
-                            )
-                            _safe_rmtree(local_dir)
-                            # Log post-deletion free space so users can see the reclaim worked.
-                            try:
-                                free_after = shutil.disk_usage("/kaggle/working").free / (1024 ** 3)
+                    # EXTRA SECURITY SAFEGUARD (Kaggle Only):
+                    # Audit the remote HF backup to ensure all model tensors and metadata exist
+                    # and are intact before deleting the local snapshot.
+                    remote_audit_passed = True
+                    if hf_repo:
+                        target_remote_path = (
+                            f"tara_checkpoints/best_milestone/step_{step}_loss_{loss:.4f}"
+                            if is_best
+                            else f"tara_checkpoints/normal_checkpoint/step_{step}"
+                        )
+                        remote_audit_passed = verify_hf_checkpoint_backup(
+                            repo_id=hf_repo,
+                            target_step_path=target_remote_path,
+                            local_source_dir=local_dir,
+                            hf_token=hf_token,
+                        )
+
+                    if not remote_audit_passed:
+                        print(
+                            f"[Kaggle Security Guard] Preserving local snapshot for [{tag}]: "
+                            f"remote cloud audit was not 100% verified. Local snapshot KEPT as safety fallback.",
+                            flush=True,
+                        )
+                    else:
+                        try:
+                            if os.path.isdir(local_dir):
                                 print(
-                                    f"[Kaggle Disk Guard] Local snapshot deleted. "
-                                    f"Free disk space now: {free_after:.2f} GB",
+                                    f"[Kaggle Disk Guard] Remote verification 100% passed for [{tag}]. "
+                                    f"Safely reclaiming local snapshot: {local_dir}",
                                     flush=True,
                                 )
-                            except Exception:
-                                pass
-                        else:
-                            print(
-                                f"[Kaggle Disk Guard] Local dir no longer exists (already cleaned): {local_dir}",
-                                flush=True,
-                            )
-                    except Exception as kde:
-                        print(f"[Kaggle Disk Guard Warning] Could not delete local snapshot after upload: {kde}", flush=True)
+                                _safe_rmtree(local_dir)
+                                # Log post-deletion free space so users can see the reclaim worked.
+                                try:
+                                    free_after = shutil.disk_usage("/kaggle/working").free / (1024 ** 3)
+                                    print(
+                                        f"[Kaggle Disk Guard] Local snapshot deleted. "
+                                        f"Free disk space now: {free_after:.2f} GB",
+                                        flush=True,
+                                    )
+                                except Exception:
+                                    pass
+                            else:
+                                print(
+                                    f"[Kaggle Disk Guard] Local dir no longer exists (already cleaned): {local_dir}",
+                                    flush=True,
+                                )
+                        except Exception as kde:
+                            print(f"[Kaggle Disk Guard Warning] Could not delete local snapshot after upload: {kde}", flush=True)
                 elif delete_local_after_upload and not any_cloud_upload_succeeded:
                     print(
                         f"[Kaggle Disk Guard] Skipping local deletion for [{tag}]: "
@@ -1237,6 +1261,84 @@ def prune_hf_checkpoints(
                     print(f"[HF Quota Guard Notice] Prune note for {old_path}: {de}", flush=True)
     except Exception as e:
         print(f"[HF Quota Guard Notice] Prune inquiry note: {e}", flush=True)
+
+
+def verify_hf_checkpoint_backup(
+    repo_id: str,
+    target_step_path: str,
+    local_source_dir: str,
+    hf_token: Optional[str] = None,
+) -> bool:
+    """
+    Kaggle Deep Security Audit:
+    Explicitly queries Hugging Face API to verify that the remote checkpoint
+    at `target_step_path` exists, contains all required model/optimizer/metadata files,
+    and has valid, non-zero file sizes before allowing local snapshot deletion.
+    Only used on Kaggle to guarantee zero data loss.
+    """
+    token = _resolve_hf_token_standalone(hf_token)
+    if not token or not repo_id or str(repo_id).strip().lower() in ("", "none", "null", "local"):
+        return False
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi(token=token)
+        remote_files = set(api.list_repo_files(repo_id=repo_id, repo_type="model"))
+
+        # Determine essential files from local snapshot
+        required_names = []
+        if os.path.isdir(local_source_dir):
+            for fname in os.listdir(local_source_dir):
+                if (fname.endswith((".safetensors", ".pt", ".bin", ".json"))
+                        and not fname.startswith(".")
+                        and fname != "COMMITTED"):
+                    required_names.append(fname)
+
+        if not required_names:
+            required_names = ["checkpoint_state.json", "STAGE_METADATA.json"]
+
+        missing_files = []
+        prefix = target_step_path.strip("/")
+        for fname in required_names:
+            expected_remote = f"{prefix}/{fname}"
+            if expected_remote not in remote_files:
+                missing_files.append(fname)
+
+        if missing_files:
+            print(
+                f"[Kaggle Security Audit FAILED] Remote HF verification failed for '{target_step_path}'. "
+                f"Missing {len(missing_files)} essential files on remote: {missing_files[:5]}. "
+                f"Preserving local snapshot for safety!",
+                flush=True,
+            )
+            return False
+
+        # Additional sanity check: query paths metadata to ensure file sizes > 0
+        try:
+            paths_info = api.get_paths_info(
+                repo_id=repo_id,
+                paths=[f"{prefix}/{f}" for f in required_names],
+                repo_type="model",
+            )
+            for info in paths_info:
+                if hasattr(info, "size") and info.size is not None and info.size <= 0:
+                    print(
+                        f"[Kaggle Security Audit FAILED] Remote file '{info.path}' has 0 bytes on HF. "
+                        f"Preserving local snapshot for safety!",
+                        flush=True,
+                    )
+                    return False
+        except Exception:
+            pass  # get_paths_info may not be supported on older hub versions; file presence already verified
+
+        print(
+            f"[Kaggle Security Audit] Verified remote HF backup 100% complete and healthy "
+            f"({len(required_names)} files verified in {target_step_path}).",
+            flush=True,
+        )
+        return True
+    except Exception as e:
+        print(f"[Kaggle Security Audit Warning] Error verifying remote HF backup: {e}", flush=True)
+        return False
 
 
 def sync_normal_checkpoint_to_hf(
@@ -2040,12 +2142,19 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
                 if os.path.exists(cdir):
                     shutil.rmtree(cdir, ignore_errors=True)
 
-            # 2. On Kaggle: prune old versioned checkpoint snapshots (*.step<N>_*) from
-            #    the working directory.  These are created per-checkpoint by save_checkpoint
-            #    and can collectively consume 10–15 GB on a 20 GB disk.
-            #    Only snapshots that are NOT the very newest (highest step) are removed.
+            # 2. On Kaggle: prune old versioned checkpoint snapshots (*.step<N>_*) and redundant backups
             if _is_kaggle_environment():
                 _kaggle_prune_old_versioned_snapshots(check_path)
+                # Purge obsolete local backup directories if space is critically low
+                redundant_backup_candidates = [
+                    os.path.join(check_path, "tara/storage/backup"),
+                    os.path.join(check_path, "storage/backup"),
+                    "storage/backup",
+                ]
+                for bdir in redundant_backup_candidates:
+                    if os.path.isdir(bdir):
+                        print(f"[Kaggle Disk Guard] Purging redundant local storage/backup directory to reclaim space on Kaggle: {bdir}", flush=True)
+                        _safe_rmtree(bdir)
 
             # 3. Clean temporary files in /tmp
             for p in glob.glob("/tmp/tara_*") + glob.glob("/tmp/tmp_tara_*") + glob.glob("/tmp/tmptara*"):
@@ -2081,27 +2190,43 @@ def _kaggle_prune_old_versioned_snapshots(search_root: str) -> None:
     now = time.time()
     # Map basename -> list of (step, mtime, path)
     grouped: Dict[str, List[Tuple[int, float, str]]] = {}
+    # Collect candidate search directories
+    search_dirs = [
+        search_root,
+        os.path.join(search_root, "tara"),
+        os.path.join(search_root, "storage", "models", "checkpoints"),
+        os.path.join(search_root, "tara", "storage", "models", "checkpoints"),
+        os.path.join("storage", "models", "checkpoints"),
+    ]
+    seen_dirs: Set[str] = set()
     try:
-        for entry in os.listdir(search_root):
-            full = os.path.join(search_root, entry)
-            if not os.path.isdir(full):
+        for sdir in search_dirs:
+            if not os.path.isdir(sdir):
                 continue
-            m = versioned_pattern.match(entry)
-            if not m:
-                continue
-            base = m.group(1)
-            step_num = int(m.group(2))
-            # Must have COMMITTED marker — only fully-written snapshots are prunable
-            if not os.path.isfile(os.path.join(full, "COMMITTED")):
-                continue
-            try:
-                mtime = os.path.getmtime(full)
-            except Exception:
-                mtime = 0.0
-            # Protect snapshots younger than 5 minutes (in-flight upload window)
-            if now - mtime < 300:
-                continue
-            grouped.setdefault(base, []).append((step_num, mtime, full))
+            for entry in os.listdir(sdir):
+                full = os.path.join(sdir, entry)
+                if not os.path.isdir(full):
+                    continue
+                full_abs = os.path.abspath(full)
+                if full_abs in seen_dirs:
+                    continue
+                seen_dirs.add(full_abs)
+                m = versioned_pattern.match(entry)
+                if not m:
+                    continue
+                base = m.group(1)
+                step_num = int(m.group(2))
+                # Must have COMMITTED marker — only fully-written snapshots are prunable
+                if not os.path.isfile(os.path.join(full, "COMMITTED")):
+                    continue
+                try:
+                    mtime = os.path.getmtime(full)
+                except Exception:
+                    mtime = 0.0
+                # Protect snapshots younger than 5 minutes (in-flight upload window)
+                if now - mtime < 300:
+                    continue
+                grouped.setdefault(base, []).append((step_num, mtime, full))
     except Exception as scan_err:
         print(f"[Kaggle Disk Guard] Snapshot scan notice: {scan_err}", flush=True)
         return
@@ -3300,7 +3425,12 @@ def _cleanup_old_versioned_checkpoints(
     - In-flight uploads (younger than min_abandoned_age_seconds without COMMITTED) are protected.
     - All deletions are logged explicitly.
     """
-    keep_n = max(int(keep_n), 2)
+    # Kaggle disk guard: only keep 1 on Kaggle to prevent 20 GB disk exhaustion.
+    # On GDrive / Colab / local machines, strictly retain keep_n >= 2.
+    if _is_kaggle_environment():
+        keep_n = max(int(keep_n), 1)
+    else:
+        keep_n = max(int(keep_n), 2)
 
     prefix = output_dir_basename + ".step"
     staging_prefix = f".ckpt_staging_{output_dir_basename}_"

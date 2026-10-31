@@ -62,6 +62,7 @@ from gdrive_sync import (
     restore_checkpoint_from_gdrive,
     _safe_unlink,
     _safe_rmtree,
+    _is_kaggle_environment,
     _stream_copy_file,
     validate_checkpoint_runtime_compatibility,
     compute_file_sha256,
@@ -1013,7 +1014,7 @@ def main():
                         help="Enable activation gradient checkpointing to save VRAM (default: enabled)")
     parser.add_argument("--allow-unsafe-fp32-adamw", action="store_true", default=False,
                         help="Override memory preflight gate to allow FP32 AdamW on memory-constrained GPUs")
-    parser.add_argument("--keep-checkpoints", type=int, default=int(os.environ.get("KEEP_CHECKPOINTS", 2)),
+    parser.add_argument("--keep-checkpoints", type=int, default=int(os.environ.get("KEEP_CHECKPOINTS", 1 if _is_kaggle_environment() else 2)),
                         help="Number of past checkpoints to retain (default: 2; deletes older checkpoints only upon verified new commit)")
     parser.add_argument("--skip-save-steps", type=int, default=int(os.environ.get("SKIP_SAVE_STEPS", 0)),
                         help="Number of initial steps to skip checkpoint and best-milestone disk/cloud saves (default: 0; immediate zero-lock saves active)")
@@ -1651,7 +1652,7 @@ def main():
         _cleanup_old_versioned_checkpoints(
             parent_ckpt_dir,
             os.path.basename(args.output_dir),
-            keep_n=max(int(args.keep_checkpoints), 2),
+            keep_n=max(int(args.keep_checkpoints), 1 if _is_kaggle_environment() else 2),
             force_keep_exact=True,
             protected_dirs=prot_startup,
         )
@@ -2207,7 +2208,7 @@ def main():
                             dataset=dataset,
                             shard_ledger=shard_ledger,
                             data_cursor=best_loss_cursor,
-                            keep_n=max(args.keep_checkpoints, 2),
+                            keep_n=max(args.keep_checkpoints, 1 if _is_kaggle_environment() else 2),
                             world_model=world_model,
                             world_optimizer=world_optimizer,
                             world_scaler=world_scaler,

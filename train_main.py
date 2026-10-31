@@ -293,7 +293,7 @@ def ensure_remote_assets_available(
                 # Purge hidden .cache directories to eliminate duplicate disk usage
                 for d in [model_dir, dataset_dir]:
                     shutil.rmtree(os.path.join(d, ".cache"), ignore_errors=True)
-                shutil.rmtree(os.path.expanduser("~/.cache/huggingface"), ignore_errors=True)
+
                 shutil.rmtree(os.path.expanduser("~/.cache/pip"), ignore_errors=True)
 
                 print(f"[High-Speed HF] Dataset shards ready in {dataset_dir}")

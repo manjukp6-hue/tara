@@ -2145,22 +2145,14 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
         free_gb = usage.free / (1024 ** 3)
         if free_gb < effective_min_free_gb:
             print(f"[DISK HYGIENE] Low free disk space detected ({free_gb:.2f} GB < {effective_min_free_gb:.1f} GB). Reclaiming caches...", flush=True)
-            # 1. Purge pip and torch caches; Hugging Face cache ONLY if worker is NOT actively uploading
+            # 1. Purge pip and torch caches only. Hugging Face cache is strictly preserved
+            # so dataset shards and authentication tokens are NOT repeatedly re-downloaded.
             cache_dirs = [
                 "/root/.cache/pip",
                 "/root/.cache/torch",
                 os.path.expanduser("~/.cache/pip"),
                 os.path.expanduser("~/.cache/torch"),
             ]
-            try:
-                worker = BackgroundGDriveSyncWorker.get_instance()
-                if not worker.is_busy():
-                    cache_dirs.extend([
-                        "/root/.cache/huggingface",
-                        os.path.expanduser("~/.cache/huggingface"),
-                    ])
-            except Exception:
-                pass
 
             for cdir in cache_dirs:
                 if os.path.exists(cdir):
@@ -3225,11 +3217,6 @@ def restore_checkpoint_from_hf(
                 shutil.copytree(s_f, d_f)
 
         _safe_rmtree(staging_restore_dir)
-        if _is_kaggle_environment():
-            for hf_cache in ("/root/.cache/huggingface/hub", os.path.expanduser("~/.cache/huggingface/hub")):
-                if os.path.isdir(hf_cache):
-                    _safe_rmtree(hf_cache)
-                    print(f"[Kaggle Disk Guard] Purged HF restore download cache to reclaim 5 GB: {hf_cache}", flush=True)
         print(f"[HF Restore] Checkpoint successfully verified and synchronized from Hugging Face into '{local_ckpt_dir}'!", flush=True)
         return True
     except Exception as e:

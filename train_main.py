@@ -144,6 +144,7 @@ CLR_RED = "\033[31m"
 CLR_GREEN = "\033[32m"
 CLR_PURPLE = "\033[35m"
 CLR_CYAN = "\033[36m"
+CLR_YELLOW = "\033[33m"
 
 
 def get_metric_status_and_color(val: float, green_range: Tuple[float, float], purple_range: Tuple[float, float]) -> Tuple[str, str, str]:
@@ -903,30 +904,56 @@ def probe_model_generation(
     step: int,
     stage_id: str,
     max_new_tokens: int = 30,
+    temperature: float = 0.7,
+    top_k: int = 50,
+    top_p: float = 0.9,
+    repetition_penalty: float = 1.15,
+    sample_inputs: Optional[torch.Tensor] = None,
+    current_domain: Optional[str] = None,
 ) -> None:
     """
-    Evaluates real-time text synthesis by probing the active model with canonical benchmark prompts.
+    Evaluates real-time text synthesis by probing the active model with canonical benchmark prompts
+    and dynamic samples extracted directly from the active training dataset.
     Provides immediate human-observable truth on model learning progression without training disruption.
+    Uses Top-K / Top-P nucleus sampling with temperature and repetition penalty to prevent artificial greedy repetition loops.
     """
     was_training = model.training
     model.eval()
     eval_model = getattr(model, "module", model)
 
-    test_probes = [
-        ("Kannada", "ಕರ್ನಾಟಕದ "),
-        ("Reasoning", "The sun rises in the "),
-        ("Code", "def add(a, b):\n    return "),
-    ]
+    pad_id = getattr(tokenizer, "pad_id", 0)
+    eos_id = getattr(tokenizer, "eos_id", None)
+    if eos_id is None and hasattr(tokenizer, "token_to_id"):
+        eos_id = tokenizer.token_to_id.get("<|endoftext|>", tokenizer.token_to_id.get("</s>", None))
+
+    test_probes = []
+
+    # 1. Dynamic Dataset Probe: Auto-sample prefix from active training dataset batch
+    if sample_inputs is not None and torch.is_tensor(sample_inputs) and sample_inputs.numel() > 0:
+        try:
+            seq = sample_inputs[0].detach().cpu().tolist()
+            valid_tokens = [t for t in seq if t != pad_id]
+            if len(valid_tokens) >= 16:
+                prefix_len = min(12, len(valid_tokens) // 3)
+                prefix_ids = valid_tokens[:prefix_len]
+                truth_ids = valid_tokens[prefix_len : prefix_len + max_new_tokens]
+                dynamic_prompt = tokenizer.decode(prefix_ids).strip()
+                truth_continuation = tokenizer.decode(truth_ids).replace("\n", "\\n").strip()
+                if dynamic_prompt:
+                    domain_label = f"Live Dataset ({current_domain})" if current_domain else "Live Dataset"
+                    test_probes.append((domain_label, dynamic_prompt, truth_continuation))
+        except Exception:
+            pass
+
+    # 2. Canonical Fixed Benchmark Probes (for step-over-step longitudinal tracking)
+    test_probes.append(("Kannada Bench", "ಕರ್ನಾಟಕದ ", None))
+    test_probes.append(("Code Bench", "def add(a, b):\n    return ", None))
 
     print(f"\n{CLR_CYAN}{'=' * 80}{CLR_RESET}", flush=True)
     print(f"  {CLR_BOLD}{CLR_CYAN}TARA LIVE MODEL GENERATION PROBE (Step {step:04d} | {stage_id}){CLR_RESET}", flush=True)
     print(f"{CLR_CYAN}{'=' * 80}{CLR_RESET}", flush=True)
 
-    eos_id = getattr(tokenizer, "eos_id", None)
-    if eos_id is None and hasattr(tokenizer, "token_to_id"):
-        eos_id = tokenizer.token_to_id.get("<|endoftext|>", tokenizer.token_to_id.get("</s>", None))
-
-    for tag, prompt in test_probes:
+    for tag, prompt, ground_truth in test_probes:
         try:
             tok_out = tokenizer.encode(prompt)
             prompt_ids = list(tok_out.ids)
@@ -938,10 +965,46 @@ def probe_model_generation(
                 inp = torch.tensor([generated_ids], dtype=torch.long, device=device)
                 out = eval_model(input_ids=inp)
                 logits = out.logits if hasattr(out, "logits") and out.logits is not None else (out[0] if isinstance(out, (tuple, list)) else out)
-                if logits.dim() == 2:
-                    next_token_id = int(torch.argmax(logits[-1, :], dim=-1).item())
+                next_token_logits = logits[-1, :].clone().float() if logits.dim() == 2 else logits[0, -1, :].clone().float()
+
+                # 1. Repetition penalty on recently generated tokens
+                if repetition_penalty != 1.0 and generated_ids:
+                    recent_tokens = set(generated_ids[-64:])
+                    for prev_token in recent_tokens:
+                        if prev_token < next_token_logits.size(0):
+                            if next_token_logits[prev_token] > 0:
+                                next_token_logits[prev_token] /= repetition_penalty
+                            else:
+                                next_token_logits[prev_token] *= repetition_penalty
+
+                # 2. Temperature scaling
+                if temperature > 0.0:
+                    scaled_logits = next_token_logits / temperature
+
+                    # 3. Top-K filtering
+                    if top_k > 0:
+                        k_val = min(top_k, scaled_logits.size(-1))
+                        topk_vals, _ = torch.topk(scaled_logits, k_val)
+                        scaled_logits[scaled_logits < topk_vals[-1]] = -float("Inf")
+
+                    # 4. Top-P (nucleus) filtering
+                    if 0.0 < top_p < 1.0:
+                        sorted_logits, sorted_indices = torch.sort(scaled_logits, descending=True)
+                        cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
+                        sorted_indices_to_remove = cumulative_probs > top_p
+                        sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                        sorted_indices_to_remove[..., 0] = False
+                        indices_to_remove = sorted_indices[sorted_indices_to_remove]
+                        scaled_logits[indices_to_remove] = -float("Inf")
+
+                    probs = torch.softmax(scaled_logits, dim=-1)
+                    if torch.isnan(probs).any() or probs.sum() <= 0:
+                        next_token_id = int(torch.argmax(next_token_logits, dim=-1).item())
+                    else:
+                        next_token_id = int(torch.multinomial(probs, num_samples=1).item())
                 else:
-                    next_token_id = int(torch.argmax(logits[0, -1, :], dim=-1).item())
+                    next_token_id = int(torch.argmax(next_token_logits, dim=-1).item())
+
                 if eos_id is not None and next_token_id == eos_id:
                     break
                 generated_ids.append(next_token_id)
@@ -952,9 +1015,13 @@ def probe_model_generation(
                 clean_cont = repr(continuation) if continuation else f"<tokens: {generated_ids[len(prompt_ids):]}>"
             else:
                 clean_cont = clean_cont.strip()
-            print(f"  [{tag:9s}] \"{prompt}\" -> {CLR_GREEN}{clean_cont}{CLR_RESET}", flush=True)
+
+            if ground_truth:
+                print(f"  [{tag}]\n    {CLR_YELLOW}Prompt   :{CLR_RESET} \"{prompt}\"\n    {CLR_CYAN}Truth    :{CLR_RESET} {ground_truth}\n    {CLR_GREEN}Tara Gen :{CLR_RESET} {clean_cont}", flush=True)
+            else:
+                print(f"  [{tag:14s}] \"{prompt}\" -> {CLR_GREEN}{clean_cont}{CLR_RESET}", flush=True)
         except Exception as pe:
-            print(f"  [{tag:9s}] Probe warning: {pe}", flush=True)
+            print(f"  [{tag:14s}] Probe warning: {pe}", flush=True)
 
     print(f"{CLR_CYAN}{'=' * 80}{CLR_RESET}\n", flush=True)
 
@@ -2215,31 +2282,34 @@ def main():
                                 flush=True,
                             )
 
-                            # Atomically commit and mirror verified best milestone
-                            save_checkpoint(
-                                model=model,
-                                optimizer=optimizer,
-                                scaler=scaler,
-                                config=config,
-                                tokenizer_path=tok_path,
-                                output_dir=best_cp_dir,
-                                step=step,
-                                epoch=epoch,
-                                loss=cur_step_loss,
-                                best_loss=best_loss,
-                                stage_id=args.stage_id,
-                                is_best=True,
-                                is_completed=False,
-                                sync_optimizer=False,
-                                dataset=dataset,
-                                shard_ledger=shard_ledger,
-                                data_cursor=best_loss_cursor,
-                                keep_n=max(args.keep_checkpoints, 1 if _is_kaggle_environment() else 2),
-                                world_model=world_model,
-                                world_optimizer=world_optimizer,
-                                world_scaler=world_scaler,
-                                max_shard_mb=args.max_shard_mb,
-                            )
+                            # Atomically commit and mirror verified best milestone (Rank 0 only with DDP barrier)
+                            if is_main_process:
+                                save_checkpoint(
+                                    model=model,
+                                    optimizer=optimizer,
+                                    scaler=scaler,
+                                    config=config,
+                                    tokenizer_path=tok_path,
+                                    output_dir=best_cp_dir,
+                                    step=step,
+                                    epoch=epoch,
+                                    loss=cur_step_loss,
+                                    best_loss=best_loss,
+                                    stage_id=args.stage_id,
+                                    is_best=True,
+                                    is_completed=False,
+                                    sync_optimizer=False,
+                                    dataset=dataset,
+                                    shard_ledger=shard_ledger,
+                                    data_cursor=best_loss_cursor,
+                                    keep_n=max(args.keep_checkpoints, 1 if _is_kaggle_environment() else 2),
+                                    world_model=world_model,
+                                    world_optimizer=world_optimizer,
+                                    world_scaler=world_scaler,
+                                    max_shard_mb=args.max_shard_mb,
+                                )
+                            if is_distributed:
+                                torch.distributed.barrier()
 
                         # If promote_max_step is set and current step is within window, snapshot to window_best_source
                         if args.promote_max_step > 0 and step <= args.promote_max_step:
@@ -2288,30 +2358,33 @@ def main():
                             flush=True,
                         )
 
-                        save_checkpoint(
-                            model=model,
-                            optimizer=optimizer,
-                            scaler=scaler,
-                            config=config,
-                            tokenizer_path=tok_path,
-                            output_dir=best_cp_dir,
-                            step=step,
-                            epoch=epoch,
-                            loss=cur_step_loss,
-                            best_loss=best_loss,
-                            stage_id=args.stage_id,
-                            is_best=True,
-                            is_completed=False,
-                            sync_optimizer=False,
-                            dataset=dataset,
-                            shard_ledger=shard_ledger,
-                            data_cursor=copy.deepcopy(current_cursor) if current_cursor is not None else pending_best_cursor,
-                            keep_n=max(args.keep_checkpoints, 1 if _is_kaggle_environment() else 2),
-                            world_model=world_model,
-                            world_optimizer=world_optimizer,
-                            world_scaler=world_scaler,
-                            max_shard_mb=args.max_shard_mb,
-                        )
+                        if is_main_process:
+                            save_checkpoint(
+                                model=model,
+                                optimizer=optimizer,
+                                scaler=scaler,
+                                config=config,
+                                tokenizer_path=tok_path,
+                                output_dir=best_cp_dir,
+                                step=step,
+                                epoch=epoch,
+                                loss=cur_step_loss,
+                                best_loss=best_loss,
+                                stage_id=args.stage_id,
+                                is_best=True,
+                                is_completed=False,
+                                sync_optimizer=False,
+                                dataset=dataset,
+                                shard_ledger=shard_ledger,
+                                data_cursor=copy.deepcopy(current_cursor) if current_cursor is not None else pending_best_cursor,
+                                keep_n=max(args.keep_checkpoints, 1 if _is_kaggle_environment() else 2),
+                                world_model=world_model,
+                                world_optimizer=world_optimizer,
+                                world_scaler=world_scaler,
+                                max_shard_mb=args.max_shard_mb,
+                            )
+                        if is_distributed:
+                            torch.distributed.barrier()
 
                 # Target-Step Model Promotion Gate (NON-BLOCKING: Real-time deployment while training continues uninterrupted)
                 if args.promote_max_step > 0 and step >= args.promote_max_step and not promoted_at_target_step:
@@ -2335,12 +2408,19 @@ def main():
                 if step % 25 == 0 or step == start_step + 1 or is_new_best:
                     print_frontier_comparison_matrix_colored(step, cur_step_loss, min(best_loss, cur_step_loss))
 
-                # Live Model Generation Evaluation Probe (main rank only)
+                # Live Model Generation Evaluation Probe (main rank only, synchronized across DDP)
                 is_eval_interval = (args.eval_interval > 0 and step % args.eval_interval == 0 and step > last_eval_step)
                 if is_eval_interval:
                     last_eval_step = step
+                    if is_distributed:
+                        torch.distributed.barrier()
                     if is_main_process:
-                        probe_model_generation(model, tokenizer, device, step, args.stage_id)
+                        probe_model_generation(
+                            model, tokenizer, device, step, args.stage_id,
+                            sample_inputs=inputs, current_domain=cur_domain
+                        )
+                    if is_distributed:
+                        torch.distributed.barrier()
 
                 # ------------------------------------------------------------------
                 # REGULAR CHECKPOINT GATE
@@ -2364,19 +2444,22 @@ def main():
                     )
                 elif should_save_regular:
                     last_regular_checkpoint_step = step
-                    # 1. Save full training checkpoint ONCE (with optimizer state)
-                    save_checkpoint(
-                        model, optimizer, scaler, config, tok_path, args.output_dir,
-                        step, epoch, cur_step_loss, best_loss, args.stage_id,
-                        is_best=False, is_completed=False,
-                        dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
-                        keep_n=args.keep_checkpoints, force_keep_exact=True,
-                        world_model=world_model,
-                        world_optimizer=world_optimizer,
-                        world_scaler=world_scaler,
-                        per_shard_promotion=args.per_shard_promotion,
-                        max_shard_mb=args.max_shard_mb,
-                    )
+                    # 1. Save full training checkpoint ONCE (with optimizer state) - Rank 0 only with DDP barrier
+                    if is_main_process:
+                        save_checkpoint(
+                            model, optimizer, scaler, config, tok_path, args.output_dir,
+                            step, epoch, cur_step_loss, best_loss, args.stage_id,
+                            is_best=False, is_completed=False,
+                            dataset=dataset, shard_ledger=shard_ledger, data_cursor=current_cursor,
+                            keep_n=args.keep_checkpoints, force_keep_exact=True,
+                            world_model=world_model,
+                            world_optimizer=world_optimizer,
+                            world_scaler=world_scaler,
+                            per_shard_promotion=args.per_shard_promotion,
+                            max_shard_mb=args.max_shard_mb,
+                        )
+                    if is_distributed:
+                        torch.distributed.barrier()
 
                 # ------------------------------------------------------------------
                 # PERIODIC MODEL PROMOTION & NON-BLOCKING HF UPLOAD GATE
@@ -2429,17 +2512,6 @@ def main():
         # To produce the mathematically exact average gradient (1 / n) * sum_{i=1}^n grad(L_i),
         # we rescale the accumulated gradients by (args.grad_accum / partial_count).
         if accum_batches:
-            partial_count = len(accum_batches)
-            rescale_factor = float(args.grad_accum) / float(partial_count)
-
-            for p in model.parameters():
-                if p.grad is not None:
-                    p.grad.mul_(rescale_factor)
-            if world_model is not None:
-                for p in world_model.parameters():
-                    if p.grad is not None:
-                        p.grad.mul_(rescale_factor)
-
             cur_lr = compute_scheduled_lr(step, args.warmup_steps, args.max_steps, args.lr, args.min_lr)
             for pg in optimizer.param_groups:
                 pg["lr"] = cur_lr

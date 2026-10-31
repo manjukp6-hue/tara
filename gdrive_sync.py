@@ -1853,6 +1853,11 @@ def compute_tokenizer_fingerprint(
         actual_tok_path = tokenizer_path if os.path.isfile(tokenizer_path) else os.path.join(tokenizer_path, "tokenizer.json") if os.path.isdir(tokenizer_path) else None
         if actual_tok_path and os.path.isfile(actual_tok_path):
             tok_file_sha = compute_file_sha256(actual_tok_path)
+            try:
+                with open(actual_tok_path, "rb") as _tfb:
+                    tok_norm_sha = hashlib.sha256(_tfb.read().replace(b"\r\n", b"\n")).hexdigest()
+            except Exception:
+                tok_norm_sha = tok_file_sha
             search_dir = os.path.dirname(os.path.abspath(actual_tok_path))
             try:
                 with open(actual_tok_path, "r", encoding="utf-8") as f:
@@ -1911,6 +1916,7 @@ def compute_tokenizer_fingerprint(
     res = {
         "canonical_fingerprint": composite_sha,
         "tokenizer_file_sha256": tok_file_sha,
+        "normalized_tokenizer_file_sha256": locals().get("tok_norm_sha", tok_file_sha),
         "tokenizer_config_sha256": tok_cfg_sha,
         "special_tokens_map_sha256": tok_sp_sha,
         "vocab_size": vocab_size,
@@ -2972,14 +2978,24 @@ def save_checkpoint(
             # Step 8: Non-Blocking Background Multi-Cloud Synchronization (GDrive + HF)
             # If Google Drive is not mounted, auto-selects Hugging Face as the primary backup target!
             # Thread safety: upload from immutable versioned_dir to eliminate TOCTOU overwrite race conditions
-            upload_source = versioned_dir if versioned_dir and os.path.exists(versioned_dir) else output_dir
-            trigger_async_cloud_backup(
-                local_ckpt_dir=upload_source,
-                stage_id=stage_id,
-                is_best=is_best,
-                step=step,
-                loss=loss,
-            )
+            is_rank_0 = True
+            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                is_rank_0 = (torch.distributed.get_rank() == 0)
+            elif "RANK" in os.environ:
+                try:
+                    is_rank_0 = (int(os.environ.get("RANK", "0")) == 0)
+                except ValueError:
+                    pass
+
+            if is_rank_0:
+                upload_source = versioned_dir if versioned_dir and os.path.exists(versioned_dir) else output_dir
+                trigger_async_cloud_backup(
+                    local_ckpt_dir=upload_source,
+                    stage_id=stage_id,
+                    is_best=is_best,
+                    step=step,
+                    loss=loss,
+                )
 
             # On Kaggle: Strictly wait for backup, remote verification, and local snapshot reclamation
             # before returning to training loop so storage is free for the next step!
@@ -3391,6 +3407,25 @@ def resolve_and_auto_select_checkpoint(
         if m:
             local_step = max(local_step, int(m.group(1)))
 
+    # Fallback to local tara_checkpoints / workspace discovery if local_ckpt_dir is empty
+    local_alt_source = None
+    if local_step < 0:
+        for alt_loc in [
+            "tara_checkpoints/normal_checkpoint",
+            "tara_checkpoints/best_milestone",
+            "tara_checkpoints",
+            "/kaggle/working/tara_checkpoints/normal_checkpoint",
+            "/kaggle/working/tara_checkpoints/best_milestone",
+            "/kaggle/working/tara_checkpoints",
+            os.path.join(parent_dir, "tara_checkpoints", "normal_checkpoint"),
+            os.path.join(parent_dir, "tara_checkpoints"),
+        ]:
+            if os.path.isdir(alt_loc):
+                st = get_checkpoint_dir_step(alt_loc)
+                if st > local_step:
+                    local_step = st
+                    local_alt_source = alt_loc
+
     # 2. Google Drive Step
     gdrive_dir = resolve_gdrive_restore_dir() or gdrive_base_dir
     gdrive_step = get_checkpoint_dir_step(gdrive_dir) if (gdrive_dir and os.path.exists(gdrive_dir)) else -1
@@ -3435,6 +3470,28 @@ def resolve_and_auto_select_checkpoint(
 
     # 1. Local Disk is already at or above the latest remote checkpoint
     if local_step >= highest_step and local_step >= 0:
+        if local_alt_source and not check_model_weights_exist(local_ckpt_dir):
+            print(f"  [Auto-Align] Seeding active checkpoint '{local_ckpt_dir}' from '{local_alt_source}' (Step {local_step})...", flush=True)
+            src_to_copy = local_alt_source
+            for sub in os.listdir(local_alt_source):
+                sub_path = os.path.join(local_alt_source, sub)
+                if os.path.isdir(sub_path) and check_model_weights_exist(sub_path):
+                    sub_st = get_checkpoint_dir_step(sub_path)
+                    if sub_st == local_step:
+                        src_to_copy = sub_path
+                        break
+            os.makedirs(local_ckpt_dir, exist_ok=True)
+            for f in os.listdir(src_to_copy):
+                sf = os.path.join(src_to_copy, f)
+                df = os.path.join(local_ckpt_dir, f)
+                if os.path.isfile(sf) and not os.path.exists(df):
+                    try:
+                        os.link(sf, df)
+                    except Exception:
+                        try:
+                            os.symlink(os.path.abspath(sf), df)
+                        except Exception:
+                            shutil.copy2(sf, df)
         print(f"  {CLR_BOLD}{CLR_GREEN}>>> AUTO-SELECTED: LOCAL DISK (Step {local_step:04d} is already latest. No remote download required) <<<{CLR_RESET}", flush=True)
         print(f"{CLR_CYAN}{'=' * 85}{CLR_RESET}\n", flush=True)
         return "local", local_step
@@ -4112,6 +4169,24 @@ def try_resume_from_checkpoint(
     elif os.path.isdir(checkpoint_dir) and checkpoint_dir not in candidate_dirs:
         candidate_dirs.append(checkpoint_dir)
 
+    # 4. Discovered tara_checkpoints candidates across local workspace
+    for extra_base in [
+        "tara_checkpoints",
+        os.path.join(parent_dir, "tara_checkpoints"),
+        "/kaggle/working/tara_checkpoints",
+    ]:
+        if os.path.isdir(extra_base):
+            for sub_cat in ["normal_checkpoint", "best_milestone", ""]:
+                cat_dir = os.path.join(extra_base, sub_cat) if sub_cat else extra_base
+                if os.path.isdir(cat_dir):
+                    for entry in os.listdir(cat_dir):
+                        full_entry = os.path.join(cat_dir, entry)
+                        if os.path.isdir(full_entry) and check_model_weights_exist(full_entry):
+                            if full_entry not in candidate_dirs:
+                                candidate_dirs.append(full_entry)
+                    if check_model_weights_exist(cat_dir) and cat_dir not in candidate_dirs:
+                        candidate_dirs.append(cat_dir)
+
     best_cand_dir = None
     best_cand_step = -1
     best_cand_epoch = 0
@@ -4191,9 +4266,11 @@ def try_resume_from_checkpoint(
                     else:
                         stored_tok_sha = stored_tok_fp.get("tokenizer_file_sha256")
                         curr_tok_sha = current_tok_fp.get("tokenizer_file_sha256")
+                        curr_norm_sha = current_tok_fp.get("normalized_tokenizer_file_sha256")
                         stored_vocab = stored_tok_fp.get("vocab_size")
                         curr_vocab = current_tok_fp.get("vocab_size")
-                        if stored_tok_sha and curr_tok_sha and stored_tok_sha == curr_tok_sha and (stored_vocab is None or curr_vocab is None or stored_vocab == curr_vocab):
+                        tok_sha_matches = (stored_tok_sha == curr_tok_sha) or (curr_norm_sha and stored_tok_sha == curr_norm_sha)
+                        if stored_tok_sha and (curr_tok_sha or curr_norm_sha) and tok_sha_matches and (stored_vocab is None or curr_vocab is None or stored_vocab == curr_vocab):
                             is_tok_match = True
                             print(
                                 f"  -> Notice: Candidate at {cand} primary tokenizer.json SHA-256 and vocab_size ({curr_vocab}) match authentic baseline. Permitting verified resume.",
@@ -4236,6 +4313,7 @@ def try_resume_from_checkpoint(
             cand_basename = os.path.basename(os.path.normpath(cand))
             is_direct_output = (os.path.abspath(cand) == os.path.abspath(checkpoint_dir))
             is_versioned_match = cand_basename.startswith(output_dir_basename + ".step")
+            is_tara_ckpt = ("tara_checkpoints" in cand)
 
             cand_stage = s_data.get("stage_id", "")
             if expected_stage_id and cand_stage and cand_stage != expected_stage_id:
@@ -4246,7 +4324,7 @@ def try_resume_from_checkpoint(
                 )
                 continue
 
-            if not (is_direct_output or is_versioned_match):
+            if not (is_direct_output or is_versioned_match or is_tara_ckpt):
                 # When expected_stage_id is provided and matches, accept it; otherwise reject scope mismatch
                 if expected_stage_id and cand_stage == expected_stage_id:
                     pass

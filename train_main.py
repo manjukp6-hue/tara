@@ -1058,7 +1058,12 @@ def main():
         torch.cuda.set_device(local_rank)
         device = torch.device(f"cuda:{local_rank}")
         if not torch.distributed.is_initialized():
-            torch.distributed.init_process_group(backend="nccl", init_method="env://")
+            import datetime as _dt
+            torch.distributed.init_process_group(
+                backend="nccl",
+                init_method="env://",
+                timeout=_dt.timedelta(minutes=30),
+            )
     else:
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -2225,6 +2230,7 @@ def main():
                                 stage_id=args.stage_id,
                                 is_best=True,
                                 is_completed=False,
+                                sync_optimizer=False,
                                 dataset=dataset,
                                 shard_ledger=shard_ledger,
                                 data_cursor=best_loss_cursor,
@@ -2296,6 +2302,7 @@ def main():
                             stage_id=args.stage_id,
                             is_best=True,
                             is_completed=False,
+                            sync_optimizer=False,
                             dataset=dataset,
                             shard_ledger=shard_ledger,
                             data_cursor=copy.deepcopy(current_cursor) if current_cursor is not None else pending_best_cursor,

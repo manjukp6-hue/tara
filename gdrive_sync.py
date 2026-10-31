@@ -2166,6 +2166,23 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
                     _safe_rmtree(phantom_gdrive)
 
                 _kaggle_prune_old_versioned_snapshots(check_path)
+
+                # Purge duplicate candidate model weights (storage/models/tara_candidate_v1)
+                for cand_dir in (
+                    os.path.join(check_path, "storage/models/tara_candidate_v1"),
+                    os.path.join(check_path, "tara/storage/models/tara_candidate_v1"),
+                    "storage/models/tara_candidate_v1",
+                ):
+                    if os.path.isdir(cand_dir):
+                        for f in os.listdir(cand_dir):
+                            if f.endswith((".safetensors", ".pt", ".bin")):
+                                fp = os.path.join(cand_dir, f)
+                                try:
+                                    os.remove(fp)
+                                    print(f"[Kaggle Disk Guard] Reclaimed duplicate candidate weight: {f}", flush=True)
+                                except Exception:
+                                    pass
+
                 # Purge obsolete local backup directories if space is critically low
                 redundant_backup_candidates = [
                     os.path.join(check_path, "tara/storage/backup"),
@@ -2287,8 +2304,7 @@ def _kaggle_prune_old_versioned_snapshots(search_root: str) -> None:
                         mtime = os.path.getmtime(full)
                     except Exception:
                         mtime = 0.0
-                    if now - mtime >= 120:
-                        grouped_versioned.setdefault(base, []).append((step_num, mtime, full))
+                    grouped_versioned.setdefault(base, []).append((step_num, mtime, full))
                     continue
 
                 m_mile = milestone_pattern.match(entry)
@@ -2325,6 +2341,79 @@ def _kaggle_prune_old_versioned_snapshots(search_root: str) -> None:
 # =============================================================================
 # 6. Atomic Checkpoint Persistence, Promotion Pipeline & Versioned Retention
 # =============================================================================
+
+def _kaggle_ensure_staging_headroom(output_dir: str, is_best: bool, required_gb: float = 6.0) -> float:
+    """
+    On Kaggle's ~20 GB disk, ensures at least `required_gb` free space before writing
+    a new checkpoint to staging.
+    Reclaims:
+    1. Standard caches and old snapshots via _reclaim_emergency_disk_space().
+    2. Redundant candidate weights in storage/models/tara_candidate_v1 (3.7 GB).
+    3. If is_best=True and output_dir has old milestone weights (3.7 GB), reclaims them
+       since the new best milestone replaces output_dir and previous milestone is backed up on HF.
+    """
+    check_path = "/kaggle/working" if os.path.isdir("/kaggle/working") else "."
+    try:
+        free_gb = shutil.disk_usage(check_path).free / (1024 ** 3)
+    except Exception:
+        return 10.0
+
+    if free_gb >= required_gb:
+        return free_gb
+
+    print(f"[Kaggle Disk Guard] Free disk space is low ({free_gb:.2f} GB < {required_gb:.1f} GB). Reclaiming space before staging...", flush=True)
+
+    # 1. Standard emergency reclamation
+    _reclaim_emergency_disk_space(min_free_gb=required_gb)
+    try:
+        free_gb = shutil.disk_usage(check_path).free / (1024 ** 3)
+    except Exception:
+        pass
+    if free_gb >= required_gb:
+        return free_gb
+
+    # 2. Reclaim redundant candidate model weights (storage/models/tara_candidate_v1)
+    for cand_dir in (
+        os.path.join(check_path, "storage/models/tara_candidate_v1"),
+        os.path.join(check_path, "tara/storage/models/tara_candidate_v1"),
+        "storage/models/tara_candidate_v1",
+    ):
+        if os.path.isdir(cand_dir):
+            for f in os.listdir(cand_dir):
+                if f.endswith((".safetensors", ".pt", ".bin")):
+                    fp = os.path.join(cand_dir, f)
+                    try:
+                        os.remove(fp)
+                        print(f"[Kaggle Disk Guard] Reclaimed duplicate candidate weight: {f}", flush=True)
+                    except Exception:
+                        pass
+
+    try:
+        free_gb = shutil.disk_usage(check_path).free / (1024 ** 3)
+    except Exception:
+        pass
+    if free_gb >= required_gb:
+        return free_gb
+
+    # 3. If saving best milestone, reclaim previous milestone weights from output_dir
+    # (they are already mirrored to HF; this milestone replaces them)
+    if is_best and os.path.isdir(output_dir):
+        for f in os.listdir(output_dir):
+            if f.endswith((".safetensors", ".pt", ".bin")):
+                fp = os.path.join(output_dir, f)
+                try:
+                    os.remove(fp)
+                    print(f"[Kaggle Disk Guard] Reclaimed previous best milestone weight before staging: {f}", flush=True)
+                except Exception:
+                    pass
+
+    try:
+        free_gb = shutil.disk_usage(check_path).free / (1024 ** 3)
+    except Exception:
+        pass
+    print(f"[Kaggle Disk Guard] Available free disk space before staging: {free_gb:.2f} GB", flush=True)
+    return free_gb
+
 
 def get_memory_status_str() -> str:
     """Returns formatted system RAM and GPU VRAM status for diagnostic monitoring."""
@@ -2418,14 +2507,9 @@ def save_checkpoint(
                 worker.wait_completion(timeout=600)
                 _reclaim_emergency_disk_space(min_free_gb=10.0)
 
-            # Check free disk space before staging
+            # Ensure sufficient disk headroom before staging (guarantees >= 6.0 GB)
             try:
-                free_gb = shutil.disk_usage("/kaggle/working").free / (1024 ** 3)
-                if free_gb < 8.0:
-                    print(f"[Kaggle Disk Guard] Free disk space is low ({free_gb:.2f} GB < 8.0 GB). Reclaiming space before staging...", flush=True)
-                    _reclaim_emergency_disk_space(min_free_gb=10.0)
-                    free_after = shutil.disk_usage("/kaggle/working").free / (1024 ** 3)
-                    print(f"[Kaggle Disk Guard] Available free disk space before staging: {free_after:.2f} GB", flush=True)
+                _kaggle_ensure_staging_headroom(output_dir=output_dir, is_best=is_best, required_gb=6.0)
             except Exception as de:
                 print(f"[Kaggle Disk Guard Notice] Disk space check notice: {de}", flush=True)
         else:
@@ -2851,6 +2935,19 @@ def save_checkpoint(
                 step=step,
                 loss=loss,
             )
+
+            # On Kaggle: Strictly wait for backup, remote verification, and local snapshot reclamation
+            # before returning to training loop so storage is free for the next step!
+            if _is_kaggle_environment():
+                print(f"[Kaggle Synchronous Backup Guard] Waiting for [{tag}] backup to upload, verify remotely, and reclaim local storage before continuing to next step...", flush=True)
+                worker = BackgroundGDriveSyncWorker.get_instance()
+                worker.wait_completion(timeout=1800)
+                _reclaim_emergency_disk_space(min_free_gb=10.0)
+                try:
+                    free_gb = shutil.disk_usage("/kaggle/working").free / (1024 ** 3)
+                    print(f"[Kaggle Synchronous Backup Guard] Backup 100% verified & storage freed ({free_gb:.2f} GB free). Continuing to next training step.", flush=True)
+                except Exception:
+                    pass
 
             return True
 

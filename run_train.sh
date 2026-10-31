@@ -25,6 +25,11 @@ if [ -d "/kaggle/working" ] || [ -n "${KAGGLE_URL_BASE:-}" ]; then
     echo "[KAGGLE DISK CLEANUP] Purging all obsolete local checkpoint copies and phantom directories on Kaggle..."
     rm -rf /kaggle/working/tara_checkpoints /kaggle/working/tara/tara_checkpoints /content/drive 2>/dev/null || true
     rm -rf /kaggle/working/tara/storage/backup /kaggle/working/storage/backup 2>/dev/null || true
+    # Purge redundant candidate weights if checkpoint weights exist
+    if [ -f "storage/models/checkpoints/stage0_pretraining/model.safetensors" ] || [ -f "/kaggle/working/tara/storage/models/checkpoints/stage0_pretraining/model.safetensors" ]; then
+        rm -f storage/models/tara_candidate_v1/*.safetensors storage/models/tara_candidate_v1/*.pt 2>/dev/null || true
+        rm -f /kaggle/working/tara/storage/models/tara_candidate_v1/*.safetensors /kaggle/working/tara/storage/models/tara_candidate_v1/*.pt 2>/dev/null || true
+    fi
     python3 -c "from gdrive_sync import _kaggle_prune_old_versioned_snapshots; _kaggle_prune_old_versioned_snapshots('/kaggle/working')" 2>/dev/null || true
 fi
 if command -v apt-get >/dev/null 2>&1; then
@@ -279,13 +284,16 @@ if check_model_weights_exist(dst) and not check_model_weights_exist(cand_dir):
         s = os.path.join(dst, f)
         d = os.path.join(cand_dir, f)
         if os.path.isfile(s) and not os.path.exists(d):
-            try:
-                os.link(s, d)
-            except Exception:
+            if f.endswith(('.json', '.txt')):
+                shutil.copy2(s, d)
+            elif not (os.path.exists('/kaggle/working') or os.environ.get('KAGGLE_URL_BASE', '')):
                 try:
-                    os.symlink(os.path.abspath(s), d)
+                    os.link(s, d)
                 except Exception:
-                    shutil.copy2(s, d)
+                    try:
+                        os.symlink(os.path.abspath(s), d)
+                    except Exception:
+                        shutil.copy2(s, d)
     print(f'[MULTI-CLOUD RESTORE] Seeded candidate directory {cand_dir} from restored checkpoint.')
 
 
@@ -341,6 +349,9 @@ for i in "${!STAGES[@]}"; do
     STAGE_ID="${STAGES[$i]}"
     STAGE_OUTPUT_DIR="$ACTIVE_CP_DIR/$STAGE_ID"
     STAGE_MODEL_DIR="storage/models/tara_candidate_v1"
+    if [ -f "$STAGE_OUTPUT_DIR/model.safetensors" ] || [ -f "$STAGE_OUTPUT_DIR/model.safetensors.index.json" ]; then
+        STAGE_MODEL_DIR="$STAGE_OUTPUT_DIR"
+    fi
 
     # Stage handoff: if prior stage produced a valid checkpoint, seed from prior stage output
     if [ "$i" -gt 0 ]; then

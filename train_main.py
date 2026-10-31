@@ -1816,6 +1816,10 @@ def main():
     best_loss_step = start_step
     best_loss_epoch = start_epoch
     best_loss_cursor = resumed_cursor
+    pending_best_milestone = False
+    pending_best_step = -1
+    pending_best_loss = float("inf")
+    pending_best_cursor = None
     last_eval_step = start_step
     last_promote_step = start_step
     current_cursor = resumed_cursor
@@ -2180,40 +2184,56 @@ def main():
                     best_loss_cursor = copy.deepcopy(current_cursor) if current_cursor is not None else None
 
                     if can_save_at_current_step and (is_meaningful or cooldown_ok or step >= args.max_steps):
-                        committed_milestone_this_step = True
-                        last_best_checkpoint_step = step
-                        last_best_checkpoint_loss = cur_step_loss
+                        from gdrive_sync import BackgroundGDriveSyncWorker
+                        worker = BackgroundGDriveSyncWorker.get_instance()
+                        # On Kaggle: If a cloud backup is in-flight and not final step,
+                        # queue milestone so GPU training continues uninterrupted without disk collisions
+                        if _is_kaggle_environment() and worker.is_busy() and not (step >= args.max_steps):
+                            pending_best_milestone = True
+                            pending_best_step = step
+                            pending_best_loss = cur_step_loss
+                            pending_best_cursor = best_loss_cursor
+                            print(
+                                f"[{args.stage_id}] [Kaggle Best Milestone Queue] Cloud backup in progress. "
+                                f"Queued Best Milestone {best_loss:.4f} (Step {step:04d}) in memory - GPU training continues uninterrupted...",
+                                flush=True,
+                            )
+                        else:
+                            committed_milestone_this_step = True
+                            last_best_checkpoint_step = step
+                            last_best_checkpoint_loss = cur_step_loss
+                            pending_best_milestone = False
 
-                        print(
-                            f"[{args.stage_id}] >>> {CLR_GREEN}{CLR_BOLD}COMMITTING AUTHENTIC BEST MILESTONE CHECKPOINT: "
-                            f"{best_loss:.4f} (Step {step:04d}){CLR_RESET} <<<",
-                            flush=True,
-                        )
+                            print(
+                                f"[{args.stage_id}] >>> {CLR_GREEN}{CLR_BOLD}COMMITTING AUTHENTIC BEST MILESTONE CHECKPOINT: "
+                                f"{best_loss:.4f} (Step {step:04d}){CLR_RESET} <<<",
+                                flush=True,
+                            )
 
-                        # Atomically commit and mirror verified best milestone
-                        save_checkpoint(
-                            model=model,
-                            optimizer=optimizer,
-                            scaler=scaler,
-                            config=config,
-                            tokenizer_path=tok_path,
-                            output_dir=best_cp_dir,
-                            step=step,
-                            epoch=epoch,
-                            loss=cur_step_loss,
-                            best_loss=best_loss,
-                            stage_id=args.stage_id,
-                            is_best=True,
-                            is_completed=False,
-                            dataset=dataset,
-                            shard_ledger=shard_ledger,
-                            data_cursor=best_loss_cursor,
-                            keep_n=max(args.keep_checkpoints, 1 if _is_kaggle_environment() else 2),
-                            world_model=world_model,
-                            world_optimizer=world_optimizer,
-                            world_scaler=world_scaler,
-                            max_shard_mb=args.max_shard_mb,
-                        )
+                            # Atomically commit and mirror verified best milestone
+                            save_checkpoint(
+                                model=model,
+                                optimizer=optimizer,
+                                scaler=scaler,
+                                config=config,
+                                tokenizer_path=tok_path,
+                                output_dir=best_cp_dir,
+                                step=step,
+                                epoch=epoch,
+                                loss=cur_step_loss,
+                                best_loss=best_loss,
+                                stage_id=args.stage_id,
+                                is_best=True,
+                                is_completed=False,
+                                dataset=dataset,
+                                shard_ledger=shard_ledger,
+                                data_cursor=best_loss_cursor,
+                                keep_n=max(args.keep_checkpoints, 1 if _is_kaggle_environment() else 2),
+                                world_model=world_model,
+                                world_optimizer=world_optimizer,
+                                world_scaler=world_scaler,
+                                max_shard_mb=args.max_shard_mb,
+                            )
 
                         # If promote_max_step is set and current step is within window, snapshot to window_best_source
                         if args.promote_max_step > 0 and step <= args.promote_max_step:
@@ -2244,6 +2264,46 @@ def main():
                             f"[{args.stage_id} | Step {step:04d}] [Skip-Save Active (<= {args.skip_save_steps})] "
                             f"New best loss {best_loss:.4f} tracked in memory; local save active at Step {args.skip_save_steps + 1}+.",
                             flush=True,
+                        )
+
+                # Process queued best milestone on Kaggle as soon as previous upload finishes
+                if pending_best_milestone and not committed_milestone_this_step:
+                    from gdrive_sync import BackgroundGDriveSyncWorker
+                    worker = BackgroundGDriveSyncWorker.get_instance()
+                    if not worker.is_busy() or (step >= args.max_steps):
+                        committed_milestone_this_step = True
+                        last_best_checkpoint_step = step
+                        last_best_checkpoint_loss = cur_step_loss
+                        pending_best_milestone = False
+
+                        print(
+                            f"[{args.stage_id}] >>> {CLR_GREEN}{CLR_BOLD}COMMITTING QUEUED BEST MILESTONE CHECKPOINT: "
+                            f"{best_loss:.4f} (Step {step:04d}, queued from Step {pending_best_step:04d}){CLR_RESET} <<<",
+                            flush=True,
+                        )
+
+                        save_checkpoint(
+                            model=model,
+                            optimizer=optimizer,
+                            scaler=scaler,
+                            config=config,
+                            tokenizer_path=tok_path,
+                            output_dir=best_cp_dir,
+                            step=step,
+                            epoch=epoch,
+                            loss=cur_step_loss,
+                            best_loss=best_loss,
+                            stage_id=args.stage_id,
+                            is_best=True,
+                            is_completed=False,
+                            dataset=dataset,
+                            shard_ledger=shard_ledger,
+                            data_cursor=copy.deepcopy(current_cursor) if current_cursor is not None else pending_best_cursor,
+                            keep_n=max(args.keep_checkpoints, 1 if _is_kaggle_environment() else 2),
+                            world_model=world_model,
+                            world_optimizer=world_optimizer,
+                            world_scaler=world_scaler,
+                            max_shard_mb=args.max_shard_mb,
                         )
 
                 # Target-Step Model Promotion Gate (NON-BLOCKING: Real-time deployment while training continues uninterrupted)

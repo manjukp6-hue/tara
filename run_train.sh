@@ -112,11 +112,20 @@ export DOMAIN_WEIGHTS
 echo "[DYNAMIC CONFIG] Batch Size: $TRAIN_BATCH_SIZE | Grad Accum: $GRAD_ACCUM | Optimizer: $OPTIMIZER_TYPE | LR: $LR | Grad Checkpointing: $GRADIENT_CHECKPOINTING | Eval Interval: $EVAL_INTERVAL | Promote Interval: $PROMOTE_INTERVAL"
 
 # 3. Mount Google Drive if in Colab & Configure Checkpoint Sync
-if [ -d "/content" ]; then
+# (Active in Google Colab / single GPU environments; explicitly disabled on Kaggle to protect 20 GB disk)
+IS_KAGGLE_ENV=0
+if [ -d "/kaggle/working" ] || [ -d "/kaggle/input" ] || [ -n "${KAGGLE_URL_BASE:-}" ] || [ -n "${KAGGLE_DATA_PROXY_URL:-}" ]; then
+    IS_KAGGLE_ENV=1
+fi
+
+if [ "$IS_KAGGLE_ENV" = "0" ] && [ -d "/content" ]; then
     echo "[GDRIVE] Checking Google Drive mount in Colab..."
     python3 -c "from gdrive_sync import mount_google_drive; mount_google_drive()" 2>/dev/null || true
     export GDRIVE_BACKUP_DIR="${GDRIVE_BACKUP_DIR:-/content/drive/MyDrive/tara_checkpoints}"
     mkdir -p "$GDRIVE_BACKUP_DIR"
+elif [ "$IS_KAGGLE_ENV" = "1" ]; then
+    unset GDRIVE_BACKUP_DIR TARA_GDRIVE_DIR 2>/dev/null || true
+    rm -rf /content/drive 2>/dev/null || true
 fi
 
 # 4. Resolve Hugging Face Authentication Token

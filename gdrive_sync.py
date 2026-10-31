@@ -53,8 +53,28 @@ if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
         pass
 
 
+def _is_kaggle_environment() -> bool:
+    """
+    Detects whether the current runtime is a Kaggle notebook (T4 x2 or any GPU tier).
+    Kaggle working disk is ~20 GB - far smaller than Colab's ~200 GB ephemeral disk.
+    Detection uses canonical env-vars and paths set by every Kaggle kernel.
+    """
+    if os.environ.get("KAGGLE_URL_BASE") or os.environ.get("KAGGLE_DATA_PROXY_URL") or os.environ.get("KAGGLE_KERNEL_RUN_TYPE"):
+        return True
+    if os.path.isdir("/kaggle/working") or os.path.isdir("/kaggle/input"):
+        return True
+    try:
+        from kaggle_secrets import UserSecretsClient  # noqa: F401
+        return True
+    except Exception:
+        pass
+    return False
+
+
 def mount_google_drive(mount_point: str = '/content/drive') -> Optional[str]:
-    """Mount Google Drive if running in Google Colab environment."""
+    """Mount Google Drive if running in Google Colab environment (disabled on Kaggle)."""
+    if _is_kaggle_environment():
+        return None
     try:
         from google.colab import drive
         if not os.path.exists(mount_point):
@@ -751,6 +771,8 @@ def find_all_gdrive_checkpoint_candidates() -> List[str]:
     5. Google Workspace Shared Drives (/content/drive/Shareddrives/*)
     6. Colab shortcut targets (/content/drive/.shortcut-targets-by-id/*)
     """
+    if _is_kaggle_environment():
+        return []
     candidates: List[str] = []
 
     # 1. Environment variables
@@ -904,12 +926,16 @@ def get_checkpoint_dir_step(d: str) -> int:
 def resolve_gdrive_restore_dir() -> Optional[str]:
     """
     Dynamically discovers and selects the best Google Drive checkpoint directory to restore from.
+    Disabled on Kaggle to protect 20 GB disk; active in Colab and single GPU.
     Evaluates:
     - Shared Google Drive shortcuts from other accounts
     - Environment variables (TARA_SHARED_GDRIVE_DIR, GDRIVE_SHARED_DIR, GDRIVE_RESTORE_DIR)
     - Local user's own MyDrive tara_checkpoints
     - Selects the directory possessing the highest verified training step.
     """
+    if _is_kaggle_environment():
+        return None
+
     candidates = find_all_gdrive_checkpoint_candidates()
     if not candidates:
         return None
@@ -953,12 +979,15 @@ def is_directory_writable(path: str) -> bool:
 def resolve_gdrive_backup_dir() -> Optional[str]:
     """
     Dynamically resolve Google Drive backup directory for writing checkpoints.
-    1. If TARA_GDRIVE_DIR or GDRIVE_BACKUP_DIR is explicitly configured, use it.
-    2. Check if a restored shared directory from another account is writable (Editor permission).
-       If writable, allows continuous collaborative synchronization back to the shared folder!
-    3. If the shared folder is read-only (Viewer permission), automatically falls back to
-       the current account's own MyDrive (/content/drive/MyDrive/tara_checkpoints) for writing.
+    1. Disabled on Kaggle to protect limited 20 GB disk space (Hugging Face is primary).
+    2. Active on Colab and single GPU environments where Google Drive is genuinely mounted.
+    3. If TARA_GDRIVE_DIR or GDRIVE_BACKUP_DIR is explicitly configured, use it.
+    4. Check if a restored shared directory from another account is writable (Editor permission).
+    5. Automatically falls back to /content/drive/MyDrive/tara_checkpoints in Colab / single GPU.
     """
+    if _is_kaggle_environment():
+        return None
+
     env_dir = os.environ.get("TARA_GDRIVE_DIR", os.environ.get("GDRIVE_BACKUP_DIR", "")).strip()
     if env_dir:
         return env_dir
@@ -974,24 +1003,6 @@ def resolve_gdrive_backup_dir() -> Optional[str]:
         return colab_default
 
     return None
-
-
-def _is_kaggle_environment() -> bool:
-    """
-    Detects whether the current runtime is a Kaggle notebook (T4 x2 or any GPU tier).
-    Kaggle working disk is ~20 GB — far smaller than Colab's ~200 GB ephemeral disk.
-    Detection uses the canonical KAGGLE_URL_BASE env-var set by every Kaggle kernel.
-    """
-    if os.environ.get("KAGGLE_URL_BASE") or os.environ.get("KAGGLE_DATA_PROXY_URL"):
-        return True
-    if os.path.isdir("/kaggle/working") or os.path.isdir("/kaggle/input"):
-        return True
-    try:
-        from kaggle_secrets import UserSecretsClient  # noqa: F401
-        return True
-    except Exception:
-        pass
-    return False
 
 
 class BackgroundGDriveSyncWorker:
@@ -1021,6 +1032,10 @@ class BackgroundGDriveSyncWorker:
             if cls._instance is None:
                 cls._instance = cls()
             return cls._instance
+
+    def is_busy(self) -> bool:
+        """Returns True if a cloud backup transfer is currently active or queued."""
+        return (self.active_transfers > 0) or (self.task_queue.unfinished_tasks > 0)
 
     def submit_task(
         self,
@@ -1205,17 +1220,18 @@ class BackgroundGDriveSyncWorker:
                 self.active_transfers = max(0, self.active_transfers - 1)
 
     def wait_completion(self, timeout: Optional[float] = None) -> bool:
-        """Wait for pending background uploads to complete (useful at training end)."""
-        if self.task_queue.unfinished_tasks == 0:
+        """Wait for pending background uploads to complete (useful before next save or at training end)."""
+        if self.task_queue.unfinished_tasks == 0 and self.active_transfers == 0:
             return True
-        print(f"[GDrive Worker] Waiting for {self.task_queue.unfinished_tasks} pending background upload(s) to finish...", flush=True)
-        try:
-            self.task_queue.join()
-            print("[GDrive Worker] All background Google Drive sync tasks completed.", flush=True)
-            return True
-        except Exception as e:
-            print(f"[GDrive Worker Warning] Wait completion interrupted: {e}", flush=True)
-            return False
+        t_start = time.time()
+        print(f"[Cloud Backup Worker] Waiting for in-flight cloud backup(s) to finish ({self.task_queue.unfinished_tasks} queued, {self.active_transfers} active)...", flush=True)
+        while self.task_queue.unfinished_tasks > 0 or self.active_transfers > 0:
+            if timeout is not None and (time.time() - t_start) > timeout:
+                print(f"[Cloud Backup Warning] Wait completion timed out after {timeout:.1f}s ({self.task_queue.unfinished_tasks} unfinished).", flush=True)
+                return False
+            time.sleep(0.5)
+        print("[Cloud Backup Worker] All background sync tasks completed.", flush=True)
+        return True
 
 
 def prune_hf_checkpoints(
@@ -2129,21 +2145,34 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
         free_gb = usage.free / (1024 ** 3)
         if free_gb < effective_min_free_gb:
             print(f"[DISK HYGIENE] Low free disk space detected ({free_gb:.2f} GB < {effective_min_free_gb:.1f} GB). Reclaiming caches...", flush=True)
-            # 1. Purge huggingface, pip, and torch caches
+            # 1. Purge pip and torch caches; Hugging Face cache ONLY if worker is NOT actively uploading
             cache_dirs = [
-                "/root/.cache/huggingface",
                 "/root/.cache/pip",
                 "/root/.cache/torch",
-                os.path.expanduser("~/.cache/huggingface"),
                 os.path.expanduser("~/.cache/pip"),
                 os.path.expanduser("~/.cache/torch"),
             ]
+            try:
+                worker = BackgroundGDriveSyncWorker.get_instance()
+                if not worker.is_busy():
+                    cache_dirs.extend([
+                        "/root/.cache/huggingface",
+                        os.path.expanduser("~/.cache/huggingface"),
+                    ])
+            except Exception:
+                pass
+
             for cdir in cache_dirs:
                 if os.path.exists(cdir):
                     shutil.rmtree(cdir, ignore_errors=True)
 
-            # 2. On Kaggle: prune old versioned checkpoint snapshots (*.step<N>_*) and redundant backups
+            # 2. On Kaggle: clean any phantom /content/drive directory and prune old versioned snapshots
             if _is_kaggle_environment():
+                phantom_gdrive = "/content/drive"
+                if os.path.isdir(phantom_gdrive):
+                    print("[Kaggle Disk Guard] Purging phantom /content/drive directory on Kaggle to reclaim space...", flush=True)
+                    _safe_rmtree(phantom_gdrive)
+
                 _kaggle_prune_old_versioned_snapshots(check_path)
                 # Purge obsolete local backup directories if space is critically low
                 redundant_backup_candidates = [
@@ -2323,7 +2352,36 @@ def save_checkpoint(
     print(f"[Checkpoint] Snapshotting [{tag}] checkpoint at Step {step}... {get_memory_status_str()}", flush=True)
 
     with _checkpoint_write_lock:
-        _reclaim_emergency_disk_space(min_free_gb=6.0)
+        if _is_kaggle_environment():
+            # Kaggle Backup Queue Guard:
+            # Kaggle working disk is only ~20 GB. One checkpoint + optimizer is ~5 GB.
+            # If an asynchronous background upload is in-flight, staging another 5 GB
+            # concurrently will trigger os error 28 (No space left on device).
+            # We MUST wait for the in-flight backup to complete its upload and reclaim its local
+            # snapshot before staging the new checkpoint!
+            worker = BackgroundGDriveSyncWorker.get_instance()
+            if worker.is_busy():
+                tag_step = f"Step {step}" if not is_best else f"BEST MILESTONE (Step {step})"
+                print(
+                    f"[Kaggle Backup Queue] In-flight cloud backup is currently uploading. "
+                    f"Holding [{tag_step}] in queue until in-flight backup completes and local disk space is reclaimed...",
+                    flush=True,
+                )
+                worker.wait_completion(timeout=600)
+                _reclaim_emergency_disk_space(min_free_gb=10.0)
+
+            # Check free disk space before staging
+            try:
+                free_gb = shutil.disk_usage("/kaggle/working").free / (1024 ** 3)
+                if free_gb < 8.0:
+                    print(f"[Kaggle Disk Guard] Free disk space is low ({free_gb:.2f} GB < 8.0 GB). Reclaiming space before staging...", flush=True)
+                    _reclaim_emergency_disk_space(min_free_gb=10.0)
+                    free_after = shutil.disk_usage("/kaggle/working").free / (1024 ** 3)
+                    print(f"[Kaggle Disk Guard] Available free disk space before staging: {free_after:.2f} GB", flush=True)
+            except Exception as de:
+                print(f"[Kaggle Disk Guard Notice] Disk space check notice: {de}", flush=True)
+        else:
+            _reclaim_emergency_disk_space(min_free_gb=6.0)
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.synchronize()

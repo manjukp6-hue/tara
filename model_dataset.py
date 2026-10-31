@@ -234,11 +234,9 @@ class RMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        input_dtype = x.dtype
-        x_f32 = x.float()
-        variance = x_f32.pow(2).mean(-1, keepdim=True)
-        x_norm = x_f32 * torch.rsqrt(variance + self.eps)
-        return (self.weight * x_norm).to(input_dtype)
+        variance = x.pow(2).mean(-1, keepdim=True)
+        x = x * torch.rsqrt(variance + self.eps)
+        return self.weight * x
 
 
 def rotate_half(x: torch.Tensor) -> torch.Tensor:
@@ -591,10 +589,6 @@ class TaraForCausalLM(nn.Module):
         self.model = TaraModel(config, gradient_checkpointing=gradient_checkpointing)
         self.lm_head = nn.Linear(config["hidden_size"], config["vocab_size"], bias=False)
 
-        # Canonical Weight Initialization & Residual Branch Scaling (GPT-2 / Megatron-LM Standard)
-        self.apply(self._init_weights)
-        self._apply_residual_projection_scaling()
-
         # Tie weights if requested
         if config.get("tie_word_embeddings", False):
             self.lm_head.weight = self.model.embed_tokens.weight
@@ -608,42 +602,6 @@ class TaraForCausalLM(nn.Module):
         if config.get("multimodal", False) or "audio_config" in config:
             a_cfg = config.get("audio_config", {"hidden_size": config["hidden_size"]})
             self.audio_encoder = PyTorchAudioEncoder(a_cfg)
-
-    def _init_weights(self, module: nn.Module) -> None:
-        """
-        Canonical weight initialization for transformer layers.
-        Follows standard normal distribution scaled by initializer_range (default 0.02).
-        """
-        std = self.config.get("initializer_range", 0.02)
-        if isinstance(module, nn.Linear):
-            nn.init.normal_(module.weight, mean=0.0, std=std)
-            if module.bias is not None:
-                nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            nn.init.normal_(module.weight, mean=0.0, std=std)
-            if hasattr(module, "padding_idx") and module.padding_idx is not None:
-                module.weight.data[module.padding_idx].zero_()
-        elif isinstance(module, RMSNorm):
-            if hasattr(module, "weight") and module.weight is not None:
-                nn.init.ones_(module.weight)
-
-    def _apply_residual_projection_scaling(self) -> None:
-        """
-        Applies GPT-2 / Megatron-LM style residual projection scaling:
-        Scales the output projections of residual branches (o_proj and down_proj)
-        by 1 / sqrt(2 * num_hidden_layers) to prevent variance accumulation at depth.
-        """
-        num_layers = self.config.get("num_hidden_layers", len(self.model.layers))
-        if num_layers <= 0:
-            return
-        std = self.config.get("initializer_range", 0.02)
-        scaled_std = std / math.sqrt(2.0 * num_layers)
-        with torch.no_grad():
-            for layer in self.model.layers:
-                if hasattr(layer, "self_attn") and hasattr(layer.self_attn, "o_proj"):
-                    nn.init.normal_(layer.self_attn.o_proj.weight, mean=0.0, std=scaled_std)
-                if hasattr(layer, "mlp") and hasattr(layer.mlp, "down_proj"):
-                    nn.init.normal_(layer.mlp.down_proj.weight, mean=0.0, std=scaled_std)
 
     def forward(
         self,
@@ -1664,27 +1622,8 @@ class TaraStreamingJsonlDataset(IterableDataset):
         max_shard_bytes: int = 0,
         dataset_snapshot: Optional["DatasetSnapshot"] = None,
         seed: Optional[int] = None,
-        rank: Optional[int] = None,
-        world_size: Optional[int] = None,
     ):
         self.file_paths = list(file_paths)
-        if rank is None or world_size is None:
-            if torch.distributed.is_available() and torch.distributed.is_initialized():
-                self.rank = torch.distributed.get_rank()
-                self.world_size = torch.distributed.get_world_size()
-            elif "WORLD_SIZE" in os.environ and "RANK" in os.environ:
-                try:
-                    self.rank = int(os.environ.get("RANK", "0"))
-                    self.world_size = int(os.environ.get("WORLD_SIZE", "1"))
-                except ValueError:
-                    self.rank = 0
-                    self.world_size = 1
-            else:
-                self.rank = 0
-                self.world_size = 1
-        else:
-            self.rank = rank
-            self.world_size = world_size
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
         self.max_samples = max_samples
@@ -2108,7 +2047,6 @@ class TaraStreamingJsonlDataset(IterableDataset):
             r.shuffle(fps)
 
         emitted = 0
-        sample_counter = 0
         buffer = []
         buffer_size = self.buffer_size
         target_resume_shard = self.resume_shard.replace("\\", "/") if self.resume_shard else None
@@ -2303,12 +2241,6 @@ class TaraStreamingJsonlDataset(IterableDataset):
                             self.active_chunk_idx = chunk_idx
 
                             item = (input_ids, labels, shard_name, line_idx, line_byte_offset, chunk_idx, is_last_chunk)
-                            if self.world_size > 1:
-                                if (sample_counter % self.world_size) != self.rank:
-                                    sample_counter += 1
-                                    continue
-                            sample_counter += 1
-
                             if buffer_size <= 1:
                                 yield item
                                 emitted += 1
@@ -2958,28 +2890,9 @@ class TaraMultiDomainScheduler(IterableDataset):
         max_shard_bytes: int = 0,
         dataset_snapshot: Optional[Any] = None,
         domain_cursors: Optional[Dict[str, Dict[str, Any]]] = None,
-        rank: Optional[int] = None,
-        world_size: Optional[int] = None,
         **kwargs,
     ):
         self.domain_shards = {d: list(s) for d, s in domain_shards.items() if s}
-        if rank is None or world_size is None:
-            if torch.distributed.is_available() and torch.distributed.is_initialized():
-                self.rank = torch.distributed.get_rank()
-                self.world_size = torch.distributed.get_world_size()
-            elif "WORLD_SIZE" in os.environ and "RANK" in os.environ:
-                try:
-                    self.rank = int(os.environ.get("RANK", "0"))
-                    self.world_size = int(os.environ.get("WORLD_SIZE", "1"))
-                except ValueError:
-                    self.rank = 0
-                    self.world_size = 1
-            else:
-                self.rank = 0
-                self.world_size = 1
-        else:
-            self.rank = rank
-            self.world_size = world_size
         self.active_domains = sorted(self.domain_shards.keys())
         self.tokenizer = tokenizer
         self.batch_size = batch_size
@@ -3073,8 +2986,6 @@ class TaraMultiDomainScheduler(IterableDataset):
                 buffer_size=buffer_size,
                 max_shard_bytes=max_shard_bytes,
                 dataset_snapshot=dataset_snapshot,
-                rank=self.rank,
-                world_size=self.world_size,
             )
 
     @property

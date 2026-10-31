@@ -2,9 +2,8 @@
 """
 TARA Standalone Checkpoint & Architecture Verification Engine
 =============================================================================
-Verifies that an exported model checkpoint (model.safetensors or sharded
-model-*.safetensors, config.json, tokenizer.json) is 100% compliant with
-TARA's native Rust tara_engine.
+Verifies that an exported model checkpoint (model.safetensors, config.json,
+tokenizer.json) is 100% compliant with TARA's native Rust tara_engine.
 
 Usage:
     python verify_model.py --model_dir path/to/checkpoint
@@ -12,7 +11,6 @@ Usage:
 """
 
 import argparse
-import glob
 import json
 import os
 import sys
@@ -25,7 +23,7 @@ try:
 except ImportError:
     HAS_SAFETENSORS = False
 
-from model_dataset import TaraForCausalLM, TaraNativeTokenizer, load_candidate_weights
+from model_dataset import TaraForCausalLM, TaraNativeTokenizer
 
 
 def verify_checkpoint(model_dir: str) -> bool:
@@ -38,32 +36,20 @@ def verify_checkpoint(model_dir: str) -> bool:
         return False
 
     safetensors_path = os.path.join(model_dir, "model.safetensors")
-    index_path = os.path.join(model_dir, "model.safetensors.index.json")
     config_path = os.path.join(model_dir, "config.json")
     tokenizer_path = os.path.join(model_dir, "tokenizer.json")
 
-    has_single = os.path.isfile(safetensors_path)
-    shard_files = sorted(glob.glob(os.path.join(model_dir, "*.safetensors")))
-    has_shards = bool(shard_files)
-
     # 1. Check file existence
-    if not has_single and not has_shards:
-        print(f"[FAIL] Neither model.safetensors nor sharded *.safetensors found in {model_dir}")
+    if not os.path.exists(safetensors_path):
+        print(f"[FAIL] model.safetensors missing in {model_dir}")
         return False
     if not os.path.exists(config_path):
         print(f"[FAIL] config.json missing in {model_dir}")
         return False
 
+    sf_size = os.path.getsize(safetensors_path)
     cfg_size = os.path.getsize(config_path)
-    if has_single and not (len(shard_files) > 1):
-        sf_size = os.path.getsize(safetensors_path)
-        print(f"[1/5] Files found: model.safetensors ({sf_size:,} bytes), config.json ({cfg_size:,} bytes)")
-    else:
-        tot_bytes = sum(os.path.getsize(s) for s in shard_files)
-        print(f"[1/5] Files found: {len(shard_files)} safetensors shard(s) ({tot_bytes:,} bytes total), config.json ({cfg_size:,} bytes)")
-        if os.path.exists(index_path):
-            print(f"      model.safetensors.index.json found ({os.path.getsize(index_path):,} bytes)")
-
+    print(f"[1/5] Files found: model.safetensors ({sf_size:,} bytes), config.json ({cfg_size:,} bytes)")
     if os.path.exists(tokenizer_path):
         print(f"      tokenizer.json found ({os.path.getsize(tokenizer_path):,} bytes)")
 
@@ -87,24 +73,8 @@ def verify_checkpoint(model_dir: str) -> bool:
         print("[FAIL] safetensors package is not installed.")
         return False
 
-    keys = set()
-    if os.path.isfile(index_path):
-        try:
-            with open(index_path, "r", encoding="utf-8") as ip_f:
-                idx_data = json.load(ip_f)
-            if "weight_map" in idx_data:
-                keys = set(idx_data["weight_map"].keys())
-        except Exception:
-            pass
-
-    if not keys:
-        for sf in shard_files:
-            try:
-                with safetensors.safe_open(sf, framework="pt", device="cpu") as sf_handle:
-                    keys.update(sf_handle.keys())
-            except Exception as sf_err:
-                print(f"[FAIL] Could not read safetensors shard {sf}: {sf_err}")
-                return False
+    with safetensors.safe_open(safetensors_path, framework="pt", device="cpu") as sf:
+        keys = set(sf.keys())
 
     num_layers = config["num_hidden_layers"]
     expected_keys = [
@@ -134,14 +104,8 @@ def verify_checkpoint(model_dir: str) -> bool:
     # 4. Load weights into TaraForCausalLM
     print("[4/5] Instantiating PyTorch model and loading safetensors state_dict...")
     model = TaraForCausalLM(config)
-    if has_single and not (len(shard_files) > 1):
-        state_dict = load_file(safetensors_path, device="cpu")
-        model.load_state_dict(state_dict, strict=False)
-    else:
-        loaded = load_candidate_weights(model, model_dir)
-        if not loaded:
-            print("[FAIL] Failed to load candidate weights from shards.")
-            return False
+    state_dict = load_file(safetensors_path, device="cpu")
+    model.load_state_dict(state_dict, strict=False)
     model.eval()
     print("      Model instantiated and weights loaded cleanly!")
 
@@ -151,11 +115,11 @@ def verify_checkpoint(model_dir: str) -> bool:
     dummy_input = torch.randint(0, config["vocab_size"], (1, test_seq_len))
     with torch.no_grad():
         output = model(input_ids=dummy_input)
-
+    
     if output.logits is None:
         print("[FAIL] Output logits are None")
         return False
-
+    
     logits_shape = output.logits.shape
     expected_shape = (1, test_seq_len, config["vocab_size"])
     if logits_shape != expected_shape:
@@ -171,7 +135,7 @@ def verify_checkpoint(model_dir: str) -> bool:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Verify TARA checkpoint compatibility.")
-    parser.add_argument("--model_dir", type=str, default=".", help="Path to checkpoint directory containing model weights and config.json")
+    parser.add_argument("--model_dir", type=str, default=".", help="Path to checkpoint directory containing model.safetensors and config.json")
     args = parser.parse_args()
 
     success = verify_checkpoint(args.model_dir)

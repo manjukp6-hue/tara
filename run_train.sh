@@ -20,15 +20,7 @@ echo "==========================================================================
 # 0. Proactive Disk Hygiene
 echo "[DISK CLEANUP] Reclaiming disk space from caches and temporary files..."
 rm -rf /tmp/tara_* /tmp/tmp_tara_* 2>/dev/null || true
-rm -rf /root/.cache/pip /root/.cache/torch 2>/dev/null || true
-if [ -d "/kaggle/working" ] || [ -n "${KAGGLE_URL_BASE:-}" ]; then
-    echo "[KAGGLE DISK CLEANUP] Preserving authoritative checkpoints; purging only temporary caches and phantom mounts..."
-    rm -rf /content/drive /kaggle/working/tara/storage/backup /kaggle/working/storage/backup 2>/dev/null || true
-    # Purge HF model restore cache (frees 5.2 GB while keeping datasets)
-    rm -rf /root/.cache/huggingface/hub/models--* ~/.cache/huggingface/hub/models--* 2>/dev/null || true
-    # Prune only older/stale intermediate snapshots, preserving the highest step
-    python3 -c "from gdrive_sync import _kaggle_prune_old_versioned_snapshots; _kaggle_prune_old_versioned_snapshots('/kaggle/working')" 2>/dev/null || true
-fi
+rm -rf /root/.cache/pip /root/.cache/torch /root/.cache/huggingface/hub 2>/dev/null || true
 if command -v apt-get >/dev/null 2>&1; then
     apt-get clean 2>/dev/null || true
     rm -rf /var/lib/apt/lists/* 2>/dev/null || true
@@ -120,28 +112,11 @@ export DOMAIN_WEIGHTS
 echo "[DYNAMIC CONFIG] Batch Size: $TRAIN_BATCH_SIZE | Grad Accum: $GRAD_ACCUM | Optimizer: $OPTIMIZER_TYPE | LR: $LR | Grad Checkpointing: $GRADIENT_CHECKPOINTING | Eval Interval: $EVAL_INTERVAL | Promote Interval: $PROMOTE_INTERVAL"
 
 # 3. Mount Google Drive if in Colab & Configure Checkpoint Sync
-# (Active in Google Colab / single GPU environments; explicitly disabled on Kaggle to protect 20 GB disk)
-IS_KAGGLE_ENV=0
-if [ -d "/kaggle/working" ] || [ -d "/kaggle/input" ] || [ -n "${KAGGLE_URL_BASE:-}" ] || [ -n "${KAGGLE_DATA_PROXY_URL:-}" ]; then
-    IS_KAGGLE_ENV=1
-fi
-
-if [ "$IS_KAGGLE_ENV" = "0" ] && [ -d "/content" ]; then
+if [ -d "/content" ]; then
     echo "[GDRIVE] Checking Google Drive mount in Colab..."
     python3 -c "from gdrive_sync import mount_google_drive; mount_google_drive()" 2>/dev/null || true
-    if [ -z "${GDRIVE_BACKUP_DIR:-}" ]; then
-        if [ -d "/content/drive/MyDrive" ]; then
-            export GDRIVE_BACKUP_DIR="/content/drive/MyDrive/tara_checkpoints"
-        elif [ -d "/content/drive/My Drive" ]; then
-            export GDRIVE_BACKUP_DIR="/content/drive/My Drive/tara_checkpoints"
-        else
-            export GDRIVE_BACKUP_DIR="/content/drive/MyDrive/tara_checkpoints"
-        fi
-    fi
-    mkdir -p "$GDRIVE_BACKUP_DIR" 2>/dev/null || true
-elif [ "$IS_KAGGLE_ENV" = "1" ]; then
-    unset GDRIVE_BACKUP_DIR TARA_GDRIVE_DIR 2>/dev/null || true
-    rm -rf /content/drive 2>/dev/null || true
+    export GDRIVE_BACKUP_DIR="${GDRIVE_BACKUP_DIR:-/content/drive/MyDrive/tara_checkpoints}"
+    mkdir -p "$GDRIVE_BACKUP_DIR"
 fi
 
 # 4. Resolve Hugging Face Authentication Token
@@ -289,23 +264,11 @@ if check_model_weights_exist(dst) and not check_model_weights_exist(cand_dir):
         s = os.path.join(dst, f)
         d = os.path.join(cand_dir, f)
         if os.path.isfile(s) and not os.path.exists(d):
-            if f.endswith(('.json', '.txt')):
+            try:
+                os.link(s, d)
+            except Exception:
                 shutil.copy2(s, d)
-            else:
-                try:
-                    os.link(s, d)
-                except Exception:
-                    try:
-                        os.symlink(os.path.abspath(s), d)
-                    except Exception:
-                        shutil.copy2(s, d)
     print(f'[MULTI-CLOUD RESTORE] Seeded candidate directory {cand_dir} from restored checkpoint.')
-
-
-
-
-
-
 " 2>/dev/null || true
 
 # 8b. Ensure candidate directory has baseline config and tokenizer from model_config if missing
@@ -354,9 +317,6 @@ for i in "${!STAGES[@]}"; do
     STAGE_ID="${STAGES[$i]}"
     STAGE_OUTPUT_DIR="$ACTIVE_CP_DIR/$STAGE_ID"
     STAGE_MODEL_DIR="storage/models/tara_candidate_v1"
-    if [ -f "$STAGE_OUTPUT_DIR/model.safetensors" ] || [ -f "$STAGE_OUTPUT_DIR/model.safetensors.index.json" ]; then
-        STAGE_MODEL_DIR="$STAGE_OUTPUT_DIR"
-    fi
 
     # Stage handoff: if prior stage produced a valid checkpoint, seed from prior stage output
     if [ "$i" -gt 0 ]; then

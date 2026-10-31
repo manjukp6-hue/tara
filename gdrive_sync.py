@@ -53,28 +53,8 @@ if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
         pass
 
 
-def _is_kaggle_environment() -> bool:
-    """
-    Detects whether the current runtime is a Kaggle notebook (T4 x2 or any GPU tier).
-    Kaggle working disk is ~20 GB - far smaller than Colab's ~200 GB ephemeral disk.
-    Detection uses canonical env-vars and paths set by every Kaggle kernel.
-    """
-    if os.environ.get("KAGGLE_URL_BASE") or os.environ.get("KAGGLE_DATA_PROXY_URL") or os.environ.get("KAGGLE_KERNEL_RUN_TYPE"):
-        return True
-    if os.path.isdir("/kaggle/working") or os.path.isdir("/kaggle/input"):
-        return True
-    try:
-        from kaggle_secrets import UserSecretsClient  # noqa: F401
-        return True
-    except Exception:
-        pass
-    return False
-
-
 def mount_google_drive(mount_point: str = '/content/drive') -> Optional[str]:
-    """Mount Google Drive if running in Google Colab environment (disabled on Kaggle)."""
-    if _is_kaggle_environment():
-        return None
+    """Mount Google Drive if running in Google Colab environment."""
     try:
         from google.colab import drive
         if not os.path.exists(mount_point):
@@ -87,45 +67,6 @@ def mount_google_drive(mount_point: str = '/content/drive') -> Optional[str]:
     except Exception as e:
         print(f'[GDrive Warning] Failed to mount Google Drive: {e}')
         return None
-
-
-def resolve_colab_gdrive_root() -> Optional[str]:
-    """
-    Dynamically discovers the genuine user root inside Google Drive in Colab.
-    Handles both '/content/drive/MyDrive' (no space) and '/content/drive/My Drive' (with space).
-    """
-    if _is_kaggle_environment():
-        return None
-    for cand in ("/content/drive/MyDrive", "/content/drive/My Drive"):
-        if os.path.isdir(cand):
-            return cand
-    if os.path.isdir("/content/drive"):
-        try:
-            for entry in os.listdir("/content/drive"):
-                if entry.lower() in ("mydrive", "my drive"):
-                    p = os.path.join("/content/drive", entry)
-                    if os.path.isdir(p):
-                        return p
-        except Exception:
-            pass
-    return None
-
-
-def is_gdrive_mounted(mount_point: str = '/content/drive') -> bool:
-    """Check if Google Drive is genuinely mounted in the filesystem."""
-    if _is_kaggle_environment():
-        return False
-    if resolve_colab_gdrive_root() is not None:
-        return True
-    if os.path.exists(mount_point) and os.path.isdir(mount_point):
-        try:
-            if hasattr(os.path, 'ismount') and os.path.ismount(mount_point):
-                return True
-            entries = os.listdir(mount_point)
-            return any(e.lower() in ("mydrive", "my drive", "shareddrives", ".shortcut-targets-by-id") for e in entries)
-        except Exception:
-            pass
-    return False
 
 
 def sync_checkpoint_file_atomic(src_path: str, dst_path: str, precomputed_src_sha: Optional[str] = None) -> bool:
@@ -810,8 +751,6 @@ def find_all_gdrive_checkpoint_candidates() -> List[str]:
     5. Google Workspace Shared Drives (/content/drive/Shareddrives/*)
     6. Colab shortcut targets (/content/drive/.shortcut-targets-by-id/*)
     """
-    if _is_kaggle_environment():
-        return []
     candidates: List[str] = []
 
     # 1. Environment variables
@@ -839,26 +778,19 @@ def find_all_gdrive_checkpoint_candidates() -> List[str]:
     except Exception:
         pass
 
-    # 3. Standard Colab MyDrive / My Drive path (supports both space and no-space)
-    groot = resolve_colab_gdrive_root()
-    search_roots = []
-    if groot and groot not in search_roots:
-        search_roots.append(groot)
-    for p in ("/content/drive/MyDrive", "/content/drive/My Drive"):
-        if os.path.isdir(p) and p not in search_roots:
-            search_roots.append(p)
+    # 3. Standard Colab MyDrive path
+    std_path = "/content/drive/MyDrive/tara_checkpoints"
+    if os.path.exists(std_path) and std_path not in candidates:
+        candidates.append(std_path)
 
-    for r in search_roots:
-        std_path = os.path.join(r, "tara_checkpoints")
-        if os.path.exists(std_path) and std_path not in candidates:
-            candidates.append(std_path)
-
-        # 4. Search for shortcuts/folders matching 'tara' or 'checkpoint'
+    # 4. Search /content/drive/MyDrive for shortcuts/folders matching 'tara' or 'checkpoint'
+    mydrive = "/content/drive/MyDrive"
+    if os.path.exists(mydrive) and os.path.isdir(mydrive):
         try:
-            for entry in os.listdir(r):
+            for entry in os.listdir(mydrive):
                 low = entry.lower()
                 if "tara" in low or "checkpoint" in low:
-                    p = os.path.join(r, entry)
+                    p = os.path.join(mydrive, entry)
                     if os.path.isdir(p) and p not in candidates:
                         candidates.append(p)
         except Exception:
@@ -972,16 +904,12 @@ def get_checkpoint_dir_step(d: str) -> int:
 def resolve_gdrive_restore_dir() -> Optional[str]:
     """
     Dynamically discovers and selects the best Google Drive checkpoint directory to restore from.
-    Disabled on Kaggle to protect 20 GB disk; active in Colab and single GPU.
     Evaluates:
     - Shared Google Drive shortcuts from other accounts
     - Environment variables (TARA_SHARED_GDRIVE_DIR, GDRIVE_SHARED_DIR, GDRIVE_RESTORE_DIR)
     - Local user's own MyDrive tara_checkpoints
     - Selects the directory possessing the highest verified training step.
     """
-    if _is_kaggle_environment():
-        return None
-
     candidates = find_all_gdrive_checkpoint_candidates()
     if not candidates:
         return None
@@ -1025,30 +953,25 @@ def is_directory_writable(path: str) -> bool:
 def resolve_gdrive_backup_dir() -> Optional[str]:
     """
     Dynamically resolve Google Drive backup directory for writing checkpoints.
-    1. Disabled on Kaggle to protect limited 20 GB disk space (Hugging Face is primary).
-    2. Active on Colab and single GPU environments where Google Drive is genuinely mounted.
-    3. If TARA_GDRIVE_DIR or GDRIVE_BACKUP_DIR is explicitly configured, use it.
-    4. Check if a restored shared directory from another account is writable (Editor permission).
-    5. Dynamically falls back to <gdrive_root>/tara_checkpoints in Colab / single GPU (handles MyDrive and My Drive).
+    1. If TARA_GDRIVE_DIR or GDRIVE_BACKUP_DIR is explicitly configured, use it.
+    2. Check if a restored shared directory from another account is writable (Editor permission).
+       If writable, allows continuous collaborative synchronization back to the shared folder!
+    3. If the shared folder is read-only (Viewer permission), automatically falls back to
+       the current account's own MyDrive (/content/drive/MyDrive/tara_checkpoints) for writing.
     """
-    if _is_kaggle_environment():
-        return None
-
     env_dir = os.environ.get("TARA_GDRIVE_DIR", os.environ.get("GDRIVE_BACKUP_DIR", "")).strip()
     if env_dir:
         return env_dir
+
+    colab_default = "/content/drive/MyDrive/tara_checkpoints"
 
     # Check if a shared restore directory exists and is writable
     restore_dir = resolve_gdrive_restore_dir()
     if restore_dir and is_directory_writable(restore_dir):
         return restore_dir
 
-    groot = resolve_colab_gdrive_root()
-    if groot:
-        return os.path.join(groot, "tara_checkpoints")
-
-    if is_gdrive_mounted():
-        return "/content/drive/MyDrive/tara_checkpoints"
+    if os.path.exists("/content/drive/MyDrive"):
+        return colab_default
 
     return None
 
@@ -1058,12 +981,6 @@ class BackgroundGDriveSyncWorker:
     Dedicated Asynchronous Daemon Worker for Google Drive Synchronization.
     Runs on a separate background thread so 8-10 GB checkpoint transfers
     and FUSE network I/O NEVER block GPU training or stall backpropagation.
-
-    Kaggle Disk-Space Safety:
-    Kaggle /kaggle/working is only ~20 GB. After a verified HF upload the local
-    versioned checkpoint snapshot is automatically deleted so the second (and
-    subsequent) backup can write its own staging directory without hitting
-    "No space left on device".
     """
     _instance: Optional["BackgroundGDriveSyncWorker"] = None
     _lock = threading.Lock()
@@ -1081,10 +998,6 @@ class BackgroundGDriveSyncWorker:
                 cls._instance = cls()
             return cls._instance
 
-    def is_busy(self) -> bool:
-        """Returns True if a cloud backup transfer is currently active or queued."""
-        return (self.active_transfers > 0) or (self.task_queue.unfinished_tasks > 0)
-
     def submit_task(
         self,
         local_ckpt_dir: str,
@@ -1095,7 +1008,6 @@ class BackgroundGDriveSyncWorker:
         step: int = 0,
         loss: float = 0.0,
         hf_token: Optional[str] = None,
-        delete_local_after_upload: bool = False,
     ):
         task = {
             "local_ckpt_dir": local_ckpt_dir,
@@ -1107,9 +1019,6 @@ class BackgroundGDriveSyncWorker:
             "loss": loss,
             "hf_token": hf_token,
             "timestamp": time.time(),
-            # On Kaggle (20 GB disk) delete the local versioned snapshot after a
-            # verified cloud upload so the next backup's staging dir can fit.
-            "delete_local_after_upload": delete_local_after_upload,
         }
         try:
             self.task_queue.put_nowait(task)
@@ -1137,13 +1046,8 @@ class BackgroundGDriveSyncWorker:
                 step = task["step"]
                 loss = task.get("loss", 0.0)
                 hf_token = task.get("hf_token")
-                delete_local_after_upload = task.get("delete_local_after_upload", False)
 
                 tag = f"BEST MILESTONE (step {step}, loss {loss:.4f})" if is_best else f"Step {step:04d}"
-
-                # Track whether at least one cloud target confirmed a successful upload.
-                # Used to gate the Kaggle post-upload local disk reclamation.
-                any_cloud_upload_succeeded = False
 
                 # 1. Google Drive Background Transfer (if configured & mounted)
                 if gdrive_dir:
@@ -1168,7 +1072,6 @@ class BackgroundGDriveSyncWorker:
                         elapsed = time.time() - t0
                         if success:
                             print(f"[GDrive Worker] Completed background upload for [{tag}] in {elapsed:.1f}s.", flush=True)
-                            any_cloud_upload_succeeded = True
                         else:
                             print(f"[GDrive Worker Warning] Background upload failed or incomplete for [{tag}].", flush=True)
                     except Exception as ge:
@@ -1179,7 +1082,7 @@ class BackgroundGDriveSyncWorker:
                     try:
                         t0 = time.time()
                         if is_best:
-                            hf_ok = sync_best_milestone_to_hf(
+                            sync_best_milestone_to_hf(
                                 local_source_dir=local_dir,
                                 repo_id=hf_repo,
                                 step=step,
@@ -1188,94 +1091,15 @@ class BackgroundGDriveSyncWorker:
                                 hf_token=hf_token,
                             )
                         else:
-                            hf_ok = sync_normal_checkpoint_to_hf(
+                            sync_normal_checkpoint_to_hf(
                                 local_source_dir=local_dir,
                                 repo_id=hf_repo,
                                 step=step,
                                 keep_n=2,
                                 hf_token=hf_token,
                             )
-                        if hf_ok:
-                            any_cloud_upload_succeeded = True
                     except Exception as hfe:
                         print(f"[HF Checkpoint Worker Warning] HF background upload error: {hfe}", flush=True)
-
-                # 3. Kaggle Disk Reclamation: delete local versioned snapshot after verified cloud backup.
-                #    Kaggle /kaggle/working has only ~20 GB, so keeping the old versioned dir means
-                #    the next backup's staging dir cannot fit → "No space left on device" on 2nd backup.
-                #    This applies on Kaggle only.
-                if delete_local_after_upload and any_cloud_upload_succeeded:
-                    # EXTRA SECURITY SAFEGUARD (Kaggle Only):
-                    # Audit the remote HF backup to ensure all model tensors and metadata exist
-                    # and are intact before deleting the local snapshot.
-                    remote_audit_passed = True
-                    if hf_repo:
-                        target_remote_path = (
-                            f"tara_checkpoints/best_milestone/step_{step}_loss_{loss:.4f}"
-                            if is_best
-                            else f"tara_checkpoints/normal_checkpoint/step_{step}"
-                        )
-                        remote_audit_passed = verify_hf_checkpoint_backup(
-                            repo_id=hf_repo,
-                            target_step_path=target_remote_path,
-                            local_source_dir=local_dir,
-                            hf_token=hf_token,
-                        )
-
-                    if not remote_audit_passed:
-                        print(
-                            f"[Kaggle Security Guard] Preserving local snapshot for [{tag}]: "
-                            f"remote cloud audit was not 100% verified. Local snapshot KEPT as safety fallback.",
-                            flush=True,
-                        )
-                    else:
-                        try:
-                            if os.path.isdir(local_dir):
-                                print(
-                                    f"[Kaggle Disk Guard] Remote verification 100% passed for [{tag}]. "
-                                    f"Safely reclaiming local snapshot: {local_dir}",
-                                    flush=True,
-                                )
-                                _safe_rmtree(local_dir)
-                                if is_best:
-                                    # Also clean duplicate model weights in local best_checkpoint directory
-                                    parent_ckpt_dir = os.path.dirname(os.path.abspath(local_dir))
-                                    for b_cand in [
-                                        os.path.join(parent_ckpt_dir, "best_checkpoint"),
-                                        "/kaggle/working/tara/storage/models/checkpoints/stage0_pretraining/best_checkpoint",
-                                        "storage/models/checkpoints/stage0_pretraining/best_checkpoint",
-                                    ]:
-                                        if os.path.isdir(b_cand):
-                                            for f in os.listdir(b_cand):
-                                                if f.endswith((".safetensors", ".pt", ".bin")):
-                                                    try:
-                                                        os.remove(os.path.join(b_cand, f))
-                                                        print(f"[Kaggle Disk Guard] Reclaimed duplicate best_checkpoint weight after verified HF upload: {f}", flush=True)
-                                                    except Exception:
-                                                        pass
-                                # Log post-deletion free space so users can see the reclaim worked.
-                                try:
-                                    free_after = shutil.disk_usage("/kaggle/working").free / (1024 ** 3)
-                                    print(
-                                        f"[Kaggle Disk Guard] Local snapshot deleted. "
-                                        f"Free disk space now: {free_after:.2f} GB",
-                                        flush=True,
-                                    )
-                                except Exception:
-                                    pass
-                            else:
-                                print(
-                                    f"[Kaggle Disk Guard] Local dir no longer exists (already cleaned): {local_dir}",
-                                    flush=True,
-                                )
-                        except Exception as kde:
-                            print(f"[Kaggle Disk Guard Warning] Could not delete local snapshot after upload: {kde}", flush=True)
-                elif delete_local_after_upload and not any_cloud_upload_succeeded:
-                    print(
-                        f"[Kaggle Disk Guard] Skipping local deletion for [{tag}]: "
-                        f"no cloud upload confirmed successful — preserving local snapshot as safety fallback.",
-                        flush=True,
-                    )
 
                 self.task_queue.task_done()
                 self.active_transfers -= 1
@@ -1284,18 +1108,17 @@ class BackgroundGDriveSyncWorker:
                 self.active_transfers = max(0, self.active_transfers - 1)
 
     def wait_completion(self, timeout: Optional[float] = None) -> bool:
-        """Wait for pending background uploads to complete (useful before next save or at training end)."""
-        if self.task_queue.unfinished_tasks == 0 and self.active_transfers == 0:
+        """Wait for pending background uploads to complete (useful at training end)."""
+        if self.task_queue.unfinished_tasks == 0:
             return True
-        t_start = time.time()
-        print(f"[Cloud Backup Worker] Waiting for in-flight cloud backup(s) to finish ({self.task_queue.unfinished_tasks} queued, {self.active_transfers} active)...", flush=True)
-        while self.task_queue.unfinished_tasks > 0 or self.active_transfers > 0:
-            if timeout is not None and (time.time() - t_start) > timeout:
-                print(f"[Cloud Backup Warning] Wait completion timed out after {timeout:.1f}s ({self.task_queue.unfinished_tasks} unfinished).", flush=True)
-                return False
-            time.sleep(0.5)
-        print("[Cloud Backup Worker] All background sync tasks completed.", flush=True)
-        return True
+        print(f"[GDrive Worker] Waiting for {self.task_queue.unfinished_tasks} pending background upload(s) to finish...", flush=True)
+        try:
+            self.task_queue.join()
+            print("[GDrive Worker] All background Google Drive sync tasks completed.", flush=True)
+            return True
+        except Exception as e:
+            print(f"[GDrive Worker Warning] Wait completion interrupted: {e}", flush=True)
+            return False
 
 
 def prune_hf_checkpoints(
@@ -1341,84 +1164,6 @@ def prune_hf_checkpoints(
                     print(f"[HF Quota Guard Notice] Prune note for {old_path}: {de}", flush=True)
     except Exception as e:
         print(f"[HF Quota Guard Notice] Prune inquiry note: {e}", flush=True)
-
-
-def verify_hf_checkpoint_backup(
-    repo_id: str,
-    target_step_path: str,
-    local_source_dir: str,
-    hf_token: Optional[str] = None,
-) -> bool:
-    """
-    Kaggle Deep Security Audit:
-    Explicitly queries Hugging Face API to verify that the remote checkpoint
-    at `target_step_path` exists, contains all required model/optimizer/metadata files,
-    and has valid, non-zero file sizes before allowing local snapshot deletion.
-    Only used on Kaggle to guarantee zero data loss.
-    """
-    token = _resolve_hf_token_standalone(hf_token)
-    if not token or not repo_id or str(repo_id).strip().lower() in ("", "none", "null", "local"):
-        return False
-    try:
-        from huggingface_hub import HfApi
-        api = HfApi(token=token)
-        remote_files = set(api.list_repo_files(repo_id=repo_id, repo_type="model"))
-
-        # Determine essential files from local snapshot
-        required_names = []
-        if os.path.isdir(local_source_dir):
-            for fname in os.listdir(local_source_dir):
-                if (fname.endswith((".safetensors", ".pt", ".bin", ".json"))
-                        and not fname.startswith(".")
-                        and fname != "COMMITTED"):
-                    required_names.append(fname)
-
-        if not required_names:
-            required_names = ["checkpoint_state.json", "STAGE_METADATA.json"]
-
-        missing_files = []
-        prefix = target_step_path.strip("/")
-        for fname in required_names:
-            expected_remote = f"{prefix}/{fname}"
-            if expected_remote not in remote_files:
-                missing_files.append(fname)
-
-        if missing_files:
-            print(
-                f"[Kaggle Security Audit FAILED] Remote HF verification failed for '{target_step_path}'. "
-                f"Missing {len(missing_files)} essential files on remote: {missing_files[:5]}. "
-                f"Preserving local snapshot for safety!",
-                flush=True,
-            )
-            return False
-
-        # Additional sanity check: query paths metadata to ensure file sizes > 0
-        try:
-            paths_info = api.get_paths_info(
-                repo_id=repo_id,
-                paths=[f"{prefix}/{f}" for f in required_names],
-                repo_type="model",
-            )
-            for info in paths_info:
-                if hasattr(info, "size") and info.size is not None and info.size <= 0:
-                    print(
-                        f"[Kaggle Security Audit FAILED] Remote file '{info.path}' has 0 bytes on HF. "
-                        f"Preserving local snapshot for safety!",
-                        flush=True,
-                    )
-                    return False
-        except Exception:
-            pass  # get_paths_info may not be supported on older hub versions; file presence already verified
-
-        print(
-            f"[Kaggle Security Audit] Verified remote HF backup 100% complete and healthy "
-            f"({len(required_names)} files verified in {target_step_path}).",
-            flush=True,
-        )
-        return True
-    except Exception as e:
-        print(f"[Kaggle Security Audit Warning] Error verifying remote HF backup: {e}", flush=True)
-        return False
 
 
 def sync_normal_checkpoint_to_hf(
@@ -1569,10 +1314,6 @@ def trigger_async_cloud_backup(
         step=step,
         loss=loss,
         hf_token=token,
-        # On Kaggle the working disk is only ~20 GB (dual T4 and single GPU alike).
-        # After a confirmed cloud upload the local versioned snapshot is deleted so
-        # the next backup's staging directory can fit without "No space left on device".
-        delete_local_after_upload=_is_kaggle_environment(),
     )
 
 
@@ -1901,11 +1642,6 @@ def compute_tokenizer_fingerprint(
         actual_tok_path = tokenizer_path if os.path.isfile(tokenizer_path) else os.path.join(tokenizer_path, "tokenizer.json") if os.path.isdir(tokenizer_path) else None
         if actual_tok_path and os.path.isfile(actual_tok_path):
             tok_file_sha = compute_file_sha256(actual_tok_path)
-            try:
-                with open(actual_tok_path, "rb") as _tfb:
-                    tok_norm_sha = hashlib.sha256(_tfb.read().replace(b"\r\n", b"\n")).hexdigest()
-            except Exception:
-                tok_norm_sha = tok_file_sha
             search_dir = os.path.dirname(os.path.abspath(actual_tok_path))
             try:
                 with open(actual_tok_path, "r", encoding="utf-8") as f:
@@ -1964,7 +1700,6 @@ def compute_tokenizer_fingerprint(
     res = {
         "canonical_fingerprint": composite_sha,
         "tokenizer_file_sha256": tok_file_sha,
-        "normalized_tokenizer_file_sha256": locals().get("tok_norm_sha", tok_file_sha),
         "tokenizer_config_sha256": tok_cfg_sha,
         "special_tokens_map_sha256": tok_sp_sha,
         "vocab_size": vocab_size,
@@ -2202,92 +1937,24 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
     """
     Proactively reclaims disk space from caches and intermediate build directories
     if available disk space drops below min_free_gb, completely preventing 'No space left on device'.
-
-    On Kaggle (dual T4 or single GPU) the working disk is only ~20 GB.
-    The threshold is automatically raised to 10 GB and old versioned checkpoint
-    snapshots (*.step<N>_*) are pruned so the next staging write can succeed.
     """
     try:
-        # Kaggle working dir takes priority for disk checks
-        check_path = "/kaggle/working" if _is_kaggle_environment() and os.path.isdir("/kaggle/working") else "."
-        effective_min_free_gb = max(min_free_gb, 10.0) if _is_kaggle_environment() else min_free_gb
-        usage = shutil.disk_usage(check_path)
+        usage = shutil.disk_usage(".")
         free_gb = usage.free / (1024 ** 3)
-        if free_gb < effective_min_free_gb:
-            print(f"[DISK HYGIENE] Low free disk space detected ({free_gb:.2f} GB < {effective_min_free_gb:.1f} GB). Reclaiming caches...", flush=True)
-            # 1. Purge pip and torch caches only. Hugging Face cache is strictly preserved
-            # so dataset shards and authentication tokens are NOT repeatedly re-downloaded.
+        if free_gb < min_free_gb:
+            print(f"[DISK HYGIENE] Low free disk space detected ({free_gb:.2f} GB < {min_free_gb:.1f} GB). Reclaiming caches...", flush=True)
+            # 1. Purge huggingface, pip, and torch caches
             cache_dirs = [
+                "/root/.cache/huggingface",
                 "/root/.cache/pip",
                 "/root/.cache/torch",
+                os.path.expanduser("~/.cache/huggingface"),
                 os.path.expanduser("~/.cache/pip"),
                 os.path.expanduser("~/.cache/torch"),
             ]
-
             for cdir in cache_dirs:
                 if os.path.exists(cdir):
                     shutil.rmtree(cdir, ignore_errors=True)
-
-            # Purge models--* cache from HF hub (restored model weights) while strictly keeping datasets--*
-            for hf_hub in ("/root/.cache/huggingface/hub", os.path.expanduser("~/.cache/huggingface/hub")):
-                if os.path.isdir(hf_hub):
-                    for item in os.listdir(hf_hub):
-                        if item.startswith("models--"):
-                            mpath = os.path.join(hf_hub, item)
-                            _safe_rmtree(mpath)
-                            print(f"[Kaggle Disk Guard] Purged HF model hub restore cache (5.2 GB): {item}", flush=True)
-
-            # 2. On Kaggle: clean any phantom /content/drive directory and prune old versioned snapshots
-            if _is_kaggle_environment():
-                phantom_gdrive = "/content/drive"
-                if os.path.isdir(phantom_gdrive):
-                    print("[Kaggle Disk Guard] Purging phantom /content/drive directory on Kaggle to reclaim space...", flush=True)
-                    _safe_rmtree(phantom_gdrive)
-
-                _kaggle_prune_old_versioned_snapshots(check_path)
-
-                # Purge duplicate candidate model weights (storage/models/tara_candidate_v1)
-                for cand_dir in (
-                    os.path.join(check_path, "storage/models/tara_candidate_v1"),
-                    os.path.join(check_path, "tara/storage/models/tara_candidate_v1"),
-                    "storage/models/tara_candidate_v1",
-                ):
-                    if os.path.isdir(cand_dir):
-                        for f in os.listdir(cand_dir):
-                            if f.endswith((".safetensors", ".pt", ".bin")):
-                                fp = os.path.join(cand_dir, f)
-                                try:
-                                    os.remove(fp)
-                                    print(f"[Kaggle Disk Guard] Reclaimed duplicate candidate weight: {f}", flush=True)
-                                except Exception:
-                                    pass
-
-                # Purge duplicate local best_checkpoint weights (backed up on Hugging Face)
-                for b_cand in (
-                    os.path.join(check_path, "storage/models/checkpoints/stage0_pretraining/best_checkpoint"),
-                    os.path.join(check_path, "tara/storage/models/checkpoints/stage0_pretraining/best_checkpoint"),
-                    "storage/models/checkpoints/stage0_pretraining/best_checkpoint",
-                ):
-                    if os.path.isdir(b_cand):
-                        for f in os.listdir(b_cand):
-                            if f.endswith((".safetensors", ".pt", ".bin")):
-                                fp = os.path.join(b_cand, f)
-                                try:
-                                    os.remove(fp)
-                                    print(f"[Kaggle Disk Guard] Reclaimed duplicate local best_checkpoint weight: {f}", flush=True)
-                                except Exception:
-                                    pass
-
-                # Purge obsolete local backup directories if space is critically low
-                redundant_backup_candidates = [
-                    os.path.join(check_path, "tara/storage/backup"),
-                    os.path.join(check_path, "storage/backup"),
-                    "storage/backup",
-                ]
-                for bdir in redundant_backup_candidates:
-                    if os.path.isdir(bdir):
-                        print(f"[Kaggle Disk Guard] Purging redundant local storage/backup directory to reclaim space on Kaggle: {bdir}", flush=True)
-                        _safe_rmtree(bdir)
 
             # 3. Clean temporary files in /tmp
             for p in glob.glob("/tmp/tara_*") + glob.glob("/tmp/tmp_tara_*") + glob.glob("/tmp/tmptara*"):
@@ -2299,216 +1966,16 @@ def _reclaim_emergency_disk_space(min_free_gb: float = 6.0):
                 except Exception:
                     pass
 
-            after_usage = shutil.disk_usage(check_path)
+            after_usage = shutil.disk_usage(".")
             after_free = after_usage.free / (1024 ** 3)
             print(f"[DISK HYGIENE] Reclamation complete! Available disk space: {after_free:.2f} GB free.", flush=True)
     except Exception as e:
         print(f"[DISK HYGIENE Notice] Disk check notice: {e}", flush=True)
 
 
-def _kaggle_prune_old_versioned_snapshots(search_root: str) -> None:
-    """
-    Kaggle Deep Storage Guard:
-    Scans search_root and all known checkpoint directories for:
-    1. Versioned checkpoint directories: <basename>.step<N>_<timestamp>
-    2. Milestone directories: step_<N>_loss_<loss> or step_<N>
-       (e.g., tara_checkpoints/best_milestone/step_2121_loss_1.7231)
-    3. Obsolete local tara_checkpoints and staging directories
-    Keeps only the highest-step snapshot and deletes older ones to prevent
-    'No space left on device' on Kaggle's 20 GB working disk.
-    """
-    import re as _re
-    versioned_pattern = _re.compile(r"^(.+)\.step(\d+)_(\d+)$")
-    milestone_pattern = _re.compile(r"^step_(\d+)(?:_loss_([\d\.]+))?$")
-    now = time.time()
-
-    search_dirs = [
-        search_root,
-        os.path.join(search_root, "tara"),
-        os.path.join(search_root, "tara_checkpoints"),
-        os.path.join(search_root, "tara_checkpoints", "best_milestone"),
-        os.path.join(search_root, "tara_checkpoints", "normal_checkpoint"),
-        os.path.join(search_root, "tara", "tara_checkpoints"),
-        os.path.join(search_root, "tara", "tara_checkpoints", "best_milestone"),
-        os.path.join(search_root, "tara", "tara_checkpoints", "normal_checkpoint"),
-        os.path.join(search_root, "storage", "models", "checkpoints"),
-        os.path.join(search_root, "tara", "storage", "models", "checkpoints"),
-        os.path.join("storage", "models", "checkpoints"),
-        "tara_checkpoints",
-        os.path.join("tara_checkpoints", "best_milestone"),
-        os.path.join("tara_checkpoints", "normal_checkpoint"),
-        "/kaggle/working/tara_checkpoints",
-        "/kaggle/working/tara_checkpoints/best_milestone",
-        "/kaggle/working/tara_checkpoints/normal_checkpoint",
-        "/kaggle/working/tara/tara_checkpoints",
-        "/kaggle/working/tara/tara_checkpoints/best_milestone",
-        "/kaggle/working/tara/tara_checkpoints/normal_checkpoint",
-        "/content/drive/MyDrive/tara_checkpoints",
-        "/content/drive/MyDrive/tara_checkpoints/best_milestone",
-        "/content/drive/MyDrive/tara_checkpoints/normal_checkpoint",
-    ]
-
-    try:
-        if os.path.isdir(search_root):
-            for root, dirs, _ in os.walk(search_root):
-                rel = os.path.relpath(root, search_root)
-                depth = len(rel.split(os.sep)) if rel != "." else 0
-                if depth > 4:
-                    dirs.clear()
-                    continue
-                for d in dirs:
-                    if d in ("best_milestone", "normal_checkpoint", "tara_checkpoints"):
-                        full_d = os.path.join(root, d)
-                        if full_d not in search_dirs:
-                            search_dirs.append(full_d)
-    except Exception:
-        pass
-
-    seen_dirs: Set[str] = set()
-    grouped_versioned: Dict[str, List[Tuple[int, float, str]]] = {}
-    milestones_by_parent: Dict[str, List[Tuple[int, float, str]]] = {}
-
-    for sdir in search_dirs:
-        if not os.path.isdir(sdir):
-            continue
-        try:
-            for entry in os.listdir(sdir):
-                full = os.path.join(sdir, entry)
-                if not os.path.isdir(full):
-                    continue
-                full_abs = os.path.abspath(full)
-                if full_abs in seen_dirs:
-                    continue
-                seen_dirs.add(full_abs)
-
-                if entry.startswith((".ckpt_staging_", ".tmp_staging_", ".hf_restore_staging_")):
-                    try:
-                        mtime = os.path.getmtime(full)
-                    except Exception:
-                        mtime = 0.0
-                    if now - mtime > 120:
-                        print(f"[Kaggle Disk Guard] Purging stale staging directory: {entry}", flush=True)
-                        _safe_rmtree(full)
-                    continue
-
-                m_ver = versioned_pattern.match(entry)
-                if m_ver:
-                    base = m_ver.group(1)
-                    step_num = int(m_ver.group(2))
-                    try:
-                        mtime = os.path.getmtime(full)
-                    except Exception:
-                        mtime = 0.0
-                    grouped_versioned.setdefault(base, []).append((step_num, mtime, full))
-                    continue
-
-                m_mile = milestone_pattern.match(entry)
-                if m_mile:
-                    step_num = int(m_mile.group(1))
-                    try:
-                        mtime = os.path.getmtime(full)
-                    except Exception:
-                        mtime = 0.0
-                    milestones_by_parent.setdefault(sdir, []).append((step_num, mtime, full))
-                    continue
-        except Exception:
-            pass
-
-    for base, snapshots in grouped_versioned.items():
-        if len(snapshots) <= 1:
-            continue
-        snapshots.sort(key=lambda x: x[0], reverse=True)
-        to_delete = snapshots[1:]
-        for step_num, _, snap_path in to_delete:
-            print(f"[Kaggle Disk Guard] Pruning old versioned snapshot (step {step_num}): {os.path.basename(snap_path)}", flush=True)
-            _safe_rmtree(snap_path)
-
-    for parent_dir, milestones in milestones_by_parent.items():
-        if len(milestones) <= 1:
-            continue
-        milestones.sort(key=lambda x: x[0], reverse=True)
-        to_delete = milestones[1:]
-        for step_num, _, m_path in to_delete:
-            print(f"[Kaggle Disk Guard] Pruning obsolete milestone directory (step {step_num}): {os.path.basename(m_path)} from {parent_dir}", flush=True)
-            _safe_rmtree(m_path)
-
-
 # =============================================================================
 # 6. Atomic Checkpoint Persistence, Promotion Pipeline & Versioned Retention
 # =============================================================================
-
-def _kaggle_ensure_staging_headroom(output_dir: str, is_best: bool, required_gb: float = 6.0) -> float:
-    """
-    On Kaggle's ~20 GB disk, ensures at least `required_gb` free space before writing
-    a new checkpoint to staging.
-    Reclaims:
-    1. Standard caches and old snapshots via _reclaim_emergency_disk_space().
-    2. Redundant candidate weights in storage/models/tara_candidate_v1 (3.7 GB).
-    3. If is_best=True and output_dir has old milestone weights (3.7 GB), reclaims them
-       since the new best milestone replaces output_dir and previous milestone is backed up on HF.
-    """
-    check_path = "/kaggle/working" if os.path.isdir("/kaggle/working") else "."
-    try:
-        free_gb = shutil.disk_usage(check_path).free / (1024 ** 3)
-    except Exception:
-        return 10.0
-
-    if free_gb >= required_gb:
-        return free_gb
-
-    print(f"[Kaggle Disk Guard] Free disk space is low ({free_gb:.2f} GB < {required_gb:.1f} GB). Reclaiming space before staging...", flush=True)
-
-    # 1. Standard emergency reclamation
-    _reclaim_emergency_disk_space(min_free_gb=required_gb)
-    try:
-        free_gb = shutil.disk_usage(check_path).free / (1024 ** 3)
-    except Exception:
-        pass
-    if free_gb >= required_gb:
-        return free_gb
-
-    # 2. Reclaim redundant candidate model weights (storage/models/tara_candidate_v1)
-    for cand_dir in (
-        os.path.join(check_path, "storage/models/tara_candidate_v1"),
-        os.path.join(check_path, "tara/storage/models/tara_candidate_v1"),
-        "storage/models/tara_candidate_v1",
-    ):
-        if os.path.isdir(cand_dir):
-            for f in os.listdir(cand_dir):
-                if f.endswith((".safetensors", ".pt", ".bin")):
-                    fp = os.path.join(cand_dir, f)
-                    try:
-                        os.remove(fp)
-                        print(f"[Kaggle Disk Guard] Reclaimed duplicate candidate weight: {f}", flush=True)
-                    except Exception:
-                        pass
-
-    try:
-        free_gb = shutil.disk_usage(check_path).free / (1024 ** 3)
-    except Exception:
-        pass
-    if free_gb >= required_gb:
-        return free_gb
-
-    # 3. If saving best milestone, reclaim previous milestone weights from output_dir
-    # (they are already mirrored to HF; this milestone replaces them)
-    if is_best and os.path.isdir(output_dir):
-        for f in os.listdir(output_dir):
-            if f.endswith((".safetensors", ".pt", ".bin")):
-                fp = os.path.join(output_dir, f)
-                try:
-                    os.remove(fp)
-                    print(f"[Kaggle Disk Guard] Reclaimed previous best milestone weight before staging: {f}", flush=True)
-                except Exception:
-                    pass
-
-    try:
-        free_gb = shutil.disk_usage(check_path).free / (1024 ** 3)
-    except Exception:
-        pass
-    print(f"[Kaggle Disk Guard] Available free disk space before staging: {free_gb:.2f} GB", flush=True)
-    return free_gb
-
 
 def get_memory_status_str() -> str:
     """Returns formatted system RAM and GPU VRAM status for diagnostic monitoring."""
@@ -2584,31 +2051,7 @@ def save_checkpoint(
     print(f"[Checkpoint] Snapshotting [{tag}] checkpoint at Step {step}... {get_memory_status_str()}", flush=True)
 
     with _checkpoint_write_lock:
-        if _is_kaggle_environment():
-            # Kaggle Backup Queue Guard:
-            # Kaggle working disk is only ~20 GB. One checkpoint + optimizer is ~5 GB.
-            # If an asynchronous background upload is in-flight, staging another 5 GB
-            # concurrently will trigger os error 28 (No space left on device).
-            # We MUST wait for the in-flight backup to complete its upload and reclaim its local
-            # snapshot before staging the new checkpoint!
-            worker = BackgroundGDriveSyncWorker.get_instance()
-            if worker.is_busy():
-                tag_step = f"Step {step}" if not is_best else f"BEST MILESTONE (Step {step})"
-                print(
-                    f"[Kaggle Backup Queue] In-flight cloud backup is currently uploading. "
-                    f"Holding [{tag_step}] in queue until in-flight backup completes and local disk space is reclaimed...",
-                    flush=True,
-                )
-                worker.wait_completion(timeout=600)
-                _reclaim_emergency_disk_space(min_free_gb=10.0)
-
-            # Ensure sufficient disk headroom before staging (guarantees >= 6.0 GB)
-            try:
-                _kaggle_ensure_staging_headroom(output_dir=output_dir, is_best=is_best, required_gb=6.0)
-            except Exception as de:
-                print(f"[Kaggle Disk Guard Notice] Disk space check notice: {de}", flush=True)
-        else:
-            _reclaim_emergency_disk_space(min_free_gb=6.0)
+        _reclaim_emergency_disk_space(min_free_gb=6.0)
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.synchronize()
@@ -2901,10 +2344,6 @@ def save_checkpoint(
                 src = os.path.join(versioned_dir, fname)
                 dst = os.path.join(output_dir, fname)
                 if os.path.isfile(src):
-                    # On Kaggle: Best milestones are backed up directly to Hugging Face.
-                    # Do NOT store a duplicate 3.7 GB copy of model weights in local best_checkpoint!
-                    if _is_kaggle_environment() and is_best and fname.endswith((".safetensors", ".pt", ".bin")):
-                        continue
                     tmp_dst = os.path.join(output_dir, f".atomic_{fname}.{os.getpid()}_{int(time.time())}")
                     try:
                         try:
@@ -3026,37 +2465,14 @@ def save_checkpoint(
             # Step 8: Non-Blocking Background Multi-Cloud Synchronization (GDrive + HF)
             # If Google Drive is not mounted, auto-selects Hugging Face as the primary backup target!
             # Thread safety: upload from immutable versioned_dir to eliminate TOCTOU overwrite race conditions
-            is_rank_0 = True
-            if torch.distributed.is_available() and torch.distributed.is_initialized():
-                is_rank_0 = (torch.distributed.get_rank() == 0)
-            elif "RANK" in os.environ:
-                try:
-                    is_rank_0 = (int(os.environ.get("RANK", "0")) == 0)
-                except ValueError:
-                    pass
-
-            if is_rank_0:
-                upload_source = versioned_dir if versioned_dir and os.path.exists(versioned_dir) else output_dir
-                trigger_async_cloud_backup(
-                    local_ckpt_dir=upload_source,
-                    stage_id=stage_id,
-                    is_best=is_best,
-                    step=step,
-                    loss=loss,
-                )
-
-            # On Kaggle: Strictly wait for backup, remote verification, and local snapshot reclamation
-            # before returning to training loop so storage is free for the next step!
-            if _is_kaggle_environment():
-                print(f"[Kaggle Synchronous Backup Guard] Waiting for [{tag}] backup to upload, verify remotely, and reclaim local storage before continuing to next step...", flush=True)
-                worker = BackgroundGDriveSyncWorker.get_instance()
-                worker.wait_completion(timeout=1800)
-                _reclaim_emergency_disk_space(min_free_gb=10.0)
-                try:
-                    free_gb = shutil.disk_usage("/kaggle/working").free / (1024 ** 3)
-                    print(f"[Kaggle Synchronous Backup Guard] Backup 100% verified & storage freed ({free_gb:.2f} GB free). Continuing to next training step.", flush=True)
-                except Exception:
-                    pass
+            upload_source = versioned_dir if versioned_dir and os.path.exists(versioned_dir) else output_dir
+            trigger_async_cloud_backup(
+                local_ckpt_dir=upload_source,
+                stage_id=stage_id,
+                is_best=is_best,
+                step=step,
+                loss=loss,
+            )
 
             return True
 
@@ -3455,29 +2871,9 @@ def resolve_and_auto_select_checkpoint(
         if m:
             local_step = max(local_step, int(m.group(1)))
 
-    # Fallback to local tara_checkpoints / workspace discovery if local_ckpt_dir is empty
-    local_alt_source = None
-    if local_step < 0:
-        for alt_loc in [
-            "tara_checkpoints/normal_checkpoint",
-            "tara_checkpoints/best_milestone",
-            "tara_checkpoints",
-            "/kaggle/working/tara_checkpoints/normal_checkpoint",
-            "/kaggle/working/tara_checkpoints/best_milestone",
-            "/kaggle/working/tara_checkpoints",
-            os.path.join(parent_dir, "tara_checkpoints", "normal_checkpoint"),
-            os.path.join(parent_dir, "tara_checkpoints"),
-        ]:
-            if os.path.isdir(alt_loc):
-                st = get_checkpoint_dir_step(alt_loc)
-                if st > local_step:
-                    local_step = st
-                    local_alt_source = alt_loc
-
     # 2. Google Drive Step
-    gdrive_dir = resolve_gdrive_restore_dir() or gdrive_base_dir or resolve_gdrive_backup_dir()
+    gdrive_dir = resolve_gdrive_restore_dir() or gdrive_base_dir
     gdrive_step = get_checkpoint_dir_step(gdrive_dir) if (gdrive_dir and os.path.exists(gdrive_dir)) else -1
-    gdrive_is_mounted = is_gdrive_mounted() or (gdrive_dir is not None and os.path.exists(os.path.dirname(os.path.abspath(gdrive_dir))))
 
     # 3. Hugging Face Step
     hf_step = -1
@@ -3503,14 +2899,7 @@ def resolve_and_auto_select_checkpoint(
 
     gd_str = f"Step {gdrive_step:04d}" if gdrive_step >= 0 else "Unavailable"
     gd_color = CLR_GREEN if gdrive_step >= 0 else CLR_RESET
-    if gdrive_is_mounted:
-        gd_status = "Connected" if gdrive_step >= 0 else "Mounted (Empty)"
-        resolved_root = resolve_colab_gdrive_root() or "/content/drive"
-        gd_loc = gdrive_dir or os.path.join(resolved_root, "tara_checkpoints")
-    else:
-        gd_status = "Not Mounted"
-        gd_loc = "Unavailable"
-    print(f"  {'2. Google Drive':<20} {gd_status:<15} {gd_color}{gd_str:<18}{CLR_RESET} {gd_loc}", flush=True)
+    print(f"  {'2. Google Drive':<20} {'Mounted' if gdrive_step >= 0 else 'Not Found':<15} {gd_color}{gd_str:<18}{CLR_RESET} {gdrive_dir or 'Not Mounted'}", flush=True)
 
     hf_str = f"Step {hf_step:04d}" if hf_step >= 0 else "Unavailable"
     hf_color = CLR_GREEN if hf_step >= 0 else CLR_RESET
@@ -3526,28 +2915,6 @@ def resolve_and_auto_select_checkpoint(
 
     # 1. Local Disk is already at or above the latest remote checkpoint
     if local_step >= highest_step and local_step >= 0:
-        if local_alt_source and not check_model_weights_exist(local_ckpt_dir):
-            print(f"  [Auto-Align] Seeding active checkpoint '{local_ckpt_dir}' from '{local_alt_source}' (Step {local_step})...", flush=True)
-            src_to_copy = local_alt_source
-            for sub in os.listdir(local_alt_source):
-                sub_path = os.path.join(local_alt_source, sub)
-                if os.path.isdir(sub_path) and check_model_weights_exist(sub_path):
-                    sub_st = get_checkpoint_dir_step(sub_path)
-                    if sub_st == local_step:
-                        src_to_copy = sub_path
-                        break
-            os.makedirs(local_ckpt_dir, exist_ok=True)
-            for f in os.listdir(src_to_copy):
-                sf = os.path.join(src_to_copy, f)
-                df = os.path.join(local_ckpt_dir, f)
-                if os.path.isfile(sf) and not os.path.exists(df):
-                    try:
-                        os.link(sf, df)
-                    except Exception:
-                        try:
-                            os.symlink(os.path.abspath(sf), df)
-                        except Exception:
-                            shutil.copy2(sf, df)
         print(f"  {CLR_BOLD}{CLR_GREEN}>>> AUTO-SELECTED: LOCAL DISK (Step {local_step:04d} is already latest. No remote download required) <<<{CLR_RESET}", flush=True)
         print(f"{CLR_CYAN}{'=' * 85}{CLR_RESET}\n", flush=True)
         return "local", local_step
@@ -3786,12 +3153,7 @@ def _cleanup_old_versioned_checkpoints(
     - In-flight uploads (younger than min_abandoned_age_seconds without COMMITTED) are protected.
     - All deletions are logged explicitly.
     """
-    # Kaggle disk guard: only keep 1 on Kaggle to prevent 20 GB disk exhaustion.
-    # On GDrive / Colab / local machines, strictly retain keep_n >= 2.
-    if _is_kaggle_environment():
-        keep_n = max(int(keep_n), 1)
-    else:
-        keep_n = max(int(keep_n), 2)
+    keep_n = max(int(keep_n), 2)
 
     prefix = output_dir_basename + ".step"
     staging_prefix = f".ckpt_staging_{output_dir_basename}_"
@@ -4225,24 +3587,6 @@ def try_resume_from_checkpoint(
     elif os.path.isdir(checkpoint_dir) and checkpoint_dir not in candidate_dirs:
         candidate_dirs.append(checkpoint_dir)
 
-    # 4. Discovered tara_checkpoints candidates across local workspace
-    for extra_base in [
-        "tara_checkpoints",
-        os.path.join(parent_dir, "tara_checkpoints"),
-        "/kaggle/working/tara_checkpoints",
-    ]:
-        if os.path.isdir(extra_base):
-            for sub_cat in ["normal_checkpoint", "best_milestone", ""]:
-                cat_dir = os.path.join(extra_base, sub_cat) if sub_cat else extra_base
-                if os.path.isdir(cat_dir):
-                    for entry in os.listdir(cat_dir):
-                        full_entry = os.path.join(cat_dir, entry)
-                        if os.path.isdir(full_entry) and check_model_weights_exist(full_entry):
-                            if full_entry not in candidate_dirs:
-                                candidate_dirs.append(full_entry)
-                    if check_model_weights_exist(cat_dir) and cat_dir not in candidate_dirs:
-                        candidate_dirs.append(cat_dir)
-
     best_cand_dir = None
     best_cand_step = -1
     best_cand_epoch = 0
@@ -4322,11 +3666,9 @@ def try_resume_from_checkpoint(
                     else:
                         stored_tok_sha = stored_tok_fp.get("tokenizer_file_sha256")
                         curr_tok_sha = current_tok_fp.get("tokenizer_file_sha256")
-                        curr_norm_sha = current_tok_fp.get("normalized_tokenizer_file_sha256")
                         stored_vocab = stored_tok_fp.get("vocab_size")
                         curr_vocab = current_tok_fp.get("vocab_size")
-                        tok_sha_matches = (stored_tok_sha == curr_tok_sha) or (curr_norm_sha and stored_tok_sha == curr_norm_sha)
-                        if stored_tok_sha and (curr_tok_sha or curr_norm_sha) and tok_sha_matches and (stored_vocab is None or curr_vocab is None or stored_vocab == curr_vocab):
+                        if stored_tok_sha and curr_tok_sha and stored_tok_sha == curr_tok_sha and (stored_vocab is None or curr_vocab is None or stored_vocab == curr_vocab):
                             is_tok_match = True
                             print(
                                 f"  -> Notice: Candidate at {cand} primary tokenizer.json SHA-256 and vocab_size ({curr_vocab}) match authentic baseline. Permitting verified resume.",
@@ -4369,7 +3711,6 @@ def try_resume_from_checkpoint(
             cand_basename = os.path.basename(os.path.normpath(cand))
             is_direct_output = (os.path.abspath(cand) == os.path.abspath(checkpoint_dir))
             is_versioned_match = cand_basename.startswith(output_dir_basename + ".step")
-            is_tara_ckpt = ("tara_checkpoints" in cand)
 
             cand_stage = s_data.get("stage_id", "")
             if expected_stage_id and cand_stage and cand_stage != expected_stage_id:
@@ -4380,7 +3721,7 @@ def try_resume_from_checkpoint(
                 )
                 continue
 
-            if not (is_direct_output or is_versioned_match or is_tara_ckpt):
+            if not (is_direct_output or is_versioned_match):
                 # When expected_stage_id is provided and matches, accept it; otherwise reject scope mismatch
                 if expected_stage_id and cand_stage == expected_stage_id:
                     pass

@@ -1792,7 +1792,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
             )
 
     # 1. Load Architecture Config
-    config_path = os.path.join(args.model_dir, "config.json")
+    config_path = os.path.join(args.resume_dir, "config.json") if (args.resume_dir and os.path.isfile(os.path.join(args.resume_dir, "config.json"))) else os.path.join(args.model_dir, "config.json")
     if not os.path.exists(config_path):
         config_path = "storage/models/tara_candidate_v1/config.json"
     if not os.path.exists(config_path):
@@ -1810,7 +1810,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
         args.max_seq_len = int(config.get("max_position_embeddings", 2048))
 
     # 2. Load Native Tokenizer
-    tok_path = os.path.join(args.model_dir, "tokenizer.json")
+    tok_path = os.path.join(args.resume_dir, "tokenizer.json") if (args.resume_dir and os.path.isfile(os.path.join(args.resume_dir, "tokenizer.json"))) else os.path.join(args.model_dir, "tokenizer.json")
     if not os.path.exists(tok_path):
         tok_path = "storage/models/tara_candidate_v1/tokenizer.json"
     if not os.path.exists(tok_path):
@@ -2518,15 +2518,23 @@ def main():
         except Exception as e:
             print(f"[TPU Cloud Resume Notice] Multi-source resume discovery skipped: {e}", flush=True)
 
-    # Ensure candidate model assets are downloaded if missing locally
-    ensure_remote_tpu_assets(
-        model_dir=args.model_dir,
-        dataset_dir=args.dataset_dir,
-        repo_id=args.hf_repo or args.hf_model_repo,
-        dataset_repo=args.hf_dataset_repo,
-        prefix=args.dataset_prefix.strip("/"),
-        token=args.hf_token,
-    )
+    # Ensure candidate model assets are downloaded if missing locally and NOT already resumed
+    is_resumed = bool(args.resume_dir and os.path.exists(args.resume_dir) and (
+        os.path.isfile(os.path.join(args.resume_dir, "checkpoint_state.json"))
+        or os.path.isfile(os.path.join(args.resume_dir, "STAGE_METADATA.json"))
+    ))
+
+    if not is_resumed:
+        ensure_remote_tpu_assets(
+            model_dir=args.model_dir,
+            dataset_dir=args.dataset_dir,
+            repo_id=args.hf_repo or args.hf_model_repo,
+            dataset_repo=args.hf_dataset_repo,
+            prefix=args.dataset_prefix.strip("/"),
+            token=args.hf_token,
+        )
+    else:
+        print(f"[TPU Asset Notice] Checkpoint already resumed from '{args.resume_dir}'. Skipping redundant candidate model download.", flush=True)
 
     if HAS_XLA and hw_info["num_cores"] > 1 and not args.single_core:
         print(f"[TPU Spawner] Launching distributed training across {hw_info['num_cores']} TPU cores via xmp.spawn...", flush=True)

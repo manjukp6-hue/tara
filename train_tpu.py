@@ -2125,7 +2125,8 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
     ema_loss = None
 
     if is_main:
-        print(f"[TPU Training Loop] Launching Steps {step}..{args.max_steps} on {world_size} TPU Cores...\n", flush=True)
+        print(f"[TPU Training Loop] Launching Steps {step}..{args.max_steps} on {world_size} TPU Cores...", flush=True)
+        print(f"[TPU Engine] Note: First step ({step + 1}) compiles XLA execution graph for TPU hardware (JIT compilation may take ~1-2 min). Subsequent steps run instantly.\n", flush=True)
 
     epoch = start_epoch
     for epoch in range(start_epoch, args.epochs):

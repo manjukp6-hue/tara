@@ -344,6 +344,7 @@ def restore_tpu_optimizer_state(
             raise FileNotFoundError(f"[TPU Resume Gate] Mandatory optimizer state missing at '{opt_file}'. Cold start rejected without --allow-optimizer-cold-start.")
 
     import torch
+    print(f"[TPU Resume] Loading optimizer state from '{opt_file}' into RAM (deserializing ~7.4GB momentum states, please wait ~30-60s)...", flush=True)
     try:
         opt_data = torch.load(opt_file, map_location="cpu")
     except Exception as le:
@@ -407,6 +408,7 @@ def restore_tpu_optimizer_state(
                         pstate["exp_avg_sq"] = s2.float() if hasattr(s2, "float") else s2
 
     # Ingest validated state_dict into optimizer
+    print(f"[TPU Resume] Ingesting validated state dict and transferring momentum tensors to device ({device})...", flush=True)
     try:
         optimizer.load_state_dict(raw_opt_sd)
     except Exception as se:
@@ -416,7 +418,7 @@ def restore_tpu_optimizer_state(
         raise RuntimeError(f"[TPU Resume Gate] Failed to load validated optimizer state dict: {se}")
 
     # Move state tensors to TPU/XLA device
-    if device is not None and (str(device).startswith("xla") or getattr(device, "type", "") == "xla"):
+    if device is not None and (str(device).startswith("xla") or getattr(device, "type", "") in ("xla", "tpu")):
         for state in optimizer.state.values():
             for sk, sv in state.items():
                 if isinstance(sv, torch.Tensor):

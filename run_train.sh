@@ -112,11 +112,11 @@ export DOMAIN_WEIGHTS
 echo "[DYNAMIC CONFIG] Batch Size: $TRAIN_BATCH_SIZE | Grad Accum: $GRAD_ACCUM | Optimizer: $OPTIMIZER_TYPE | LR: $LR | Grad Checkpointing: $GRADIENT_CHECKPOINTING | Eval Interval: $EVAL_INTERVAL | Promote Interval: $PROMOTE_INTERVAL"
 
 # 3. Mount Google Drive if in Colab & Configure Checkpoint Sync
-if [ -d "/content" ]; then
+if [ -d "/content" ] && python3 -c "import google.colab" 2>/dev/null; then
     echo "[GDRIVE] Checking Google Drive mount in Colab..."
     python3 -c "from gdrive_sync import mount_google_drive; mount_google_drive()" 2>/dev/null || true
     export GDRIVE_BACKUP_DIR="${GDRIVE_BACKUP_DIR:-/content/drive/MyDrive/tara_checkpoints}"
-    mkdir -p "$GDRIVE_BACKUP_DIR"
+    mkdir -p "$GDRIVE_BACKUP_DIR" 2>/dev/null || true
 fi
 
 # 4. Resolve Hugging Face Authentication Token

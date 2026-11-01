@@ -1636,15 +1636,6 @@ class TaraStreamingJsonlDataset(IterableDataset):
         self.mask_prompt = bool(mask_prompt)
         self.rank = int(rank)
         self.world_size = max(1, int(world_size))
-
-        # Multi-GPU (DDP) Shard Partitioning:
-        # If world_size > 1 and multiple shards exist, partition shards disjointly across ranks.
-        # If fewer shards than world_size exist (e.g. single shard), retain shards across ranks
-        # and interleave records in __iter__ (line_idx % world_size == rank).
-        if self.world_size > 1 and len(self.file_paths) >= self.world_size:
-            sharded_fps = [fp for idx, fp in enumerate(self.file_paths) if idx % self.world_size == self.rank]
-            if sharded_fps:
-                self.file_paths = sharded_fps
         self.resume_shard = resume_shard
         self.resume_line_offset = resume_line_offset
         self.resume_byte_offset = resume_byte_offset
@@ -1703,10 +1694,15 @@ class TaraStreamingJsonlDataset(IterableDataset):
                     if norm_p.startswith(norm_ds + "/"):
                         known_shard_names.add(norm_p[len(norm_ds) + 1:])
             if norm_resume not in known_shard_names and base_resume not in known_shard_names:
-                raise RuntimeError(
-                    f"[Dataset Resume Error] Specified resume target shard '{self.resume_shard}' "
-                    f"is not present in the discovered dataset shards catalog ({len(known_shard_names)} shards)."
+                print(
+                    f"[Dataset Resume Notice] Resume shard '{self.resume_shard}' not in current shard list; "
+                    f"resetting domain cursor to start of domain.",
+                    flush=True,
                 )
+                self.resume_shard = None
+                self.resume_line_offset = -1
+                self.resume_byte_offset = 0
+                self.resume_chunk_idx = 0
 
         print(f"[Dataset] Initialized streaming pipeline across {len(self.file_paths)} shard(s) "
               f"(buffer_size={self.buffer_size}, resume_shard={self.resume_shard}, "
@@ -2202,11 +2198,6 @@ class TaraStreamingJsonlDataset(IterableDataset):
                 for line_idx, line_byte_offset, record in self._iter_shard_records(
                     actual_fp, is_resume_target, target_resume_line, target_resume_byte, target_resume_chunk, shard_name, shard_sha
                 ):
-                    # Multi-GPU (DDP) Record-Level Interleaving for single/fewer shards:
-                    if self.world_size > 1 and len(fps) < self.world_size:
-                        if (line_idx % self.world_size) != self.rank:
-                            continue
-
                     total_shard_lines = max(total_shard_lines, line_idx + 1)
                     try:
                         inp_text, out_text, raw_text = self._extract_training_text(record)
@@ -2249,12 +2240,6 @@ class TaraStreamingJsonlDataset(IterableDataset):
                             if is_resume_target and line_idx == target_resume_line and chunk_idx < target_resume_chunk:
                                 continue
 
-                            if torch.distributed.is_available() and torch.distributed.is_initialized():
-                                ddp_world = torch.distributed.get_world_size()
-                                ddp_rank = torch.distributed.get_rank()
-                                if ddp_world > 1 and ((line_idx + chunk_idx) % ddp_world != ddp_rank):
-                                    continue
-
                             chunk_target_start = max(0, target_start - chunk_start)
                             chunk_target_start = min(chunk_target_start, len(chunk_ids))
 
@@ -2268,6 +2253,12 @@ class TaraStreamingJsonlDataset(IterableDataset):
                             self.active_shard_offset = line_idx
                             self.active_shard_byte_offset = line_byte_offset
                             self.active_chunk_idx = chunk_idx
+
+                            # DDP rank striding: distribute chunks disjointly across ranks
+                            effective_world = self.world_size if self.world_size > 1 else (torch.distributed.get_world_size() if (torch.distributed.is_available() and torch.distributed.is_initialized()) else 1)
+                            effective_rank = self.rank if self.world_size > 1 else (torch.distributed.get_rank() if (torch.distributed.is_available() and torch.distributed.is_initialized()) else 0)
+                            if effective_world > 1 and ((line_idx + chunk_idx) % effective_world != effective_rank):
+                                continue
 
                             item = (input_ids, labels, shard_name, line_idx, line_byte_offset, chunk_idx, is_last_chunk)
                             if buffer_size <= 1:

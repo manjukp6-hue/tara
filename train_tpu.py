@@ -74,6 +74,7 @@ from tpu_config import (
     TPUConfig,
     build_tpu_optimizer_groups,
     restore_tpu_optimizer_state,
+    should_offload_optimizer,
     get_tpu_memory_diagnostics,
     log_tpu_memory_stage,
 )
@@ -1649,6 +1650,7 @@ def load_tpu_checkpoint(
     optimizer: Optional[torch.optim.Optimizer] = None,
     device: Optional[torch.device] = None,
     allow_cold_start: bool = False,
+    offload_optimizer: bool = False,
 ) -> Tuple[int, int, float, bool, Dict[str, Any]]:
     """
     Loads existing checkpoint (TPU or GPU) with 100% parameter and optimizer fidelity.
@@ -1716,7 +1718,7 @@ def load_tpu_checkpoint(
             )
             _ensure_tied_weights(target_model)
             if optimizer is not None:
-                restore_tpu_optimizer_state(checkpoint_dir, optimizer, device=device, allow_cold_start=allow_cold_start)
+                restore_tpu_optimizer_state(checkpoint_dir, optimizer, device=device, allow_cold_start=allow_cold_start, offload_optimizer=offload_optimizer)
             return step, epoch, loss, (matched_keys > 0), cursor
 
         # Case 2: Monolithic SafeTensors (Standard TPU single-file checkpoint)
@@ -1731,7 +1733,7 @@ def load_tpu_checkpoint(
             print(f"[TPU Resume] Restored {matched_keys}/{total_model_keys} weight tensors from model.safetensors at Step {step} (Loss: {loss:.4f})", flush=True)
             _ensure_tied_weights(target_model)
             if optimizer is not None:
-                restore_tpu_optimizer_state(checkpoint_dir, optimizer, device=device, allow_cold_start=allow_cold_start)
+                restore_tpu_optimizer_state(checkpoint_dir, optimizer, device=device, allow_cold_start=allow_cold_start, offload_optimizer=offload_optimizer)
             return step, epoch, loss, (matched_keys > 0), cursor
 
         # Case 3: Loose SafeTensors Shards
@@ -1749,7 +1751,7 @@ def load_tpu_checkpoint(
                 print(f"[TPU Resume] Restored {matched_keys}/{total_model_keys} weight tensors from {len(loose_shards)} loose shards at Step {step} (Loss: {loss:.4f})", flush=True)
                 _ensure_tied_weights(target_model)
                 if optimizer is not None:
-                    restore_tpu_optimizer_state(checkpoint_dir, optimizer, device=device, allow_cold_start=allow_cold_start)
+                    restore_tpu_optimizer_state(checkpoint_dir, optimizer, device=device, allow_cold_start=allow_cold_start, offload_optimizer=offload_optimizer)
                 return step, epoch, loss, (matched_keys > 0), cursor
 
         # Case 4: PyTorch Binary Fallback
@@ -1765,7 +1767,7 @@ def load_tpu_checkpoint(
             print(f"[TPU Resume] Restored {matched_keys}/{total_model_keys} weight tensors from pytorch_model.bin at Step {step} (Loss: {loss:.4f})", flush=True)
             _ensure_tied_weights(target_model)
             if optimizer is not None:
-                restore_tpu_optimizer_state(checkpoint_dir, optimizer, device=device, allow_cold_start=allow_cold_start)
+                restore_tpu_optimizer_state(checkpoint_dir, optimizer, device=device, allow_cold_start=allow_cold_start, offload_optimizer=offload_optimizer)
             return step, epoch, loss, (matched_keys > 0), cursor
 
     except Exception as e:
@@ -1972,6 +1974,27 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
     log_tpu_memory_stage("AFTER_MODEL_LOADING", step=target_resume_step, device=device, model=model)
 
     # 4. AdamW Optimizer with 100% Exact GPU Parameter Grouping
+    hw_info = get_tpu_hardware_info()
+    if getattr(args, "offload_optimizer", None) is None:
+        args.offload_optimizer = should_offload_optimizer(
+            hardware_type=hw_info.get("hardware_type", ""),
+            num_cores=hw_info.get("num_cores", 1),
+        )
+
+    if is_main:
+        if args.offload_optimizer:
+            print(
+                "[Optimizer Setup] Optimizer state offloading: ENABLED (Host CPU RAM)\n"
+                "  -> Offloading ~7.07 GB FP32 momentum buffers to CPU Host RAM.\n"
+                "  -> Preserves ~7.07 GB TPU HBM for forward activations and backpropagation.",
+                flush=True,
+            )
+        else:
+            print(
+                "[Optimizer Setup] Optimizer state offloading: DISABLED (TPU Device Resident)",
+                flush=True,
+            )
+
     optim_groups = build_tpu_optimizer_groups(model, weight_decay=args.weight_decay)
     optimizer = torch.optim.AdamW(
         optim_groups,
@@ -2015,7 +2038,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
 
     if resume_dir:
         start_step, start_epoch, best_loss, resumed, cursor = load_tpu_checkpoint(
-            resume_dir, model, optimizer, device=device, allow_cold_start=args.allow_optimizer_cold_start
+            resume_dir, model, optimizer, device=device, allow_cold_start=args.allow_optimizer_cold_start, offload_optimizer=args.offload_optimizer
         )
         if resumed and is_main:
             print(
@@ -2367,6 +2390,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
                     valid_tokens=local_valid_tokens,
                     step=step,
                     attempt=accum_attempt,
+                    offload_optimizer=args.offload_optimizer,
                 )
 
                 if is_skipped:
@@ -2655,6 +2679,7 @@ def parse_tpu_arguments() -> argparse.Namespace:
     parser.add_argument("--mask-prompt", action="store_true", default=False, help="Mask user instruction tokens with -100 in SFT stages")
     parser.add_argument("--freeze-backbone", action="store_true", default=False, help="Freeze backbone transformer layers during specialized head training")
     parser.add_argument("--single-core", action="store_true", default=False, help="Run single-core TPU mode")
+    parser.add_argument("--offload-optimizer", action=argparse.BooleanOptionalAction, default=None, help="Offload AdamW momentum buffers to CPU Host RAM (default: auto-detected for 16GB TPUs like v5e, v3, v2)")
     parser.add_argument("--validate-checkpoint-handoff", type=str, default=None, help="Validate a candidate checkpoint directory before stage handoff and exit")
     return parser.parse_args()
 

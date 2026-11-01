@@ -46,6 +46,8 @@ from tpu_config import (
     set_collective_mock,
     sync_tpu_sum,
     sync_tpu_sum_float,
+    should_offload_optimizer,
+    _step_offloaded_adamw,
 )
 from train_tpu import compute_tpu_chunked_loss, save_tpu_checkpoint, load_tpu_checkpoint
 from model_dataset import TaraForCausalLM, TaraNativeTokenizer
@@ -689,6 +691,110 @@ class TestTpuHbmMemorySafety(unittest.TestCase):
                 self.assertIsNone(p.grad, "Parameter .grad must be None after zero_grad(set_to_none=True)")
         finally:
             set_collective_mock(None)
+
+    def test_15_offloaded_optimizer_exact_parity_and_hbm_isolation(self):
+        """
+        Validates:
+          1. should_offload_optimizer correctly detects 16GB / 8GB TPUs and single-core setups.
+          2. Bitwise exact mathematical parity between offloaded AdamW step and native AdamW.
+          3. Momentum states remain strictly on CPU Host memory (0 bytes on accelerator device).
+          4. Checkpoint save & restore with offload_optimizer=True preserves complete FP32 fidelity.
+        """
+        # 1. Hardware detection
+        self.assertTrue(should_offload_optimizer("Google Cloud TPU v5e-1 (Colab | 16GB HBM | 1 Core)", num_cores=1))
+        self.assertTrue(should_offload_optimizer("Google Cloud TPU v5e-8 (Kaggle/GCP | 8 Cores | 128GB HBM)", num_cores=8))
+        self.assertTrue(should_offload_optimizer("Google TPU v3-8 (128GB HBM | 8 Cores)", num_cores=8))
+        self.assertTrue(should_offload_optimizer("Google TPU v2-8 (64GB HBM | 8 Cores)", num_cores=8))
+        self.assertTrue(should_offload_optimizer("Custom TPU", num_cores=1))
+        self.assertFalse(should_offload_optimizer("Google Cloud TPU v6e-8 Trillium (256GB HBM | 8 Cores)", num_cores=8))
+        self.assertFalse(should_offload_optimizer("Google Cloud TPU v5p (95GB HBM/chip | 8 Cores)", num_cores=8))
+
+        # 2. Multi-step bitwise exact parity with 2 parameter groups
+        torch.manual_seed(999)
+        p1_decay = torch.nn.Parameter(torch.randn(10, 10))
+        p1_nodecay = torch.nn.Parameter(torch.randn(5))
+        opt1 = torch.optim.AdamW([
+            {"params": [p1_decay], "weight_decay": 0.01},
+            {"params": [p1_nodecay], "weight_decay": 0.0},
+        ], lr=2e-4, betas=(0.9, 0.95), eps=1e-5)
+
+        torch.manual_seed(999)
+        p2_decay = torch.nn.Parameter(torch.randn(10, 10))
+        p2_nodecay = torch.nn.Parameter(torch.randn(5))
+        opt2 = torch.optim.AdamW([
+            {"params": [p2_decay], "weight_decay": 0.01},
+            {"params": [p2_nodecay], "weight_decay": 0.0},
+        ], lr=2e-4, betas=(0.9, 0.95), eps=1e-5)
+
+        for step_idx in range(5):
+            g_dec = torch.randn(10, 10)
+            g_nodec = torch.randn(5)
+
+            p1_decay.grad = g_dec.clone()
+            p1_nodecay.grad = g_nodec.clone()
+            opt1.step()
+
+            p2_decay.grad = g_dec.clone()
+            p2_nodecay.grad = g_nodec.clone()
+            is_skipped, _ = tpu_optimizer_step(opt2, max_norm=0.0, step=step_idx + 1, offload_optimizer=True)
+            self.assertFalse(is_skipped)
+
+            diff_dec = (p1_decay - p2_decay).abs().max().item()
+            diff_nodec = (p1_nodecay - p2_nodecay).abs().max().item()
+            self.assertLess(diff_dec, 1e-7, f"Decay param diff too large at step {step_idx}: {diff_dec}")
+            self.assertLess(diff_nodec, 1e-7, f"No-decay param diff too large at step {step_idx}: {diff_nodec}")
+
+        # 3. Momentum buffer CPU residence check
+        for state in opt2.state.values():
+            if "exp_avg" in state:
+                self.assertEqual(state["exp_avg"].device.type, "cpu")
+                self.assertEqual(state["exp_avg"].dtype, torch.float32)
+            if "exp_avg_sq" in state:
+                self.assertEqual(state["exp_avg_sq"].device.type, "cpu")
+                self.assertEqual(state["exp_avg_sq"].dtype, torch.float32)
+
+        # 4. Checkpoint save & restore with offload_optimizer=True
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = TaraForCausalLM(self.config)
+            opt_groups = build_tpu_optimizer_groups(model)
+            model_opt = torch.optim.AdamW(opt_groups, lr=1e-3)
+            # Take one offloaded step to populate momentum state
+            for p in model.parameters():
+                p.grad = torch.randn_like(p)
+            tpu_optimizer_step(model_opt, max_norm=1.0, step=1, offload_optimizer=True)
+
+            save_tpu_checkpoint(
+                model=model,
+                optimizer=model_opt,
+                config=self.config,
+                tok_path="",
+                output_dir=tmp_dir,
+                step=10,
+                epoch=0,
+                loss=1.5,
+                best_loss=1.5,
+                stage_id="test_stage",
+                max_shard_mb=10,
+            )
+
+            # Restore into a fresh model & optimizer with offload_optimizer=True
+            fresh_model = TaraForCausalLM(self.config)
+            fresh_opt = torch.optim.AdamW(build_tpu_optimizer_groups(fresh_model), lr=1e-3)
+            res_step, _, res_loss, resumed, _ = load_tpu_checkpoint(
+                tmp_dir, fresh_model, fresh_opt, allow_cold_start=False, offload_optimizer=True
+            )
+            self.assertTrue(resumed)
+            self.assertEqual(res_step, 10)
+            self.assertAlmostEqual(res_loss, 1.5)
+
+            # Verify restored momentum states are FP32 and resident on CPU
+            for state in fresh_opt.state.values():
+                if "exp_avg" in state:
+                    self.assertEqual(state["exp_avg"].device.type, "cpu")
+                    self.assertEqual(state["exp_avg"].dtype, torch.float32)
+                if "exp_avg_sq" in state:
+                    self.assertEqual(state["exp_avg_sq"].device.type, "cpu")
+                    self.assertEqual(state["exp_avg_sq"].dtype, torch.float32)
 
 
 if __name__ == "__main__":

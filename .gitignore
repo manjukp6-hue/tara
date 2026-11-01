@@ -1,2 +1,12 @@
 __pycache__/
 *.pyc
+.env
+*.safetensors
+storage/datasets/
+storage/memory/
+storage/backup/
+storage/vault/
+storage/models/checkpoints_tpu/
+tara_checkpoints/
+target/
+.cache/

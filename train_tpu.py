@@ -1263,19 +1263,30 @@ def _validate_checkpoint_tensors(loaded_sd: Dict[str, torch.Tensor], model_sd: D
         print(f"[TPU Resume Notice] {len(unexpected_keys)} unexpected keys present in checkpoint but safely ignored.", flush=True)
 
 
-def _ensure_tied_weights(model: nn.Module):
-    """Guarantees tied word embeddings and LM head point to the exact same parameter buffer."""
+def _ensure_tied_weights(model: nn.Module) -> bool:
+    """
+    Authoritative architectural weight-tying enforcer and verifier.
+    When `tie_word_embeddings` is True in the model configuration:
+      1. Binds target_model.lm_head.weight directly to target_model.model.embed_tokens.weight.
+      2. Strictly asserts pointer identity: (lm_head.weight is embed_tokens.weight).
+    """
     target_model = getattr(model, "module", model)
     cfg = getattr(target_model, "config", None)
     tie = False
     if isinstance(cfg, dict):
-        tie = cfg.get("tie_word_embeddings", False)
+        tie = bool(cfg.get("tie_word_embeddings", False))
     elif cfg is not None:
-        tie = getattr(cfg, "tie_word_embeddings", False)
+        tie = bool(getattr(cfg, "tie_word_embeddings", False))
 
     if tie:
         if hasattr(target_model, "lm_head") and hasattr(target_model, "model") and hasattr(target_model.model, "embed_tokens"):
             target_model.lm_head.weight = target_model.model.embed_tokens.weight
+            if target_model.lm_head.weight is not target_model.model.embed_tokens.weight:
+                raise RuntimeError(
+                    "[Weight Tying Fatal] Failed to bind lm_head.weight to embed_tokens.weight; pointer identity mismatch."
+                )
+            return True
+    return False
 
 
 def validate_stage_checkpoint_for_handoff(
@@ -1826,6 +1837,11 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
     model = TaraForCausalLM(config, gradient_checkpointing=args.gradient_checkpointing)
     model.to(device)
     _ensure_tied_weights(model)
+
+    if is_main and config.get("tie_word_embeddings", False):
+        target = getattr(model, "module", model)
+        assert target.lm_head.weight is target.model.embed_tokens.weight, "Pointer identity assertion failed: lm_head.weight is not embed_tokens.weight"
+        print(f"[Model Architecture] Verified architectural weight tying (lm_head.weight is embed_tokens.weight: True) on device ({device}).", flush=True)
 
     # 4. AdamW Optimizer with 100% Exact GPU Parameter Grouping
     optim_groups = build_tpu_optimizer_groups(model, weight_decay=args.weight_decay)

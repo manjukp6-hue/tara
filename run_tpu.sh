@@ -83,6 +83,11 @@ if [ -n "${COLAB_TPU_ADDR:-}" ] || [ -d "/content" ]; then
     $PY_CMD -c "from gdrive_sync import mount_google_drive; mount_google_drive()" 2>/dev/null || true
 fi
 
+# Authoritative Default Dataset and Model Repositories (Exact Parity with run_train.sh)
+export HF_DATASET_REPO="${HF_DATASET_REPO:-${HF_REPO:-manjukp6/tara_dataset_v1}}"
+export HF_MODEL_REPO="${HF_MODEL_REPO:-${HF_REPO:-manjukp6/tara}}"
+EXTRA_ARGS+=("--hf-dataset-repo" "$HF_DATASET_REPO")
+
 HF_REPO_VAL="${HF_MODEL_REPO:-${HF_REPO:-}}"
 if [ -n "$HF_REPO_VAL" ]; then
     EXTRA_ARGS+=("--hf-repo" "$HF_REPO_VAL")

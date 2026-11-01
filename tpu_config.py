@@ -53,22 +53,29 @@ except (ImportError, Exception):
 
 
 def is_tpu_available() -> bool:
-    """Returns True if PyTorch/XLA is installed and a TPU accelerator is present."""
-    if not HAS_XLA:
-        return False
+    """Returns True if PyTorch/XLA or native TorchTPU accelerator is present."""
+    if HAS_XLA:
+        try:
+            if xr is not None and hasattr(xr, "device_type"):
+                return xr.device_type().upper() == "TPU"
+            device_hw = xm.xla_device_hw()
+            return "TPU" in str(device_hw).upper()
+        except Exception:
+            return True
     try:
-        if xr is not None and hasattr(xr, "device_type"):
-            return xr.device_type().upper() == "TPU"
-        device_hw = xm.xla_device_hw()
-        return "TPU" in str(device_hw).upper()
+        import torch
+        dev = torch.device("tpu")
+        _ = torch.empty(0, device=dev)
+        return True
     except Exception:
-        # Check environment markers common in Colab / Kaggle / GCP TPU VMs
-        return bool(
-            os.environ.get("TPU_NAME")
-            or os.environ.get("COLAB_TPU_ADDR")
-            or os.environ.get("TPU_ACCELERATOR_TYPE")
-            or (os.environ.get("PJRT_DEVICE") == "TPU")
-        )
+        pass
+    # Check environment markers common in Colab / Kaggle / GCP TPU VMs
+    return bool(
+        os.environ.get("TPU_NAME")
+        or os.environ.get("COLAB_TPU_ADDR")
+        or os.environ.get("TPU_ACCELERATOR_TYPE")
+        or (os.environ.get("PJRT_DEVICE") == "TPU")
+    )
 
 
 def get_tpu_hardware_info() -> Dict[str, Any]:
@@ -167,9 +174,19 @@ def get_tpu_hardware_info() -> Dict[str, Any]:
 
 
 def get_tpu_device():
-    """Acquires the authentic PyTorch/XLA device bound to the current process."""
+    """Acquires the authentic PyTorch/XLA or native TorchTPU device bound to the current process."""
     if HAS_XLA:
-        return xm.xla_device()
+        try:
+            return xm.xla_device()
+        except Exception:
+            pass
+    try:
+        import torch
+        dev = torch.device("tpu")
+        _ = torch.empty(0, device=dev)
+        return dev
+    except Exception:
+        pass
     import torch
     return torch.device("cpu")
 

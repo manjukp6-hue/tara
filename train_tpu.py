@@ -1922,7 +1922,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
     # 6. Authoritative Shard Discovery & Multi-Domain Curriculum Setup
     shard_ledger = ShardLedger(args.output_dir, stage_id=args.stage_id, dataset_revision=args.dataset_prefix.strip("/"))
 
-    raw_dataset_repo = args.hf_dataset_repo or args.hf_repo or os.environ.get("HF_DATASET_REPO", os.environ.get("HF_REPO", None))
+    raw_dataset_repo = args.hf_dataset_repo or args.hf_repo or os.environ.get("HF_DATASET_REPO", os.environ.get("HF_REPO", "manjukp6/tara_dataset_v1"))
     dataset_repo = None if (raw_dataset_repo is None or str(raw_dataset_repo).strip().lower() in ("", "none", "local", "null")) else str(raw_dataset_repo).strip()
     ds_prefix = args.dataset_prefix.strip("/")
 
@@ -2456,7 +2456,7 @@ def parse_tpu_arguments() -> argparse.Namespace:
     parser.add_argument("--verify-gate", action="store_true", default=True, help="Verify pretraining authorization proof")
     parser.add_argument("--hf-repo", type=str, default=os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", None)), help="Hugging Face model repository")
     parser.add_argument("--hf-model-repo", type=str, default=os.environ.get("HF_MODEL_REPO", os.environ.get("HF_REPO", None)), help="Hugging Face model repository for weights upload")
-    parser.add_argument("--hf-dataset-repo", type=str, default=os.environ.get("HF_DATASET_REPO", None), help="Hugging Face dataset repository")
+    parser.add_argument("--hf-dataset-repo", type=str, default=os.environ.get("HF_DATASET_REPO", "manjukp6/tara_dataset_v1"), help="Hugging Face dataset repository")
     parser.add_argument("--hf-token", type=str, default=os.environ.get("HF_TOKEN", None), help="Hugging Face auth token")
     parser.add_argument("--gdrive-dir", type=str, default=os.environ.get("GDRIVE_RESTORE_DIR", os.environ.get("GDRIVE_BACKUP_DIR", None)), help="Google Drive backup directory")
     parser.add_argument("--mask-prompt", action="store_true", default=False, help="Mask user instruction tokens with -100 in SFT stages")

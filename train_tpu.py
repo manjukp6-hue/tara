@@ -2488,6 +2488,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
                             dataset=dataset,
                             shard_ledger=shard_ledger,
                         )
+                        log_tpu_memory_stage("AFTER_CHECKPOINT_SAVE", step=step, device=device, model=model, optimizer=optimizer)
 
                 # Regular Checkpoint Saving
                 is_regular = (args.checkpoint_interval > 0 and step % args.checkpoint_interval == 0 and step > last_regular_checkpoint_step)
@@ -2514,6 +2515,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
                         dataset=dataset,
                         shard_ledger=shard_ledger,
                     )
+                    log_tpu_memory_stage("AFTER_CHECKPOINT_SAVE", step=step, device=device, model=model, optimizer=optimizer)
 
                 # Periodic Model Promotion
                 is_promote = (args.promote_interval > 0 and step % args.promote_interval == 0 and step > last_promote_step)

@@ -348,7 +348,7 @@ def run_all_tpu_tests() -> bool:
     # -------------------------------------------------------------------------
     # TEST 11: TPU HBM Memory Safety, Non-Leaf Grad Warning & Precision Suite
     # -------------------------------------------------------------------------
-    print("\n[TEST 11/11] Running TPU HBM Memory Safety, Distributed Gradient Weighting & Precision Suite (13 tests)...")
+    print("\n[TEST 11/11] Running TPU HBM Memory Safety & Distributed Gradient Parity Suite (14 tests)...")
     try:
         import unittest
         from tests.test_tpu_hbm_memory_safety import TestTpuHbmMemorySafety
@@ -356,7 +356,7 @@ def run_all_tpu_tests() -> bool:
         runner = unittest.TextTestRunner(verbosity=1)
         res = runner.run(suite)
         if res.wasSuccessful():
-            print("  [PASS] Test 11: TPU HBM Memory Safety & Distributed Gradient Weighting (13/13 tests) verified.")
+            print("  [PASS] Test 11: TPU HBM Memory Safety, Distributed Parity (CE + Aux) & Weight Decay Immunity (14/14 tests) verified.")
         else:
             print("  [FAIL] Test 11: TPU HBM Memory Safety regression tests failed.")
             all_passed = False
@@ -366,7 +366,7 @@ def run_all_tpu_tests() -> bool:
 
     print("\n" + "=" * 80)
     if all_passed:
-        print("  ALL 11 TPU VERIFICATION & REGRESSION TESTS PASSED! (100% READY)")
+        print("  ALL 11 MASTER VERIFICATION PHASES (INCLUDING 14/14 HBM & DISTRIBUTED REGRESSION TESTS) PASSED! (100% READY)")
     else:
         print("  SOME TESTS ENCOUNTERED FAILURES - REVIEW LOGS ABOVE.")
     print("=" * 80)

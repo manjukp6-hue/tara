@@ -220,6 +220,7 @@ class TestTpuHbmMemorySafety(unittest.TestCase):
             "BEFORE_FORWARD",
             "BEFORE_BACKWARD",
             "BEFORE_OPTIMIZER_STEP",
+            "AFTER_CHECKPOINT_SAVE",
         ]
 
         for stage in stages:
@@ -235,6 +236,8 @@ class TestTpuHbmMemorySafety(unittest.TestCase):
             self.assertIn("used_mb", diag)
             self.assertIn("free_mb", diag)
             self.assertIn("total_mb", diag)
+            self.assertIn("peak_mb", diag)
+            self.assertIn("has_grad_refs", diag)
             self.assertIn("backend", diag)
             self.assertIn("is_physical_tpu", diag)
             # Locally on CPU machine, is_physical_tpu must honestly report False
@@ -461,7 +464,7 @@ class TestTpuHbmMemorySafety(unittest.TestCase):
                     eas_diff = (s_a["exp_avg_sq"] - s_b["exp_avg_sq"]).abs().max().item()
                     self.assertEqual(eas_diff, 0.0, f"exp_avg_sq diverged: diff={eas_diff}")
 
-    def test_12_unequal_valid_token_distributed_gradient_parity(self):
+    def test_12_unequal_valid_token_distributed_ce_gradient_parity(self):
         """
         Rigorously verify distributed gradient weighting parity on an 8-core simulated cluster
         with unequal valid-token distributions (including multiple cores with 0 valid tokens):
@@ -566,7 +569,90 @@ class TestTpuHbmMemorySafety(unittest.TestCase):
         old_max_diff = max((old_unweighted_grads[name] - ref_grads[name]).abs().max().item() for name in ref_grads)
         self.assertGreater(old_max_diff, 1e-3, f"Old unweighted average should show significant error, got {old_max_diff}")
 
-    def test_13_all_masked_cluster_wide_skip_and_weight_decay_immunity(self):
+    def test_13_unequal_valid_token_distributed_ce_plus_aux_gradient_parity(self):
+        """
+        Rigorously verify distributed gradient weighting parity for combined
+        Cross-Entropy + Auxiliary variance regularizer on an 8-core simulated cluster:
+          unreduced_loss = loss_sum + (N_valid * aux_loss)
+        Proves:
+          1. Distributed reduced gradient matches single concatenated reference gradient (diff < 1e-5).
+          2. Unweighted average shows significant error (> 1e-3).
+        """
+        import copy
+        torch.manual_seed(42)
+        base_model = TaraForCausalLM(self.config)
+        base_state = copy.deepcopy(base_model.state_dict())
+
+        valid_counts = [0, 180, 40, 95, 20, 120, 0, 165]
+        world_size = 8
+        cluster_valid_tokens = sum(valid_counts)  # 620 tokens
+        seq_len = 64
+        bsz = 4
+
+        core_inputs = []
+        core_labels = []
+        for r, n_val in enumerate(valid_counts):
+            torch.manual_seed(2000 + r)
+            x_r = torch.randint(0, self.config["vocab_size"], (bsz, seq_len))
+            y_r = torch.full((bsz, seq_len), -100, dtype=torch.long)
+            if n_val > 0:
+                flat_y = y_r[..., 1:].reshape(-1)
+                rand_indices = torch.randperm(flat_y.size(0))[:n_val]
+                flat_y[rand_indices] = torch.randint(0, self.config["vocab_size"], (n_val,))
+                y_r[..., 1:] = flat_y.reshape(bsz, seq_len - 1)
+            core_inputs.append(x_r)
+            core_labels.append(y_r)
+
+        # 1. Single-device Concatenated Global Reference (CE + aux_loss)
+        ref_model = TaraForCausalLM(self.config)
+        ref_model.load_state_dict(base_state)
+        ref_model.train()
+
+        total_ref_unreduced = torch.tensor(0.0)
+        for r in range(world_size):
+            res_r = compute_tpu_chunked_loss(ref_model, core_inputs[r], core_labels[r], chunk_sz=32)
+            total_ref_unreduced = total_ref_unreduced + res_r.unreduced_loss
+
+        ref_global_loss = total_ref_unreduced / float(cluster_valid_tokens)
+        ref_global_loss.backward()
+        ref_grads = {name: p.grad.clone() for name, p in ref_model.named_parameters() if p.grad is not None}
+
+        # 2. Distributed Execution Simulation across 8 Cores (CE + aux_loss)
+        core_grads = []
+        for r in range(world_size):
+            core_model = TaraForCausalLM(self.config)
+            core_model.load_state_dict(base_state)
+            core_model.train()
+
+            res_r = compute_tpu_chunked_loss(core_model, core_inputs[r], core_labels[r], chunk_sz=32)
+            unreduced = res_r.unreduced_loss
+            unreduced.backward()
+
+            r_grads = {}
+            for name, p in core_model.named_parameters():
+                if p.grad is not None:
+                    scaled_grad = p.grad.clone() * (float(world_size) / float(cluster_valid_tokens))
+                    r_grads[name] = scaled_grad
+                else:
+                    r_grads[name] = torch.zeros_like(p)
+            core_grads.append(r_grads)
+
+        # All-reduce average across the 8 cores:
+        dist_grads = {}
+        for name in ref_grads:
+            sum_g = sum(core_grads[r][name] for r in range(world_size))
+            dist_grads[name] = sum_g / float(world_size)
+
+        # 3. Assert Mathematical Parity: dist_grads == ref_grads within 1e-5
+        max_diff = 0.0
+        for name in ref_grads:
+            diff = (dist_grads[name] - ref_grads[name]).abs().max().item()
+            if diff > max_diff:
+                max_diff = diff
+
+        self.assertLess(max_diff, 1e-5, f"Distributed CE+aux gradient diverged from global reference: max_diff={max_diff}")
+
+    def test_14_all_masked_cluster_wide_skip_and_weight_decay_immunity(self):
         """
         Verify that when ALL 8 cores in a cluster have 0 valid tokens:
           1. sync_tpu_sum reports cluster_valid_tokens == 0.

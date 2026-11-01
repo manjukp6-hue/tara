@@ -825,19 +825,19 @@ def tpu_optimizer_step(
     elif _COLLECTIVE_GRAD_HOOK is not None and model is not None:
         _COLLECTIVE_GRAD_HOOK(model, step)
 
-    # 4. Gradient norm clipping
+    # 6. Global gradient norm clipping (strictly on globally reduced gradients)
     grad_norm_val = 0.0
     if max_norm > 0 and model is not None:
         target_model = getattr(model, "module", model)
         grad_norm = torch.nn.utils.clip_grad_norm_(target_model.parameters(), max_norm=max_norm)
         grad_norm_val = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else float(grad_norm)
 
-    # 5. Local gradient explosion and non-finite evaluation
+    # 7. Local gradient explosion and non-finite evaluation
     is_grad_non_finite = math.isnan(grad_norm_val) or math.isinf(grad_norm_val)
     is_grad_shock = (not is_grad_non_finite) and (grad_norm_val > (1000.0 * max_norm))
     local_grad_skip = 1 if (is_grad_non_finite or is_grad_shock) else 0
 
-    # 6. Collective gradient-skip synchronization across all TPU workers
+    # 8. Collective gradient-skip synchronization across all TPU workers
     grad_tag = f"tpu_grad_skip_s{step}_a{attempt}" if attempt > 0 else f"tpu_grad_skip_{step}"
     global_grad_skip = sync_tpu_decision(local_grad_skip, tag=grad_tag)
 
@@ -853,7 +853,7 @@ def tpu_optimizer_step(
             xm.mark_step()
         return True, grad_norm_val
 
-    # 7. Safe optimizer step
+    # 9. Safe optimizer step (performed directly without double-reduction)
     optimizer.step()
     if HAS_XLA:
         xm.mark_step()

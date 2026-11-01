@@ -223,6 +223,7 @@ echo "--------------------------------------------------------------------------
 echo "[LAUNCH] Launching TARA Native TPU Trainer (Single Stage)..."
 $PY_CMD train_tpu.py \
     --output-dir "$TPU_OUTPUT_DIR" \
+    --resume \
     "${EXTRA_ARGS[@]}" \
     "${FORWARD_ARGS[@]}"
 

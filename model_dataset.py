@@ -677,8 +677,8 @@ class TaraForCausalLM(nn.Module):
 
             if total_valid > 0:
                 loss_sum = torch.tensor(0.0, device=flat_hidden.device, dtype=torch.float32)
-                # Chunk size 1024 preserves high throughput while keeping logits VRAM bounded (~300MB)
-                chunk_sz = 1024
+                # Chunk size 512 preserves high throughput while keeping logits VRAM bounded (~300MB)
+                chunk_sz = 512
                 for chunk_start in range(0, flat_hidden.size(0), chunk_sz):
                     chunk_end = min(chunk_start + chunk_sz, flat_hidden.size(0))
                     c_mask = valid_mask[chunk_start:chunk_end]
@@ -1622,6 +1622,10 @@ class TaraStreamingJsonlDataset(IterableDataset):
         max_shard_bytes: int = 0,
         dataset_snapshot: Optional["DatasetSnapshot"] = None,
         seed: Optional[int] = None,
+        mask_prompt: bool = False,
+        rank: int = 0,
+        world_size: int = 1,
+        **kwargs,
     ):
         self.file_paths = list(file_paths)
         self.tokenizer = tokenizer
@@ -1629,6 +1633,18 @@ class TaraStreamingJsonlDataset(IterableDataset):
         self.max_samples = max_samples
         self.shuffle_shards = shuffle_shards
         self.seed = seed
+        self.mask_prompt = bool(mask_prompt)
+        self.rank = int(rank)
+        self.world_size = max(1, int(world_size))
+
+        # Multi-GPU (DDP) Shard Partitioning:
+        # If world_size > 1 and multiple shards exist, partition shards disjointly across ranks.
+        # If fewer shards than world_size exist (e.g. single shard), retain shards across ranks
+        # and interleave records in __iter__ (line_idx % world_size == rank).
+        if self.world_size > 1 and len(self.file_paths) >= self.world_size:
+            sharded_fps = [fp for idx, fp in enumerate(self.file_paths) if idx % self.world_size == self.rank]
+            if sharded_fps:
+                self.file_paths = sharded_fps
         self.resume_shard = resume_shard
         self.resume_line_offset = resume_line_offset
         self.resume_byte_offset = resume_byte_offset
@@ -2186,6 +2202,11 @@ class TaraStreamingJsonlDataset(IterableDataset):
                 for line_idx, line_byte_offset, record in self._iter_shard_records(
                     actual_fp, is_resume_target, target_resume_line, target_resume_byte, target_resume_chunk, shard_name, shard_sha
                 ):
+                    # Multi-GPU (DDP) Record-Level Interleaving for single/fewer shards:
+                    if self.world_size > 1 and len(fps) < self.world_size:
+                        if (line_idx % self.world_size) != self.rank:
+                            continue
+
                     total_shard_lines = max(total_shard_lines, line_idx + 1)
                     try:
                         inp_text, out_text, raw_text = self._extract_training_text(record)
@@ -2201,7 +2222,7 @@ class TaraStreamingJsonlDataset(IterableDataset):
                             enc_o = self.tokenizer.encode(out_text)
                             enc_inp = enc_i.ids if hasattr(enc_i, "ids") else list(enc_i)
                             enc_out = enc_o.ids if hasattr(enc_o, "ids") else list(enc_o)
-                            target_start = len(enc_inp)
+                            target_start = len(enc_inp) if self.mask_prompt else 0
                             full_ids = enc_inp + enc_out
                         else:
                             continue
@@ -2228,13 +2249,21 @@ class TaraStreamingJsonlDataset(IterableDataset):
                             if is_resume_target and line_idx == target_resume_line and chunk_idx < target_resume_chunk:
                                 continue
 
+                            if torch.distributed.is_available() and torch.distributed.is_initialized():
+                                ddp_world = torch.distributed.get_world_size()
+                                ddp_rank = torch.distributed.get_rank()
+                                if ddp_world > 1 and ((line_idx + chunk_idx) % ddp_world != ddp_rank):
+                                    continue
+
                             chunk_target_start = max(0, target_start - chunk_start)
                             chunk_target_start = min(chunk_target_start, len(chunk_ids))
 
                             input_ids = torch.tensor(chunk_ids, dtype=torch.long)
                             labels = input_ids.clone()
-                            if chunk_target_start > 0:
+                            if self.mask_prompt and chunk_target_start > 0:
                                 labels[:chunk_target_start] = -100
+                            if not (labels != -100).any():
+                                labels = input_ids.clone()
 
                             self.active_shard_offset = line_idx
                             self.active_shard_byte_offset = line_byte_offset
@@ -2890,8 +2919,14 @@ class TaraMultiDomainScheduler(IterableDataset):
         max_shard_bytes: int = 0,
         dataset_snapshot: Optional[Any] = None,
         domain_cursors: Optional[Dict[str, Dict[str, Any]]] = None,
+        mask_prompt: bool = False,
+        rank: int = 0,
+        world_size: int = 1,
         **kwargs,
     ):
+        self.mask_prompt: bool = bool(mask_prompt or kwargs.get("mask_prompt", False))
+        self.rank = int(rank)
+        self.world_size = max(1, int(world_size))
         self.domain_shards = {d: list(s) for d, s in domain_shards.items() if s}
         self.active_domains = sorted(self.domain_shards.keys())
         self.tokenizer = tokenizer
@@ -2986,6 +3021,9 @@ class TaraMultiDomainScheduler(IterableDataset):
                 buffer_size=buffer_size,
                 max_shard_bytes=max_shard_bytes,
                 dataset_snapshot=dataset_snapshot,
+                mask_prompt=self.mask_prompt,
+                rank=self.rank,
+                world_size=self.world_size,
             )
 
     @property
@@ -3047,6 +3085,9 @@ class TaraMultiDomainScheduler(IterableDataset):
                         buffer_size=self.buffer_size,
                         max_shard_bytes=self.max_shard_bytes,
                         dataset_snapshot=self.dataset_snapshot,
+                        mask_prompt=self.mask_prompt,
+                        rank=self.rank,
+                        world_size=self.world_size,
                     )
         if "active_domain_idx" in state:
             self.active_domain_idx = state["active_domain_idx"]
@@ -3136,6 +3177,9 @@ class TaraMultiDomainScheduler(IterableDataset):
                         buffer_size=max(self.buffer_size, 32),
                         max_shard_bytes=self.max_shard_bytes,
                         dataset_snapshot=self.dataset_snapshot,
+                        mask_prompt=self.mask_prompt,
+                        rank=self.rank,
+                        world_size=self.world_size,
                     )
                     domain_iters[best_d] = iter(self.domain_datasets[best_d])
                 else:

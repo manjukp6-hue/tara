@@ -1085,27 +1085,33 @@ def main():
 
     # 1. Idempotence Check
     if not args.force and check_stage_already_completed(args.output_dir):
-        finalize_stage_and_promote(
-            output_dir=args.output_dir,
-            promoted_dir=args.promoted_dir,
-            stage_id=args.stage_id,
-            hf_repo=model_repo,
-            previous_stage_dir=args.previous_stage_dir,
-        )
+        if is_main_process:
+            finalize_stage_and_promote(
+                output_dir=args.output_dir,
+                promoted_dir=args.promoted_dir,
+                stage_id=args.stage_id,
+                hf_repo=model_repo,
+                previous_stage_dir=args.previous_stage_dir,
+            )
+        if is_distributed:
+            torch.distributed.barrier()
         sys.exit(0)
 
     # 2. Fast Asset Verification & Streaming Download (if files missing)
     if model_repo:
-        ensure_remote_assets_available(
-            args.model_dir,
-            args.dataset_dir,
-            repo_id=model_repo,
-            dataset_repo=dataset_repo,
-            prefix=args.dataset_prefix.strip("/"),
-            bulk_download_dataset=args.bulk_download_dataset,
-            output_dir=args.output_dir,
-            stage_id=args.stage_id,
-        )
+        if is_main_process:
+            ensure_remote_assets_available(
+                args.model_dir,
+                args.dataset_dir,
+                repo_id=model_repo,
+                dataset_repo=dataset_repo,
+                prefix=args.dataset_prefix.strip("/"),
+                bulk_download_dataset=args.bulk_download_dataset,
+                output_dir=args.output_dir,
+                stage_id=args.stage_id,
+            )
+        if is_distributed:
+            torch.distributed.barrier()
 
     # 2b. Pretraining Authorization Gate check
     if args.verify_gate:
@@ -1622,14 +1628,17 @@ def main():
         # Audits Local Disk, Google Drive, and Hugging Face repository in parallel.
         # Whichever source possesses the highest/latest verified step is auto-selected!
         # If Google Drive is not mounted or not found, Hugging Face is auto-selected seamlessly.
-        gdrive_dir = resolve_gdrive_restore_dir() or resolve_gdrive_backup_dir()
-        chosen_source, chosen_step = resolve_and_auto_select_checkpoint(
-            local_ckpt_dir=args.output_dir,
-            stage_id=args.stage_id,
-            gdrive_base_dir=gdrive_dir,
-            hf_repo_id=model_repo,
-            hf_token=_resolve_hf_token(),
-        )
+        if is_main_process:
+            gdrive_dir = resolve_gdrive_restore_dir() or resolve_gdrive_backup_dir()
+            chosen_source, chosen_step = resolve_and_auto_select_checkpoint(
+                local_ckpt_dir=args.output_dir,
+                stage_id=args.stage_id,
+                gdrive_base_dir=gdrive_dir,
+                hf_repo_id=model_repo,
+                hf_token=_resolve_hf_token(),
+            )
+        if is_distributed:
+            torch.distributed.barrier()
 
         start_step, start_epoch, best_loss, was_resumed, resumed_cursor = try_resume_from_checkpoint(
             args.output_dir, model, optimizer, scaler,
@@ -1753,6 +1762,9 @@ def main():
     is_pretraining = "stage0" in args.stage_id.lower() or "pretrain" in args.stage_id.lower()
     effective_mask_prompt = args.mask_prompt if not is_pretraining else False
 
+    if is_distributed:
+        print(f"[Hardware DDP Data Partitioning] Rank {rank}/{world_size} initialized with rank-aware disjoint data streaming.", flush=True)
+
     if len(active_doms_with_shards) > 1:
         dataset = TaraMultiDomainScheduler(
             domain_shards=domain_shards,
@@ -1773,6 +1785,8 @@ def main():
             max_domain_cycles=args.max_domain_cycles,
             scheduler_deficits=resumed_cursor.get("scheduler_deficits") if resumed_cursor else None,
             mask_prompt=effective_mask_prompt,
+            rank=rank,
+            world_size=world_size,
         )
     else:
         dataset = TaraStreamingJsonlDataset(
@@ -1794,6 +1808,8 @@ def main():
             max_shard_bytes=args.max_shard_bytes,
             dataset_snapshot=dataset_snapshot,
             mask_prompt=effective_mask_prompt,
+            rank=rank,
+            world_size=world_size,
         )
     dataloader = DataLoader(
         dataset,
@@ -2248,20 +2264,21 @@ def main():
                 # Target-Step Model Promotion Gate (NON-BLOCKING: Real-time deployment while training continues uninterrupted)
                 if args.promote_max_step > 0 and step >= args.promote_max_step and not promoted_at_target_step:
                     promoted_at_target_step = True
-                    src_cand = window_best_source if (os.path.isdir(window_best_source) and check_model_weights_exist(window_best_source)) else (
-                        best_cp_dir if check_model_weights_exist(best_cp_dir) else args.output_dir
-                    )
-                    print(f"\n{'=' * 80}", flush=True)
-                    print(f"[{args.stage_id} | Step {step:04d}] >>> PROMOTING MODEL AT TARGET STEP ({args.promote_max_step}) FOR REAL-TIME DEPLOYMENT <<<", flush=True)
-                    print(f"[{args.stage_id}] Selected Best Checkpoint within window (<= {args.promote_max_step}) -> Promoting to: {promoted_target}", flush=True)
-                    print(f"[{args.stage_id}] [TRAINING CONTINUES UNINTERRUPTED TO STEP {args.max_steps}]", flush=True)
-                    print(f"{'=' * 80}\n", flush=True)
-                    try:
-                        promote_checkpoint(src_cand, promoted_target, args.stage_id)
-                        if target_model_repo:
-                            trigger_async_hf_upload(promoted_target, target_model_repo, args.stage_id, step)
-                    except Exception as pe:
-                        print(f"[{args.stage_id} | ERROR] Target step model promotion failed: {pe}", flush=True)
+                    if is_main_process:
+                        src_cand = window_best_source if (os.path.isdir(window_best_source) and check_model_weights_exist(window_best_source)) else (
+                            best_cp_dir if check_model_weights_exist(best_cp_dir) else args.output_dir
+                        )
+                        print(f"\n{'=' * 80}", flush=True)
+                        print(f"[{args.stage_id} | Step {step:04d}] >>> PROMOTING MODEL AT TARGET STEP ({args.promote_max_step}) FOR REAL-TIME DEPLOYMENT <<<", flush=True)
+                        print(f"[{args.stage_id}] Selected Best Checkpoint within window (<= {args.promote_max_step}) -> Promoting to: {promoted_target}", flush=True)
+                        print(f"[{args.stage_id}] [TRAINING CONTINUES UNINTERRUPTED TO STEP {args.max_steps}]", flush=True)
+                        print(f"{'=' * 80}\n", flush=True)
+                        try:
+                            promote_checkpoint(src_cand, promoted_target, args.stage_id)
+                            if target_model_repo:
+                                trigger_async_hf_upload(promoted_target, target_model_repo, args.stage_id, step)
+                        except Exception as pe:
+                            print(f"[{args.stage_id} | ERROR] Target step model promotion failed: {pe}", flush=True)
 
                 # Periodic Benchmark Matrix Display
                 if step % 25 == 0 or step == start_step + 1 or is_new_best:
@@ -2329,18 +2346,19 @@ def main():
                             per_shard_promotion=args.per_shard_promotion,
                             max_shard_mb=args.max_shard_mb,
                         )
-                    src_cand = best_cp_dir if check_model_weights_exist(best_cp_dir) else args.output_dir
-                    print(f"\n{CLR_GREEN}{'=' * 80}{CLR_RESET}", flush=True)
-                    print(f"[{args.stage_id} | Step {step:04d}] >>> PERIODIC MODEL PROMOTION (Interval: {args.promote_interval}) <<<", flush=True)
-                    print(f"[{args.stage_id}] Promoting verified inference model to: {promoted_target}", flush=True)
-                    print(f"[{args.stage_id}] [TRAINING CONTINUES UNINTERRUPTED ON GPU]", flush=True)
-                    print(f"{CLR_GREEN}{'=' * 80}{CLR_RESET}\n", flush=True)
-                    try:
-                        promote_checkpoint(src_cand, promoted_target, args.stage_id)
-                        if target_model_repo:
-                            trigger_async_hf_upload(promoted_target, target_model_repo, args.stage_id, step)
-                    except Exception as pe:
-                        print(f"[{args.stage_id} | ERROR] Periodic model promotion failed: {pe}", flush=True)
+                    if is_main_process:
+                        src_cand = best_cp_dir if check_model_weights_exist(best_cp_dir) else args.output_dir
+                        print(f"\n{CLR_GREEN}{'=' * 80}{CLR_RESET}", flush=True)
+                        print(f"[{args.stage_id} | Step {step:04d}] >>> PERIODIC MODEL PROMOTION (Interval: {args.promote_interval}) <<<", flush=True)
+                        print(f"[{args.stage_id}] Promoting verified inference model to: {promoted_target}", flush=True)
+                        print(f"[{args.stage_id}] [TRAINING CONTINUES UNINTERRUPTED ON GPU]", flush=True)
+                        print(f"{CLR_GREEN}{'=' * 80}{CLR_RESET}\n", flush=True)
+                        try:
+                            promote_checkpoint(src_cand, promoted_target, args.stage_id)
+                            if target_model_repo:
+                                trigger_async_hf_upload(promoted_target, target_model_repo, args.stage_id, step)
+                        except Exception as pe:
+                            print(f"[{args.stage_id} | ERROR] Periodic model promotion failed: {pe}", flush=True)
 
                 # Reset step timer after all checkpoint I/O, verification, and promotion
                 # so that checkpoint disk/network serialization is not conflated with GPU step speed
@@ -2362,12 +2380,20 @@ def main():
         # we rescale the accumulated gradients by (args.grad_accum / partial_count).
         if accum_batches:
             partial_count = len(accum_batches)
-            rescale_factor = float(args.grad_accum) / float(partial_count)
 
-            for p in model.parameters():
-                if p.grad is not None:
-                    p.grad.mul_(rescale_factor)
-            if world_model is not None:
+            # Mathematical Gradient Normalization:
+            # 1. Main model accumulated sum of token losses (loss * v_tokens), so param.grad
+            #    contains sum_{i,t} grad(l_{i,t}). Normalization by exact total valid tokens
+            #    is performed in execute_optimizer_step via p.grad.div_(accum_tokens).
+            #    Multiplying model gradients by (grad_accum / partial_count) here causes a
+            #    catastrophic up to 16x gradient explosion (double normalization blast) and
+            #    must NOT be applied to model.
+            # 2. For world_model, micro-batches were accumulated with loss / args.grad_accum.
+            #    For partial_count < grad_accum batches, param.grad is (1 / grad_accum) * sum.
+            #    Rescaling by (args.grad_accum / partial_count) restores the true sample average
+            #    since world_model does NOT undergo accum_tokens division in execute_optimizer_step.
+            if world_model is not None and world_optimizer is not None:
+                rescale_factor = float(args.grad_accum) / float(partial_count)
                 for p in world_model.parameters():
                     if p.grad is not None:
                         p.grad.mul_(rescale_factor)
@@ -2380,7 +2406,7 @@ def main():
                     w_pg["lr"] = cur_lr
 
             is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after = execute_optimizer_step(
-                model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0, accum_tokens=accum_tokens
+                model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0, cur_loss=accum_loss / max(1, accum_tokens), ema_loss=ema_loss, accum_tokens=accum_tokens
             )
 
             if is_step_skipped:
@@ -2405,7 +2431,7 @@ def main():
             if not is_step_skipped:
                 optimizer.zero_grad(set_to_none=True)
                 step += 1
-                window_samples = sum(len(c) for _, _, c in accum_batches)
+                window_samples = sum(len(c) for c in accum_batches)
                 total_samples_trained += window_samples
                 cur_step_loss = accum_loss / max(1, accum_tokens) if accum_tokens > 0 else (accum_loss / partial_count)
                 cur_step_ce = accum_ce / max(1, accum_tokens) if accum_tokens > 0 else (accum_ce / partial_count)
@@ -2417,6 +2443,18 @@ def main():
                 accum_tokens = 0
                 accum_world_loss = 0.0
                 ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
+
+                for b_cursors in accum_batches:
+                    for c_item in b_cursors:
+                        if len(c_item) >= 6:
+                            c_dom = c_item[5]
+                            if c_dom:
+                                committed_domain_cursors[c_dom] = {
+                                    "active_shard": c_item[0],
+                                    "line_offset": c_item[1],
+                                    "byte_offset": c_item[2],
+                                    "chunk_idx": c_item[3],
+                                }
 
                 current_cursor = extract_accumulated_data_cursor(
                     accum_batches, dataset, total_samples_trained, samples_consumed, shard_ledger, committed_domain_cursors
@@ -2445,76 +2483,76 @@ def main():
         _dist_final.barrier()
     final_cursor = current_cursor if current_cursor is not None else resumed_cursor
     if is_main_process:
-     save_checkpoint(
-        model, optimizer, scaler, config, tok_path, args.output_dir,
-        step, epoch, final_loss, best_loss, args.stage_id,
-        is_best=False, is_completed=True,
-        dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
-        keep_n=args.keep_checkpoints, force_keep_exact=True,
-        world_model=world_model,
-        world_optimizer=world_optimizer,
-        world_scaler=world_scaler,
-        per_shard_promotion=args.per_shard_promotion,
-        max_shard_mb=args.max_shard_mb,
-    )
-    if ema_loss is not None and final_loss <= best_loss:
-        best_loss = final_loss
-        best_loss_step = step
-        # Align from the newly committed args.output_dir without duplicate re-serialization
-        os.makedirs(best_cp_dir, exist_ok=True)
-        for art in os.listdir(args.output_dir):
-            if art.endswith(".safetensors") or art.endswith(".json") or art in ("COMMITTED",):
-                if art not in ("optimizer_state.pt",):
-                    s_art = os.path.join(args.output_dir, art)
-                    d_art = os.path.join(best_cp_dir, art)
-                    if os.path.exists(s_art):
-                        try:
-                            if os.path.exists(d_art):
-                                _safe_unlink(d_art)
-                            os.link(s_art, d_art)
-                        except Exception:
+        save_checkpoint(
+            model, optimizer, scaler, config, tok_path, args.output_dir,
+            step, epoch, final_loss, best_loss, args.stage_id,
+            is_best=False, is_completed=True,
+            dataset=dataset, shard_ledger=shard_ledger, data_cursor=final_cursor,
+            keep_n=args.keep_checkpoints, force_keep_exact=True,
+            world_model=world_model,
+            world_optimizer=world_optimizer,
+            world_scaler=world_scaler,
+            per_shard_promotion=args.per_shard_promotion,
+            max_shard_mb=args.max_shard_mb,
+        )
+        if ema_loss is not None and final_loss <= best_loss:
+            best_loss = final_loss
+            best_loss_step = step
+            # Align from the newly committed args.output_dir without duplicate re-serialization
+            os.makedirs(best_cp_dir, exist_ok=True)
+            for art in os.listdir(args.output_dir):
+                if art.endswith(".safetensors") or art.endswith(".json") or art in ("COMMITTED",):
+                    if art not in ("optimizer_state.pt",):
+                        s_art = os.path.join(args.output_dir, art)
+                        d_art = os.path.join(best_cp_dir, art)
+                        if os.path.exists(s_art):
                             try:
-                                shutil.copy2(s_art, d_art)
+                                if os.path.exists(d_art):
+                                    _safe_unlink(d_art)
+                                os.link(s_art, d_art)
                             except Exception:
-                                pass
-        best_ptr = os.path.join(os.path.dirname(os.path.abspath(best_cp_dir)), "best_checkpoint.json")
-        try:
-            with open(best_ptr, "w", encoding="utf-8") as bf:
-                json.dump({
-                    "step": step,
-                    "loss": final_loss,
-                    "versioned_dir": best_cp_dir,
-                    "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                }, bf, indent=2)
-        except Exception:
-            pass
+                                try:
+                                    shutil.copy2(s_art, d_art)
+                                except Exception:
+                                    pass
+            best_ptr = os.path.join(os.path.dirname(os.path.abspath(best_cp_dir)), "best_checkpoint.json")
+            try:
+                with open(best_ptr, "w", encoding="utf-8") as bf:
+                    json.dump({
+                        "step": step,
+                        "loss": final_loss,
+                        "versioned_dir": best_cp_dir,
+                        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                    }, bf, indent=2)
+            except Exception:
+                pass
 
-    print(f"[Stage Complete] Training checkpoint preserved in: {args.output_dir}")
-    print(f"[Stage Complete] Best Milestone model archived in: {best_cp_dir}")
+        print(f"[Stage Complete] Training checkpoint preserved in: {args.output_dir}")
+        print(f"[Stage Complete] Best Milestone model archived in: {best_cp_dir}")
 
-    # Auto-Promote clean inference model for deployment & native Rust serving
-    promoted_target = args.promoted_dir if args.promoted_dir else os.path.join("storage/models", f"promoted_{args.stage_id}")
-    if not promoted_at_target_step:
-        best_source = (
-            window_best_source if (args.promote_max_step > 0 and os.path.isdir(window_best_source) and check_model_weights_exist(window_best_source))
-            else (best_cp_dir if check_model_weights_exist(best_cp_dir) else args.output_dir)
-        )
-        finalize_stage_and_promote(
-            output_dir=args.output_dir,
-            promoted_dir=promoted_target,
-            stage_id=args.stage_id,
-            hf_repo=model_repo,
-            previous_stage_dir=args.previous_stage_dir,
-            candidate_source_dir=best_source,
-        )
-    else:
-        print(f"[Promotion] Target step {args.promote_max_step} model already promoted and active for real-time inference -> {promoted_target}", flush=True)
-        if args.previous_stage_dir:
-            clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
+        # Auto-Promote clean inference model for deployment & native Rust serving
+        promoted_target = args.promoted_dir if args.promoted_dir else os.path.join("storage/models", f"promoted_{args.stage_id}")
+        if not promoted_at_target_step:
+            best_source = (
+                window_best_source if (args.promote_max_step > 0 and os.path.isdir(window_best_source) and check_model_weights_exist(window_best_source))
+                else (best_cp_dir if check_model_weights_exist(best_cp_dir) else args.output_dir)
+            )
+            finalize_stage_and_promote(
+                output_dir=args.output_dir,
+                promoted_dir=promoted_target,
+                stage_id=args.stage_id,
+                hf_repo=model_repo,
+                previous_stage_dir=args.previous_stage_dir,
+                candidate_source_dir=best_source,
+            )
+        else:
+            print(f"[Promotion] Target step {args.promote_max_step} model already promoted and active for real-time inference -> {promoted_target}", flush=True)
+            if args.previous_stage_dir:
+                clean_previous_training_checkpoints(args.previous_stage_dir, args.output_dir)
 
-    print(f"[Promotion Complete] Deployment model ready at: {promoted_target}")
-    print("[Success] All weights are 100% compatible with native Rust TARA inference & serving!")
-    wait_for_hf_upload(timeout=180.0)
+        print(f"[Promotion Complete] Deployment model ready at: {promoted_target}")
+        print("[Success] All weights are 100% compatible with native Rust TARA inference & serving!")
+        wait_for_hf_upload(timeout=180.0)
 
 
 if __name__ == "__main__":

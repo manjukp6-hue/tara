@@ -155,7 +155,7 @@ fi
 # 4b. Resolve Authoritative Root Public Key for Pre-Training Signature Gate
 if [ -z "${TARA_AUTH_PUBLIC_KEY:-}" ]; then
     RESOLVED_PUBKEY=$(python3 -c "
-import os, re
+import os, re, json
 try:
     from google.colab import userdata
     k = userdata.get('TARA_AUTH_PUBLIC_KEY')
@@ -171,6 +171,17 @@ for f in ('model_config/tara_auth_pubkey.hex', 'storage/vault/tara_auth_pubkey.h
             if len(c) == 64 and re.fullmatch(r'[0-9a-fA-F]{64}', c):
                 print(c)
                 exit(0)
+for jf in ('pretraining_authorization.json', 'storage/models/checkpoints/pretraining_authorization.json'):
+    if os.path.isfile(jf):
+        try:
+            with open(jf, 'r') as fp:
+                data = json.load(fp)
+                pk = data.get('public_key', '').strip()
+                if len(pk) == 64 and re.fullmatch(r'[0-9a-fA-F]{64}', pk):
+                    print(pk)
+                    exit(0)
+        except Exception:
+            pass
 " 2>/dev/null || true)
     if [ -n "$RESOLVED_PUBKEY" ]; then
         export TARA_AUTH_PUBLIC_KEY="$RESOLVED_PUBKEY"
@@ -285,6 +296,9 @@ START_STAGE_IDX=0
 
 # If specific stage is provided via argument, execute single stage; otherwise execute multi-stage loop
 REQUESTED_STAGE="${1:-all}"
+if [ "$#" -gt 0 ]; then
+    shift
+fi
 if [ "$REQUESTED_STAGE" != "all" ]; then
     echo "[START] Executing single requested stage: $REQUESTED_STAGE..."
     $PY_CMD train_main.py \

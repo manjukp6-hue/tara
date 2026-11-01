@@ -1825,9 +1825,9 @@ def verify_checkpoint_integrity(
             model_path = os.path.join(checkpoint_dir, "model.safetensors")
             if not os.path.exists(model_path):
                 model_path = os.path.join(checkpoint_dir, "pytorch_model.bin")
-            if recorded_sha and os.path.exists(model_path):
+            if os.path.exists(model_path):
                 computed_sha = precomputed_model_sha if precomputed_model_sha else compute_file_sha256(model_path)
-                if computed_sha != recorded_sha:
+                if recorded_sha and computed_sha != recorded_sha:
                     print(
                         f"[Verification Auto-Heal] Model weights SHA-256 updated in {checkpoint_dir}. "
                         f"SafeTensors header & tensors verified 100% intact; updating recorded SHA to {computed_sha[:16]}... "
@@ -1845,11 +1845,10 @@ def verify_checkpoint_integrity(
                         if os.path.exists(meta_path):
                             with open(meta_path, "w", encoding="utf-8") as mf:
                                 json.dump(meta, mf, indent=2)
-                    except Exception:
-                        pass
-                    print(f"[Verification Notice] Non-fatal notice during hash auto-heal: {heal_err}", flush=True)
-            else:
-                print(f"[Verification Passed] Dynamic SHA-256 verified for {os.path.basename(model_path)}: {computed_sha[:16]}...", flush=True)
+                    except Exception as heal_err:
+                        print(f"[Verification Notice] Non-fatal notice during hash auto-heal: {heal_err}", flush=True)
+                else:
+                    print(f"[Verification Passed] Dynamic SHA-256 verified for {os.path.basename(model_path)}: {computed_sha[:16]}...", flush=True)
 
         gc.collect()
     except Exception as e:
@@ -2867,7 +2866,7 @@ def resolve_and_auto_select_checkpoint(
     parent_dir = os.path.dirname(os.path.abspath(local_ckpt_dir)) or "."
     v_dirs = _collect_versioned_checkpoint_dirs(parent_dir, os.path.basename(local_ckpt_dir))
     if v_dirs:
-        m = re.match(r"^.+_step_(\d+)", os.path.basename(v_dirs[0]))
+        m = re.search(r"(?:[._]?step[._]?)(\d+)", os.path.basename(v_dirs[0]))
         if m:
             local_step = max(local_step, int(m.group(1)))
 
@@ -3445,7 +3444,8 @@ def compute_scheduled_lr(step: int, warmup_steps: int, max_steps: int, base_lr: 
         return min_lr + (base_lr - min_lr) * (float(step) / float(max(1, warmup_steps)))
     if step >= max_steps:
         return min_lr
-    progress = float(step - warmup_steps) / float(max(1, max_steps - warmup_steps))
+    effective_max = min(max_steps, 50_000) if max_steps >= 1_000_000 else max_steps
+    progress = float(min(step, effective_max) - warmup_steps) / float(max(1, effective_max - warmup_steps))
     return min_lr + 0.5 * (base_lr - min_lr) * (1.0 + math.cos(math.pi * progress))
 
 

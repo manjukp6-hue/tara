@@ -12,12 +12,13 @@ for ALL Google TPU generations:
 
 Designed to be 100% decoupled from existing GPU scripts (train_main.py, run_train.sh).
 """
+from __future__ import annotations
 
 import os
 import sys
 import math
 import logging
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, Tuple, Dict, Any, List, Union, Callable, Iterable
 
 # Ensure PJRT & Bfloat16 defaults are active in Python environment before importing torch_xla
 os.environ.setdefault("PJRT_DEVICE", "TPU")

@@ -13,6 +13,7 @@ Validates:
   7. GPU Pipeline Files Integrity (train_main.py, model_dataset.py, run_train.sh 100% untouched)
 =============================================================================
 """
+from __future__ import annotations
 
 import os
 import sys

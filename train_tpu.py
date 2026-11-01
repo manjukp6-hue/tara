@@ -22,6 +22,7 @@ Key Architectural Pillars (Full GPU Parity):
   - Benchmark-Monitored Generation Probes: Deterministic CPU probes with telemetry.
 =============================================================================
 """
+from __future__ import annotations
 
 import os
 import sys
@@ -36,7 +37,7 @@ import fnmatch
 import shutil
 import random
 import argparse
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Union, Iterable, Sequence, Callable, Set
 from datetime import datetime, timezone
 
 # Ensure PJRT & Bfloat16 environment flags are set before importing torch / torch_xla

@@ -17,13 +17,14 @@ Execution Mode:
   - Distinguishes CPU mocked collective testing from physical TPU hardware.
 =============================================================================
 """
+from __future__ import annotations
 
 import os
 import sys
 import math
 import copy
 import threading
-from typing import Dict, List, Tuple, Any, Callable
+from typing import Dict, List, Tuple, Any, Callable, Optional, Union
 
 # Ensure root directory is on PYTHONPATH
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

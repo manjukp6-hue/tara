@@ -15,6 +15,7 @@ Validates:
   9. Strict GPU pipeline file isolation (train_main.py, model_dataset.py, run_train.sh UNTOUCHED).
 =============================================================================
 """
+from __future__ import annotations
 
 import os
 import sys

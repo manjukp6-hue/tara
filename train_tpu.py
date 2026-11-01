@@ -1932,8 +1932,32 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
     if is_main:
         print(f"[Tokenizer] Loaded TARA Tokenizer ({tokenizer.get_vocab_size():,} tokens)", flush=True)
 
+    # Pre-detect target resume step from existing checkpoint metadata if resuming
+    target_resume_step = 0
+    candidate_resume_dirs = [getattr(args, "resume_dir", None), getattr(args, "output_dir", None)]
+    for rdir in candidate_resume_dirs:
+        if rdir and os.path.isdir(rdir):
+            for st_fname in ("checkpoint_state.json", "STAGE_METADATA.json"):
+                st_path = os.path.join(rdir, st_fname)
+                if os.path.isfile(st_path):
+                    try:
+                        with open(st_path, "r", encoding="utf-8") as _stf:
+                            _meta = json.load(_stf)
+                            if "step" in _meta and isinstance(_meta["step"], int):
+                                target_resume_step = _meta["step"]
+                                break
+                    except Exception:
+                        pass
+            if target_resume_step > 0:
+                break
+
+    if is_main and target_resume_step > 0:
+        print(f"[TPU Resume Target] Active checkpoint detected at Step {target_resume_step}. Target resume step: {target_resume_step}", flush=True)
+
     # 3. Instantiate Native TARA Model on TPU Device
-    log_tpu_memory_stage("BEFORE_MODEL_LOADING", step=0, device=device)
+    log_tpu_memory_stage("BEFORE_MODEL_LOADING", step=target_resume_step, device=device)
+    if is_main:
+        print(f"[Model Architecture] Instantiating TARA architecture ({config.get('num_hidden_layers', 16)} layers, hidden={config.get('hidden_size', 2048)}) into TPU device memory...", flush=True)
     model = TaraForCausalLM(config, gradient_checkpointing=args.gradient_checkpointing)
     if getattr(args, "precision", "bf16").lower() == "bf16":
         os.environ["XLA_USE_BF16"] = "1"
@@ -1945,7 +1969,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
         assert target.lm_head.weight is target.model.embed_tokens.weight, "Pointer identity assertion failed: lm_head.weight is not embed_tokens.weight"
         print(f"[Model Architecture] Verified architectural weight tying (lm_head.weight is embed_tokens.weight: True) on device ({device}).", flush=True)
 
-    log_tpu_memory_stage("AFTER_MODEL_LOADING", step=0, device=device, model=model)
+    log_tpu_memory_stage("AFTER_MODEL_LOADING", step=target_resume_step, device=device, model=model)
 
     # 4. AdamW Optimizer with 100% Exact GPU Parameter Grouping
     optim_groups = build_tpu_optimizer_groups(model, weight_decay=args.weight_decay)

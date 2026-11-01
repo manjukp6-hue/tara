@@ -30,6 +30,7 @@ logger = logging.getLogger("tara_tpu_config")
 
 # Safe PyTorch / XLA Import Handling
 HAS_XLA = False
+XLA_IMPORT_ERRORS: List[str] = []
 xm = None
 pl = None
 xmp = None
@@ -37,20 +38,36 @@ xr = None
 
 try:
     import torch_xla
-    import torch_xla.core.xla_model as _xm
-    import torch_xla.distributed.parallel_loader as _pl
-    import torch_xla.distributed.xla_multiprocessing as _xmp
-    xm = _xm
-    pl = _pl
-    xmp = _xmp
+
+    try:
+        import torch_xla.core.xla_model as _xm
+        xm = _xm
+    except Exception as _e_xm:
+        XLA_IMPORT_ERRORS.append(f"torch_xla.core.xla_model: {_e_xm}")
+
+    try:
+        import torch_xla.distributed.parallel_loader as _pl
+        pl = _pl
+    except Exception as _e_pl:
+        XLA_IMPORT_ERRORS.append(f"torch_xla.distributed.parallel_loader: {_e_pl}")
+
+    try:
+        import torch_xla.distributed.xla_multiprocessing as _xmp
+        xmp = _xmp
+    except Exception as _e_xmp:
+        XLA_IMPORT_ERRORS.append(f"torch_xla.distributed.xla_multiprocessing: {_e_xmp}")
+
     try:
         import torch_xla.runtime as _xr
         xr = _xr
-    except ImportError:
+    except Exception as _e_xr:
         xr = None
-    HAS_XLA = True
-except (ImportError, Exception):
+
+    if xm is not None or "torch_xla" in sys.modules:
+        HAS_XLA = True
+except Exception as _e_root:
     HAS_XLA = False
+    XLA_IMPORT_ERRORS.append(f"torch_xla root: {_e_root}")
 
 
 def is_tpu_available() -> bool:
@@ -255,14 +272,24 @@ def get_tpu_memory_diagnostics(device: Optional[Any] = None) -> Dict[str, Any]:
         "telemetry_error": None,
     }
 
-    # 1. Genuine PyTorch / XLA TPU Device
-    if HAS_XLA:
+    # 1. Genuine PyTorch / XLA TPU Device or TorchTPU device
+    is_tpu_target = False
+    device_type_str = str(device).lower() if device is not None else ""
+    if (device is not None and getattr(device, "type", "") == "tpu") or device_type_str.startswith("tpu") or device_type_str.startswith("xla"):
+        is_tpu_target = True
+
+    if HAS_XLA or is_tpu_target:
         try:
-            device_hw = str(xm.xla_device_hw(device) if device is not None else xm.xla_device_hw()).upper()
-            if "TPU" in device_hw:
+            device_hw = "TPU"
+            if xm is not None and hasattr(xm, "xla_device_hw"):
+                try:
+                    device_hw = str(xm.xla_device_hw(device) if device is not None else xm.xla_device_hw()).upper()
+                except Exception:
+                    device_hw = "TPU"
+            if "TPU" in device_hw or is_tpu_target:
                 diag["is_physical_tpu"] = True
-                diag["backend"] = f"Physical Google TPU ({device_hw})"
-                if hasattr(xm, "get_memory_info"):
+                diag["backend"] = f"Physical Google TPU ({device_hw if device_hw != 'TPU' else str(device or 'TPU')})"
+                if xm is not None and hasattr(xm, "get_memory_info"):
                     try:
                         mem_info = xm.get_memory_info(device)
                         if isinstance(mem_info, dict):
@@ -284,6 +311,43 @@ def get_tpu_memory_diagnostics(device: Optional[Any] = None) -> Dict[str, Any]:
                         logger.warning(f"[TPU Telemetry Notice] {diag['telemetry_error']}")
                 else:
                     diag["telemetry_error"] = "xm.get_memory_info API not exposed in this torch_xla runtime version."
+
+                # Try torch_xla module-level memory query
+                try:
+                    import torch_xla
+                    if hasattr(torch_xla, "get_memory_info"):
+                        mem_info = torch_xla.get_memory_info(device)
+                        if isinstance(mem_info, dict):
+                            b_used = mem_info.get("bytes_used", 0)
+                            b_free = mem_info.get("bytes_free", 0)
+                            b_peak = mem_info.get("peak_bytes_used", mem_info.get("bytes_peak", b_used))
+                            diag["bytes_used"] = b_used
+                            diag["bytes_free"] = b_free
+                            diag["bytes_total"] = b_used + b_free
+                            diag["used_mb"] = round(b_used / (1024 * 1024), 2)
+                            diag["free_mb"] = round(b_free / (1024 * 1024), 2)
+                            diag["total_mb"] = round((b_used + b_free) / (1024 * 1024), 2)
+                            diag["peak_mb"] = round(b_peak / (1024 * 1024), 2)
+                            return diag
+                except Exception:
+                    pass
+
+                # If physical TPU but direct memory API is not available, report process memory with hardware flag intact
+                try:
+                    import psutil
+                    vmem = psutil.virtual_memory()
+                    proc = psutil.Process()
+                    proc_mem = proc.memory_info().rss
+                    diag["bytes_used"] = proc_mem
+                    diag["bytes_free"] = vmem.available
+                    diag["bytes_total"] = vmem.total
+                    diag["used_mb"] = round(proc_mem / (1024 * 1024), 2)
+                    diag["free_mb"] = round(vmem.available / (1024 * 1024), 2)
+                    diag["total_mb"] = round(vmem.total / (1024 * 1024), 2)
+                    diag["peak_mb"] = round(proc_mem / (1024 * 1024), 2)
+                except Exception:
+                    pass
+                return diag
         except Exception as hw_err:
             diag["telemetry_error"] = f"XLA hardware query exception: {hw_err}"
 

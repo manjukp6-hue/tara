@@ -296,13 +296,35 @@ def build_tpu_optimizer_groups(model: Any, weight_decay: float = 0.01) -> List[D
       - Group 0: 2D projection / MLP / attention weight matrices with decoupled weight_decay (default: 0.01).
       - Group 1: 1D biases, RMSNorm parameters, 2D token embeddings (embed_tokens), and lm_head with weight_decay = 0.0.
     Preserves exact parameter-group ordering and membership identical to train_main.py lines 1489-1503.
+    Strictly enforces weight-tying invariants (lm_head.weight == embed_tokens.weight) to maintain exact 112/34 group counts.
     """
     target_model = getattr(model, "module", model)
+    cfg = getattr(target_model, "config", None)
+    tie = False
+    if isinstance(cfg, dict):
+        tie = cfg.get("tie_word_embeddings", False)
+    elif cfg is not None:
+        tie = getattr(cfg, "tie_word_embeddings", False)
+
+    if tie:
+        if hasattr(target_model, "lm_head") and hasattr(target_model, "model") and hasattr(target_model.model, "embed_tokens"):
+            target_model.lm_head.weight = target_model.model.embed_tokens.weight
+
     decay_params = []
     no_decay_params = []
+    seen_ids = set()
+
     for name, param in target_model.named_parameters():
         if not param.requires_grad:
             continue
+        if id(param) in seen_ids:
+            continue
+        seen_ids.add(id(param))
+        # If tie_word_embeddings is active, lm_head.weight points to embed_tokens buffer - skip duplicate
+        if tie and "lm_head" in name and hasattr(target_model, "model") and hasattr(target_model.model, "embed_tokens"):
+            if param is target_model.model.embed_tokens.weight or id(param) == id(target_model.model.embed_tokens.weight):
+                continue
+
         if param.dim() < 2 or "embed_tokens" in name or "lm_head" in name or "norm" in name:
             no_decay_params.append(param)
         else:
@@ -374,11 +396,33 @@ def restore_tpu_optimizer_state(
             return False
         raise RuntimeError(f"{err_msg}\nRe-initialization prohibited to prevent cold-start momentum shock. Provide --allow-optimizer-cold-start to override.")
 
-    # Strict per-group parameter count validation
+    # Strict per-group parameter count validation with auto-parity reconciliation
     for g_idx, (saved_g, cur_g) in enumerate(zip(raw_opt_sd["param_groups"], optimizer.param_groups)):
         n_saved = len(saved_g.get("params", []))
         n_cur = len(cur_g.get("params", []))
         if n_saved != n_cur:
+            # Special case: Group 1 has 34 params in checkpoint (tied lm_head) but 35 in optimizer
+            if g_idx == 1 and n_saved == 34 and n_cur == 35:
+                unique_params = []
+                seen_p_ids = set()
+                for p in cur_g["params"]:
+                    if id(p) not in seen_p_ids:
+                        seen_p_ids.add(id(p))
+                        unique_params.append(p)
+                if len(unique_params) == 34:
+                    cur_g["params"] = unique_params
+                    n_cur = 34
+                    print("[TPU Resume Parity] Successfully reconciled Group 1 parameter count (35 -> 34) by deduplicating tied embeddings.", flush=True)
+
+        if n_saved != n_cur:
+            print(f"\n{'=' * 88}", flush=True)
+            print(f"  [TPU OPTIMIZER PARAMETER DIAGNOSTICS - MISMATCH IN GROUP {g_idx}]", flush=True)
+            print(f"  Checkpoint has {n_saved} params | Active optimizer has {n_cur} params", flush=True)
+            print(f"{'-' * 88}", flush=True)
+            for p_idx, p in enumerate(cur_g.get("params", [])):
+                shape_str = tuple(p.shape) if hasattr(p, "shape") else "unknown"
+                print(f"  Group {g_idx} | index={p_idx:02d} | shape={shape_str} | requires_grad={getattr(p, 'requires_grad', None)}", flush=True)
+            print(f"{'=' * 88}\n", flush=True)
             err_msg = f"[TPU Resume Gate] Parameter count mismatch in group {g_idx}: checkpoint has {n_saved} params, optimizer has {n_cur} params."
             if allow_cold_start:
                 print(f"{err_msg} Skipping restore per --allow-optimizer-cold-start.", flush=True)

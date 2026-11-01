@@ -1824,8 +1824,8 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
 
     # 3. Instantiate Native TARA Model on TPU Device
     model = TaraForCausalLM(config, gradient_checkpointing=args.gradient_checkpointing)
-    _ensure_tied_weights(model)
     model.to(device)
+    _ensure_tied_weights(model)
 
     # 4. AdamW Optimizer with 100% Exact GPU Parameter Grouping
     optim_groups = build_tpu_optimizer_groups(model, weight_decay=args.weight_decay)

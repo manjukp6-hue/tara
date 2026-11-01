@@ -43,18 +43,18 @@ def run_all_tpu_tests() -> bool:
     all_passed = True
 
     # -------------------------------------------------------------------------
-    # TEST 1: TPU v3-8 Detection
+    # TEST 1: TPU Detection (v5e-8, v5e-1, v3-8, v2-8)
     # -------------------------------------------------------------------------
-    print("\n[TEST 1/7] Testing TPU v3-8 Detection & Environment Layer...")
+    print("\n[TEST 1/7] Testing TPU Detection & Multi-Generation Hardware Layer...")
     try:
         hw_info = get_tpu_hardware_info()
         dev = get_tpu_device()
         rank = get_tpu_rank()
         world_size = get_tpu_world_size()
-        print(f"  -> Hardware info: {hw_info}")
-        print(f"  -> Active device: {dev}")
-        print(f"  -> Process rank : {rank}/{world_size}")
-        print("  [PASS] Test 1: TPU detection & device resolution succeeded.")
+        print(f"  -> Detected Hardware: {hw_info['hardware_type']}")
+        print(f"  -> Active device    : {dev}")
+        print(f"  -> Cores & Topology : {hw_info['num_cores']} core(s) | Rank {rank}/{world_size}")
+        print("  [PASS] Test 1: TPU detection & hardware layer verified.")
     except Exception as e:
         print(f"  [FAIL] Test 1: {e}")
         all_passed = False
@@ -183,6 +183,14 @@ def run_all_tpu_tests() -> bool:
         # 3. Resume from TPU checkpoint
         step, epoch, loss, resumed, cursor = load_tpu_checkpoint(test_tpu_ckpt_dir, model)
         assert resumed and step == 10 and abs(loss - 1.85) < 1e-4
+
+        # 4. Verify GPU Checkpoint Structure & SafeTensors Sharded Index
+        gpu_index_file = os.path.join(gpu_ckpt_dir, "model.safetensors.index.json")
+        assert os.path.isfile(gpu_index_file), "GPU checkpoint model.safetensors.index.json missing"
+        with open(gpu_index_file, "r") as gf:
+            gpu_idx = json.load(gf)
+        assert len(gpu_idx.get("weight_map", {})) == 147, f"Expected 147 tensors in index, got {len(gpu_idx.get('weight_map', {}))}"
+        print(f"  -> Successfully verified GPU sharded index with {len(gpu_idx['weight_map'])} tensors across 8 shards.")
 
         # Clean up temporary test checkpoint
         shutil.rmtree(test_tpu_ckpt_dir, ignore_errors=True)

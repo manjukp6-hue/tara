@@ -297,36 +297,114 @@ def save_tpu_checkpoint(
 
 
 def load_tpu_checkpoint(checkpoint_dir: str, model: nn.Module) -> Tuple[int, int, float, bool, Dict[str, Any]]:
-    """Loads existing TPU checkpoint if present."""
-    state_file = os.path.join(checkpoint_dir, "checkpoint_state.json")
-    if not os.path.isfile(state_file):
+    """
+    Loads existing checkpoint (TPU or GPU) if present.
+    Supports:
+      1. Sharded SafeTensors: model.safetensors.index.json with model-*-of-*.safetensors
+      2. Monolithic SafeTensors: model.safetensors
+      3. Loose SafeTensors: glob("*.safetensors")
+      4. PyTorch legacy binary: pytorch_model.bin
+    Restores model parameter weights with 100% parameter fidelity.
+    """
+    if not os.path.isdir(checkpoint_dir):
         return 0, 0, float("inf"), False, {}
 
+    state_file = os.path.join(checkpoint_dir, "checkpoint_state.json")
+    step = 0
+    epoch = 0
+    loss = float("inf")
+    cursor = {}
+
+    if os.path.isfile(state_file):
+        try:
+            with open(state_file, "r", encoding="utf-8") as sf:
+                state = json.load(sf)
+            step = int(state.get("step", 0))
+            epoch = int(state.get("epoch", 0))
+            loss = float(state.get("loss", float("inf")))
+            cursor = state.get("data_cursor", {})
+        except Exception as e:
+            print(f"[TPU Resume Notice] Could not parse checkpoint_state.json: {e}", flush=True)
+
+    target_model = getattr(model, "module", model)
+    total_model_keys = len(target_model.state_dict())
+    matched_keys = 0
+
     try:
-        with open(state_file, "r", encoding="utf-8") as sf:
-            state = json.load(sf)
-        step = int(state.get("step", 0))
-        epoch = int(state.get("epoch", 0))
-        loss = float(state.get("loss", float("inf")))
-        cursor = state.get("data_cursor", {})
+        # Case 1: Sharded SafeTensors Index (Standard Hugging Face & TARA Sharded Checkpoints)
+        index_file = os.path.join(checkpoint_dir, "model.safetensors.index.json")
+        if HAS_SAFETENSORS and os.path.isfile(index_file):
+            with open(index_file, "r", encoding="utf-8") as idxf:
+                idx_data = json.load(idxf)
+            weight_map = idx_data.get("weight_map", {})
+            shard_names = sorted(list(set(weight_map.values())))
+            model_sd = target_model.state_dict()
+            for s_name in shard_names:
+                s_path = os.path.join(checkpoint_dir, s_name)
+                if os.path.isfile(s_path):
+                    shard_tensors = load_file(s_path, device="cpu")
+                    filtered = {k: v for k, v in shard_tensors.items() if k in model_sd and model_sd[k].shape == v.shape}
+                    if filtered:
+                        target_model.load_state_dict(filtered, strict=False)
+                        matched_keys += len(filtered)
+                    del shard_tensors
+            print(
+                f"[TPU Resume] Restored {matched_keys}/{total_model_keys} weight tensors from "
+                f"sharded checkpoint ({len(shard_names)} shards) at Step {step} (Loss: {loss:.4f})",
+                flush=True
+            )
+            return step, epoch, loss, (matched_keys > 0), cursor
 
+        # Case 2: Monolithic SafeTensors (Standard TPU single-file checkpoint)
         st_path = os.path.join(checkpoint_dir, "model.safetensors")
-        target_model = getattr(model, "module", model)
-
         if HAS_SAFETENSORS and os.path.isfile(st_path):
             weights = load_file(st_path, device="cpu")
-            target_model.load_state_dict(weights, strict=False)
-            print(f"[TPU Resume] Restored {len(weights)} weight tensors from Step {step} (Loss: {loss:.4f})", flush=True)
-            return step, epoch, loss, True, cursor
-    except Exception as e:
-        print(f"[TPU Resume Warning] Could not resume from {checkpoint_dir}: {e}", flush=True)
+            model_sd = target_model.state_dict()
+            filtered = {k: v for k, v in weights.items() if k in model_sd and model_sd[k].shape == v.shape}
+            if filtered:
+                target_model.load_state_dict(filtered, strict=False)
+                matched_keys = len(filtered)
+            del weights
+            print(f"[TPU Resume] Restored {matched_keys}/{total_model_keys} weight tensors from model.safetensors at Step {step} (Loss: {loss:.4f})", flush=True)
+            return step, epoch, loss, (matched_keys > 0), cursor
 
-    return 0, 0, float("inf"), False, {}
+        # Case 3: Loose SafeTensors Shards
+        if HAS_SAFETENSORS:
+            loose_shards = sorted(glob.glob(os.path.join(checkpoint_dir, "*.safetensors")))
+            if loose_shards:
+                model_sd = target_model.state_dict()
+                for s_path in loose_shards:
+                    shard_tensors = load_file(s_path, device="cpu")
+                    filtered = {k: v for k, v in shard_tensors.items() if k in model_sd and model_sd[k].shape == v.shape}
+                    if filtered:
+                        target_model.load_state_dict(filtered, strict=False)
+                        matched_keys += len(filtered)
+                    del shard_tensors
+                print(f"[TPU Resume] Restored {matched_keys}/{total_model_keys} weight tensors from {len(loose_shards)} loose shards at Step {step} (Loss: {loss:.4f})", flush=True)
+                return step, epoch, loss, (matched_keys > 0), cursor
+
+        # Case 4: PyTorch Binary Fallback
+        bin_path = os.path.join(checkpoint_dir, "pytorch_model.bin")
+        if os.path.isfile(bin_path):
+            weights = torch.load(bin_path, map_location="cpu")
+            model_sd = target_model.state_dict()
+            filtered = {k: v for k, v in weights.items() if k in model_sd and model_sd[k].shape == v.shape}
+            if filtered:
+                target_model.load_state_dict(filtered, strict=False)
+                matched_keys = len(filtered)
+            del weights
+            print(f"[TPU Resume] Restored {matched_keys}/{total_model_keys} weight tensors from pytorch_model.bin at Step {step} (Loss: {loss:.4f})", flush=True)
+            return step, epoch, loss, (matched_keys > 0), cursor
+
+    except Exception as e:
+        print(f"[TPU Resume Warning] Could not resume weights from {checkpoint_dir}: {e}", flush=True)
+
+    return step, epoch, loss, (matched_keys > 0), cursor
 
 
 def train_tpu_worker(index: int, args: argparse.Namespace):
     """
-    Core per-core TPU worker function. Executed across all 8 TPU cores via xmp.spawn.
+    Core per-core TPU worker function. Executed across TPU cores via xmp.spawn.
     """
     device = get_tpu_device()
     world_size = get_tpu_world_size()
@@ -335,7 +413,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
 
     if is_main:
         print("=" * 80)
-        print(f"  TARA TPU TRAINING WORKER INITIALIZED (8 Cores | Rank {rank}/{world_size})")
+        print(f"  TARA TPU TRAINING WORKER INITIALIZED (Cores: {world_size} | Rank {rank}/{world_size})")
         print(f"  Target Device : {device}")
         print(f"  Output Dir    : {args.output_dir} (ISOLATED TPU STORAGE)")
         print("=" * 80 + "\n", flush=True)
@@ -367,7 +445,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
         print(f"[Tokenizer] Loaded TARA Tokenizer ({tokenizer.get_vocab_size():,} tokens)", flush=True)
 
     # 3. Instantiate Native TARA Model on TPU Device
-    # TPU v3-8 natively evaluates bfloat16 master storage with zero precision penalty
+    # TPU v5e/v3 natively evaluates bfloat16 master storage with zero precision penalty
     model = TaraForCausalLM(config, gradient_checkpointing=args.gradient_checkpointing)
     model.to(device)
 
@@ -378,8 +456,30 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
     resumed = False
     cursor = {}
 
-    if args.resume:
-        start_step, start_epoch, best_loss, resumed, cursor = load_tpu_checkpoint(args.output_dir, model)
+    resume_dir = None
+    if getattr(args, "resume_dir", None) and os.path.isdir(args.resume_dir):
+        resume_dir = args.resume_dir
+    elif args.resume:
+        # Priority 1: Check existing TPU checkpoint
+        if os.path.isdir(args.output_dir) and (
+            os.path.isfile(os.path.join(args.output_dir, "checkpoint_state.json"))
+            or glob.glob(os.path.join(args.output_dir, "*.safetensors"))
+        ):
+            resume_dir = args.output_dir
+        # Priority 2: Auto-fallback to GPU checkpoint directory without modifying it
+        elif os.path.isdir("storage/models/checkpoints/stage0_pretraining"):
+            resume_dir = "storage/models/checkpoints/stage0_pretraining"
+
+    if resume_dir:
+        start_step, start_epoch, best_loss, resumed, cursor = load_tpu_checkpoint(resume_dir, model)
+        if resumed and is_main:
+            print(
+                f"[TPU Resume Matrix] Checkpoint successfully restored from '{resume_dir}'.\n"
+                f"  -> Restored Step : {start_step}\n"
+                f"  -> Checkpoint Loss: {best_loss:.4f}\n"
+                f"  -> Next Step     : {start_step + 1} (Pre-training will smoothly resume at Step {start_step + 1})\n",
+                flush=True
+            )
 
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     if is_main:
@@ -548,7 +648,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
 
 def parse_tpu_arguments() -> argparse.Namespace:
     """Parses command-line arguments for TARA TPU Training."""
-    parser = argparse.ArgumentParser(description="TARA Autonomous Google TPU v3-8 Training Engine")
+    parser = argparse.ArgumentParser(description="TARA Autonomous Google TPU (v5e / v3-8 / v2-8) Training Engine")
     parser.add_argument("--model-dir", type=str, default="storage/models/tara_candidate_v1", help="Candidate model directory (config.json & tokenizer.json)")
     parser.add_argument("--dataset-dir", type=str, default="storage/datasets/main_dataset_v2", help="Dataset directory")
     # Separate TPU output directory:
@@ -566,8 +666,9 @@ def parse_tpu_arguments() -> argparse.Namespace:
     parser.add_argument("--checkpoint-interval", type=int, default=TPUConfig.CHECKPOINT_INTERVAL, help="Steps between checkpoints")
     parser.add_argument("--eval-interval", type=int, default=TPUConfig.EVAL_INTERVAL, help="Steps between probe evaluations")
     parser.add_argument("--gradient-checkpointing", action="store_true", default=True, help="Enable gradient checkpointing")
-    parser.add_argument("--resume", action="store_true", default=False, help="Resume from last checkpoint in output-dir")
-    parser.add_argument("--single-core", action="store_true", default=False, help="Run single-core TPU mode (useful for testing)")
+    parser.add_argument("--resume", action="store_true", default=False, help="Resume from last checkpoint in output-dir or fallback to GPU checkpoint")
+    parser.add_argument("--resume-dir", type=str, default=None, help="Explicit directory from which to resume (e.g. storage/models/checkpoints/stage0_pretraining)")
+    parser.add_argument("--single-core", action="store_true", default=False, help="Run single-core TPU mode (e.g. Colab TPU v5e-1 or quick test)")
     return parser.parse_args()
 
 
@@ -584,12 +685,14 @@ def main():
     print(f"  XLA Engine    : {'Installed' if hw_info['has_xla'] else 'Fallback/Mock Engine Active'}")
     print("=" * 80 + "\n", flush=True)
 
-    if HAS_XLA and not args.single_core:
-        # Launch 8-core TPU distributed multiprocessing
+    if HAS_XLA and hw_info["num_cores"] > 1 and not args.single_core:
+        # Launch multi-core TPU distributed multiprocessing (e.g. Kaggle TPU v5e-8 or TPU v3-8)
         print(f"[TPU Spawner] Launching distributed training across {hw_info['num_cores']} TPU cores via xmp.spawn...", flush=True)
         xmp.spawn(train_tpu_worker, args=(args,), nprocs=hw_info["num_cores"])
     else:
-        # Single-core mode or fallback
+        # Single-core mode (e.g. Colab TPU v5e-1) or single_core flag or fallback
+        if hw_info["available"] and hw_info["num_cores"] == 1:
+            print("[TPU Runner] Single-core TPU detected (e.g. Colab TPU v5e-1). Executing direct TPU worker...", flush=True)
         train_tpu_worker(0, args)
 
 

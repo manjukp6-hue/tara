@@ -26,19 +26,29 @@ else
     exit 1
 fi
 
-# 2. Configure Google TPU v3-8 Hardware Environment Flags
+# 2. Configure Google TPU Hardware Environment Flags (Supports v5e-8, v5e-1, v3-8, v2-8)
 export PJRT_DEVICE="${PJRT_DEVICE:-TPU}"
 export XLA_USE_BF16="${XLA_USE_BF16:-1}"
-export TPU_NUM_DEVICES="${TPU_NUM_DEVICES:-8}"
 export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
 export TF_CPP_MIN_LOG_LEVEL="${TF_CPP_MIN_LOG_LEVEL:-2}"
 
-# 3. Detect TPU Environment
-echo "[TPU SETUP] Inspecting TPU Environment..."
-if [ -n "${TPU_NAME:-}" ] || [ -n "${COLAB_TPU_ADDR:-}" ] || [ -n "${TPU_ACCELERATOR_TYPE:-}" ]; then
-    echo "[TPU DETECTED] Cloud TPU Accelerator detected: ${TPU_ACCELERATOR_TYPE:-${TPU_NAME:-TPU v3-8}}"
+# 3. Detect TPU Environment (Colab v5e-1 vs Kaggle v5e-8 vs Cloud TPU VM)
+echo "[TPU SETUP] Inspecting Cloud TPU Environment..."
+EXTRA_ARGS=()
+
+if [ -n "${KAGGLE_KERNEL_RUN_TYPE:-}" ] || [ -n "${KAGGLE_TPU_VERSION:-}" ]; then
+    echo "[TPU DETECTED] Kaggle Cloud TPU Environment detected: TPU v5e-8 (8 Cores | 128GB HBM)"
+    export TPU_NUM_DEVICES="${TPU_NUM_DEVICES:-8}"
+elif [ "${TPU_ACCELERATOR_TYPE:-}" = "v5e-1" ] || [ -n "${COLAB_TPU_ADDR:-}" ] && [ "${TPU_NUM_DEVICES:-}" = "1" ]; then
+    echo "[TPU DETECTED] Google Colab TPU v5e-1 detected (1 Core | 16GB HBM)"
+    export TPU_NUM_DEVICES=1
+    EXTRA_ARGS+=("--single-core")
+elif [ -n "${TPU_ACCELERATOR_TYPE:-}" ] || [ -n "${TPU_NAME:-}" ]; then
+    echo "[TPU DETECTED] Cloud TPU Accelerator detected: ${TPU_ACCELERATOR_TYPE:-${TPU_NAME:-TPU v3-8/v5e}}"
+    export TPU_NUM_DEVICES="${TPU_NUM_DEVICES:-8}"
 else
     echo "[TPU NOTICE] Standard TPU environment flags configured (PJRT_DEVICE=$PJRT_DEVICE, BF16=$XLA_USE_BF16)."
+    export TPU_NUM_DEVICES="${TPU_NUM_DEVICES:-8}"
 fi
 
 # 4. Prepare Dedicated TPU Directories (ISOLATED: Never overwrites GPU checkpoints)
@@ -50,10 +60,11 @@ echo "[STORAGE] Dedicated TPU Checkpoint Dir: $TPU_OUTPUT_DIR"
 echo "[ISOLATION] GPU Checkpoints (storage/models/checkpoints/) remain 100% UNTOUCHED."
 echo "------------------------------------------------------------------------------"
 
-# 5. Launch Native TPU Multi-Core Training
-echo "[LAUNCH] Launching TARA Native TPU Trainer across 8 Cores..."
+# 5. Launch Native TPU Training (Multi-Core or Single-Core)
+echo "[LAUNCH] Launching TARA Native TPU Trainer..."
 $PY_CMD train_tpu.py \
     --output-dir "$TPU_OUTPUT_DIR" \
+    ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} \
     "$@"
 
 TPU_EXIT_CODE=$?

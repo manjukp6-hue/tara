@@ -68,17 +68,26 @@ def get_tpu_hardware_info() -> Dict[str, Any]:
     tpu_env = (
         os.environ.get("TPU_ACCELERATOR_TYPE")
         or os.environ.get("TPU_NAME", "")
+        or os.environ.get("KAGGLE_TPU_VERSION", "")
         or device_name
     ).lower()
 
-    if "v3-8" in tpu_env or "v3" in tpu_env:
+    # Colab TPU v5e-1 (Single-core / 1 TensorCore / 16GB HBM)
+    if "v5e-1" in tpu_env or ("v5e" in tpu_env and ("-1" in tpu_env or "single" in tpu_env)) or (os.environ.get("TPU_NUM_DEVICES") == "1" and "v5" in tpu_env):
+        hw_type = "Google Cloud TPU v5e-1 (16GB HBM | 1 Core | 197 TFLOPS BF16)"
+        num_cores = 1
+    # Kaggle / GCP TPU v5e-8 (Multi-core / 8 TensorCores / 4 Chips / 64-128GB HBM)
+    elif "v5e-8" in tpu_env or "v5e" in tpu_env or "v5litepod-8" in tpu_env:
+        hw_type = "Google Cloud TPU v5e-8 (Kaggle/GCP | 8 Cores | 1576 TFLOPS BF16)"
+        num_cores = 8
+    elif "v4" in tpu_env:
+        hw_type = "Google TPU v4 (8 Cores | 275 TFLOPS/chip)"
+        num_cores = 8
+    elif "v3-8" in tpu_env or "v3" in tpu_env:
         hw_type = "Google TPU v3-8 (128GB HBM | 8 Cores | 420 TFLOPS)"
         num_cores = 8
     elif "v2-8" in tpu_env or "v2" in tpu_env:
         hw_type = "Google TPU v2-8 (64GB HBM | 8 Cores | 180 TFLOPS)"
-        num_cores = 8
-    elif "v4" in tpu_env:
-        hw_type = "Google TPU v4 (8 Cores | 275 TFLOPS/chip)"
         num_cores = 8
     elif available:
         hw_type = f"Google TPU ({device_name})"

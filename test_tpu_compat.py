@@ -366,7 +366,7 @@ def run_all_tpu_tests() -> bool:
 
     print("\n" + "=" * 80)
     if all_passed:
-        print("  ALL 11 MASTER VERIFICATION PHASES (INCLUDING 14/14 HBM & DISTRIBUTED REGRESSION TESTS) PASSED! (100% READY)")
+        print("  ALL 13 TPU VERIFICATION & REGRESSION TESTS PASSED! (100% READY)")
     else:
         print("  SOME TESTS ENCOUNTERED FAILURES - REVIEW LOGS ABOVE.")
     print("=" * 80)

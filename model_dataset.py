@@ -17,6 +17,7 @@ import copy
 import gc
 import glob
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -2956,6 +2957,8 @@ class TaraMultiDomainScheduler(IterableDataset):
                 raise ValueError(f"Invalid sum of domain_weights: {total_w} (must be positive and finite)")
             self.domain_weights = {d: norm_w[d] / total_w for d in self.active_domains}
 
+        self.base_domain_weights = copy.deepcopy(self.domain_weights)
+
         # Checkpoint Resume Deficit Continuity: strict deficit validation from checkpoint
         self.deficits: Dict[str, float] = {d: 0.0 for d in self.active_domains}
         if "scheduler_deficits" in kwargs and kwargs["scheduler_deficits"]:
@@ -2982,6 +2985,21 @@ class TaraMultiDomainScheduler(IterableDataset):
             for d, c in self.shard_ledger.domain_cycles.items():
                 if d in self.domain_cycles:
                     self.domain_cycles[d] = int(c)
+
+        # Maintenance Replay Mode Resume Guard:
+        # If any domain already completed max_domain_cycles in previous sessions,
+        # preserve its throttled maintenance weight (decayed to 10% of base weight).
+        has_maintenance = False
+        for d in self.active_domains:
+            if self.domain_cycles.get(d, 0) >= self.max_domain_cycles:
+                decayed_w = min(0.01, max(0.002, self.base_domain_weights.get(d, 0.01) * 0.10))
+                self.domain_weights[d] = decayed_w
+                has_maintenance = True
+        if has_maintenance:
+            tot_w = sum(self.domain_weights.values())
+            if tot_w > 0:
+                self.domain_weights = {d: self.domain_weights[d] / tot_w for d in self.active_domains}
+
         self.active_domain_idx: int = 0
 
         self.current_active_shard: Optional[str] = None
@@ -3045,15 +3063,32 @@ class TaraMultiDomainScheduler(IterableDataset):
             "domain_cycles": copy.deepcopy(self.domain_cycles),
             "active_domain_idx": self.active_domain_idx,
             "scheduler_deficits": copy.deepcopy(self.deficits),
+            "base_domain_weights": copy.deepcopy(getattr(self, "base_domain_weights", self.domain_weights)),
+            "domain_weights": copy.deepcopy(self.domain_weights),
         }
 
     def load_state(self, state: Dict[str, Any]):
         if not state:
             return
+        if "base_domain_weights" in state and isinstance(state["base_domain_weights"], dict):
+            self.base_domain_weights = copy.deepcopy(state["base_domain_weights"])
+        if "domain_weights" in state and isinstance(state["domain_weights"], dict):
+            self.domain_weights = copy.deepcopy(state["domain_weights"])
         if "domain_cycles" in state and isinstance(state["domain_cycles"], dict):
             for d, c in state["domain_cycles"].items():
                 if d in self.domain_cycles:
                     self.domain_cycles[d] = int(c)
+        # Re-apply maintenance replay mode for domains that completed max_domain_cycles
+        has_maintenance = False
+        for d in self.active_domains:
+            if self.domain_cycles.get(d, 0) >= self.max_domain_cycles:
+                decayed_w = min(0.01, max(0.002, getattr(self, "base_domain_weights", self.domain_weights).get(d, 0.01) * 0.10))
+                self.domain_weights[d] = decayed_w
+                has_maintenance = True
+        if has_maintenance:
+            tot_w = sum(self.domain_weights.values())
+            if tot_w > 0:
+                self.domain_weights = {d: self.domain_weights[d] / tot_w for d in self.active_domains}
         if "domain_cursors" in state:
             self.domain_cursors = copy.deepcopy(state["domain_cursors"])
             for d, cur in self.domain_cursors.items():
@@ -3138,49 +3173,79 @@ class TaraMultiDomainScheduler(IterableDataset):
 
             except StopIteration:
                 cur_cycle = self.domain_cycles.get(best_d, 0)
-                if cur_cycle + 1 < self.max_domain_cycles:
-                    self.domain_cycles[best_d] = cur_cycle + 1
-                    next_cycle = self.domain_cycles[best_d]
-                    if self.shard_ledger:
-                        self.shard_ledger.update_domain_cycle(best_d, next_cycle)
-                    cycle_seed = 42 + next_cycle * 1000 + (abs(hash(best_d)) % 1000)
+                next_cycle = cur_cycle + 1
+                self.domain_cycles[best_d] = next_cycle
+                if self.shard_ledger:
+                    self.shard_ledger.update_domain_cycle(best_d, next_cycle)
+
+                cycle_seed = 42 + next_cycle * 1000 + (abs(hash(best_d)) % 1000)
+
+                if next_cycle >= self.max_domain_cycles:
+                    # Transition to / continue in Maintenance Replay Mode:
+                    # Decay sampling weight to 10% of base weight (bounded between 0.002 and 0.01)
+                    base_w = getattr(self, "base_domain_weights", self.domain_weights).get(best_d, 0.01)
+                    decayed_w = min(0.01, max(0.002, base_w * 0.10))
+                    self.domain_weights[best_d] = decayed_w
+
+                    # Re-normalize self.domain_weights across active_candidates so sum is 1.0
+                    tot_active = sum(self.domain_weights.get(d, 0.0) for d in active_candidates)
+                    if tot_active > 0:
+                        for d in active_candidates:
+                            self.domain_weights[d] = self.domain_weights.get(d, 0.0) / tot_active
+
+                    # Reset deficit so it does not burst
+                    self.deficits[best_d] = 0.0
+
                     print(
-                        f"[Balanced Domain Cycling] Domain '{best_d}' completed Cycle {cur_cycle + 1}/{self.max_domain_cycles}. "
+                        f"[Anti-Forgetting Replay] Domain '{best_d}' completed {next_cycle} cycles. "
+                        f"Entering Maintenance Replay Mode (throttled weight={self.domain_weights[best_d]:.4f}) "
+                        f"to prevent catastrophic forgetting without overfitting.",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"[Balanced Domain Cycling] Domain '{best_d}' completed Cycle {next_cycle}/{self.max_domain_cycles}. "
                         f"Re-cycling with randomized shuffle (seed={cycle_seed}) to preserve retention without overfitting.",
                         flush=True,
                     )
-                    self.domain_datasets[best_d] = TaraStreamingJsonlDataset(
-                        file_paths=self.domain_shards[best_d],
-                        tokenizer=self.tokenizer,
-                        max_seq_len=self.max_seq_len,
-                        max_samples=self.max_samples,
-                        shuffle_shards=True,
-                        seed=cycle_seed,
-                        resume_shard=None,
-                        resume_line_offset=-1,
-                        resume_byte_offset=0,
-                        resume_chunk_idx=0,
-                        shard_ledger=None,
-                        keep_shards=self.keep_shards,
-                        dataset_dir=self.dataset_dir,
-                        repo_id=self.repo_id,
-                        prefix=self.prefix,
-                        buffer_size=max(self.buffer_size, 32),
-                        max_shard_bytes=self.max_shard_bytes,
-                        dataset_snapshot=self.dataset_snapshot,
-                        mask_prompt=self.mask_prompt,
-                        rank=self.rank,
-                        world_size=self.world_size,
-                    )
-                    domain_iters[best_d] = iter(self.domain_datasets[best_d])
-                else:
+
+                new_ds = TaraStreamingJsonlDataset(
+                    file_paths=self.domain_shards[best_d],
+                    tokenizer=self.tokenizer,
+                    max_seq_len=self.max_seq_len,
+                    max_samples=self.max_samples,
+                    shuffle_shards=True,
+                    seed=cycle_seed,
+                    resume_shard=None,
+                    resume_line_offset=-1,
+                    resume_byte_offset=0,
+                    resume_chunk_idx=0,
+                    shard_ledger=None,
+                    keep_shards=self.keep_shards,
+                    dataset_dir=self.dataset_dir,
+                    repo_id=self.repo_id,
+                    prefix=self.prefix,
+                    buffer_size=max(self.buffer_size, 64),
+                    max_shard_bytes=self.max_shard_bytes,
+                    dataset_snapshot=self.dataset_snapshot,
+                    mask_prompt=self.mask_prompt,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                )
+                new_it = iter(new_ds)
+
+                try:
+                    first_item = next(new_it)
+                    domain_iters[best_d] = itertools.chain([first_item], new_it)
+                    self.domain_datasets[best_d] = new_ds
+                except StopIteration:
                     if best_d in active_candidates:
                         active_candidates.remove(best_d)
-                        print(
-                            f"[Balanced Domain Cycling] Domain '{best_d}' reached max cycle cap ({self.max_domain_cycles} cycles). "
-                            f"Safely retired from active sampling to eliminate overfitting.",
-                            flush=True,
-                        )
+                    print(
+                        f"[Empty Domain Retired] Domain '{best_d}' produced 0 records on re-cycle. "
+                        f"Removed from active candidates.",
+                        flush=True,
+                    )
 
 
 def collate_fn(batch):

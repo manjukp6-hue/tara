@@ -894,6 +894,51 @@ def wait_for_hf_upload(timeout: Optional[float] = 120.0) -> bool:
     return True
 
 
+# Canonical Multi-Domain Dynamic Probe Catalog for Live Model Quality Probing
+DYNAMIC_PROBE_CATALOG = {
+    "Kannada": [
+        "ಕರ್ನಾಟಕದ ರಾಜಧಾನಿ ",
+        "ಕನ್ನಡ ಸಾಹಿತ್ಯದಲ್ಲಿ ಪ್ರಸಿದ್ಧ ಕವಿ ",
+        "ಬೆಂಗಳೂರಿನ ಹವಾಮಾನ ಮತ್ತು ಸಂಸ್ಕೃತಿ ",
+        "ಕರ್ನಾಟಕದ ಪ್ರಮುಖ ನದಿಗಳಲ್ಲಿ ಒಂದಾದ ",
+        "ಜ್ಞಾನಪೀಠ ಪ್ರಶಸ್ತಿ ವಿಜೇತ ಕನ್ನಡಿಗ ",
+        "ವಿಜಯನಗರ ಸಾಮ್ರಾಜ್ಯದ ಇತಿಹಾಸವು ",
+        "ಮೈಸೂರು ಅರಮನೆಯ ದಸರಾ ಹಬ್ಬದ ವೈಭವ ",
+        "ಕನ್ನಡ ನಾಡಿನ ಸುಂದರ ಶಿಲ್ಪಕಲೆಯು ",
+    ],
+    "Reasoning": [
+        "The sun rises in the ",
+        "If water freezes at 0 degrees Celsius, then at room temperature it is ",
+        "Why do birds migrate south during winter? The main reason is ",
+        "If all humans are mortal and Socrates is human, therefore Socrates is ",
+        "The reason why ice floats on liquid water is because ",
+        "When warm air rises and cools down, the moisture condenses into ",
+        "If a train travels at 60 miles per hour for 3 hours, the total distance covered is ",
+        "The principle of supply and demand states that when supply is low and demand is high, prices ",
+    ],
+    "Code": [
+        "def add(a, b):\n    return ",
+        "def is_prime(n: int) -> bool:\n    if n <= 1:\n        return False\n    ",
+        "def reverse_string(s: str) -> str:\n    return ",
+        "def fibonacci(n: int) -> int:\n    if n <= 1:\n        return n\n    return ",
+        "class BinaryTreeNode:\n    def __init__(self, value):\n        self.val = value\n        ",
+        "import torch.nn as nn\nclass MultiHeadAttention(nn.Module):\n    def __init__(self, d_model, n_heads):\n        ",
+        "def quicksort(arr):\n    if len(arr) <= 1:\n        return arr\n    pivot = ",
+        "def binary_search(arr, target):\n    low, high = 0, len(arr) - 1\n    while low <= high:\n        ",
+    ],
+    "Science": [
+        "The chemical formula of water is ",
+        "Albert Einstein's theory of relativity connects space and time through ",
+        "DNA carries the genetic code composed of adenine, thymine, cytosine, and ",
+        "The speed of light in a vacuum is approximately ",
+        "Photosynthesis converts carbon dioxide and sunlight into oxygen and ",
+        "Newton's third law of motion establishes that for every action, there is an ",
+        "The closest planet to the Sun in our solar system is ",
+        "Gravity is the fundamental force that attracts objects with mass towards ",
+    ],
+}
+
+
 @torch.no_grad()
 def probe_model_generation(
     model: nn.Module,
@@ -902,23 +947,33 @@ def probe_model_generation(
     step: int,
     stage_id: str,
     max_new_tokens: int = 30,
+    temperature: float = 0.7,
+    top_p: float = 0.9,
+    repetition_penalty: float = 1.25,
 ) -> None:
     """
-    Evaluates real-time text synthesis by probing the active model with canonical benchmark prompts.
-    Provides immediate human-observable truth on model learning progression without training disruption.
+    Evaluates real-time text synthesis by probing the active model with dynamically rotating
+    multi-domain benchmark prompts (Kannada, Reasoning, Code, Science).
+    
+    Applies repetition penalty, temperature scaling, and nucleus (top-p) sampling to eliminate
+    greedy degeneration and repetitive token loops.
     """
     was_training = model.training
     model.eval()
     eval_model = getattr(model, "module", model)
 
-    test_probes = [
-        ("Kannada", "ಕರ್ನಾಟಕದ "),
-        ("Reasoning", "The sun rises in the "),
-        ("Code", "def add(a, b):\n    return "),
-    ]
+    # Dynamic auto-rotating prompt selection based on evaluation cycle step:
+    # On every probe interval, a fresh, distinct set of benchmark prompts is auto-selected!
+    cycle_idx = (step // 100) if step >= 100 else step
+    test_probes = []
+    for domain, prompt_list in DYNAMIC_PROBE_CATALOG.items():
+        prompt_idx = cycle_idx % len(prompt_list)
+        chosen_prompt = prompt_list[prompt_idx]
+        domain_tag = f"{domain} #{prompt_idx + 1}"
+        test_probes.append((domain_tag, chosen_prompt))
 
     print(f"\n{CLR_CYAN}{'=' * 80}{CLR_RESET}", flush=True)
-    print(f"  {CLR_BOLD}{CLR_CYAN}TARA LIVE MODEL GENERATION PROBE (Step {step:04d} | {stage_id}){CLR_RESET}", flush=True)
+    print(f"  {CLR_BOLD}{CLR_CYAN}TARA LIVE MODEL GENERATION PROBE (Step {step:04d} | {stage_id} | Dynamic Auto-Prompts){CLR_RESET}", flush=True)
     print(f"{CLR_CYAN}{'=' * 80}{CLR_RESET}", flush=True)
 
     eos_id = getattr(tokenizer, "eos_id", None)
@@ -938,9 +993,37 @@ def probe_model_generation(
                 out = eval_model(input_ids=inp)
                 logits = out.logits if hasattr(out, "logits") and out.logits is not None else (out[0] if isinstance(out, (tuple, list)) else out)
                 if logits.dim() == 2:
-                    next_token_id = int(torch.argmax(logits[-1, :], dim=-1).item())
+                    next_logits = logits[-1, :].clone().float()
                 else:
-                    next_token_id = int(torch.argmax(logits[0, -1, :], dim=-1).item())
+                    next_logits = logits[0, -1, :].clone().float()
+
+                # Repetition Penalty: Suppress logits of already generated tokens to prevent degeneration
+                if repetition_penalty != 1.0:
+                    for prev_token_id in set(generated_ids):
+                        if next_logits[prev_token_id] < 0:
+                            next_logits[prev_token_id] *= repetition_penalty
+                        else:
+                            next_logits[prev_token_id] /= repetition_penalty
+
+                # Temperature Scaling & Nucleus (Top-p) Sampling
+                if temperature > 0:
+                    scaled_logits = next_logits / max(temperature, 1e-5)
+                    if top_p < 1.0:
+                        sorted_logits, sorted_indices = torch.sort(scaled_logits, descending=True)
+                        cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                        sorted_indices_to_remove = cumulative_probs > top_p
+                        sorted_indices_to_remove[1:] = sorted_indices_to_remove[:-1].clone()
+                        sorted_indices_to_remove[0] = False
+                        indices_to_remove = sorted_indices[sorted_indices_to_remove]
+                        scaled_logits[indices_to_remove] = -float("Inf")
+                    probs = F.softmax(scaled_logits, dim=-1)
+                    if torch.isnan(probs).any() or torch.isinf(probs).any():
+                        next_token_id = int(torch.argmax(next_logits, dim=-1).item())
+                    else:
+                        next_token_id = int(torch.multinomial(probs, num_samples=1).item())
+                else:
+                    next_token_id = int(torch.argmax(next_logits, dim=-1).item())
+
                 if eos_id is not None and next_token_id == eos_id:
                     break
                 generated_ids.append(next_token_id)
@@ -951,9 +1034,9 @@ def probe_model_generation(
                 clean_cont = repr(continuation) if continuation else f"<tokens: {generated_ids[len(prompt_ids):]}>"
             else:
                 clean_cont = clean_cont.strip()
-            print(f"  [{tag:9s}] \"{prompt}\" -> {CLR_GREEN}{clean_cont}{CLR_RESET}", flush=True)
+            print(f"  [{tag:13s}] \"{prompt}\" -> {CLR_GREEN}{clean_cont}{CLR_RESET}", flush=True)
         except Exception as pe:
-            print(f"  [{tag:9s}] Probe warning: {pe}", flush=True)
+            print(f"  [{tag:13s}] Probe warning: {pe}", flush=True)
 
     print(f"{CLR_CYAN}{'=' * 80}{CLR_RESET}\n", flush=True)
 

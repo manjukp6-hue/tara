@@ -332,7 +332,7 @@ def run_all_tpu_tests() -> bool:
     # -------------------------------------------------------------------------
     # TEST 10: Mandatory Peer-Review Verification Suite (8-Core, Multi-Domain, Tampering)
     # -------------------------------------------------------------------------
-    print("\n[TEST 10/10] Running Mandatory Peer-Review Test Suite (8-Core Fault Injection, Multi-Domain Resume, Tampering Rejection)...")
+    print("\n[TEST 10/11] Running Mandatory Peer-Review Test Suite (8-Core Fault Injection, Multi-Domain Resume, Tampering Rejection)...")
     try:
         from tests.test_tpu_peer_review_validation import run_all_mandatory_peer_review_tests
         peer_review_passed = run_all_mandatory_peer_review_tests()
@@ -345,9 +345,28 @@ def run_all_tpu_tests() -> bool:
         print(f"  [FAIL] Test 10: {e}")
         all_passed = False
 
+    # -------------------------------------------------------------------------
+    # TEST 11: TPU HBM Memory Safety, Non-Leaf Grad Warning & Precision Suite
+    # -------------------------------------------------------------------------
+    print("\n[TEST 11/11] Running TPU HBM Memory Safety, Distributed Gradient Weighting & Precision Suite (13 tests)...")
+    try:
+        import unittest
+        from tests.test_tpu_hbm_memory_safety import TestTpuHbmMemorySafety
+        suite = unittest.TestLoader().loadTestsFromTestCase(TestTpuHbmMemorySafety)
+        runner = unittest.TextTestRunner(verbosity=1)
+        res = runner.run(suite)
+        if res.wasSuccessful():
+            print("  [PASS] Test 11: TPU HBM Memory Safety & Distributed Gradient Weighting (13/13 tests) verified.")
+        else:
+            print("  [FAIL] Test 11: TPU HBM Memory Safety regression tests failed.")
+            all_passed = False
+    except Exception as e:
+        print(f"  [FAIL] Test 11: {e}")
+        all_passed = False
+
     print("\n" + "=" * 80)
     if all_passed:
-        print("  ALL 10 TPU VERIFICATION & REGRESSION TESTS PASSED! (100% READY)")
+        print("  ALL 11 TPU VERIFICATION & REGRESSION TESTS PASSED! (100% READY)")
     else:
         print("  SOME TESTS ENCOUNTERED FAILURES - REVIEW LOGS ABOVE.")
     print("=" * 80)

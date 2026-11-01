@@ -235,6 +235,184 @@ def tpu_barrier(tag: str = "tpu_barrier"):
             pass
 
 
+def get_tpu_memory_diagnostics(device: Optional[Any] = None) -> Dict[str, Any]:
+    """
+    Queries authentic memory telemetry from physical TPU / XLA, CUDA, or host CPU fallback.
+    Explicitly distinguishes genuine physical TPU execution from CPU Fallback/Mock Engine.
+    Returns structured memory metrics and hardware identification without silent suppression.
+    """
+    diag = {
+        "is_physical_tpu": False,
+        "backend": "CPU Host (Fallback Engine)",
+        "bytes_used": 0,
+        "bytes_free": 0,
+        "bytes_total": 0,
+        "used_mb": 0.0,
+        "free_mb": 0.0,
+        "total_mb": 0.0,
+        "peak_mb": 0.0,
+        "telemetry_error": None,
+    }
+
+    # 1. Genuine PyTorch / XLA TPU Device
+    if HAS_XLA:
+        try:
+            device_hw = str(xm.xla_device_hw(device) if device is not None else xm.xla_device_hw()).upper()
+            if "TPU" in device_hw:
+                diag["is_physical_tpu"] = True
+                diag["backend"] = f"Physical Google TPU ({device_hw})"
+                if hasattr(xm, "get_memory_info"):
+                    try:
+                        mem_info = xm.get_memory_info(device)
+                        if isinstance(mem_info, dict):
+                            b_used = mem_info.get("bytes_used", 0)
+                            b_free = mem_info.get("bytes_free", 0)
+                            b_peak = mem_info.get("peak_bytes_used", mem_info.get("bytes_peak", b_used))
+                            diag["bytes_used"] = b_used
+                            diag["bytes_free"] = b_free
+                            diag["bytes_total"] = b_used + b_free
+                            diag["used_mb"] = round(b_used / (1024 * 1024), 2)
+                            diag["free_mb"] = round(b_free / (1024 * 1024), 2)
+                            diag["total_mb"] = round((b_used + b_free) / (1024 * 1024), 2)
+                            diag["peak_mb"] = round(b_peak / (1024 * 1024), 2)
+                            return diag
+                        else:
+                            diag["telemetry_error"] = f"xm.get_memory_info returned non-dict type: {type(mem_info)}"
+                    except Exception as mem_err:
+                        diag["telemetry_error"] = f"xm.get_memory_info exception: {mem_err}"
+                        logger.warning(f"[TPU Telemetry Notice] {diag['telemetry_error']}")
+                else:
+                    diag["telemetry_error"] = "xm.get_memory_info API not exposed in this torch_xla runtime version."
+        except Exception as hw_err:
+            diag["telemetry_error"] = f"XLA hardware query exception: {hw_err}"
+
+    # 2. CUDA Device (if running on GPU fallback)
+    try:
+        import torch
+        if torch.cuda.is_available() and (device is None or (isinstance(device, torch.device) and device.type == "cuda")):
+            diag["is_physical_tpu"] = False
+            diag["backend"] = f"NVIDIA CUDA ({torch.cuda.get_device_name(0)})"
+            alloc = torch.cuda.memory_allocated()
+            res = torch.cuda.memory_reserved()
+            total = torch.cuda.get_device_properties(0).total_memory
+            peak = torch.cuda.max_memory_allocated()
+            diag["bytes_used"] = alloc
+            diag["bytes_free"] = total - alloc
+            diag["bytes_total"] = total
+            diag["used_mb"] = round(alloc / (1024 * 1024), 2)
+            diag["free_mb"] = round((total - alloc) / (1024 * 1024), 2)
+            diag["total_mb"] = round(total / (1024 * 1024), 2)
+            diag["peak_mb"] = round(peak / (1024 * 1024), 2)
+            return diag
+    except Exception:
+        pass
+
+    # 3. CPU Host RAM fallback (Standard process / system memory)
+    try:
+        import psutil
+        vmem = psutil.virtual_memory()
+        proc = psutil.Process()
+        proc_mem = proc.memory_info().rss
+        diag["is_physical_tpu"] = False
+        diag["backend"] = "CPU Host (Fallback Engine)"
+        diag["bytes_used"] = proc_mem
+        diag["bytes_free"] = vmem.available
+        diag["bytes_total"] = vmem.total
+        diag["used_mb"] = round(proc_mem / (1024 * 1024), 2)
+        diag["free_mb"] = round(vmem.available / (1024 * 1024), 2)
+        diag["total_mb"] = round(vmem.total / (1024 * 1024), 2)
+        diag["peak_mb"] = round(proc_mem / (1024 * 1024), 2)
+    except Exception:
+        pass
+    except Exception:
+        pass
+
+    return diag
+
+
+def log_tpu_memory_stage(
+    stage_name: str,
+    step: int = 0,
+    device: Optional[Any] = None,
+    model: Optional[Any] = None,
+    optimizer: Optional[Any] = None,
+    microbatch: int = 0,
+) -> Dict[str, Any]:
+    """
+    Standardized logger for TPU memory diagnostics across mandatory pipeline stages:
+      1. BEFORE_MODEL_LOADING
+      2. AFTER_MODEL_LOADING
+      3. AFTER_OPTIMIZER_RESTORE
+      4. BEFORE_FORWARD
+      5. BEFORE_BACKWARD
+      6. BEFORE_OPTIMIZER_STEP
+    Collects parameters, gradients, and optimizer moments with strict leaf-only gradient inspection.
+    """
+    import torch
+    mem = get_tpu_memory_diagnostics(device=device)
+
+    param_dtypes = set()
+    grad_dtypes = set()
+    moment_dtypes = set()
+    total_param_bytes = 0
+    total_grad_bytes = 0
+    total_moment_bytes = 0
+
+    has_grad_refs = False
+    if model is not None:
+        target_model = getattr(model, "module", model)
+        for p in target_model.parameters():
+            param_dtypes.add(str(p.dtype).replace("torch.", ""))
+            total_param_bytes += p.numel() * p.element_size()
+            # Strictly inspect .grad on leaf parameters only (never non-leaf intermediate activations)
+            if p.is_leaf and p.grad is not None:
+                has_grad_refs = True
+                grad_dtypes.add(str(p.grad.dtype).replace("torch.", ""))
+                total_grad_bytes += p.grad.numel() * p.grad.element_size()
+
+    if optimizer is not None and hasattr(optimizer, "state"):
+        for state in optimizer.state.values():
+            if isinstance(state, dict):
+                for k in ("exp_avg", "exp_avg_sq"):
+                    if k in state and isinstance(state[k], torch.Tensor):
+                        moment_dtypes.add(str(state[k].dtype).replace("torch.", ""))
+                        total_moment_bytes += state[k].numel() * state[k].element_size()
+
+    is_physical = mem.get("is_physical_tpu", False)
+    backend_str = mem.get("backend", "Unknown")
+
+    log_payload = {
+        "stage": stage_name,
+        "step": step,
+        "microbatch": microbatch,
+        "backend": backend_str,
+        "is_physical_tpu": is_physical,
+        "used_mb": mem.get("used_mb", 0.0),
+        "free_mb": mem.get("free_mb", 0.0),
+        "total_mb": mem.get("total_mb", 0.0),
+        "peak_mb": mem.get("peak_mb", mem.get("used_mb", 0.0)),
+        "has_grad_refs": has_grad_refs,
+        "param_dtypes": sorted(list(param_dtypes)),
+        "grad_dtypes": sorted(list(grad_dtypes)),
+        "moment_dtypes": sorted(list(moment_dtypes)),
+        "weights_mb": round(total_param_bytes / (1024 * 1024), 2),
+        "grads_mb": round(total_grad_bytes / (1024 * 1024), 2),
+        "moments_mb": round(total_moment_bytes / (1024 * 1024), 2),
+    }
+
+    if is_tpu_master():
+        print(
+            f"[TPU MEMORY DIAGNOSTIC | {stage_name}] Step={step} | Backend: {backend_str} (Physical TPU: {is_physical})\n"
+            f"  HBM/RAM: Used={log_payload['used_mb']} MB, Free={log_payload['free_mb']} MB, Peak={log_payload['peak_mb']} MB, Total={log_payload['total_mb']} MB\n"
+            f"  Weights: {log_payload['weights_mb']} MB (dtypes: {log_payload['param_dtypes'] or 'None'}) | "
+            f"Grads: {log_payload['grads_mb']} MB (dtypes: {log_payload['grad_dtypes'] or 'None'}, active_refs: {has_grad_refs}) | "
+            f"Moments: {log_payload['moments_mb']} MB (dtypes: {log_payload['moment_dtypes'] or 'None'})",
+            flush=True,
+        )
+
+    return log_payload
+
+
 _COLLECTIVE_MOCK_HOOK: Optional[Any] = None
 _COLLECTIVE_GRAD_HOOK: Optional[Any] = None
 
@@ -266,6 +444,51 @@ def sync_tpu_decision(local_decision: int, tag: str = "tpu_decision") -> int:
         return int(_COLLECTIVE_MOCK_HOOK(flag, tag))
 
     return flag
+
+
+def sync_tpu_sum(val: int, tag: str = "tpu_sum") -> int:
+    """
+    Synchronizes and sums an integer across all TPU worker cores.
+    Used for cluster-wide valid-token accounting and aggregate token counts.
+    Ensures that if at least one replica has valid data, the cluster-wide count is > 0.
+    """
+    int_val = int(val)
+    if HAS_XLA and get_tpu_world_size() > 1:
+        try:
+            return int(xm.mesh_reduce(tag, int_val, lambda x: sum(x) if hasattr(x, '__iter__') else x))
+        except Exception as e:
+            logger.error(f"[TPU Collective Error] sync_tpu_sum failed for {tag}: {e}. Aborting to prevent multi-core deadlock / state divergence.")
+            raise
+
+    if _COLLECTIVE_MOCK_HOOK is not None:
+        try:
+            return int(_COLLECTIVE_MOCK_HOOK(int_val, tag))
+        except Exception:
+            return int_val
+
+    return int_val
+
+
+def sync_tpu_sum_float(val: float, tag: str = "tpu_sum_float") -> float:
+    """
+    Synchronizes and sums a scalar float across all TPU worker cores.
+    Used for cluster-wide aggregate loss summation across replicas.
+    """
+    f_val = float(val)
+    if HAS_XLA and get_tpu_world_size() > 1:
+        try:
+            return float(xm.mesh_reduce(tag, f_val, lambda x: sum(x) if hasattr(x, '__iter__') else x))
+        except Exception as e:
+            logger.error(f"[TPU Collective Error] sync_tpu_sum_float failed for {tag}: {e}. Aborting to prevent multi-core deadlock / state divergence.")
+            raise
+
+    if _COLLECTIVE_MOCK_HOOK is not None:
+        try:
+            return float(_COLLECTIVE_MOCK_HOOK(f_val, tag))
+        except Exception:
+            return f_val
+
+    return f_val
 
 
 def sync_tpu_mean(val: float, tag: str = "tpu_mean") -> float:
@@ -481,12 +704,25 @@ def restore_tpu_optimizer_state(
             return False
         raise RuntimeError(f"[TPU Resume Gate] Failed to load validated optimizer state dict: {se}")
 
-    # Move state tensors to TPU/XLA device
+    # Move state tensors to TPU/XLA device while strictly preserving FP32 moment precision
+    for state in optimizer.state.values():
+        if isinstance(state, dict):
+            for sk in ("exp_avg", "exp_avg_sq"):
+                if sk in state and isinstance(state[sk], torch.Tensor):
+                    if state[sk].dtype != torch.float32:
+                        state[sk] = state[sk].to(dtype=torch.float32)
+
     if device is not None and (str(device).startswith("xla") or getattr(device, "type", "") in ("xla", "tpu")):
         for state in optimizer.state.values():
             for sk, sv in state.items():
                 if isinstance(sv, torch.Tensor):
-                    state[sk] = sv.to(device)
+                    if sk in ("exp_avg", "exp_avg_sq"):
+                        state[sk] = sv.to(device=device, dtype=torch.float32)
+                    elif sv.dim() > 0:
+                        state[sk] = sv.to(device)
+                    else:
+                        # Scalar step: keep intact or move if XLA requires
+                        state[sk] = sv.to(device) if HAS_XLA else sv
 
     print(f"[TPU Resume] Successfully restored complete optimizer state ({loaded_n_groups} parameter groups, {len(optimizer.state)} momentum buffers) with 100% parameter fidelity.", flush=True)
     return True
@@ -498,51 +734,88 @@ def tpu_optimizer_step(
     max_norm: float = 1.0,
     cur_loss: Optional[float] = None,
     ema_loss: Optional[float] = None,
+    valid_tokens: Optional[int] = None,
     step: int = 0,
     attempt: int = 0,
 ) -> Tuple[bool, float]:
     """
     Executes a TPU-optimized all-reduce optimizer step with Collective Model Shock & Gradient Explosion Protection:
-      1. Evaluates local loss validity (non-finite or >10x EMA shock).
-      2. Synchronizes loss-skip decision across ALL TPU replicas using sync_tpu_decision (collective max).
-      3. If any replica reports loss shock or non-finite loss, ALL replicas skip the step simultaneously,
+      1. Evaluates cluster-wide valid tokens: if valid_tokens is provided, sums valid tokens across
+         all TPU replicas via sync_tpu_sum. If cluster_valid_tokens == 0 across ALL replicas, skips step
+         to strictly prevent unwarranted AdamW weight decay without training data.
+         If at least one replica has valid data (cluster_valid_tokens > 0), the step proceeds normally.
+      2. Evaluates local loss validity (non-finite or >10x EMA shock).
+      3. Synchronizes loss shock / corruption decision across ALL TPU replicas using sync_tpu_decision (collective max).
+      4. If any replica reports corruption/shock, ALL replicas skip the step simultaneously,
          clearing gradients and marking the step without diverging model weights.
-      4. If loss is valid across all replicas, all-reduces gradients across replicas once (xm.reduce_gradients).
-      5. Clips globally reduced gradients consistently across all cores (max_norm=1.0).
-      6. Evaluates and collectively synchronizes gradient validity (non-finite or >1000x norm shock).
-      7. Steps optimizer and marks XLA execution graph, or skips step if gradient corruption is detected.
+      5. If step is valid across all replicas, all-reduces gradients across replicas once (xm.reduce_gradients).
+      6. Clips globally reduced gradients consistently across all cores (max_norm=1.0).
+      7. Evaluates and collectively synchronizes gradient validity (non-finite or >1000x norm shock).
+      8. Steps optimizer and marks XLA execution graph.
     Returns (is_step_skipped, grad_norm_val).
     """
     import torch
 
-    # 1. Local loss-shock and non-finite loss evaluation
+    # Sanitize inputs to prevent implicit tensor D2H sync in host checks
+    if isinstance(cur_loss, torch.Tensor):
+        cur_loss = cur_loss.detach().cpu().item()
+    if isinstance(valid_tokens, torch.Tensor):
+        valid_tokens = int(valid_tokens.detach().cpu().item())
+
+    # 1. Cluster-wide valid tokens evaluation (all-masked accumulation window)
+    if valid_tokens is not None:
+        tokens_tag = f"tpu_valid_tokens_s{step}_a{attempt}" if attempt > 0 else f"tpu_valid_tokens_{step}"
+        cluster_valid_tokens = sync_tpu_sum(valid_tokens, tag=tokens_tag)
+        is_all_masked = (cluster_valid_tokens == 0)
+    else:
+        is_all_masked = (cur_loss is not None and cur_loss <= 0.0)
+
+    # 2. Local loss-shock and non-finite loss evaluation (decoupled from all-masked check)
     is_loss_non_finite = (cur_loss is not None) and (math.isnan(cur_loss) or math.isinf(cur_loss))
     is_loss_shock = False
-    if not is_loss_non_finite and cur_loss is not None and ema_loss is not None and ema_loss > 0.5:
+    if not is_loss_non_finite and not is_all_masked and cur_loss is not None and ema_loss is not None and ema_loss > 0.5:
         if cur_loss > (10.0 * ema_loss) and cur_loss > 15.0:
             is_loss_shock = True
 
-    local_loss_skip = 1 if (is_loss_non_finite or is_loss_shock) else 0
+    # Skip if non-finite or loss shock
+    local_shock_skip = 1 if (is_loss_non_finite or is_loss_shock) else 0
 
-    # 2. Collective loss-skip synchronization across all TPU workers
-    # Strictly unique rendezvous tag per step and accumulation attempt (prevents stale rendezvous / XLA graph collision)
-    loss_tag = f"tpu_loss_skip_s{step}_a{attempt}" if attempt > 0 else f"tpu_loss_skip_{step}"
-    global_loss_skip = sync_tpu_decision(local_loss_skip, tag=loss_tag)
+    # 3. Collective shock synchronization across all TPU workers (max reduction: ANY worker triggers skip)
+    shock_tag = f"tpu_loss_skip_s{step}_a{attempt}" if attempt > 0 else f"tpu_loss_skip_{step}"
+    global_shock_skip = sync_tpu_decision(local_shock_skip, tag=shock_tag)
 
-    if global_loss_skip == 1:
-        if is_loss_shock:
+    if global_shock_skip == 1 or is_all_masked:
+        if is_all_masked:
+            if is_tpu_master():
+                print(f"[TPU Step Guard] Accumulation window contains 0 valid tokens across cluster (loss = {cur_loss}). Synchronized skip across all TPU cores to prevent unwarranted AdamW weight decay.", flush=True)
+        elif is_loss_shock:
             print(f"[TPU Model Shock Guard] Extreme loss spike detected ({cur_loss:.4f} vs EMA {ema_loss:.4f}). Skipping step across all cores!", flush=True)
         elif is_loss_non_finite:
             print(f"[TPU Model Shock Guard] Non-finite loss detected ({cur_loss}). Skipping step across all cores!", flush=True)
         elif is_tpu_master():
-            print("[TPU Model Shock Guard] Worker replica reported loss shock / non-finite loss. Synchronized skip across all TPU cores.", flush=True)
+            print("[TPU Model Shock Guard] Worker replica reported skip condition (loss shock / non-finite). Synchronized skip across all TPU cores.", flush=True)
 
         optimizer.zero_grad(set_to_none=True)
         if HAS_XLA:
             xm.mark_step()
         return True, 0.0
 
-    # 3. Collective gradient synchronization (Only if loss was valid across all workers)
+    # 4. Distributed Gradient Weighting for Exact Token-Mean Parity:
+    # If valid_tokens / cluster_valid_tokens is provided and > 0:
+    # Scale local accumulated gradient by (world_size / cluster_valid_tokens)
+    # so that xm.reduce_gradients (which computes: (1 / world_size) * sum_r [ G_scaled_r ])
+    # produces exactly:
+    #   (1 / world_size) * sum_r [ (world_size / N_global) * G_r ] = (1 / N_global) * sum_r [ G_r ]
+    # guaranteeing that every single valid token across all TPU cores receives equal mathematical weight.
+    if valid_tokens is not None and cluster_valid_tokens is not None and cluster_valid_tokens > 0:
+        world_size = get_tpu_world_size() if (HAS_XLA and get_tpu_world_size() > 1) else 1
+        grad_scale = float(world_size) / float(cluster_valid_tokens)
+        for group in optimizer.param_groups:
+            for p in group["params"]:
+                if p.grad is not None:
+                    p.grad.mul_(grad_scale)
+
+    # 5. Collective gradient synchronization (Only if loss was valid across all workers)
     # STRICT SINGLE-REDUCTION INVARIANT:
     # We call xm.reduce_gradients(optimizer) explicitly once here before clipping.
     # At step 7 below, we invoke optimizer.step() directly (NOT xm.optimizer_step()),
@@ -608,10 +881,14 @@ class TPUConfig:
     Authoritative default hyper-parameters optimized for Google TPU (v6e / v5p / v5e / v4 / v3-8).
     Maintains exact numerical and hyperparameter parity with TARA GPU training.
     """
-    # Micro-batch per TPU core (x8 cores = 32 samples per micro-step)
-    DEFAULT_BATCH_SIZE: int = 4
-    # Gradient accumulation steps (32 * 8 = 256 effective batch size)
-    DEFAULT_GRAD_ACCUM: int = 8
+    # Micro-batch per TPU core (1 per core = 8 samples across 8 cores; 4x activation memory reduction)
+    DEFAULT_BATCH_SIZE: int = 1
+    # Gradient accumulation steps (1 * 32 * 8 = 256 effective batch size preserved)
+    DEFAULT_GRAD_ACCUM: int = 32
+    # Memory-safe chunk size for vocabulary projection and cross-entropy (prevents 196MB OOM)
+    DEFAULT_LOSS_CHUNK_SIZE: int = 128
+    # Default training precision: bf16 (hardware execution via XLA_USE_BF16)
+    DEFAULT_PRECISION: str = "bf16"
     # Native TPU Sequence Length (fixed static shape)
     DEFAULT_SEQ_LEN: int = 2048
     # Base Learning Rate for 256 effective batch size

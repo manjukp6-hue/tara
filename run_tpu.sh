@@ -93,6 +93,12 @@ if [ -n "$HF_REPO_VAL" ]; then
     EXTRA_ARGS+=("--hf-repo" "$HF_REPO_VAL")
 fi
 
+# 4a. Memory-Safe TPU Hyperparameter Defaults (Prevents 16GB HBM exhaustion)
+EXTRA_ARGS+=("--batch-size" "${BATCH_SIZE:-1}")
+EXTRA_ARGS+=("--grad-accum" "${GRAD_ACCUM:-32}")
+EXTRA_ARGS+=("--loss-chunk-size" "${LOSS_CHUNK_SIZE:-128}")
+EXTRA_ARGS+=("--precision" "${PRECISION:-bf16}")
+
 # 4b. Production Ephemeral Key Safeguard & Pretraining Public Key Resolution
 if [ "${TARA_ALLOW_EPHEMERAL_KEY:-0}" = "1" ] || [ "${TARA_ALLOW_EPHEMERAL_KEY:-0}" = "true" ]; then
     echo "[SECURITY WARNING] TARA_ALLOW_EPHEMERAL_KEY was enabled! Disabling strictly for production pretraining..."

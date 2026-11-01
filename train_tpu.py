@@ -67,10 +67,14 @@ from tpu_config import (
     tpu_optimizer_step,
     sync_tpu_decision,
     sync_tpu_mean,
+    sync_tpu_sum,
+    sync_tpu_sum_float,
     tpu_save,
     TPUConfig,
     build_tpu_optimizer_groups,
     restore_tpu_optimizer_state,
+    get_tpu_memory_diagnostics,
+    log_tpu_memory_stage,
 )
 
 # Reuse Native TARA Core Classes from model_dataset (UNTOUCHED)
@@ -1771,6 +1775,100 @@ def load_tpu_checkpoint(
     return step, epoch, loss, (matched_keys > 0), cursor
 
 
+class ChunkedLossResult(tuple):
+    """
+    4-element tuple (total_loss, ce_loss, aux_loss, total_valid) providing 100% backward compatibility
+    with unpacking `total_loss, ce_loss, aux_loss, total_valid = res` while also exposing:
+      .total_loss: per-token normalized total loss
+      .ce_loss: per-token cross entropy
+      .aux_loss: auxiliary regularizer
+      .total_valid: valid token count
+      .loss_sum: unreduced sum of valid token cross-entropy losses
+      .unreduced_loss: loss_sum + (total_valid * aux_loss) for exact global token-weighted gradient accumulation.
+    """
+    def __new__(cls, total_loss, ce_loss, aux_loss, total_valid, loss_sum=None, unreduced_loss=None):
+        return super().__new__(cls, (total_loss, ce_loss, aux_loss, total_valid))
+
+    def __init__(self, total_loss, ce_loss, aux_loss, total_valid, loss_sum=None, unreduced_loss=None):
+        self.total_loss = total_loss
+        self.ce_loss = ce_loss
+        self.aux_loss = aux_loss
+        self.total_valid = total_valid
+        self.loss_sum = loss_sum if loss_sum is not None else (total_loss * total_valid)
+        self.unreduced_loss = unreduced_loss if unreduced_loss is not None else (self.loss_sum + total_valid.float() * aux_loss)
+
+
+def compute_tpu_chunked_loss(
+    model: nn.Module,
+    input_ids: torch.Tensor,
+    labels: torch.Tensor,
+    attention_mask: Optional[torch.Tensor] = None,
+    chunk_sz: int = 128,
+    return_valid_tokens: bool = True,
+) -> Union[ChunkedLossResult, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    """
+    Branchless memory-efficient chunked cross-entropy projection and variance regularizer for Google TPU:
+      1. Bypasses full vocabulary logits materialization (which would allocate over 3.28 GB at seq_len 2048).
+      2. Executes model transformer backbone once to produce hidden_states without full-vocabulary projection.
+      3. Uses static chunking (chunk_sz tokens, default 128) for vocabulary projection:
+         c_logits = lm_head(c_h) allocates only ~48.95 MB (in FP32) or ~24.5 MB (in BF16),
+         preventing RuntimeProgramAllocationFailure in tt_jit_cross_entropy_loss.
+      4. STRICTLY BRANCHLESS ON TENSORS: Zero Python `if (c_l == -100).all()` and zero `if total_valid > 0`.
+         F.cross_entropy with ignore_index=-100 natively produces 0.0 loss and 0.0 gradients on masked tokens,
+         completely eliminating device-to-host synchronization stalls and XLA graph recompilations.
+      5. Computes auxiliary variance collapse regularizer over valid tokens using static broadcast
+         masking (zero dynamic indexing), mathematically identical to model_dataset.py.
+      6. Preserves numerical parity and exact gradient flow across all leaf parameters.
+    Returns ChunkedLossResult (total_loss, ce_loss, aux_loss, total_valid) if return_valid_tokens else (total_loss, ce_loss, aux_loss).
+    """
+    target_model = getattr(model, "module", model)
+    hidden_states = target_model.model(input_ids=input_ids, attention_mask=attention_mask)
+
+    shift_hidden = hidden_states[..., :-1, :].contiguous()
+    shift_labels = labels[..., 1:].contiguous()
+
+    flat_hidden = shift_hidden.view(-1, shift_hidden.size(-1))
+    flat_labels = shift_labels.view(-1)
+
+    n_tokens = flat_hidden.size(0)
+    effective_chunk_sz = max(16, chunk_sz)
+
+    # Static Fixed-Shape Chunk Padding for 100% Deterministic XLA Kernel Compilation:
+    # Ensures every single chunk has identical shape [chunk_sz, D] so XLA compiles exactly 1 kernel.
+    pad_len = (effective_chunk_sz - (n_tokens % effective_chunk_sz)) % effective_chunk_sz
+    if pad_len > 0:
+        flat_hidden = F.pad(flat_hidden, (0, 0, 0, pad_len), value=0.0)
+        flat_labels = F.pad(flat_labels, (0, pad_len), value=-100)
+
+    loss_sum = torch.tensor(0.0, device=flat_hidden.device, dtype=torch.float32)
+    for chunk_start in range(0, flat_hidden.size(0), effective_chunk_sz):
+        chunk_end = chunk_start + effective_chunk_sz
+        c_h = flat_hidden[chunk_start:chunk_end]
+        c_l = flat_labels[chunk_start:chunk_end]
+        c_logits = target_model.lm_head(c_h)
+        # Unconditional static execution: ignore_index=-100 automatically produces 0.0 for masked/padded tokens
+        c_loss = F.cross_entropy(c_logits.float(), c_l, ignore_index=-100, reduction="sum")
+        loss_sum = loss_sum + c_loss
+
+    total_valid = (flat_labels != -100).sum()
+    has_valid = (total_valid > 0).float()
+    valid_denom = total_valid.clamp(min=1.0)
+    ce_loss = (loss_sum / valid_denom) * has_valid
+
+    # Unconditional branchless auxiliary representation regularizer
+    # When total_valid == 0 (e.g. all-masked sequence), has_valid == 0.0 smoothly zeros out aux_loss
+    valid_mask_f = (flat_labels != -100).float().unsqueeze(-1)
+    var_per_token = flat_hidden.var(dim=-1, keepdim=True)
+    hidden_var = (var_per_token * valid_mask_f).sum() / valid_mask_f.sum().clamp(min=1.0)
+    aux_loss = 0.005 * torch.relu(1.0 - hidden_var) * has_valid
+
+    total_loss = ce_loss + aux_loss
+    unreduced_loss = loss_sum + (total_valid.float() * aux_loss)
+    if return_valid_tokens:
+        return ChunkedLossResult(total_loss, ce_loss, aux_loss, total_valid, loss_sum=loss_sum, unreduced_loss=unreduced_loss)
+    return total_loss, ce_loss, aux_loss
+
+
 def train_tpu_worker(index: int, args: argparse.Namespace):
     """
     Core per-core TPU worker function. Executed across TPU cores via xmp.spawn.
@@ -1834,7 +1932,10 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
         print(f"[Tokenizer] Loaded TARA Tokenizer ({tokenizer.get_vocab_size():,} tokens)", flush=True)
 
     # 3. Instantiate Native TARA Model on TPU Device
+    log_tpu_memory_stage("BEFORE_MODEL_LOADING", step=0, device=device)
     model = TaraForCausalLM(config, gradient_checkpointing=args.gradient_checkpointing)
+    if getattr(args, "precision", "bf16").lower() == "bf16":
+        os.environ["XLA_USE_BF16"] = "1"
     model.to(device)
     _ensure_tied_weights(model)
 
@@ -1842,6 +1943,8 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
         target = getattr(model, "module", model)
         assert target.lm_head.weight is target.model.embed_tokens.weight, "Pointer identity assertion failed: lm_head.weight is not embed_tokens.weight"
         print(f"[Model Architecture] Verified architectural weight tying (lm_head.weight is embed_tokens.weight: True) on device ({device}).", flush=True)
+
+    log_tpu_memory_stage("AFTER_MODEL_LOADING", step=0, device=device, model=model)
 
     # 4. AdamW Optimizer with 100% Exact GPU Parameter Grouping
     optim_groups = build_tpu_optimizer_groups(model, weight_decay=args.weight_decay)
@@ -1934,6 +2037,8 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     if is_main:
         print(f"[Model] Total Trainable Parameters: {total_params:,} ({total_params * 4 / 1e6:.1f} MB)", flush=True)
+
+    log_tpu_memory_stage("AFTER_OPTIMIZER_RESTORE", step=start_step, device=device, model=model, optimizer=optimizer)
 
     # 6. Authoritative Shard Discovery & Multi-Domain Curriculum Setup
     shard_ledger = ShardLedger(args.output_dir, stage_id=args.stage_id, dataset_revision=args.dataset_prefix.strip("/"))
@@ -2124,6 +2229,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
     step = start_step
     accum_tokens = 0
     accum_loss = 0.0
+    accum_valid_tokens = torch.tensor(0, dtype=torch.long, device=device)
     accum_batches = 0
     accum_batch_cursors = []
     step_start_time = time.time()
@@ -2170,17 +2276,34 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
             if attention_mask is not None and attention_mask.device != device:
                 attention_mask = attention_mask.to(device)
 
-            outputs = model(inputs, labels=labels, attention_mask=attention_mask)
-            loss = outputs.loss if hasattr(outputs, "loss") and outputs.loss is not None else outputs[1]
+            # Diagnostic stage: BEFORE_FORWARD
+            if accum_batches == 0 and (step == start_step or (args.checkpoint_interval > 0 and step % args.checkpoint_interval == 0)):
+                log_tpu_memory_stage("BEFORE_FORWARD", step=step, device=device, model=model, optimizer=optimizer, microbatch=accum_batches)
 
-            loss_scaled = loss / args.grad_accum
-            loss_scaled.backward()
+            # Memory-Safe TPU Chunked Cross-Entropy Projection (prevents 196MB OOM and dynamic tt_jit_index)
+            loss_res = compute_tpu_chunked_loss(
+                model=model,
+                input_ids=inputs,
+                labels=labels,
+                attention_mask=attention_mask,
+                chunk_sz=getattr(args, "loss_chunk_size", TPUConfig.DEFAULT_LOSS_CHUNK_SIZE),
+            )
+            loss, ce_loss, aux_loss, cur_valid_tokens = loss_res
+
+            # Diagnostic stage: BEFORE_BACKWARD
+            if accum_batches == 0 and (step == start_step or (args.checkpoint_interval > 0 and step % args.checkpoint_interval == 0)):
+                log_tpu_memory_stage("BEFORE_BACKWARD", step=step, device=device, model=model, optimizer=optimizer, microbatch=accum_batches)
+
+            # Unreduced loss is backwarded directly so gradients accumulate as the exact sum of token losses
+            loss_to_backward = getattr(loss_res, "unreduced_loss", loss)
+            loss_to_backward.backward()
 
             # PyTorch/XLA lazy step mark: bounds computation graph and frees activations per micro-batch
             if HAS_XLA:
                 xm.mark_step()
 
-            accum_loss += loss.detach()
+            accum_loss += getattr(loss_res, "loss_sum", loss).detach()
+            accum_valid_tokens = accum_valid_tokens + cur_valid_tokens.detach()
             accum_batches += 1
             accum_tokens += (inputs.size(0) * inputs.size(1))
             accum_batch_cursors.append(cursors)
@@ -2193,12 +2316,32 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
                 for pg in optimizer.param_groups:
                     pg["lr"] = cur_lr
 
-                cur_step_loss = (accum_loss / accum_batches).item()
+                local_loss_sum = accum_loss.item() if isinstance(accum_loss, torch.Tensor) else float(accum_loss)
+                local_valid_tokens = int(accum_valid_tokens.item())
                 if HAS_XLA and world_size > 1:
                     loss_sync_tag = f"tpu_loss_s{step}_a{accum_attempt}" if accum_attempt > 0 else f"tpu_loss_{step}"
-                    cur_step_loss = sync_tpu_mean(cur_step_loss, tag=loss_sync_tag)
+                    cluster_loss_sum = sync_tpu_sum_float(local_loss_sum, tag=loss_sync_tag)
+                    tokens_sync_tag = f"tpu_tokens_s{step}_a{accum_attempt}" if accum_attempt > 0 else f"tpu_tokens_{step}"
+                    cluster_valid_tokens = sync_tpu_sum(local_valid_tokens, tag=tokens_sync_tag)
+                else:
+                    cluster_loss_sum = local_loss_sum
+                    cluster_valid_tokens = local_valid_tokens
+
+                cur_step_loss = (cluster_loss_sum / float(cluster_valid_tokens)) if cluster_valid_tokens > 0 else 0.0
+
+                # Diagnostic stage: BEFORE_OPTIMIZER_STEP
+                if step == start_step or (args.checkpoint_interval > 0 and step % args.checkpoint_interval == 0):
+                    log_tpu_memory_stage("BEFORE_OPTIMIZER_STEP", step=step, device=device, model=model, optimizer=optimizer, microbatch=accum_batches)
+
                 is_skipped, grad_norm_val = tpu_optimizer_step(
-                    optimizer, model=model, max_norm=1.0, cur_loss=cur_step_loss, ema_loss=ema_loss, step=step, attempt=accum_attempt
+                    optimizer,
+                    model=model,
+                    max_norm=1.0,
+                    cur_loss=cur_step_loss,
+                    ema_loss=ema_loss,
+                    valid_tokens=local_valid_tokens,
+                    step=step,
+                    attempt=accum_attempt,
                 )
 
                 if is_skipped:
@@ -2216,6 +2359,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
                         )
                     optimizer.zero_grad(set_to_none=True)
                     accum_loss = 0.0
+                    accum_valid_tokens = torch.tensor(0, dtype=torch.long, device=device)
                     accum_batches = 0
                     accum_tokens = 0
                     # Advance committed domain cursors past skipped corrupt samples to prevent infinite crash loop on resume
@@ -2249,7 +2393,9 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
                 step += 1
                 total_samples_trained += sum(len(c) for c in accum_batch_cursors)
                 accum_loss = 0.0
+                accum_valid_tokens = torch.tensor(0, dtype=torch.long, device=device)
                 accum_batches = 0
+                accum_tokens = 0
 
                 ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
 
@@ -2439,8 +2585,10 @@ def parse_tpu_arguments() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=str, default=TPUConfig.DEFAULT_OUTPUT_DIR, help="Dedicated TPU checkpoint directory (does not overwrite GPU checkpoints)")
     parser.add_argument("--promoted-dir", type=str, default=TPUConfig.DEFAULT_PROMOTED_DIR, help="Promoted model directory")
     parser.add_argument("--stage-id", type=str, default="stage0_pretraining", help="Training stage identifier")
-    parser.add_argument("--batch-size", type=int, default=TPUConfig.DEFAULT_BATCH_SIZE, help="Per-core TPU batch size (default: 4)")
-    parser.add_argument("--grad-accum", type=int, default=TPUConfig.DEFAULT_GRAD_ACCUM, help="Gradient accumulation steps (default: 8)")
+    parser.add_argument("--batch-size", type=int, default=TPUConfig.DEFAULT_BATCH_SIZE, help=f"Per-core TPU microbatch size (default: {TPUConfig.DEFAULT_BATCH_SIZE})")
+    parser.add_argument("--grad-accum", type=int, default=TPUConfig.DEFAULT_GRAD_ACCUM, help=f"Gradient accumulation steps (default: {TPUConfig.DEFAULT_GRAD_ACCUM})")
+    parser.add_argument("--loss-chunk-size", type=int, default=TPUConfig.DEFAULT_LOSS_CHUNK_SIZE, help=f"Memory-safe vocabulary chunk size for cross-entropy projection (default: {TPUConfig.DEFAULT_LOSS_CHUNK_SIZE})")
+    parser.add_argument("--precision", type=str, default=TPUConfig.DEFAULT_PRECISION, choices=["bf16", "fp32"], help=f"Compute precision (default: {TPUConfig.DEFAULT_PRECISION})")
     parser.add_argument("--max-seq-len", type=int, default=TPUConfig.DEFAULT_SEQ_LEN, help="Maximum sequence length (default: 2048)")
     parser.add_argument("--lr", type=float, default=TPUConfig.DEFAULT_LR, help="Base learning rate (default: 2e-4)")
     parser.add_argument("--min-lr", type=float, default=TPUConfig.DEFAULT_MIN_LR, help="Minimum learning rate (default: 1e-5)")

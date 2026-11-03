@@ -1748,11 +1748,19 @@ class TaraStreamingJsonlDataset(IterableDataset):
         if "content" in record and record["content"]:
             return "", "", str(record["content"])
 
-        # 2. Input / Output or Prompt / Response
+        # 2. Input / Output or Prompt / Response (Canonical ChatML / Instruction Format)
         if "input" in record or "output" in record:
-            return str(record.get("input", "")), str(record.get("output", "")), ""
+            inp = str(record.get("input", "")).strip()
+            out = str(record.get("output", "")).strip()
+            if inp and out:
+                return f"<|im_start|>user\n{inp}<|im_end|>\n<|im_start|>assistant\n", f"{out}<|im_end|>", ""
+            return inp, out, ""
         if "prompt" in record or "response" in record:
-            return str(record.get("prompt", "")), str(record.get("response", "")), ""
+            p = str(record.get("prompt", "")).strip()
+            r = str(record.get("response", "")).strip()
+            if p and r:
+                return f"<|im_start|>user\n{p}<|im_end|>\n<|im_start|>assistant\n", f"{r}<|im_end|>", ""
+            return p, r, ""
 
         # 3. Vision Captions (COCO has 'sentences_raw' as list)
         if "sentences_raw" in record and record["sentences_raw"]:
@@ -2209,6 +2217,12 @@ class TaraStreamingJsonlDataset(IterableDataset):
                             enc = self.tokenizer.encode(raw_text)
                             full_ids = enc.ids if hasattr(enc, "ids") else list(enc)
                             target_start = 0
+                            # Document Boundary Guard: enforce EOS token to isolate document and prevent bleeding
+                            eos_id = getattr(self.tokenizer, "eos_id", None)
+                            if eos_id is None and hasattr(self.tokenizer, "token_to_id"):
+                                eos_id = self.tokenizer.token_to_id.get("<|im_end|>", self.tokenizer.token_to_id.get("<|endoftext|>", 2))
+                            if eos_id is not None and full_ids and full_ids[-1] != eos_id:
+                                full_ids.append(eos_id)
                         elif inp_text or out_text:
                             enc_i = self.tokenizer.encode(inp_text)
                             enc_o = self.tokenizer.encode(out_text)
@@ -2216,6 +2230,12 @@ class TaraStreamingJsonlDataset(IterableDataset):
                             enc_out = enc_o.ids if hasattr(enc_o, "ids") else list(enc_o)
                             target_start = len(enc_inp) if self.mask_prompt else 0
                             full_ids = enc_inp + enc_out
+                            # Document Boundary Guard: enforce EOS token to isolate instruction sample
+                            eos_id = getattr(self.tokenizer, "eos_id", None)
+                            if eos_id is None and hasattr(self.tokenizer, "token_to_id"):
+                                eos_id = self.tokenizer.token_to_id.get("<|im_end|>", self.tokenizer.token_to_id.get("<|endoftext|>", 2))
+                            if eos_id is not None and full_ids and full_ids[-1] != eos_id:
+                                full_ids.append(eos_id)
                         else:
                             continue
 

@@ -897,44 +897,44 @@ def wait_for_hf_upload(timeout: Optional[float] = 120.0) -> bool:
 # Canonical Multi-Domain Dynamic Probe Catalog for Live Model Quality Probing
 DYNAMIC_PROBE_CATALOG = {
     "Kannada": [
-        "ಕರ್ನಾಟಕದ ರಾಜಧಾನಿ ",
-        "ಕನ್ನಡ ಸಾಹಿತ್ಯದಲ್ಲಿ ಪ್ರಸಿದ್ಧ ಕವಿ ",
-        "ಬೆಂಗಳೂರಿನ ಹವಾಮಾನ ಮತ್ತು ಸಂಸ್ಕೃತಿ ",
-        "ಕರ್ನಾಟಕದ ಪ್ರಮುಖ ನದಿಗಳಲ್ಲಿ ಒಂದಾದ ",
-        "ಜ್ಞಾನಪೀಠ ಪ್ರಶಸ್ತಿ ವಿಜೇತ ಕನ್ನಡಿಗ ",
-        "ವಿಜಯನಗರ ಸಾಮ್ರಾಜ್ಯದ ಇತಿಹಾಸವು ",
-        "ಮೈಸೂರು ಅರಮನೆಯ ದಸರಾ ಹಬ್ಬದ ವೈಭವ ",
-        "ಕನ್ನಡ ನಾಡಿನ ಸುಂದರ ಶಿಲ್ಪಕಲೆಯು ",
+        ("<|im_start|>user\nಕರ್ನಾಟಕದ ರಾಜಧಾನಿ ಯಾವುದು?<|im_end|>\n<|im_start|>assistant\n", "ಕರ್ನಾಟಕದ ರಾಜಧಾನಿ "),
+        ("<|im_start|>user\nಕನ್ನಡ ಸಾಹಿತ್ಯದಲ್ಲಿ ಪ್ರಸಿದ್ಧ ಕವಿ ಯಾರು?<|im_end|>\n<|im_start|>assistant\n", "ಕನ್ನಡ ಸಾಹಿತ್ಯದಲ್ಲಿ ಪ್ರಸಿದ್ಧ ಕವಿ "),
+        ("<|im_start|>user\nಬೆಂಗಳೂರಿನ ಹವಾಮಾನ ಮತ್ತು ಸಂಸ್ಕೃತಿ ಹೇಗಿದೆ?<|im_end|>\n<|im_start|>assistant\n", "ಬೆಂಗಳೂರಿನ ಹವಾಮಾನ ಮತ್ತು ಸಂಸ್ಕೃತಿ "),
+        ("<|im_start|>user\nಕರ್ನಾಟಕದ ಪ್ರಮುಖ ನದಿಗಳಲ್ಲಿ ಒಂದನ್ನು ಹೆಸರಿಸಿ.<|im_end|>\n<|im_start|>assistant\n", "ಕರ್ನಾಟಕದ ಪ್ರಮುಖ ನದಿಗಳಲ್ಲಿ ಒಂದಾದ "),
+        ("<|im_start|>user\nಜ್ಞಾನಪೀಠ ಪ್ರಶಸ್ತಿ ಪಡೆದ ಕನ್ನಡಿಗ ಯಾರು?<|im_end|>\n<|im_start|>assistant\n", "ಜ್ಞಾನಪೀಠ ಪ್ರಶಸ್ತಿ ವಿಜೇತ ಕನ್ನಡಿಗ "),
+        ("<|im_start|>user\nವಿಜಯನಗರ ಸಾಮ್ರಾಜ್ಯದ ಇತಿಹಾಸವೇನು?<|im_end|>\n<|im_start|>assistant\n", "ವಿಜಯನಗರ ಸಾಮ್ರಾಜ್ಯದ ಇತಿಹಾಸವು "),
+        ("<|im_start|>user\nಮೈಸೂರು ದಸರಾ ಹಬ್ಬದ ಬಗ್ಗೆ ಬರೆಯಿರಿ.<|im_end|>\n<|im_start|>assistant\n", "ಮೈಸೂರು ಅರಮನೆಯ ದಸರಾ ಹಬ್ಬದ ವೈಭವ "),
+        ("<|im_start|>user\nಕನ್ನಡ ನಾಡಿನ ಶಿಲ್ಪಕಲೆಯ ಮಹತ್ವವೇನು?<|im_end|>\n<|im_start|>assistant\n", "ಕನ್ನಡ ನಾಡಿನ ಸುಂದರ ಶಿಲ್ಪಕಲೆಯು "),
     ],
     "Reasoning": [
-        "The sun rises in the ",
-        "If water freezes at 0 degrees Celsius, then at room temperature it is ",
-        "Why do birds migrate south during winter? The main reason is ",
-        "If all humans are mortal and Socrates is human, therefore Socrates is ",
-        "The reason why ice floats on liquid water is because ",
-        "When warm air rises and cools down, the moisture condenses into ",
-        "If a train travels at 60 miles per hour for 3 hours, the total distance covered is ",
-        "The principle of supply and demand states that when supply is low and demand is high, prices ",
+        ("<|im_start|>user\nWhere does the sun rise?<|im_end|>\n<|im_start|>assistant\n", "The sun rises in the "),
+        ("<|im_start|>user\nWhat happens to water at room temperature?<|im_end|>\n<|im_start|>assistant\n", "If water freezes at 0 degrees Celsius, then at room temperature it is "),
+        ("<|im_start|>user\nWhy do birds migrate south during winter?<|im_end|>\n<|im_start|>assistant\n", "The main reason is "),
+        ("<|im_start|>user\nIf all humans are mortal and Socrates is human, what is Socrates?<|im_end|>\n<|im_start|>assistant\n", "Socrates is "),
+        ("<|im_start|>user\nWhy does ice float on liquid water?<|im_end|>\n<|im_start|>assistant\n", "The reason why ice floats on liquid water is because "),
+        ("<|im_start|>user\nWhen warm air rises and cools down, what does the moisture become?<|im_end|>\n<|im_start|>assistant\n", "When warm air rises and cools down, the moisture condenses into "),
+        ("<|im_start|>user\nIf a train travels at 60 mph for 3 hours, how far does it go?<|im_end|>\n<|im_start|>assistant\n", "The total distance covered is "),
+        ("<|im_start|>user\nWhen supply is low and demand is high, what happens to prices?<|im_end|>\n<|im_start|>assistant\n", "When supply is low and demand is high, prices "),
     ],
     "Code": [
-        "def add(a, b):\n    return ",
-        "def is_prime(n: int) -> bool:\n    if n <= 1:\n        return False\n    ",
-        "def reverse_string(s: str) -> str:\n    return ",
-        "def fibonacci(n: int) -> int:\n    if n <= 1:\n        return n\n    return ",
-        "class BinaryTreeNode:\n    def __init__(self, value):\n        self.val = value\n        ",
-        "import torch.nn as nn\nclass MultiHeadAttention(nn.Module):\n    def __init__(self, d_model, n_heads):\n        ",
-        "def quicksort(arr):\n    if len(arr) <= 1:\n        return arr\n    pivot = ",
-        "def binary_search(arr, target):\n    low, high = 0, len(arr) - 1\n    while low <= high:\n        ",
+        ("<|im_start|>user\nWrite a Python function to add two numbers.<|im_end|>\n<|im_start|>assistant\n", "def add(a, b):\n    return "),
+        ("<|im_start|>user\nWrite a Python function to check if a number is prime.<|im_end|>\n<|im_start|>assistant\n", "def is_prime(n: int) -> bool:\n    if n <= 1:\n        return False\n    "),
+        ("<|im_start|>user\nWrite a function to reverse a string in Python.<|im_end|>\n<|im_start|>assistant\n", "def reverse_string(s: str) -> str:\n    return "),
+        ("<|im_start|>user\nWrite a function for Fibonacci series.<|im_end|>\n<|im_start|>assistant\n", "def fibonacci(n: int) -> int:\n    if n <= 1:\n        return n\n    return "),
+        ("<|im_start|>user\nDefine a BinaryTreeNode class in Python.<|im_end|>\n<|im_start|>assistant\n", "class BinaryTreeNode:\n    def __init__(self, value):\n        self.val = value\n        "),
+        ("<|im_start|>user\nImplement MultiHeadAttention in PyTorch.<|im_end|>\n<|im_start|>assistant\n", "import torch.nn as nn\nclass MultiHeadAttention(nn.Module):\n    def __init__(self, d_model, n_heads):\n        "),
+        ("<|im_start|>user\nImplement quicksort algorithm in Python.<|im_end|>\n<|im_start|>assistant\n", "def quicksort(arr):\n    if len(arr) <= 1:\n        return arr\n    pivot = "),
+        ("<|im_start|>user\nImplement binary search algorithm.<|im_end|>\n<|im_start|>assistant\n", "def binary_search(arr, target):\n    low, high = 0, len(arr) - 1\n    while low <= high:\n        "),
     ],
     "Science": [
-        "The chemical formula of water is ",
-        "Albert Einstein's theory of relativity connects space and time through ",
-        "DNA carries the genetic code composed of adenine, thymine, cytosine, and ",
-        "The speed of light in a vacuum is approximately ",
-        "Photosynthesis converts carbon dioxide and sunlight into oxygen and ",
-        "Newton's third law of motion establishes that for every action, there is an ",
-        "The closest planet to the Sun in our solar system is ",
-        "Gravity is the fundamental force that attracts objects with mass towards ",
+        ("<|im_start|>user\nWhat is the chemical formula of water?<|im_end|>\n<|im_start|>assistant\n", "The chemical formula of water is "),
+        ("<|im_start|>user\nExplain Einstein\'s theory of relativity connecting space and time.<|im_end|>\n<|im_start|>assistant\n", "Albert Einstein\'s theory of relativity connects space and time through "),
+        ("<|im_start|>user\nWhat four chemical bases compose DNA?<|im_end|>\n<|im_start|>assistant\n", "DNA carries the genetic code composed of adenine, thymine, cytosine, and "),
+        ("<|im_start|>user\nWhat is the approximate speed of light in a vacuum?<|im_end|>\n<|im_start|>assistant\n", "The speed of light in a vacuum is approximately "),
+        ("<|im_start|>user\nWhat does photosynthesis produce from CO2 and sunlight?<|im_end|>\n<|im_start|>assistant\n", "Photosynthesis converts carbon dioxide and sunlight into oxygen and "),
+        ("<|im_start|>user\nState Newton\'s third law of motion.<|im_end|>\n<|im_start|>assistant\n", "Newton\'s third law of motion establishes that for every action, there is an "),
+        ("<|im_start|>user\nWhich planet is closest to the Sun in our solar system?<|im_end|>\n<|im_start|>assistant\n", "The closest planet to the Sun in our solar system is "),
+        ("<|im_start|>user\nWhat is gravitational force?<|im_end|>\n<|im_start|>assistant\n", "Gravity is the fundamental force that attracts objects with mass towards "),
     ],
 }
 
@@ -980,10 +980,18 @@ def probe_model_generation(
     if eos_id is None and hasattr(tokenizer, "token_to_id"):
         eos_id = tokenizer.token_to_id.get("<|endoftext|>", tokenizer.token_to_id.get("</s>", None))
 
-    for tag, prompt in test_probes:
+    for tag, chosen_item in test_probes:
         try:
+            if isinstance(chosen_item, (tuple, list)):
+                chatml_prefix, starter = chosen_item
+                prompt = chatml_prefix + starter
+                display_prompt = f"{chatml_prefix.replace('<|im_start|>', '').replace('<|im_end|>', '').strip()} -> {starter}"
+            else:
+                prompt = chosen_item
+                display_prompt = chosen_item
+
             tok_out = tokenizer.encode(prompt)
-            prompt_ids = list(tok_out.ids)
+            prompt_ids = list(tok_out.ids) if hasattr(tok_out, "ids") else list(tok_out)
             if not prompt_ids:
                 continue
 
@@ -998,8 +1006,9 @@ def probe_model_generation(
                     next_logits = logits[0, -1, :].clone().float()
 
                 # Repetition Penalty: Suppress logits of already generated tokens to prevent degeneration
-                if repetition_penalty != 1.0:
-                    for prev_token_id in set(generated_ids):
+                # CRITICAL FIX: Only penalize tokens generated AFTER the prompt, never penalize prompt tokens!
+                if repetition_penalty != 1.0 and len(generated_ids) > len(prompt_ids):
+                    for prev_token_id in set(generated_ids[len(prompt_ids):]):
                         if next_logits[prev_token_id] < 0:
                             next_logits[prev_token_id] *= repetition_penalty
                         else:
@@ -1024,7 +1033,7 @@ def probe_model_generation(
                 else:
                     next_token_id = int(torch.argmax(next_logits, dim=-1).item())
 
-                if eos_id is not None and next_token_id == eos_id:
+                if eos_id is not None and next_token_id in (eos_id, 2):
                     break
                 generated_ids.append(next_token_id)
 
@@ -1034,7 +1043,7 @@ def probe_model_generation(
                 clean_cont = repr(continuation) if continuation else f"<tokens: {generated_ids[len(prompt_ids):]}>"
             else:
                 clean_cont = clean_cont.strip()
-            print(f"  [{tag:13s}] \"{prompt}\" -> {CLR_GREEN}{clean_cont}{CLR_RESET}", flush=True)
+            print(f"  [{tag:13s}] \"{display_prompt}\" -> {CLR_GREEN}{clean_cont}{CLR_RESET}", flush=True)
         except Exception as pe:
             print(f"  [{tag:13s}] Probe warning: {pe}", flush=True)
 

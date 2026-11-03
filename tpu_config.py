@@ -187,11 +187,24 @@ def get_tpu_hardware_info() -> Dict[str, Any]:
     elif available:
         hw_type = f"Google Cloud TPU ({num_cores} Cores | PyTorch/XLA PJRT)"
 
+    has_native_tpu = False
+    try:
+        import torch
+        dev = torch.device("tpu")
+        _ = torch.empty(0, device=dev)
+        has_native_tpu = True
+    except Exception:
+        has_native_tpu = False
+
+    engine_name = "PyTorch/XLA (PJRT)" if HAS_XLA else ("TorchTPU (Colab/Native Backend)" if has_native_tpu else "None")
+
     return {
-        "available": available,
+        "available": available or has_native_tpu,
         "hardware_type": hw_type,
         "num_cores": max(1, num_cores),
         "has_xla": HAS_XLA,
+        "has_native_tpu": has_native_tpu,
+        "engine_name": engine_name,
         "device_name": device_name,
     }
 
@@ -662,13 +675,15 @@ def build_tpu_optimizer_groups(model: Any, weight_decay: float = 0.01) -> List[D
 def should_offload_optimizer(hardware_type: str = "", num_cores: int = 1) -> bool:
     """
     Determines whether optimizer states should be offloaded to CPU Host RAM.
-    Automatically True for 16GB / 8GB TPU generations (v5e, v3, v2) and single-core setups
-    to prevent OOM exhaustion (which leaves < 200MB free if 7.07GB moments reside on TPU).
+    v6e (Trillium, 32GB/core) and v5p (95GB/core) have large HBM and do not require offload.
+    v5e (16GB/core), v3 (16GB/core), v2 (8GB/core), and custom single-core setups benefit from offload.
     """
     hw_lower = (hardware_type or "").lower()
-    if num_cores <= 1:
+    if any(tag in hw_lower for tag in ("v6e", "trillium", "v5p")):
+        return False
+    if any(tag in hw_lower for tag in ("v5e", "v3", "v2", "litepod", "colab")):
         return True
-    if any(tag in hw_lower for tag in ("v5e", "v3", "v2", "litepod", "colab", "kaggle")):
+    if num_cores <= 1:
         return True
     return False
 
@@ -807,6 +822,10 @@ def restore_tpu_optimizer_state(
             return False
         raise RuntimeError(f"[TPU Resume Gate] Failed to load validated optimizer state dict: {se}")
 
+    del raw_opt_sd, opt_data
+    import gc
+    gc.collect()
+
     # Ensure FP32 precision for all momentum buffers (exp_avg, exp_avg_sq)
     for state in optimizer.state.values():
         if isinstance(state, dict):
@@ -826,6 +845,8 @@ def restore_tpu_optimizer_state(
                     else:
                         # Scalar step: keep intact or move if XLA requires
                         state[sk] = sv.to(device) if HAS_XLA else sv
+        if HAS_XLA:
+            xm.mark_step()
     elif offload_optimizer:
         # Strictly ensure all momentum states are resident on CPU Host memory
         for state in optimizer.state.values():
@@ -1061,7 +1082,7 @@ class TPUConfig:
     # Native TPU Sequence Length (fixed static shape)
     DEFAULT_SEQ_LEN: int = 2048
     # Base Learning Rate for 256 effective batch size
-    DEFAULT_LR: float = 2e-4
+    DEFAULT_LR: float = 3e-4
     # Minimum learning rate for cosine annealing
     DEFAULT_MIN_LR: float = 1e-5
     # Warmup steps

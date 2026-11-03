@@ -1146,6 +1146,14 @@ def main():
 
     is_main_process = (rank == 0)
 
+    # Dynamic checkpoint interval: 500 steps for dual/multi GPU, 100 steps for single GPU
+    if "--checkpoint-interval" not in sys.argv and "CHECKPOINT_INTERVAL" not in os.environ:
+        n_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
+        if n_gpus > 1 or is_distributed:
+            args.checkpoint_interval = 500
+        else:
+            args.checkpoint_interval = 100
+
     # Suppress non-critical stdout for worker ranks so terminal output remains single-stream and clean
     if is_distributed and not is_main_process:
         sys.stdout = open(os.devnull, "w")

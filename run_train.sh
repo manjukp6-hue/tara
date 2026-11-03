@@ -76,12 +76,14 @@ elif [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 12000 ] 2>/dev/null; then
         DEFAULT_BATCH=1
         DEFAULT_ACCUM=16
         DEFAULT_SEQ_LEN=2048
-        echo "[HARDWARE] Multi-GPU ($GPU_COUNT x $GPU_NAME) detected. Micro-Batch=$DEFAULT_BATCH/GPU Accum=$DEFAULT_ACCUM SeqLen=$DEFAULT_SEQ_LEN."
+        DEFAULT_CHECKPOINT_INTERVAL=500
+        echo "[HARDWARE] Multi-GPU ($GPU_COUNT x $GPU_NAME) detected. Micro-Batch=$DEFAULT_BATCH/GPU Accum=$DEFAULT_ACCUM SeqLen=$DEFAULT_SEQ_LEN CheckpointInterval=$DEFAULT_CHECKPOINT_INTERVAL."
     else
         # Single GPU (e.g. Google Colab free Tesla T4):
         DEFAULT_BATCH=2
         DEFAULT_ACCUM=16
         DEFAULT_SEQ_LEN=2048
+        DEFAULT_CHECKPOINT_INTERVAL=100
     fi
     DEFAULT_OPTIM="adamw8bit"
 else
@@ -90,6 +92,16 @@ else
     DEFAULT_ACCUM=32
     DEFAULT_OPTIM="adamw"
     DEFAULT_SEQ_LEN=2048
+    DEFAULT_CHECKPOINT_INTERVAL=100
+fi
+
+# Fallback checkpoint interval logic: 500 for Dual/Multi-GPU, 100 for Single GPU
+if [ -z "${DEFAULT_CHECKPOINT_INTERVAL:-}" ]; then
+    if [ "$GPU_COUNT" -ge 2 ] 2>/dev/null; then
+        DEFAULT_CHECKPOINT_INTERVAL=500
+    else
+        DEFAULT_CHECKPOINT_INTERVAL=100
+    fi
 fi
 
 TRAIN_BATCH_SIZE="${BATCH_SIZE:-$DEFAULT_BATCH}"
@@ -98,7 +110,7 @@ OPTIMIZER_TYPE="${OPTIMIZER:-$DEFAULT_OPTIM}"
 LR="${LR:-3e-4}"
 EPOCHS="${EPOCHS:-1}"
 STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-50000}"
-CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-100}"
+CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-$DEFAULT_CHECKPOINT_INTERVAL}"
 EVAL_INTERVAL="${EVAL_INTERVAL:-100}"
 PROMOTE_INTERVAL="${PROMOTE_INTERVAL:-1000}"
 GRADIENT_CHECKPOINTING="${GRADIENT_CHECKPOINTING:-1}"
@@ -109,7 +121,7 @@ fi
 DOMAIN_WEIGHTS="${DOMAIN_WEIGHTS:-02_code:0.25,01_math:0.15,04_kannada:0.15,12_reasoning:0.15,03_stem:0.10,08_world_model:0.05,11_tool_use:0.05,13_debugging:0.02,sft:0.02,05_philosophy:0.012,06_social:0.012,07_engineering:0.012,09_audio:0.012,10_vision:0.012}"
 export DOMAIN_WEIGHTS
 
-echo "[DYNAMIC CONFIG] Batch Size: $TRAIN_BATCH_SIZE | Grad Accum: $GRAD_ACCUM | Optimizer: $OPTIMIZER_TYPE | LR: $LR | Grad Checkpointing: $GRADIENT_CHECKPOINTING | Eval Interval: $EVAL_INTERVAL | Promote Interval: $PROMOTE_INTERVAL"
+echo "[DYNAMIC CONFIG] Batch Size: $TRAIN_BATCH_SIZE | Grad Accum: $GRAD_ACCUM | Optimizer: $OPTIMIZER_TYPE | LR: $LR | Grad Checkpointing: $GRADIENT_CHECKPOINTING | Checkpoint Interval: $CHECKPOINT_INTERVAL | Eval Interval: $EVAL_INTERVAL | Promote Interval: $PROMOTE_INTERVAL"
 
 # 3. Mount Google Drive if in Colab & Configure Checkpoint Sync
 if [ -d "/content" ] && python3 -c "import google.colab" 2>/dev/null; then

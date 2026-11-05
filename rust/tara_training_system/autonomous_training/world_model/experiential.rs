@@ -74,6 +74,42 @@ pub struct ExperienceEpisode {
     pub created_at_ms: u64,
 }
 
+impl ExperienceEpisode {
+    /// Synthesizes a formal `StateTransitionRecord` JSON object compatible with the World Model
+    /// training engine from this closed-loop experiential learning episode ((s, a) -> s', r).
+    pub fn to_state_transition_record(&self, domain: &str) -> Value {
+        let initial_state = json!({
+            "task": self.task_description,
+            "context": self.context_summary,
+            "status": "INITIAL"
+        });
+        let next_state = json!({
+            "result": self.execution_result,
+            "success": self.success,
+            "status": if self.success { "COMPLETED" } else { "FAILED" }
+        });
+        let reward = if self.success {
+            self.outcome_score.clamp(0.0, 1.0) as f32
+        } else {
+            -0.5f32
+        };
+
+        json!({
+            "id": format!("{}_trans", self.episode_id),
+            "episode_id": self.episode_id,
+            "step_index": 0,
+            "state_observation": initial_state.to_string(),
+            "action": self.chosen_strategy,
+            "next_state_observation": next_state.to_string(),
+            "reward": reward,
+            "done": true,
+            "domain": if domain.is_empty() { "experiential_learning" } else { domain },
+            "confidence": if self.success { 0.95f32 } else { 0.70f32 },
+            "source_dataset_id": "experiential_closed_loop",
+        })
+    }
+}
+
 pub struct ExperientialLearningEngine {
     repo_root: String,
     lesson_store_path: String,
@@ -474,6 +510,29 @@ impl ExperientialLearningEngine {
             "target_file": target_file
         }))
     }
+
+    /// Persists an experiential episode as a verified StateTransitionRecord in the specified JSONL dataset sink.
+    pub fn persist_state_transition(
+        &self,
+        episode: &ExperienceEpisode,
+        dataset_path: &Path,
+    ) -> std::io::Result<()> {
+        if let Some(parent) = dataset_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+        let record = episode.to_state_transition_record("experiential_learning");
+        let line = serde_json::to_string(&record)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dataset_path)?;
+        writeln!(file, "{}", line)?;
+        file.sync_all()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -569,6 +628,40 @@ mod tests {
         let raw = fs::read_to_string(&exported_file).unwrap();
         assert!(raw.contains("optimize matrix multiplication"));
         assert!(raw.contains("Strassen algorithm with blocked layout"));
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_experience_episode_to_state_transition_record() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_test_exp_trans_{}", uuid::Uuid::new_v4()));
+        let repo_root = temp_dir.to_str().unwrap();
+
+        let engine = ExperientialLearningEngine::new(repo_root);
+        let episode = engine.execute_closed_loop(
+            "file_system",
+            "Create directory tree safely",
+            &json!({"path": "/tmp/nested"}),
+            |_strat, _ctx| true,
+            |_strat| Ok(json!({"status": "created", "depth": 3})),
+        );
+
+        let trans = episode.to_state_transition_record("runtime_fs");
+        assert!(trans["id"].as_str().unwrap().contains("ep_file_system"));
+        assert_eq!(trans["domain"], "runtime_fs");
+        assert_eq!(trans["reward"], 1.0);
+        assert_eq!(trans["done"], true);
+
+        let sink_file = temp_dir.join("storage/datasets/world_transitions.jsonl");
+        engine
+            .persist_state_transition(&episode, &sink_file)
+            .expect("Failed to persist state transition");
+        assert!(sink_file.exists());
+
+        let raw = fs::read_to_string(&sink_file).unwrap();
+        assert!(raw.contains("Create directory tree safely"));
+        assert!(raw.contains("runtime_fs"));
 
         let _ = fs::remove_dir_all(&temp_dir);
     }

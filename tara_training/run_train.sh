@@ -202,38 +202,118 @@ fi
 ACTIVE_CP_DIR="${ACTIVE_CP_DIR:-storage/models/checkpoints}"
 mkdir -p "$ACTIVE_CP_DIR"
 
-# 8. Check Google Drive for Checkpoints to Auto-Restore if local disk is empty
-if [ -n "${GDRIVE_BACKUP_DIR:-}" ] && [ -d "$GDRIVE_BACKUP_DIR" ]; then
-    echo "[GDRIVE AUTO-RESTORE] Checking for existing durable checkpoints in Google Drive..."
-    python3 -c "
-from gdrive_sync import restore_checkpoint_from_gdrive, resolve_gdrive_restore_dir, resolve_gdrive_backup_dir
-import os, shutil
+# 8. Multi-Source Checkpoint Auto-Discovery & Restore (Hugging Face, Google Drive, Local)
+echo "[AUTO-RESTORE] Dynamically checking for highest step durable checkpoint across Hugging Face, GDrive, and Local..."
+python3 -c "
+import os, sys, shutil, json, re
+from huggingface_hub import HfApi, snapshot_download
 
-gdir = resolve_gdrive_restore_dir() or resolve_gdrive_backup_dir()
 cp_base = '${ACTIVE_CP_DIR}'
 cand_dir = 'storage/models/tara_candidate_v1'
-if gdir and os.path.exists(gdir):
-    for sub in ['best_milestone', 'normal_checkpoint']:
-        src = os.path.join(gdir, sub)
-        if os.path.exists(src):
-            dst = os.path.join(cp_base, 'stage0_pretraining')
-            if not os.path.exists(os.path.join(dst, 'model.safetensors')):
-                print(f'[GDRIVE RESTORE] Restoring candidate model from {src} -> {dst}...')
-                restore_checkpoint_from_gdrive(src, dst)
-            os.makedirs(cand_dir, exist_ok=True)
-            if os.path.exists(os.path.join(dst, 'model.safetensors')) and not os.path.exists(os.path.join(cand_dir, 'model.safetensors')):
-                for f in os.listdir(dst):
-                    s = os.path.join(dst, f)
-                    d = os.path.join(cand_dir, f)
-                    if os.path.isfile(s) and not os.path.exists(d):
-                        try:
-                            os.link(s, d)
-                        except Exception:
-                            shutil.copy2(s, d)
-                print(f'[GDRIVE RESTORE] Seeded candidate directory {cand_dir} from restored checkpoint.')
-                break
-" 2>/dev/null || true
-fi
+stage0_dst = os.path.join(cp_base, 'stage0_pretraining')
+os.makedirs(stage0_dst, exist_ok=True)
+os.makedirs(cand_dir, exist_ok=True)
+
+highest_step = -1
+best_src = None
+best_type = None
+
+# 1. Local scan
+def check_folder(d):
+    global highest_step, best_src, best_type
+    if not os.path.isdir(d):
+        return
+    s = -1
+    st_file = os.path.join(d, 'checkpoint_state.json')
+    if os.path.isfile(st_file):
+        try:
+            with open(st_file, 'r', encoding='utf-8') as f:
+                s = int(json.load(f).get('step', -1))
+        except Exception:
+            pass
+    if s < 0:
+        m = re.search(r'step_(\d+)', d)
+        if m:
+            s = int(m.group(1))
+    has_weights = os.path.isfile(os.path.join(d, 'model.safetensors')) or os.path.isfile(os.path.join(d, 'model.safetensors.index.json'))
+    if s > highest_step and has_weights:
+        highest_step = s
+        best_src = d
+        best_type = 'local'
+
+check_folder(stage0_dst)
+for root in ['tara_checkpoints/normal_checkpoint', 'tara_checkpoints/best_milestone']:
+    if os.path.isdir(root):
+        for item in os.listdir(root):
+            check_folder(os.path.join(root, item))
+
+# 2. GDrive scan
+gdrive_dir = os.environ.get('GDRIVE_BACKUP_DIR', '/content/drive/MyDrive/tara_checkpoints')
+if os.path.isdir(gdrive_dir):
+    check_folder(gdrive_dir)
+    for root in [os.path.join(gdrive_dir, 'normal_checkpoint'), os.path.join(gdrive_dir, 'best_milestone')]:
+        if os.path.isdir(root):
+            for item in os.listdir(root):
+                check_folder(os.path.join(root, item))
+
+# 3. Hugging Face scan
+hf_repo = os.environ.get('HF_MODEL_REPO', 'manjukp6/tara')
+hf_token = os.environ.get('HF_TOKEN')
+if hf_repo:
+    try:
+        api = HfApi(token=hf_token)
+        files = api.list_repo_files(hf_repo, repo_type='model')
+        hf_steps = []
+        for f in files:
+            m = re.search(r'step_(\d+)', f)
+            if m and ('normal_checkpoint' in f or 'best_milestone' in f):
+                hf_steps.append((int(m.group(1)), f))
+        if hf_steps:
+            max_s, max_f = max(hf_steps, key=lambda x: x[0])
+            if max_s > highest_step:
+                highest_step = max_s
+                best_src = max_f.split('/step_')[0] + f'/step_{highest_step}'
+                best_type = 'hf'
+    except Exception as e:
+        print(f'[AUTO-RESTORE Notice] HF query note: {e}')
+
+print(f'[AUTO-RESTORE] Highest pretraining checkpoint discovered: Step {highest_step} (Source: {best_type} -> {best_src})')
+
+# If highest is on Hugging Face, download to stage0_dst
+if best_type == 'hf' and best_src:
+    print(f'[AUTO-RESTORE HF] Downloading Step {highest_step} from https://huggingface.co/{hf_repo}:{best_src}...')
+    snapshot_download(
+        repo_id=hf_repo,
+        repo_type='model',
+        local_dir='.',
+        allow_patterns=[f'{best_src}/*'],
+        token=hf_token,
+        max_workers=4,
+    )
+    src_dir = best_src
+    if os.path.isdir(src_dir):
+        for f in os.listdir(src_dir):
+            shutil.copy2(os.path.join(src_dir, f), os.path.join(stage0_dst, f))
+
+# If highest is local/GDrive, sync to stage0_dst
+elif best_src and best_src != stage0_dst:
+    for f in os.listdir(best_src):
+        s_file = os.path.join(best_src, f)
+        if os.path.isfile(s_file):
+            shutil.copy2(s_file, os.path.join(stage0_dst, f))
+
+# Seed candidate dir
+for f in os.listdir(stage0_dst):
+    s_file = os.path.join(stage0_dst, f)
+    d_file = os.path.join(cand_dir, f)
+    if os.path.isfile(s_file) and not os.path.exists(d_file):
+        try:
+            os.link(s_file, d_file)
+        except Exception:
+            shutil.copy2(s_file, d_file)
+
+print(f'[AUTO-RESTORE] Verified stage0_pretraining & candidate seeding complete at Step {highest_step}.')
+"
 
 # 9. Launch Autonomous Multi-Stage Pipeline Runner (Stages 0..5 extensible)
 STAGES=("stage0_pretraining" "stage1_unified" "stage2_abilities" "stage3_continual" "stage4_scale" "stage5_frontier")

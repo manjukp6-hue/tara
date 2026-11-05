@@ -766,6 +766,11 @@ pub fn run_coordinated_joint_training(
     )
     .map_err(|e| format!("Failed to copy world model tokenizer.json: {e}"))?;
 
+    let dynamics_source = config.world_model_dir.join("world_model_dynamics.safetensors");
+    if dynamics_source.exists() {
+        let _ = fs::copy(&dynamics_source, staging_world.join("world_model_dynamics.safetensors"));
+    }
+
     let world_opt_moments = world_opt.export_state();
     let mut w_opt_tensors = HashMap::new();
     let mut w_opt_shapes = HashMap::new();

@@ -36,20 +36,31 @@ def verify_checkpoint(model_dir: str) -> bool:
         return False
 
     safetensors_path = os.path.join(model_dir, "model.safetensors")
+    index_path = os.path.join(model_dir, "model.safetensors.index.json")
     config_path = os.path.join(model_dir, "config.json")
     tokenizer_path = os.path.join(model_dir, "tokenizer.json")
 
     # 1. Check file existence
+    is_sharded = False
     if not os.path.exists(safetensors_path):
-        print(f"[FAIL] model.safetensors missing in {model_dir}")
-        return False
+        if os.path.exists(index_path):
+            is_sharded = True
+        else:
+            print(f"[FAIL] Neither model.safetensors nor model.safetensors.index.json found in {model_dir}")
+            return False
     if not os.path.exists(config_path):
         print(f"[FAIL] config.json missing in {model_dir}")
         return False
 
-    sf_size = os.path.getsize(safetensors_path)
     cfg_size = os.path.getsize(config_path)
-    print(f"[1/5] Files found: model.safetensors ({sf_size:,} bytes), config.json ({cfg_size:,} bytes)")
+    if is_sharded:
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_data = json.load(f)
+        total_shards = len(set(index_data.get("weight_map", {}).values()))
+        print(f"[1/5] Files found: Sharded SafeTensors ({total_shards} shards via index.json), config.json ({cfg_size:,} bytes)")
+    else:
+        sf_size = os.path.getsize(safetensors_path)
+        print(f"[1/5] Files found: model.safetensors ({sf_size:,} bytes), config.json ({cfg_size:,} bytes)")
     if os.path.exists(tokenizer_path):
         print(f"      tokenizer.json found ({os.path.getsize(tokenizer_path):,} bytes)")
 
@@ -73,8 +84,14 @@ def verify_checkpoint(model_dir: str) -> bool:
         print("[FAIL] safetensors package is not installed.")
         return False
 
-    with safetensors.safe_open(safetensors_path, framework="pt", device="cpu") as sf:
-        keys = set(sf.keys())
+    keys = set()
+    if is_sharded:
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_data = json.load(f)
+        keys = set(index_data.get("weight_map", {}).keys())
+    else:
+        with safetensors.safe_open(safetensors_path, framework="pt", device="cpu") as sf:
+            keys = set(sf.keys())
 
     num_layers = config["num_hidden_layers"]
     expected_keys = [
@@ -104,8 +121,19 @@ def verify_checkpoint(model_dir: str) -> bool:
     # 4. Load weights into TaraForCausalLM
     print("[4/5] Instantiating PyTorch model and loading safetensors state_dict...")
     model = TaraForCausalLM(config)
-    state_dict = load_file(safetensors_path, device="cpu")
-    model.load_state_dict(state_dict, strict=False)
+    if is_sharded:
+        with open(index_path, "r", encoding="utf-8") as f:
+            index_data = json.load(f)
+        weight_map = index_data.get("weight_map", {})
+        merged_state = {}
+        for sh in set(weight_map.values()):
+            sh_path = os.path.join(model_dir, sh)
+            if os.path.exists(sh_path):
+                merged_state.update(load_file(sh_path, device="cpu"))
+        model.load_state_dict(merged_state, strict=False)
+    else:
+        state_dict = load_file(safetensors_path, device="cpu")
+        model.load_state_dict(state_dict, strict=False)
     model.eval()
     print("      Model instantiated and weights loaded cleanly!")
 

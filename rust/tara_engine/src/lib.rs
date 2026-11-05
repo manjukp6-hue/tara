@@ -33,6 +33,8 @@ pub mod tokenizer;
 pub mod train_candidate;
 pub mod joint_trainer;
 pub mod multimodal;
+pub mod world_model;
+pub use world_model::{DynamicTransition, LatentTrajectory, WorldModel, WorldModelConfig, WorldModelError};
 
 // ============================================================================
 // Tier 2: Domain & Verification Subsystems
@@ -132,7 +134,8 @@ pub use model_expansion::{
 pub use safetensors::{
     compute_sha256, load_model_weights, load_model_weights_with_purpose,
     load_model_weights_with_shapes, load_safetensors, load_safetensors_with_shapes,
-    read_model_metadata_shapes, read_safetensors_shapes, SafeTensorsError,
+    read_model_metadata_shapes, read_safetensors_shapes, resolve_max_shard_size_bytes,
+    SafeTensorsError,
 };
 pub use self_update::{ExpansionDecision, SelfUpdateController, SelfUpdateReport, UpdateState};
 pub use skills_evaluator::SkillsEvaluator;

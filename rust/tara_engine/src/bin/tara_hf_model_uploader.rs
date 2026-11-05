@@ -271,6 +271,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut custom_repo = None;
     let mut custom_neural = None;
     let mut custom_world = None;
+    let mut world_only = false;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -285,6 +286,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--world-dir" | "-w" if i + 1 < args.len() => {
                 custom_world = Some(PathBuf::from(&args[i + 1]));
                 i += 1;
+            }
+            "--world-only" => {
+                world_only = true;
             }
             _ => {}
         }
@@ -311,44 +315,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     const MAX_RECOVERY_CYCLES: usize = 50;
 
-    // 1. Upload Neural Model v1 (46 SafeTensors shards + metadata)
-    let mut neural_cycle = 0;
-    loop {
-        neural_cycle += 1;
-        if neural_cycle > MAX_RECOVERY_CYCLES {
-            return Err(format!("Exceeded maximum recovery cycles ({MAX_RECOVERY_CYCLES})").into());
-        }
-        if neural_cycle > 1 {
-            println!(
-                "\n[CYCLE {}/{}] Resuming Neural Model upload pipeline...\n",
-                neural_cycle, MAX_RECOVERY_CYCLES
-            );
-        }
-
-        match upload_model_directory(
-            &repo_id,
-            &token,
-            &neural_dir,
-            "neural_model_v1",
-            "Neural Model V1",
-        ) {
-            Ok(true) => break,
-            Ok(false) => {
-                println!("Neural Model upload incomplete, retrying in 10s...");
-                sleep(Duration::from_secs(10));
+    // 1. Upload Neural Model v1 (only if not restricted to world-only)
+    if !world_only {
+        let mut neural_cycle = 0;
+        loop {
+            neural_cycle += 1;
+            if neural_cycle > MAX_RECOVERY_CYCLES {
+                return Err(format!("Exceeded maximum recovery cycles ({MAX_RECOVERY_CYCLES})").into());
             }
-            Err(e) => {
-                eprintln!(
-                    "Neural Model upload encountered error: {}. Auto-recovering in 15s...",
-                    e
+            if neural_cycle > 1 {
+                println!(
+                    "\n[CYCLE {}/{}] Resuming Neural Model upload pipeline...\n",
+                    neural_cycle, MAX_RECOVERY_CYCLES
                 );
-                sleep(Duration::from_secs(15));
+            }
+
+            match upload_model_directory(
+                &repo_id,
+                &token,
+                &neural_dir,
+                "neural_model_v1",
+                "Neural Model V1",
+            ) {
+                Ok(true) => break,
+                Ok(false) => {
+                    println!("Neural Model upload incomplete, retrying in 10s...");
+                    sleep(Duration::from_secs(10));
+                }
+                Err(e) => {
+                    eprintln!(
+                        "Neural Model upload encountered error: {}. Auto-recovering in 15s...",
+                        e
+                    );
+                    sleep(Duration::from_secs(15));
+                }
             }
         }
+    } else {
+        println!("--world-only specified; skipping Neural Model sync.");
     }
 
     // 2. Upload World Model v1 (only if configured or present)
-    let should_upload_world = has_custom_world
+    let should_upload_world = world_only
+        || has_custom_world
         || (world_dir.exists()
             && fs::read_dir(&world_dir)
                 .map(|mut d| d.next().is_some())

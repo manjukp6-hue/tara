@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Debug, Clone)]
 pub struct ModelVersionMetadata {
     pub version_id: String,
+    pub model_type: String,
     pub artifact_location: String,
     pub parameter_count: u64,
     pub growth_type: String,
@@ -121,6 +122,11 @@ impl ModelRegistry {
             .or_else(|| (!key.is_empty()).then_some(key))?;
         Some(ModelVersionMetadata {
             version_id: version_id.to_string(),
+            model_type: entry
+                .get("model_type")
+                .and_then(Value::as_str)
+                .unwrap_or("causal_lm")
+                .to_string(),
             artifact_location: entry
                 .get("artifact_location")
                 .and_then(Value::as_str)
@@ -202,6 +208,7 @@ impl ModelRegistry {
             .map(|v| {
                 json!({
                     "version_id": v.version_id,
+                    "model_type": v.model_type,
                     "artifact_location": v.artifact_location,
                     "parameter_count": v.parameter_count,
                     "growth_type": v.growth_type,
@@ -213,6 +220,17 @@ impl ModelRegistry {
                 })
             })
             .collect()
+    }
+
+    /// Returns the active or latest world model metadata if registered.
+    pub fn get_active_world_model(&self) -> Option<ModelVersionMetadata> {
+        let guard = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        guard
+            .versions
+            .iter()
+            .rev()
+            .find(|v| v.model_type == "world_model")
+            .cloned()
     }
 
     pub fn register_active_training_guarded(

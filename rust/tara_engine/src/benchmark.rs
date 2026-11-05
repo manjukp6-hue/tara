@@ -356,6 +356,50 @@ impl BenchmarkSuite {
         })
     }
 
+    /// Evaluates dynamic state transition prediction accuracy of the Neural World Model
+    /// specifically on physical dynamics and robotics causal probes.
+    pub fn evaluate_world_model_dynamics(
+        &self,
+        world_model: &TaraForCausalLM,
+        tokenizer: &TaraTokenizer,
+    ) -> Result<CategoryReport, String> {
+        let causal_probes: Vec<&BenchmarkProbe> = self
+            .probes
+            .iter()
+            .filter(|p| p.category == BenchmarkCategory::RoboticsCausal)
+            .collect();
+
+        if causal_probes.is_empty() {
+            return Err("No RoboticsCausal dynamic probes available in suite".to_string());
+        }
+
+        let mut loss_sum = 0.0f64;
+        let mut ppl_sum = 0.0f64;
+        let mut acc_sum = 0.0f64;
+        let mut exact_matches = 0usize;
+
+        for probe in &causal_probes {
+            let res = Self::evaluate_single_probe(world_model, tokenizer, &world_model.config, probe)?;
+            loss_sum += res.loss;
+            ppl_sum += res.perplexity;
+            acc_sum += res.top1_accuracy;
+            if res.exact_match {
+                exact_matches += 1;
+            }
+        }
+
+        let cnt = causal_probes.len() as f64;
+        Ok(CategoryReport {
+            category: BenchmarkCategory::RoboticsCausal,
+            probe_count: causal_probes.len(),
+            avg_loss: loss_sum / cnt,
+            avg_perplexity: ppl_sum / cnt,
+            avg_top1_accuracy: acc_sum / cnt,
+            exact_match_count: exact_matches,
+            exact_match_ratio: (exact_matches as f64) / cnt,
+        })
+    }
+
     /// Evaluates a single probe forward pass and computes token-level metrics.
     fn evaluate_single_probe(
         model: &TaraForCausalLM,

@@ -6,13 +6,18 @@
 
 pub mod audio;
 pub mod projector;
+pub mod temporal_dynamics;
 pub mod vision;
 
 pub use audio::{AudioConfig, AudioEncoder, AudioError, RawAudio};
 pub use projector::{CrossModalProjector, ProjectorType};
-pub use vision::{RawImage, VisionConfig, VisionEncoder, VisionError};
+pub use temporal_dynamics::{
+    DynamicTransitionStep, DynamicsError, TemporalDynamicsConfig, TemporalDynamicsPredictor,
+};
+pub use vision::{RawImage, RawVideo, VisionConfig, VisionDecoder, VisionEncoder, VisionError};
 
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use thiserror::Error;
 
 use crate::model::TaraForCausalLM;
@@ -25,7 +30,9 @@ pub enum MultiModalError {
     Vision(#[from] VisionError),
     #[error("audio error: {0}")]
     Audio(#[from] AudioError),
-    #[error("empty input sequence: at least text, image, or audio must be provided")]
+    #[error("temporal dynamics error: {0}")]
+    Dynamics(#[from] DynamicsError),
+    #[error("empty input sequence: at least text, image, video, or audio must be provided")]
     EmptyInput,
     #[error("sequence length ({length}) exceeds maximum limit ({max_len})")]
     SequenceTooLong { length: usize, max_len: usize },
@@ -36,6 +43,7 @@ pub enum MultiModalError {
 pub struct MultiModalInput {
     pub text: Option<String>,
     pub image: Option<RawImage>,
+    pub video: Option<RawVideo>,
     pub audio: Option<RawAudio>,
 }
 
@@ -45,6 +53,8 @@ pub struct MultiModalConfig {
     pub vision: VisionConfig,
     pub audio: AudioConfig,
     pub max_sequence_length: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamics: Option<TemporalDynamicsConfig>,
 }
 
 impl Default for MultiModalConfig {
@@ -53,7 +63,41 @@ impl Default for MultiModalConfig {
             vision: VisionConfig::default(),
             audio: AudioConfig::default(),
             max_sequence_length: 4096,
+            dynamics: None,
         }
+    }
+}
+
+impl MultiModalConfig {
+    /// Load multi-modal configuration from a JSON file.
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, std::io::Error> {
+        let content = std::fs::read_to_string(path)?;
+        serde_json::from_str(&content)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
+
+    /// Dynamically load multi-modal configuration from a model directory.
+    /// Prioritizes `multimodal_config.json`, then reads optional `"multimodal"` block in `config.json`,
+    /// or falls back to standard defaults if neither is present.
+    pub fn from_model_dir<P: AsRef<Path>>(dir: P) -> Result<Self, std::io::Error> {
+        let p = dir.as_ref();
+        let mm_path = p.join("multimodal_config.json");
+        if mm_path.exists() {
+            return Self::from_file(&mm_path);
+        }
+
+        let cfg_path = p.join("config.json");
+        if cfg_path.exists() {
+            let content = std::fs::read_to_string(&cfg_path)?;
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(mm_val) = val.get("multimodal") {
+                    return serde_json::from_value(mm_val.clone())
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e));
+                }
+            }
+        }
+
+        Ok(Self::default())
     }
 }
 
@@ -77,19 +121,67 @@ pub struct MultiModalSequence {
 pub struct MultiModalEngine {
     pub config: MultiModalConfig,
     pub vision_encoder: VisionEncoder,
+    pub vision_decoder: VisionDecoder,
     pub audio_encoder: AudioEncoder,
+    pub dynamics_predictor: Option<TemporalDynamicsPredictor>,
 }
 
 impl MultiModalEngine {
     /// Construct a new MultiModalEngine with dynamic configurations.
     pub fn new(config: MultiModalConfig) -> Self {
         let vision_encoder = VisionEncoder::new(config.vision.clone());
+        let vision_decoder = VisionDecoder::new(config.vision.clone());
         let audio_encoder = AudioEncoder::new(config.audio.clone());
+        let dynamics_predictor = config
+            .dynamics
+            .as_ref()
+            .map(|dyn_cfg| TemporalDynamicsPredictor::new(dyn_cfg.clone()));
         Self {
             config,
             vision_encoder,
+            vision_decoder,
             audio_encoder,
+            dynamics_predictor,
         }
+    }
+
+    /// Predict future visual and physical latent trajectories from an observed video.
+    pub fn predict_future_video_latents(
+        &self,
+        video: &RawVideo,
+        actions: Option<&[Vec<f32>]>,
+        steps: usize,
+    ) -> Result<Vec<Vec<f32>>, MultiModalError> {
+        match &self.dynamics_predictor {
+            Some(predictor) => {
+                let trajectory = predictor
+                    .predict_from_video(&self.vision_encoder, video, actions, steps)?;
+                Ok(trajectory)
+            }
+            None => Err(MultiModalError::Dynamics(DynamicsError::EmptyState)),
+        }
+    }
+
+    /// Predicts concrete future visual frames (decoded RGB video) from an observed video.
+    pub fn predict_future_video_frames(
+        &self,
+        video: &RawVideo,
+        actions: Option<&[Vec<f32>]>,
+        steps: usize,
+    ) -> Result<RawVideo, MultiModalError> {
+        let future_latents = self.predict_future_video_latents(video, actions, steps)?;
+        let first_frame = &video.frames[0];
+        let width = first_frame.width;
+        let height = first_frame.height;
+
+        let mut predicted_frames = Vec::with_capacity(steps);
+        for latent in &future_latents {
+            let frame = self.vision_decoder.decode_latent_to_image(latent, width, height)?;
+            predicted_frames.push(frame);
+        }
+
+        let pred_video = RawVideo::new(predicted_frames, video.fps)?;
+        Ok(pred_video)
     }
 
     /// Assemble continuous multi-modal embeddings from text, image, and audio.
@@ -110,8 +202,29 @@ impl MultiModalEngine {
         let mut vision_count = 0;
         let mut audio_count = 0;
 
-        // 1. Process Vision Input if present
-        if let Some(ref image) = input.image {
+        // 1. Process Vision or Video Input if present
+        if let Some(ref video) = input.video {
+            let (video_embs, n_frames, patches_per_frame) = self.vision_encoder.encode_video_to_embeddings(video)?;
+            let total_patches = n_frames * patches_per_frame;
+            if total_patches > 0 {
+                // Prepend vision boundary start token
+                let v_start_id = tokenizer.encode("<|vision_start|>");
+                let v_start_token = v_start_id.first().copied().unwrap_or(0);
+                let v_start_vec = &model.embed_tokens[(v_start_token as usize % model.config.vocab_size) * hs..((v_start_token as usize % model.config.vocab_size) + 1) * hs];
+                total_embeddings.extend_from_slice(v_start_vec);
+
+                // Add spatio-temporal video embeddings
+                total_embeddings.extend_from_slice(&video_embs);
+
+                // Append vision boundary end token
+                let v_end_id = tokenizer.encode("<|vision_end|>");
+                let v_end_token = v_end_id.first().copied().unwrap_or(0);
+                let v_end_vec = &model.embed_tokens[(v_end_token as usize % model.config.vocab_size) * hs..((v_end_token as usize % model.config.vocab_size) + 1) * hs];
+                total_embeddings.extend_from_slice(v_end_vec);
+
+                vision_count = total_patches + 2;
+            }
+        } else if let Some(ref image) = input.image {
             let (vision_embs, n_patches) = self.vision_encoder.encode_to_embeddings(image)?;
             if n_patches > 0 {
                 // Prepend vision boundary start token
@@ -220,6 +333,7 @@ mod tests {
             normalize_pixels: true,
             mean: vec![0.5, 0.5, 0.5],
             std: vec![0.5, 0.5, 0.5],
+            theta_base: 10_000.0,
         };
         let encoder = VisionEncoder::new(config);
 
@@ -326,6 +440,7 @@ mod tests {
                 normalize_pixels: false,
                 mean: vec![0.0, 0.0, 0.0],
                 std: vec![1.0, 1.0, 1.0],
+                theta_base: 10_000.0,
             },
             audio: AudioConfig {
                 sample_rate: 16000,
@@ -340,6 +455,7 @@ mod tests {
                 projector_type: ProjectorType::Linear,
             },
             max_sequence_length: 128,
+            dynamics: Some(TemporalDynamicsConfig::new(16, 4, 32, 2)),
         };
 
         let engine = MultiModalEngine::new(mm_config);
@@ -353,11 +469,44 @@ mod tests {
         let input = MultiModalInput {
             text: Some("describe image and audio".to_string()),
             image: Some(image),
+            video: None,
             audio: Some(audio),
         };
 
         let logits = engine.forward(&model, &tokenizer, &input).expect("multimodal forward pass succeeds");
         assert!(!logits.is_empty());
         assert_eq!(logits.len() % 16, 0); // multiple of vocab_size
+
+        // Also test video forward pass
+        let frame1 = RawImage::from_u8_slice(8, 8, 3, &img_bytes).expect("valid frame1");
+        let frame2 = RawImage::from_u8_slice(8, 8, 3, &img_bytes).expect("valid frame2");
+        let video = RawVideo::new(vec![frame1, frame2], 24.0).expect("valid video");
+
+        let video_input = MultiModalInput {
+            text: Some("predict future video states".to_string()),
+            image: None,
+            video: Some(video.clone()),
+            audio: None,
+        };
+
+        let video_logits = engine.forward(&model, &tokenizer, &video_input).expect("video forward pass succeeds");
+        assert!(!video_logits.is_empty());
+        assert_eq!(video_logits.len() % 16, 0);
+
+        // Test temporal dynamics future rollout from video
+        let future_latents = engine
+            .predict_future_video_latents(&video, None, 3)
+            .expect("future video latents rollout succeeds");
+        assert_eq!(future_latents.len(), 3);
+        assert_eq!(future_latents[0].len(), 16);
+
+        // Test temporal dynamics future visual frame generation (decoded RGB video)
+        let future_video = engine
+            .predict_future_video_frames(&video, None, 2)
+            .expect("future video frames rollout succeeds");
+        assert_eq!(future_video.num_frames(), 2);
+        assert_eq!(future_video.frames[0].width, 8);
+        assert_eq!(future_video.frames[0].height, 8);
+        assert_eq!(future_video.frames[0].channels, 3);
     }
 }

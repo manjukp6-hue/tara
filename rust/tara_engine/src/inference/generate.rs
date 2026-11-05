@@ -33,6 +33,7 @@ pub struct GenerateOptions<'a> {
     pub top_k: usize,
     pub top_p: f32,
     pub repetition_penalty: f32,
+    pub no_repeat_ngram_size: usize,
     pub stop_tokens: Option<&'a [&'a str]>,
 }
 
@@ -44,6 +45,7 @@ impl<'a> Default for GenerateOptions<'a> {
             top_k: 50,
             top_p: 0.9,
             repetition_penalty: 1.1,
+            no_repeat_ngram_size: 3,
             stop_tokens: None,
         }
     }
@@ -56,11 +58,12 @@ impl<'a> Default for GenerateOptions<'a> {
 /// Sample the next token given logits for the vocabulary.
 ///
 /// Applies (in order):
-/// 1. Repetition penalty on previously generated tokens
-/// 2. Temperature scaling
-/// 3. Top-k truncation
-/// 4. Top-p nucleus truncation
-/// 5. Categorical sampling (or argmax if temperature ≤ 0.001)
+/// 1. N-gram repetition blocking (masks tokens that would complete an already generated n-gram)
+/// 2. Deduplicated repetition penalty on previously generated/context tokens
+/// 3. Temperature scaling
+/// 4. Top-k truncation
+/// 5. Top-p nucleus truncation
+/// 6. Categorical sampling (or argmax if temperature ≤ 0.001)
 pub fn sample_next_token(
     logits: &[f32],
     generated_ids: &[u32],
@@ -68,6 +71,7 @@ pub fn sample_next_token(
     top_k: usize,
     top_p: f32,
     repetition_penalty: f32,
+    no_repeat_ngram_size: usize,
 ) -> u32 {
     if logits.is_empty() {
         return 0;
@@ -78,24 +82,44 @@ pub fn sample_next_token(
         .map(|&s| if s.is_finite() { s } else { -1e9 })
         .collect();
 
-    // 1. Repetition penalty (only when finite and > 0.0)
-    if repetition_penalty.is_finite()
-        && repetition_penalty > 0.0
-        && (repetition_penalty - 1.0).abs() > f32::EPSILON
-    {
-        for &id in generated_ids {
-            let id = id as usize;
-            if id < vocab_size {
-                if scores[id] > 0.0 {
-                    scores[id] /= repetition_penalty;
-                } else {
-                    scores[id] *= repetition_penalty;
+    // 1. N-gram repetition blocking (masks tokens that would repeat an existing n-gram)
+    if no_repeat_ngram_size > 0 && generated_ids.len() >= no_repeat_ngram_size - 1 {
+        let n = no_repeat_ngram_size;
+        let prefix_len = n - 1;
+        let current_prefix = &generated_ids[generated_ids.len() - prefix_len..];
+
+        for window in generated_ids.windows(n) {
+            if &window[..prefix_len] == current_prefix {
+                let banned_id = window[prefix_len] as usize;
+                if banned_id < vocab_size {
+                    scores[banned_id] = -1e9;
                 }
             }
         }
     }
 
-    // 2. Temperature — argmax if effectively deterministic or non-finite
+    // 2. Repetition penalty (only when finite and > 0.0)
+    // Applies penalty once per unique token in the sequence (deduplicated)
+    if repetition_penalty.is_finite()
+        && repetition_penalty > 0.0
+        && (repetition_penalty - 1.0).abs() > f32::EPSILON
+    {
+        let mut seen = std::collections::HashSet::with_capacity(generated_ids.len());
+        for &id in generated_ids {
+            if seen.insert(id) {
+                let id = id as usize;
+                if id < vocab_size {
+                    if scores[id] > 0.0 {
+                        scores[id] /= repetition_penalty;
+                    } else {
+                        scores[id] *= repetition_penalty;
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Temperature — argmax if effectively deterministic or non-finite
     if !temperature.is_finite() || temperature <= 0.001 {
         return scores
             .iter()
@@ -187,6 +211,7 @@ pub fn generate_response(
     let top_k = options.top_k;
     let top_p = options.top_p;
     let repetition_penalty = options.repetition_penalty;
+    let no_repeat_ngram_size = options.no_repeat_ngram_size;
     let stop_tokens = options.stop_tokens;
 
     let start = Instant::now();
@@ -196,6 +221,9 @@ pub fn generate_response(
     let input_ids: Vec<u32> = tokenizer.encode(prompt);
     let prompt_len = input_ids.len();
     let mut generated: Vec<u32> = Vec::with_capacity(max_new_tokens);
+    let mut full_sequence: Vec<u32> = Vec::with_capacity(prompt_len + max_new_tokens);
+    full_sequence.extend_from_slice(&input_ids);
+
     let mut first_latency_ms = 0.0f64;
     let mut cache = model.create_kv_cache();
 
@@ -217,11 +245,12 @@ pub fn generate_response(
 
         let next_id = sample_next_token(
             &last_logits,
-            &generated,
+            &full_sequence,
             temperature,
             top_k,
             top_p,
             repetition_penalty,
+            no_repeat_ngram_size,
         );
 
         if step == 0 {
@@ -233,6 +262,7 @@ pub fn generate_response(
         }
 
         generated.push(next_id);
+        full_sequence.push(next_id);
         current_token = next_id;
 
         // Stop-token check
@@ -252,8 +282,17 @@ pub fn generate_response(
         0.0
     };
 
+    let mut text = tokenizer.decode(&generated);
+    if let Some(stops) = stop_tokens {
+        for &s in stops {
+            if let Some(idx) = text.find(s) {
+                text.truncate(idx);
+            }
+        }
+    }
+
     Ok(GenerateResult {
-        text: tokenizer.decode(&generated),
+        text,
         token_count,
         first_latency_ms,
         total_latency_ms,
@@ -283,12 +322,15 @@ where
     let top_k = options.top_k;
     let top_p = options.top_p;
     let repetition_penalty = options.repetition_penalty;
+    let no_repeat_ngram_size = options.no_repeat_ngram_size;
     let stop_tokens = options.stop_tokens;
 
     let im_end = tokenizer.im_end_id();
     let input_ids: Vec<u32> = tokenizer.encode(prompt);
     let prompt_len = input_ids.len();
     let mut generated: Vec<u32> = Vec::with_capacity(max_new_tokens);
+    let mut full_sequence: Vec<u32> = Vec::with_capacity(prompt_len + max_new_tokens);
+    full_sequence.extend_from_slice(&input_ids);
     let mut cache = model.create_kv_cache();
 
     // Prime cache
@@ -309,11 +351,12 @@ where
 
         let next_id = sample_next_token(
             &last_logits,
-            &generated,
+            &full_sequence,
             temperature,
             top_k,
             top_p,
             repetition_penalty,
+            no_repeat_ngram_size,
         );
 
         if next_id == im_end {
@@ -321,6 +364,7 @@ where
         }
 
         generated.push(next_id);
+        full_sequence.push(next_id);
         current_token = next_id;
 
         // Decode just this token
@@ -349,28 +393,55 @@ mod tests {
     #[test]
     fn test_sample_next_token_empty_and_non_finite_logits() {
         // 1. Empty logits returns 0 without panic
-        assert_eq!(sample_next_token(&[], &[], 0.7, 50, 0.9, 1.1), 0);
+        assert_eq!(sample_next_token(&[], &[], 0.7, 50, 0.9, 1.1, 0), 0);
 
         // 2. Non-finite logits are sanitized to -1e9 without NaN propagation
         let nan_logits = [f32::NAN, 10.0, f32::INFINITY, -f32::INFINITY];
-        let token = sample_next_token(&nan_logits, &[], 0.0, 50, 0.9, 1.1);
+        let token = sample_next_token(&nan_logits, &[], 0.0, 50, 0.9, 1.1, 0);
         assert_eq!(token, 1); // argmax picks index 1 (10.0)
 
         // 3. Invalid repetition penalty (negative or NaN) ignored safely
-        let token2 = sample_next_token(&[1.0, 2.0], &[1], 0.0, 50, 0.9, f32::NAN);
+        let token2 = sample_next_token(&[1.0, 2.0], &[1], 0.0, 50, 0.9, f32::NAN, 0);
         assert_eq!(token2, 1);
-        let token3 = sample_next_token(&[1.0, 2.0], &[1], 0.0, 50, 0.9, -1.5);
+        let token3 = sample_next_token(&[1.0, 2.0], &[1], 0.0, 50, 0.9, -1.5, 0);
         assert_eq!(token3, 1);
 
         // 4. Non-finite temperature defaults to argmax safely without panic or NaN
-        let token_nan_temp = sample_next_token(&[1.0, 5.0, 2.0], &[], f32::NAN, 50, 0.9, 1.0);
+        let token_nan_temp = sample_next_token(&[1.0, 5.0, 2.0], &[], f32::NAN, 50, 0.9, 1.0, 0);
         assert_eq!(token_nan_temp, 1);
-        let token_inf_temp = sample_next_token(&[1.0, 5.0, 2.0], &[], f32::INFINITY, 50, 0.9, 1.0);
+        let token_inf_temp = sample_next_token(&[1.0, 5.0, 2.0], &[], f32::INFINITY, 50, 0.9, 1.0, 0);
         assert_eq!(token_inf_temp, 1);
 
         // 5. Repetition penalty near 1.0 within EPSILON is ignored as no-op
         let token_eps =
-            sample_next_token(&[1.0, 5.0], &[1], 0.0, 50, 0.9, 1.0 + f32::EPSILON / 2.0);
+            sample_next_token(&[1.0, 5.0], &[1], 0.0, 50, 0.9, 1.0 + f32::EPSILON / 2.0, 0);
         assert_eq!(token_eps, 1);
+    }
+
+    #[test]
+    fn test_sample_next_token_no_repeat_ngram_blocking() {
+        // Sequence has 3-gram [10, 20, 30]
+        // Currently context ends with [10, 20]
+        // Token 30 has highest logit (10.0), but should be blocked by 3-gram rule!
+        let context = [10, 20, 30, 40, 10, 20];
+        let mut logits = vec![0.0f32; 50];
+        logits[30] = 10.0;
+        logits[35] = 8.0;
+
+        // With no_repeat_ngram_size = 3 and argmax (temp = 0.0), token 30 is banned, token 35 is chosen
+        let token = sample_next_token(&logits, &context, 0.0, 50, 0.9, 1.0, 3);
+        assert_eq!(token, 35);
+    }
+
+    #[test]
+    fn test_sample_next_token_deduplicated_repetition_penalty() {
+        // Token 5 appears 10 times in context.
+        // It should receive repetition_penalty ONCE (deduplicated), not 10 times exponentially.
+        let context = [5, 5, 5, 5, 5, 5, 5, 5, 5, 5];
+        let logits = [10.0, 10.0, 10.0, 10.0, 10.0, 20.0];
+        // Token 5 logit is 20.0. With penalty 1.5, score becomes 20.0 / 1.5 = 13.33 > 10.0
+        // If it were compounded 10 times (1.5^10 = 57.6), it would become 0.34 < 10.0
+        let token = sample_next_token(&logits, &context, 0.0, 50, 0.9, 1.5, 0);
+        assert_eq!(token, 5);
     }
 }

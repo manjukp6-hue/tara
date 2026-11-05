@@ -50,6 +50,7 @@ impl SkillsEvaluator {
                     top_k: 50,
                     top_p: 0.9,
                     repetition_penalty: 1.1,
+                    no_repeat_ngram_size: 3,
                     stop_tokens: None,
                 };
 

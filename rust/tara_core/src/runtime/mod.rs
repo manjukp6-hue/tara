@@ -30,7 +30,7 @@ pub use recovery::{FailureCategory, IncidentReport, RecoveryOrchestrator};
 pub use resource::{ResourceGovernor, ResourceQuota, ResourceUsage};
 pub use sandbox::{
     BrokeredTransferRequest, BrokeredTransferResponse, IsolatedSandbox, SandboxBroker,
-    SandboxConfig, SandboxExecutionResult,
+    SandboxConfig, SandboxExecutionResult, SandboxedTransitionResult,
 };
 pub use team::{Team, TeamType};
 pub use tools::{ToolController, ToolDefinition};

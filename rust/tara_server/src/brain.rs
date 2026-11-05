@@ -66,6 +66,8 @@ pub const DEFAULT_INFERENCE_MAX_TEMP: f32 = 2.0;
 pub const DEFAULT_INFERENCE_TOP_K: usize = 50;
 pub const DEFAULT_INFERENCE_TOP_P: f32 = 0.9;
 pub const DEFAULT_INFERENCE_REP_PENALTY: f32 = 1.1;
+pub const DEFAULT_INFERENCE_NO_REPEAT_NGRAM: usize = 3;
+pub const CANONICAL_STOP_TOKENS: &[&str] = &["<|im_end|>", "<|endoftext|>", "\n\n\n"];
 
 pub const DEFAULT_JAILBREAK_SEVERITY_THRESHOLD: f64 = 0.85;
 pub const DEFAULT_MEMORY_EPISODES_LIMIT: usize = 5;
@@ -137,6 +139,10 @@ pub fn resolve_brain_inference_config() -> BrainInferenceConfig {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_INFERENCE_REP_PENALTY),
+        default_no_repeat_ngram_size: std::env::var("TARA_INFERENCE_NO_REPEAT_NGRAM")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_INFERENCE_NO_REPEAT_NGRAM),
     }
 }
 
@@ -183,6 +189,7 @@ pub struct BrainInferenceConfig {
     pub default_top_k: usize,
     pub default_top_p: f32,
     pub default_repetition_penalty: f32,
+    pub default_no_repeat_ngram_size: usize,
 }
 
 impl Default for BrainInferenceConfig {
@@ -335,6 +342,7 @@ pub struct TaraBrain {
     model: RwLock<Option<TaraForCausalLM>>,
     tokenizer: RwLock<Option<TaraTokenizer>>,
     pub world_model: RwLock<Option<TaraForCausalLM>>,
+    pub native_world_model: RwLock<Option<tara_engine::world_model::WorldModel>>,
     pub model_metadata: Value,
     pub training_gate: Arc<Mutex<TrainingLifecycleState>>,
     model_sha_cache: Arc<RwLock<Option<(u64, u64, String)>>>,
@@ -518,6 +526,25 @@ impl TaraBrain {
             (None, None)
         };
 
+        // Auto-load Neural World Model from disk if config and weights exist
+        let default_wm_dir = format!("{}/storage/models/tara_world_model", repo_root);
+        let default_wm_path = std::path::Path::new(&default_wm_dir);
+        let native_wm_opt = if default_wm_path.exists()
+            && (default_wm_path.join("model.safetensors.index.json").exists()
+                || default_wm_path.join("world_model_config.json").exists()
+                || default_wm_path.join("world_model_dynamics.safetensors").exists()
+                || default_wm_path.join("world_model.safetensors").exists())
+        {
+            tara_engine::world_model::WorldModel::load_from_dir(&default_wm_dir).ok()
+        } else {
+            None
+        };
+        let world_model_opt = if native_wm_opt.is_none() && default_wm_path.join("config.json").exists() {
+            TaraForCausalLM::load(&default_wm_dir).ok()
+        } else {
+            None
+        };
+
         let model_metadata = json!({
             "model_dir": resolved_model_dir,
             "sha256": sha,
@@ -532,6 +559,7 @@ impl TaraBrain {
             "knowledge",
             "knowledge/candidates",
             "datasets",
+            "datasets/transitions",
             "training",
             "audit",
             "memory/users",
@@ -539,6 +567,7 @@ impl TaraBrain {
             "ledger",
             "persistence",
             "models/tara",
+            "models/tara_world_model",
         ] {
             std::fs::create_dir_all(format!("{}/{}", storage_root, dir)).map_err(|e| {
                 format!(
@@ -866,7 +895,8 @@ impl TaraBrain {
             model_dir: resolved_model_dir,
             model: RwLock::new(model_opt),
             tokenizer: RwLock::new(tokenizer_opt),
-            world_model: RwLock::new(None),
+            world_model: RwLock::new(world_model_opt),
+            native_world_model: RwLock::new(native_wm_opt),
             model_metadata,
             training_gate,
             model_sha_cache: Arc::new(RwLock::new(None)),
@@ -977,7 +1007,8 @@ impl TaraBrain {
                             top_k: self.config.inference.default_top_k,
                             top_p: self.config.inference.default_top_p,
                             repetition_penalty: self.config.inference.default_repetition_penalty,
-                            stop_tokens: None,
+                            no_repeat_ngram_size: self.config.inference.default_no_repeat_ngram_size,
+                            stop_tokens: Some(CANONICAL_STOP_TOKENS),
                         };
                         generate_response(model, tokenizer, prompt, &options)
                             .map(|r| r.text)
@@ -1036,7 +1067,8 @@ impl TaraBrain {
             top_k: self.config.inference.default_top_k,
             top_p: self.config.inference.default_top_p,
             repetition_penalty: self.config.inference.default_repetition_penalty,
-            stop_tokens: None,
+            no_repeat_ngram_size: self.config.inference.default_no_repeat_ngram_size,
+            stop_tokens: Some(CANONICAL_STOP_TOKENS),
         };
         generate_response(model, tokenizer, &formatted_prompt, &options)
             .map_err(|error| error.to_string())
@@ -1053,7 +1085,8 @@ impl TaraBrain {
                     top_k: self.config.inference.default_top_k,
                     top_p: self.config.inference.default_top_p,
                     repetition_penalty: self.config.inference.default_repetition_penalty,
-                    stop_tokens: None,
+                    no_repeat_ngram_size: self.config.inference.default_no_repeat_ngram_size,
+                    stop_tokens: Some(CANONICAL_STOP_TOKENS),
                 };
                 let _ = generate_stream(model, tokenizer, prompt, &options, callback);
             }
@@ -1112,17 +1145,327 @@ impl TaraBrain {
             .read()
             .map(|guard| guard.is_some())
             .unwrap_or(false)
+            || self.native_world_model
+                .read()
+                .map(|guard| guard.is_some())
+                .unwrap_or(false)
     }
 
     /// Load a neural world model from an on-disk directory containing `config.json`
-    /// and `model.safetensors` (or sharded index).
+    /// and `model.safetensors` (or sharded index) and/or `world_model*.safetensors`.
     pub fn load_world_model(&self, world_model_dir: &str) -> Result<(), String> {
-        let wm = TaraForCausalLM::load(world_model_dir).map_err(|e| e.to_string())?;
-        *self
-            .world_model
-            .write()
-            .map_err(|_| "world model state lock poisoned".to_string())? = Some(wm);
+        let p = std::path::Path::new(world_model_dir);
+        if !p.exists() {
+            return Err(format!("World model directory '{}' does not exist", world_model_dir));
+        }
+
+        let nwm_res = tara_engine::world_model::WorldModel::load_from_dir(world_model_dir);
+        let wm_res = if nwm_res.is_err() {
+            TaraForCausalLM::load(world_model_dir).map_err(|e| format!("{:?}", e))
+        } else {
+            Err("Native World Model preferred".to_string())
+        };
+
+        if nwm_res.is_err() && wm_res.is_err() {
+            return Err(format!("Failed to load world model: {:?}", nwm_res.err()));
+        }
+
+        if let Ok(nwm) = nwm_res {
+            *self
+                .native_world_model
+                .write()
+                .map_err(|_| "native world model state lock poisoned".to_string())? = Some(nwm);
+        }
+
+        if let Ok(wm) = wm_res {
+            *self
+                .world_model
+                .write()
+                .map_err(|_| "world model state lock poisoned".to_string())? = Some(wm);
+        }
+
         Ok(())
+    }
+
+    /// Prospective state transition simulation using the neural world model.
+    ///
+    /// Given a current state observation and a candidate action, simulates the
+    /// prospective subsequent state transition (s_t, a_t) -> s_{t+1}.
+    pub fn simulate_world_transition(
+        &self,
+        current_state: &str,
+        candidate_action: &str,
+        max_tokens: usize,
+    ) -> Result<String, String> {
+        let has_native = self
+            .native_world_model
+            .read()
+            .map(|g| g.is_some())
+            .unwrap_or(false);
+        let has_causal = self
+            .world_model
+            .read()
+            .map(|g| g.is_some())
+            .unwrap_or(false);
+
+        if !has_causal && !has_native {
+            return Err("Neural world model is not loaded in TaraBrain".to_string());
+        }
+
+        // Native Latent World Model transition takes absolute precedence
+        if has_native {
+            let nwm_guard = self
+                .native_world_model
+                .read()
+                .map_err(|_| "native_world_model lock poisoned".to_string())?;
+            let nwm = nwm_guard
+                .as_ref()
+                .ok_or_else(|| "Neural world model is not loaded in TaraBrain".to_string())?;
+
+            let tok_guard = self.tokenizer.read().ok();
+            let tok_ref = tok_guard.as_ref().and_then(|g| g.as_ref());
+
+            let z_t = nwm.encode_state_str(current_state, tok_ref);
+            let a_t = nwm.encode_action_str(candidate_action, tok_ref);
+
+            let step_res = nwm
+                .predict_step(&z_t, &a_t)
+                .map_err(|e| format!("Latent world model transition failed: {e}"))?;
+
+            return Ok(format!(
+                "[latent_state: dim={}, viable={}, p_fail={:.3}, reward={:.3}, value={:.3}, confidence={:.3}]",
+                step_res.next_latent.len(),
+                step_res.viable,
+                step_res.failure_probability,
+                step_res.predicted_reward,
+                step_res.expected_value,
+                step_res.confidence
+            ));
+        }
+
+        let wm_guard = self
+            .world_model
+            .read()
+            .map_err(|_| "world_model lock poisoned".to_string())?;
+        let wm = wm_guard
+            .as_ref()
+            .ok_or_else(|| "Neural world model is not loaded in TaraBrain".to_string())?;
+
+        let tok_guard = self
+            .tokenizer
+            .read()
+            .map_err(|_| "tokenizer lock poisoned".to_string())?;
+        let tok = tok_guard
+            .as_ref()
+            .ok_or_else(|| "TaraTokenizer is not loaded".to_string())?;
+
+        let prompt = format!(
+            "<|im_start|>state\n{}<|im_end|>\n<|im_start|>action\n{}<|im_end|>\n<|im_start|>next_state\n",
+            current_state.trim(),
+            candidate_action.trim()
+        );
+
+        let options = GenerateOptions {
+            max_new_tokens: max_tokens.clamp(1, 256),
+            temperature: 0.1,
+            top_k: 40,
+            top_p: 0.9,
+            repetition_penalty: 1.1,
+            no_repeat_ngram_size: 3,
+            stop_tokens: Some(&["<|im_end|>"]),
+        };
+
+        generate_response(wm, tok, &prompt, &options)
+            .map(|r| r.text)
+            .map_err(|e| format!("World model simulation failed: {}", e))
+    }
+
+    /// Evaluates pre-execution safety and viability of an action or command using the World Model.
+    /// Returns (is_safe, failure_probability). If World Model is not loaded, defaults to safe (0.0 fail probability).
+    pub fn check_sandbox_action_safety(&self, command: &str, args: &[&str]) -> (bool, f32) {
+        let nwm_guard = match self.native_world_model.read() {
+            Ok(g) => g,
+            Err(_) => return (true, 0.0),
+        };
+        let nwm = match nwm_guard.as_ref() {
+            Some(m) => m,
+            None => return (true, 0.0),
+        };
+
+        let tok_guard = self.tokenizer.read().ok();
+        let tok_ref = tok_guard.as_ref().and_then(|g| g.as_ref());
+
+        let full_action = if args.is_empty() {
+            command.to_string()
+        } else {
+            format!("{} {}", command, args.join(" "))
+        };
+
+        let z_t = {
+            let active_latent = self.cognitive.world_state.to_latent_vector(nwm.config.latent_dim);
+            let norm = active_latent.iter().map(|v| v * v).sum::<f32>().sqrt();
+            if norm > 1e-6 {
+                active_latent
+            } else {
+                nwm.encode_state_str(command, tok_ref)
+            }
+        };
+        let a_t = nwm.encode_action_str(&full_action, tok_ref);
+
+        if let Ok(step) = nwm.predict_step(&z_t, &a_t) {
+            self.cognitive.world_state.update_from_latent_transition(
+                &format!("sandbox:predicted:{}", command),
+                step.predicted_reward,
+                step.failure_probability,
+                step.viable,
+                step.confidence,
+                step.expected_value,
+            );
+            (step.viable, step.failure_probability)
+        } else {
+            (true, 0.0)
+        }
+    }
+
+    /// Records real-world execution feedback from a sandboxed operation, executing online surprise learning
+    /// to update the World Model's transition, reward, and failure probability heads.
+    pub fn record_sandbox_experience(
+        &self,
+        initial_state: &str,
+        action: &str,
+        next_state: &str,
+        reward: f32,
+        failed: bool,
+    ) -> Result<f32, String> {
+        let mut nwm_guard = self
+            .native_world_model
+            .write()
+            .map_err(|_| "native_world_model lock poisoned".to_string())?;
+        let nwm = match nwm_guard.as_mut() {
+            Some(m) => m,
+            None => return Err("Native world model is not loaded in TaraBrain".to_string()),
+        };
+
+        let tok_guard = self.tokenizer.read().ok();
+        let tok_ref = tok_guard.as_ref().and_then(|g| g.as_ref());
+
+        let z_t = {
+            let active_latent = self.cognitive.world_state.to_latent_vector(nwm.config.latent_dim);
+            let norm = active_latent.iter().map(|v| v * v).sum::<f32>().sqrt();
+            if norm > 1e-6 && initial_state.is_empty() {
+                active_latent
+            } else {
+                nwm.encode_state_str(initial_state, tok_ref)
+            }
+        };
+        let a_t = nwm.encode_action_str(action, tok_ref);
+        let z_next = nwm.encode_state_str(next_state, tok_ref);
+
+        let loss = nwm.update_from_experience(&z_t, &a_t, &z_next, reward, failed)
+            .map_err(|e| format!("Online surprise update failed: {e}"))?;
+
+        self.cognitive.world_state.update_entity(
+            "sandbox:last_experience",
+            serde_json::json!({
+                "action": action,
+                "reward": reward,
+                "failed": failed,
+                "surprise_loss": loss,
+            }),
+        );
+        Ok(loss)
+    }
+
+    /// Evaluates prospective outcome of an action or tool execution using the World Model.
+    pub fn evaluate_action_viability(
+        &self,
+        current_state: &str,
+        candidate_action: &str,
+    ) -> Option<Value> {
+        if !self.is_world_model_loaded() {
+            return None;
+        }
+
+        // If Native Latent World Model is loaded, use genuine neural heads
+        let native_opt = self.native_world_model.read().ok().and_then(|g| g.clone());
+        if let Some(nwm) = native_opt {
+            let tok_guard = self.tokenizer.read().ok();
+            let tok_ref = tok_guard.as_ref().and_then(|g| g.as_ref());
+
+            let z_t = {
+                let active_latent = self.cognitive.world_state.to_latent_vector(nwm.config.latent_dim);
+                let norm = active_latent.iter().map(|v| v * v).sum::<f32>().sqrt();
+                if norm > 1e-6 && current_state.is_empty() {
+                    active_latent
+                } else if !current_state.is_empty() {
+                    nwm.encode_state_str(current_state, tok_ref)
+                } else {
+                    active_latent
+                }
+            };
+            let a_t = nwm.encode_action_str(candidate_action, tok_ref);
+
+            if let Ok(step_res) = nwm.predict_step(&z_t, &a_t) {
+                self.cognitive.world_state.update_from_latent_transition(
+                    "action_evaluation:last",
+                    step_res.predicted_reward,
+                    step_res.failure_probability,
+                    step_res.viable,
+                    step_res.confidence,
+                    step_res.expected_value,
+                );
+                let simulated_text = self
+                    .simulate_world_transition(current_state, candidate_action, 64)
+                    .unwrap_or_else(|_| {
+                        format!(
+                            "[state_norm={:.3}, reward={:.3}, viable={}]",
+                            step_res.next_latent.iter().map(|v| v * v).sum::<f32>().sqrt(),
+                            step_res.predicted_reward,
+                            step_res.viable
+                        )
+                    });
+
+                return Some(json!({
+                    "world_model_active": true,
+                    "latent_dynamics_active": true,
+                    "candidate_action": candidate_action,
+                    "simulated_next_state": simulated_text,
+                    "viable": step_res.viable,
+                    "failure_probability": step_res.failure_probability,
+                    "predicted_reward": step_res.predicted_reward,
+                    "expected_value": step_res.expected_value,
+                    "confidence": step_res.confidence as f64,
+                }));
+            }
+        }
+
+        // Fallback to causal LM text simulation if native latent model is not available
+        match self.simulate_world_transition(current_state, candidate_action, 64) {
+            Ok(predicted_next_state) => {
+                let is_failure = predicted_next_state.contains("ERROR")
+                    || predicted_next_state.contains("FAILED")
+                    || predicted_next_state.contains("PANIC")
+                    || predicted_next_state.contains("TIMEOUT")
+                    || predicted_next_state.contains("QUARANTINE");
+                let confidence = if is_failure { 0.25f64 } else { 0.85f64 };
+                Some(json!({
+                    "world_model_active": true,
+                    "latent_dynamics_active": false,
+                    "candidate_action": candidate_action,
+                    "simulated_next_state": predicted_next_state,
+                    "viable": !is_failure,
+                    "confidence": confidence,
+                }))
+            }
+            Err(err) => Some(json!({
+                "world_model_active": true,
+                "latent_dynamics_active": false,
+                "candidate_action": candidate_action,
+                "simulation_error": err,
+                "viable": true,
+                "confidence": 0.5f64,
+            })),
+        }
     }
 
     /// Get full model status with SHA256 integrity check.
@@ -1320,8 +1663,37 @@ impl TaraBrain {
     }
 
     pub fn _execute_tool(&self, tool_name: &str, params: Value, actor_id: &str) -> Value {
-        self.tool_registry
-            .execute_tool(tool_name, params, actor_id, &self.repo_root)
+        let (result, transition) = self.tool_registry.execute_tool_with_transition(
+            tool_name,
+            params,
+            actor_id,
+            &self.repo_root,
+        );
+
+        // Persist the transition record to the runtime transition dataset sink
+        let dataset_path = std::path::Path::new(&self.repo_root)
+            .join("storage")
+            .join("datasets")
+            .join("transitions")
+            .join("tool_transitions.jsonl");
+
+        if let Some(parent) = dataset_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        if let Ok(line) = serde_json::to_string(&transition) {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&dataset_path)
+            {
+                let _ = writeln!(f, "{}", line);
+                let _ = f.sync_all();
+            }
+        }
+
+        result
     }
 
     pub fn _execute_skill(&self, skill_name: &str, params: Value) -> Value {
@@ -1800,9 +2172,16 @@ impl TaraBrain {
                 if let Some(ref tool_name) = intent_result.tool {
                     tool_or_skill = Some(tool_name.clone());
                     let params = json!(intent_result.params);
+
+                    // Prospective World Model simulation prior to dispatch
+                    let wm_sim = self.evaluate_action_viability(
+                        &format!("state: ready; actor: {}", actor_id),
+                        &format!("tool: {} params: {}", tool_name, params),
+                    );
+
                     let result = self._execute_tool(tool_name, params.clone(), actor_id);
                     // Recovery if failed
-                    let final_result = if result.get("status").and_then(|v| v.as_str())
+                    let mut final_result = if result.get("status").and_then(|v| v.as_str())
                         == Some("ERROR")
                     {
                         let (recovered, healed_params, _) = self.recovery_engine.attempt_recovery(
@@ -1826,6 +2205,11 @@ impl TaraBrain {
                     } else {
                         result
                     };
+                    if let Some(sim) = wm_sim {
+                        if let Some(obj) = final_result.as_object_mut() {
+                            obj.insert("world_model_simulation".to_string(), sim);
+                        }
+                    }
                     exec_result = Some(final_result);
                 }
             }
@@ -1833,7 +2217,20 @@ impl TaraBrain {
                 if let Some(ref skill_name) = intent_result.skill {
                     tool_or_skill = Some(skill_name.clone());
                     let params = json!(intent_result.params);
-                    exec_result = Some(self._execute_skill(skill_name, params));
+
+                    // Prospective World Model simulation prior to skill dispatch
+                    let wm_sim = self.evaluate_action_viability(
+                        &format!("state: ready; actor: {}", actor_id),
+                        &format!("skill: {} params: {}", skill_name, params),
+                    );
+
+                    let mut skill_res = self._execute_skill(skill_name, params);
+                    if let Some(sim) = wm_sim {
+                        if let Some(obj) = skill_res.as_object_mut() {
+                            obj.insert("world_model_simulation".to_string(), sim);
+                        }
+                    }
+                    exec_result = Some(skill_res);
                 }
             }
             "EXECUTE_ENGINE" => {
@@ -1924,9 +2321,15 @@ impl TaraBrain {
                                     .iter()
                                     .enumerate()
                                     .map(|(idx, s)| {
+                                        let next_st = if self.is_world_model_loaded() {
+                                            self.simulate_world_transition(state, &s.target_name, 32)
+                                                .unwrap_or_else(|_| format!("{}_{}", state, idx))
+                                        } else {
+                                            format!("{}_{}", state, idx)
+                                        };
                                         (
                                             s.target_name.clone(),
-                                            format!("{}_{}", state, idx),
+                                            next_st,
                                             1.0 / (n_steps as f64),
                                         )
                                     })
@@ -1952,6 +2355,13 @@ impl TaraBrain {
                                             score += 0.25;
                                         } else {
                                             score -= 0.5;
+                                        }
+                                        if state.contains("ERROR")
+                                            || state.contains("FAILED")
+                                            || state.contains("PANIC")
+                                            || state.contains("TIMEOUT")
+                                        {
+                                            score -= 0.35;
                                         }
                                     }
                                 }
@@ -2392,9 +2802,24 @@ impl TaraBrain {
             });
 
         // ── Step 10: World state tracking & Fast-weights synaptic update ──────
+        let mut reality_mutation = json!({
+            "actor_id": actor_id,
+            "session_id": session_id,
+            "intent": intent,
+            "outcome": turn_outcome,
+            "tool_or_skill": tool_or_skill,
+            "execution_status": if exec_result.is_some() { "EXECUTED" } else { "CONVERSATIONAL" },
+            "slots": resolved_slots,
+            "timestamp_ms": ts_start as u64,
+        });
+        if let Some(ref er) = exec_result {
+            if let Some(obj) = reality_mutation.as_object_mut() {
+                obj.insert("execution_result".to_string(), er.clone());
+            }
+        }
         self.cognitive.world_state.update_entity(
-            &format!("{}:last_turn", actor_id),
-            json!({ "input": input_text, "intent": intent, "response_len": final_response.len() }),
+            &format!("{}:reality_state", actor_id),
+            reality_mutation,
         );
         let r_vec = self.embed_feature_vector(&final_response);
         if let Ok(mut fw) = self.cognitive.fast_weights.lock() {
@@ -2500,6 +2925,7 @@ impl TaraBrain {
             "final_response": p.final_response,
             "outcome": p.outcome,
             "context_tags": p.context_tags,
+            "world_model_active": self.is_world_model_loaded(),
         })
     }
 
@@ -2845,6 +3271,9 @@ mod tests {
     #[test]
     fn test_world_model_loading_and_status() {
         let brain = TaraBrain::new(None).unwrap();
+        // Clear world model to deterministically test the unloaded baseline
+        *brain.world_model.write().unwrap() = None;
+        *brain.native_world_model.write().unwrap() = None;
         assert!(!brain.is_world_model_loaded());
 
         let status = brain.get_model_status();
@@ -2854,6 +3283,81 @@ mod tests {
         let res = brain.load_world_model("nonexistent_world_model_directory");
         assert!(res.is_err());
         assert!(!brain.is_world_model_loaded());
+
+        // Simulation when world model is not loaded returns descriptive Err
+        let sim_res = brain.simulate_world_transition("state: idle", "tool: test_tool", 16);
+        assert!(sim_res.is_err());
+        assert!(sim_res.unwrap_err().contains("Neural world model is not loaded"));
+
+        // Viability evaluation when world model is not loaded returns None
+        assert!(brain.evaluate_action_viability("state: idle", "tool: test_tool").is_none());
+
+        // Process turn includes world_model_active: false
+        let turn_res = brain.process("actor_wm_test", "help", HashMap::new());
+        assert_eq!(turn_res["world_model_active"], false);
+    }
+
+    #[test]
+    fn test_native_latent_world_model_viability_and_rollout() {
+        let brain = TaraBrain::new(None).unwrap();
+        let wm_cfg = tara_engine::world_model::WorldModelConfig::new(32, 16, 64);
+        let nwm = tara_engine::world_model::WorldModel::new(wm_cfg);
+
+        // Inject genuine Native World Model
+        *brain.native_world_model.write().unwrap() = Some(nwm);
+        assert!(brain.is_world_model_loaded());
+
+        let sim_text = brain.simulate_world_transition("state: ready", "action: inspect_code", 16);
+        assert!(sim_text.is_ok());
+        let sim_str = sim_text.unwrap();
+        assert!(sim_str.contains("latent_state"));
+
+        let viability = brain.evaluate_action_viability("state: ready", "action: inspect_code");
+        assert!(viability.is_some());
+        let v = viability.unwrap();
+        assert_eq!(v["world_model_active"], true);
+        assert_eq!(v["latent_dynamics_active"], true);
+        assert!(v.get("failure_probability").is_some());
+        assert!(v.get("predicted_reward").is_some());
+        assert!(v.get("viable").is_some());
+
+        // Test sandbox pre-execution safety gate check
+        let (safe, p_fail) = brain.check_sandbox_action_safety("cargo check", &[]);
+        assert!(p_fail >= 0.0 && p_fail <= 1.0);
+        let _ = safe;
+
+        // Test sandbox live experience recording and online surprise learning
+        let loss_res = brain.record_sandbox_experience(
+            "cargo test running",
+            "execute cargo test",
+            "test passed successfully",
+            1.0,
+            false,
+        );
+        assert!(loss_res.is_ok());
+        assert!(loss_res.unwrap() >= 0.0);
+    }
+
+    #[test]
+    fn test_execute_tool_persists_transition_record() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("tara_test_tool_trans_{}", uuid::Uuid::new_v4()));
+        let brain = TaraBrain::new_with_root(temp_dir.to_str().unwrap()).unwrap();
+
+        let res = brain._execute_tool(
+            "file_reader",
+            json!({"path": "nonexistent_test.txt"}),
+            "test_actor",
+        );
+        assert_eq!(res["status"], "ERROR");
+
+        let trans_path = temp_dir.join("storage/datasets/transitions/tool_transitions.jsonl");
+        assert!(trans_path.exists());
+        let raw = std::fs::read_to_string(&trans_path).unwrap();
+        assert!(raw.contains("file_reader"));
+        assert!(raw.contains("tool_execution"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

@@ -1,15 +1,16 @@
 {
-  "vocab_size": 100256,
+  "latent_dim": 2048,
+  "action_dim": 512,
   "hidden_size": 2048,
   "intermediate_size": 5632,
   "num_hidden_layers": 8,
   "num_attention_heads": 32,
   "num_key_value_heads": 8,
   "head_dim": 64,
-  "max_position_embeddings": 4096,
-  "rope_theta": 500000.0,
   "rms_norm_eps": 0.00001,
+  "rope_theta": 500000.0,
   "initializer_range": 0.02,
-  "version": "2.0.0",
-  "model_type": "tara"
+  "learning_rate": 0.0003,
+  "discount_factor": 0.99,
+  "horizon_limit": 64
 }

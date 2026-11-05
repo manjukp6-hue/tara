@@ -329,6 +329,13 @@ pub struct SandboxExecutionResult {
     pub violated_policy: Option<String>,
 }
 
+/// Result of sandbox execution bundled with its formal dynamic state transition record.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SandboxedTransitionResult {
+    pub execution: SandboxExecutionResult,
+    pub transition_record: serde_json::Value,
+}
+
 /// Dynamic, kernel-isolated Sandbox instance.
 pub struct IsolatedSandbox {
     pub config: SandboxConfig,
@@ -721,6 +728,122 @@ impl IsolatedSandbox {
         })
     }
 
+    /// Synthesizes a formal `StateTransitionRecord` JSON object compatible with the World Model
+    /// training engine from an executed command and its resulting execution telemetry.
+    pub fn build_state_transition_record(
+        &self,
+        executable: &str,
+        args: &[&str],
+        result: &SandboxExecutionResult,
+        episode_id: Option<&str>,
+        step_index: usize,
+    ) -> serde_json::Value {
+        let ep = episode_id.unwrap_or("sandbox_runtime_episode");
+        let action_str = if args.is_empty() {
+            executable.to_string()
+        } else {
+            format!("{} {}", executable, args.join(" "))
+        };
+
+        let initial_state = serde_json::json!({
+            "sandbox_id": self.config.sandbox_id,
+            "root_dir": self.config.root_dir.to_string_lossy(),
+            "status": "READY",
+            "state_machine": format!("{:?}", self.state.current_state()),
+        });
+
+        let next_state = serde_json::json!({
+            "sandbox_id": self.config.sandbox_id,
+            "exit_code": result.exit_code,
+            "duration_ms": result.duration_ms,
+            "peak_memory_bytes": result.peak_memory_bytes,
+            "timed_out": result.timed_out,
+            "violated_policy": result.violated_policy,
+            "stdout_snippet": if result.stdout.len() > 256 {
+                format!("{}...", &result.stdout[..256])
+            } else {
+                result.stdout.clone()
+            },
+            "stderr_snippet": if result.stderr.len() > 256 {
+                format!("{}...", &result.stderr[..256])
+            } else {
+                result.stderr.clone()
+            },
+            "status": if result.exit_code == 0 && !result.timed_out && result.violated_policy.is_none() {
+                "SUCCESS"
+            } else {
+                "FAILURE"
+            }
+        });
+
+        let (reward, done) = if result.timed_out || result.violated_policy.is_some() {
+            (-1.0f32, true)
+        } else if result.exit_code == 0 {
+            (1.0f32, false)
+        } else {
+            (-0.5f32, true)
+        };
+
+        serde_json::json!({
+            "id": format!("{}_{}_{}", self.config.sandbox_id, ep, step_index),
+            "episode_id": ep,
+            "step_index": step_index,
+            "state_observation": initial_state.to_string(),
+            "action": action_str,
+            "next_state_observation": next_state.to_string(),
+            "reward": reward,
+            "done": done,
+            "domain": "system_sandbox",
+            "confidence": 1.0f32,
+            "source_dataset_id": format!("sandbox_{}", self.config.sandbox_id),
+        })
+    }
+
+    /// Appends a verified transition record to a JSONL dataset file on disk atomically.
+    pub fn record_transition_to_dataset(
+        &self,
+        record: &serde_json::Value,
+        dataset_path: &Path,
+    ) -> std::io::Result<()> {
+        if let Some(parent) = dataset_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+        let line = serde_json::to_string(record)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dataset_path)?;
+        writeln!(file, "{}", line)?;
+        file.sync_all()?;
+        Ok(())
+    }
+
+    /// Executes a sandboxed command and automatically generates and returns the formal state transition record.
+    pub fn execute_with_transition(
+        &mut self,
+        executable: &str,
+        args: &[&str],
+        stdin_data: Option<&[u8]>,
+        episode_id: Option<&str>,
+        step_index: usize,
+    ) -> Result<SandboxedTransitionResult, String> {
+        let result = self.execute(executable, args, stdin_data)?;
+        let transition = self.build_state_transition_record(
+            executable,
+            args,
+            &result,
+            episode_id,
+            step_index,
+        );
+        Ok(SandboxedTransitionResult {
+            execution: result,
+            transition_record: transition,
+        })
+    }
+
     /// Stops, revokes, and kills all processes in the sandbox.
     pub fn stop(&mut self) -> Result<(), String> {
         if let Some(ref job) = self.job_guard {
@@ -1028,5 +1151,53 @@ mod tests {
             .rejection_reason
             .unwrap()
             .contains("Creator-approved broker transfer is required"));
+    }
+
+    #[test]
+    fn test_sandbox_state_transition_recording() {
+        let temp = TempDirGuard::new("transition_test");
+        let config = SandboxConfig {
+            sandbox_id: "sbx_transition".to_string(),
+            display_name: "Test-Transition".to_string(),
+            sandbox_type: "Test".to_string(),
+            root_dir: temp.path().to_path_buf(),
+            ..SandboxConfig::default()
+        };
+
+        let sandbox = IsolatedSandbox::new(config).unwrap();
+        let dummy_res = SandboxExecutionResult {
+            exit_code: 0,
+            stdout: "execution completed successfully".to_string(),
+            stderr: String::new(),
+            duration_ms: 15,
+            peak_memory_bytes: 4096,
+            timed_out: false,
+            violated_policy: None,
+        };
+
+        let rec = sandbox.build_state_transition_record(
+            "cmd.exe",
+            &["/c", "dir"],
+            &dummy_res,
+            Some("ep_001"),
+            1,
+        );
+
+        assert_eq!(rec["episode_id"], "ep_001");
+        assert_eq!(rec["step_index"], 1);
+        assert_eq!(rec["action"], "cmd.exe /c dir");
+        assert_eq!(rec["reward"], 1.0);
+        assert_eq!(rec["done"], false);
+        assert_eq!(rec["confidence"], 1.0);
+
+        let dataset_path = temp.path().join("transitions.jsonl");
+        sandbox
+            .record_transition_to_dataset(&rec, &dataset_path)
+            .expect("Failed to append transition record to jsonl dataset");
+        assert!(dataset_path.exists());
+
+        let content = fs::read_to_string(&dataset_path).unwrap();
+        assert!(content.contains("\"episode_id\":\"ep_001\""));
+        assert!(content.contains("\"action\":\"cmd.exe /c dir\""));
     }
 }

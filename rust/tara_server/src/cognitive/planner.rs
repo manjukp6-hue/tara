@@ -83,6 +83,37 @@ impl Goal {
         self.completed_at_ms = Some(ts);
         self.step_results.push(json!({ "failure_reason": reason }));
     }
+
+    /// Evaluates prospective outcome foresight for an upcoming plan step using a state transition simulation.
+    pub fn evaluate_step_foresight<F>(&self, step_idx: usize, simulate_transition: F) -> Option<Value>
+    where
+        F: Fn(&str, &str) -> Option<String>,
+    {
+        if let Some(step) = self.steps.get(step_idx) {
+            let current_state = format!(
+                "goal: {}, step_index: {}, status: {}",
+                self.objective, step_idx, self.status
+            );
+            let action = format!(
+                "intent: {}, target: {}, params: {}",
+                step.action_intent, step.target_name, step.parameters
+            );
+            if let Some(simulated) = simulate_transition(&current_state, &action) {
+                let viable = !simulated.contains("ERROR")
+                    && !simulated.contains("FAILED")
+                    && !simulated.contains("PANIC")
+                    && !simulated.contains("TIMEOUT");
+                return Some(json!({
+                    "step_id": step.step_id,
+                    "target_name": step.target_name,
+                    "simulated_future_state": simulated,
+                    "rollout_viable": viable,
+                    "foresight_confidence": if viable { 0.85 } else { 0.25 }
+                }));
+            }
+        }
+        None
+    }
 }
 
 pub struct GoalTracker {

@@ -29,7 +29,7 @@ pub use creativity::{ConceptualFrame, CreativityEngine, EmergentBlend};
 pub use curiosity::{
     CuriosityDriveEngine, EpistemicEntropyEvaluator, EpistemicState, ExplorationGoal,
 };
-pub use deliberative_search::{DeliberativeTreeSearchEngine, SearchNode};
+pub use deliberative_search::{DeliberativeTreeSearchEngine, SearchBudget, SearchNode};
 pub use existential::{DialecticalReasoningResult, ExistentialReasoningEngine, MetacognitiveTopic};
 pub use experiential::{
     ExperienceEpisode, ExperientialLearningEngine, ExperientialStage, LessonLearned,

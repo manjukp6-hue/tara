@@ -21,8 +21,8 @@ pub use protocol::{CoreProtocolHandler, CoreRequest, CoreResponse};
 pub use robotics::{ActuatorJoint, KalmanStateEstimator, PidController, RoboticsHal};
 pub use rule_engine::{Rule, RuleDecision, RuleEngine};
 pub use runtime::{
-    Agent, DynamicNamingManager, IsolatedSandbox, ManagerConfig, SandboxConfig, TaraManager, Team,
-    Worker,
+    Agent, DynamicNamingManager, IsolatedSandbox, ManagerConfig, SandboxConfig,
+    SandboxExecutionResult, SandboxedTransitionResult, TaraManager, Team, Worker,
 };
 pub use sandbox::{ExecutionResult, ExecutionSandbox, SandboxPolicy};
 pub use tara_security::path_security;

@@ -215,6 +215,55 @@ impl ToolRegistry {
         }
     }
 
+    /// Synthesizes a formal `StateTransitionRecord` JSON object representing tool-induced environment mutations.
+    pub fn build_tool_transition_record(
+        &self,
+        tool_name: &str,
+        params: &serde_json::Value,
+        result: &serde_json::Value,
+        actor_id: &str,
+    ) -> serde_json::Value {
+        let success = result.get("status").and_then(|v| v.as_str()) == Some("SUCCESS");
+        let initial_state = serde_json::json!({
+            "actor_id": actor_id,
+            "tool": tool_name,
+            "status": "PRE_EXECUTION"
+        });
+        let next_state = serde_json::json!({
+            "actor_id": actor_id,
+            "tool": tool_name,
+            "status": if success { "SUCCESS" } else { "ERROR" },
+            "result_summary": result.get("error").or_else(|| result.get("path")).unwrap_or(&serde_json::json!("executed")),
+        });
+        let reward = if success { 1.0f32 } else { -0.5f32 };
+        serde_json::json!({
+            "id": format!("tool_{}_{}_{}", tool_name, actor_id, Uuid::new_v4()),
+            "episode_id": format!("tool_ep_{}", actor_id),
+            "step_index": 0,
+            "state_observation": initial_state.to_string(),
+            "action": format!("tool: {} params: {}", tool_name, params),
+            "next_state_observation": next_state.to_string(),
+            "reward": reward,
+            "done": true,
+            "domain": "tool_execution",
+            "confidence": 1.0f32,
+            "source_dataset_id": "tools_registry",
+        })
+    }
+
+    /// Executes tool and bundles the resulting environment transition record for World Model ingestion.
+    pub fn execute_tool_with_transition(
+        &self,
+        tool_name: &str,
+        params: serde_json::Value,
+        actor_id: &str,
+        repo_root: &str,
+    ) -> (serde_json::Value, serde_json::Value) {
+        let result = self.execute_tool(tool_name, params.clone(), actor_id, repo_root);
+        let trans = self.build_tool_transition_record(tool_name, &params, &result, actor_id);
+        (result, trans)
+    }
+
     /// List all registered tool names.
     pub fn list_tools(&self) -> Vec<String> {
         let guard = self.tools.lock().unwrap_or_else(|p| p.into_inner());

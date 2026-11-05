@@ -83,6 +83,90 @@ impl WorldStateTracker {
         }
         Ok(count)
     }
+
+    /// Projects all active ground-truth world-state entities into a continuous latent vector
+    /// aligned with the Neural World Model's `latent_dim`.
+    pub fn to_latent_vector(&self, target_dim: usize) -> Vec<f32> {
+        let lock = self.entities.lock().unwrap_or_else(|p| p.into_inner());
+        let mut vec = vec![0.0f32; target_dim];
+        if lock.is_empty() {
+            return vec;
+        }
+
+        // Sort keys for deterministic, canonical alignment
+        let mut keys: Vec<&String> = lock.keys().collect();
+        keys.sort();
+
+        let num_entities = keys.len();
+        for (idx, key) in keys.iter().enumerate() {
+            let offset = (idx * 64) % target_dim;
+            let val = &lock[*key];
+
+            // 1. Continuous hash/embedding of the entity key
+            let key_bytes = key.as_bytes();
+            for (b_i, &b) in key_bytes.iter().enumerate() {
+                let pos = (offset + b_i) % target_dim;
+                let freq = (b as f32 * 0.05).sin();
+                vec[pos] += freq / (num_entities as f32).sqrt();
+            }
+
+            // 2. Numerical reality features extraction
+            if let Some(obj) = val.as_object() {
+                for (attr_k, attr_v) in obj {
+                    let attr_idx = (offset + attr_k.len() * 7) % target_dim;
+                    if let Some(num) = attr_v.as_f64() {
+                        let normalized = (num as f32).tanh();
+                        vec[attr_idx] += normalized / (num_entities as f32).sqrt();
+                    } else if let Some(b) = attr_v.as_bool() {
+                        let flag = if b { 1.0f32 } else { -1.0f32 };
+                        vec[attr_idx] += flag / (num_entities as f32).sqrt();
+                    } else if let Some(s) = attr_v.as_str() {
+                        let s_bytes = s.as_bytes();
+                        let s_len = s_bytes.len().min(32);
+                        for i in 0..s_len {
+                            let p = (attr_idx + i) % target_dim;
+                            vec[p] += ((s_bytes[i] as f32) * 0.01).cos() / (num_entities as f32).sqrt();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Normalize to unit sphere for stable neural latent dynamics
+        let norm = vec.iter().map(|&v| v * v).sum::<f32>().sqrt();
+        if norm > 1e-6 {
+            let inv = 1.0 / norm;
+            for v in vec.iter_mut() {
+                *v *= inv;
+            }
+        }
+        vec
+    }
+
+    /// Closes the cognitive loop by updating reality state tracker entities from
+    /// predicted Neural World Model dynamic transitions.
+    pub fn update_from_latent_transition(
+        &self,
+        entity_id: &str,
+        predicted_reward: f32,
+        failure_probability: f32,
+        viable: bool,
+        confidence: f32,
+        expected_value: f32,
+    ) {
+        let entry = json!({
+            "predicted_reward": predicted_reward,
+            "failure_probability": failure_probability,
+            "viable": viable,
+            "confidence": confidence,
+            "expected_value": expected_value,
+            "timestamp_ms": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64
+        });
+        self.update_entity(entity_id, entry);
+    }
 }
 
 fn write_json_atomically(target_file: &Path, val: &Value) -> std::io::Result<()> {
@@ -130,5 +214,26 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_world_state_latent_bridge_and_transition_updates() {
+        let tracker = WorldStateTracker::new();
+        tracker.update_entity("sandbox_status", json!({"active": true, "exit_code": 0, "latency_ms": 14.5}));
+        tracker.update_entity("hardware_telemetry", json!({"cpu_percent": 42.0, "memory_mb": 512}));
+
+        // 1. Verify continuous entity-to-latent projection
+        let latent_dim = 2048;
+        let s_t = tracker.to_latent_vector(latent_dim);
+        assert_eq!(s_t.len(), latent_dim);
+        let norm: f32 = s_t.iter().map(|&v| v * v).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-4, "latent vector must be normalized to unit sphere");
+
+        // 2. Verify closed-loop dynamic transition update
+        tracker.update_from_latent_transition("action_result:cargo_check", 0.95, 0.02, true, 0.98, 1.4);
+        let updated = tracker.get_entity("action_result:cargo_check").expect("entity updated");
+        assert_eq!(updated["viable"], true);
+        assert!((updated["failure_probability"].as_f64().unwrap() - 0.02).abs() < 1e-4);
+        assert!((updated["predicted_reward"].as_f64().unwrap() - 0.95).abs() < 1e-4);
     }
 }

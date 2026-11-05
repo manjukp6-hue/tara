@@ -828,7 +828,7 @@ impl WorldModel {
         // Analytical gradient update for Latent Transition Head using true contextualized state activation:
         // \hat{s}_{t+1} = s_t + tanh(W_next * h_state)
         let s_dim = self.config.latent_dim;
-        let mut d_h = vec![0.0f32; h_dim];
+        let mut d_h_state = vec![0.0f32; h_dim];
         for i in 0..s_dim {
             let diff_s = transition.next_latent[i] - real_next_state[i];
             let delta_tanh = transition.next_latent[i] - current_state[i];
@@ -837,8 +837,14 @@ impl WorldModel {
             for j in 0..h_dim {
                 let grad = (dt * h_state[j]).clamp(-1.0, 1.0);
                 self.w_next_state[row_offset + j] -= lr * grad;
-                d_h[j] += dt * self.w_next_state[row_offset + j];
+                d_h_state[j] += dt * self.w_next_state[row_offset + j];
             }
+        }
+
+        // Action representation gradient combining reward error and viability failure error:
+        let mut d_h_action = vec![0.0f32; h_dim];
+        for j in 0..h_dim {
+            d_h_action[j] = (dr_act * self.w_reward[j] + df_act * self.w_fail[j]).clamp(-1.0, 1.0);
         }
 
         // Backpropagate error into the Transformer backbone layers via Native LoRA adapters (Rule 15)
@@ -851,7 +857,7 @@ impl WorldModel {
             let r = layer.lora_rank;
             let lora_lr = lr * layer.lora_scale * 0.05;
 
-            // Gradient w.r.t B_q: dL/dB_q = d_h * z_a^T where z_a = h_state * A_q^T
+            // Gradient w.r.t B_q: dL/dB_q = d_h_state * z_a^T where z_a = h_state * A_q^T
             let mut za_q = vec![0.0f32; r];
             for k in 0..r {
                 let a_row = &layer.lora_q_a[k * h_dim..(k + 1) * h_dim];
@@ -863,7 +869,7 @@ impl WorldModel {
             }
 
             for o in 0..q_dim {
-                let grad_out = d_h[o % h_dim];
+                let grad_out = d_h_state[o % h_dim];
                 for k in 0..r {
                     let grad_b = (grad_out * za_q[k]).clamp(-1.0, 1.0);
                     layer.lora_q_b[o * r + k] -= lora_lr * grad_b;
@@ -873,7 +879,7 @@ impl WorldModel {
             for k in 0..r {
                 let mut d_za = 0.0f32;
                 for o in 0..q_dim {
-                    d_za += d_h[o % h_dim] * layer.lora_q_b[o * r + k];
+                    d_za += d_h_state[o % h_dim] * layer.lora_q_b[o * r + k];
                 }
                 for d_i in 0..h_dim {
                     let grad_a = (d_za * h_state[d_i]).clamp(-1.0, 1.0);
@@ -881,7 +887,7 @@ impl WorldModel {
                 }
             }
 
-            // Gradient w.r.t B_v: dL/dB_v = d_h * z_v^T where z_v = h_action * A_v^T
+            // Gradient w.r.t B_v: dL/dB_v = d_h_action * z_v^T where z_v = h_action * A_v^T
             let mut za_v = vec![0.0f32; r];
             for k in 0..r {
                 let a_row = &layer.lora_v_a[k * h_dim..(k + 1) * h_dim];
@@ -893,7 +899,7 @@ impl WorldModel {
             }
 
             for o in 0..kv_dim {
-                let grad_out = d_h[o % h_dim];
+                let grad_out = d_h_action[o % h_dim];
                 for k in 0..r {
                     let grad_b = (grad_out * za_v[k]).clamp(-1.0, 1.0);
                     layer.lora_v_b[o * r + k] -= lora_lr * grad_b;
@@ -903,7 +909,7 @@ impl WorldModel {
             for k in 0..r {
                 let mut d_za = 0.0f32;
                 for o in 0..kv_dim {
-                    d_za += d_h[o % h_dim] * layer.lora_v_b[o * r + k];
+                    d_za += d_h_action[o % h_dim] * layer.lora_v_b[o * r + k];
                 }
                 for d_i in 0..h_dim {
                     let grad_a = (d_za * h_action[d_i]).clamp(-1.0, 1.0);
@@ -1014,6 +1020,26 @@ impl WorldModel {
                         layer.down_proj.clone_from(t);
                     }
                 }
+                if let Some(t) = tensors.get(&format!("{}.self_attn.lora_q_a.weight", prefix)) {
+                    if t.len() == layer.lora_q_a.len() {
+                        layer.lora_q_a.clone_from(t);
+                    }
+                }
+                if let Some(t) = tensors.get(&format!("{}.self_attn.lora_q_b.weight", prefix)) {
+                    if t.len() == layer.lora_q_b.len() {
+                        layer.lora_q_b.clone_from(t);
+                    }
+                }
+                if let Some(t) = tensors.get(&format!("{}.self_attn.lora_v_a.weight", prefix)) {
+                    if t.len() == layer.lora_v_a.len() {
+                        layer.lora_v_a.clone_from(t);
+                    }
+                }
+                if let Some(t) = tensors.get(&format!("{}.self_attn.lora_v_b.weight", prefix)) {
+                    if t.len() == layer.lora_v_b.len() {
+                        layer.lora_v_b.clone_from(t);
+                    }
+                }
             }
 
             if let Some(t) = tensors.get("norm.weight") {
@@ -1069,10 +1095,12 @@ impl WorldModel {
         let p = dir.as_ref();
         fs::create_dir_all(p)?;
 
-        // Save config
+        // Save config in both canonical names for universal tooling and engine compatibility
         let cfg_path = p.join("world_model_config.json");
+        let alt_cfg_path = p.join("config.json");
         let cfg_str = serde_json::to_string_pretty(&self.config)?;
-        fs::write(cfg_path, cfg_str)?;
+        fs::write(&cfg_path, &cfg_str)?;
+        fs::write(&alt_cfg_path, &cfg_str)?;
 
         // Save tensors
         let mut tensors = HashMap::new();
@@ -1110,6 +1138,20 @@ impl WorldModel {
 
             tensors.insert(format!("{}.self_attn.o_proj.weight", prefix), layer.o_proj.clone());
             shapes.insert(format!("{}.self_attn.o_proj.weight", prefix), vec![h, q_dim]);
+
+            if layer.lora_rank > 0 && !layer.lora_q_a.is_empty() {
+                tensors.insert(format!("{}.self_attn.lora_q_a.weight", prefix), layer.lora_q_a.clone());
+                shapes.insert(format!("{}.self_attn.lora_q_a.weight", prefix), vec![layer.lora_rank, h]);
+
+                tensors.insert(format!("{}.self_attn.lora_q_b.weight", prefix), layer.lora_q_b.clone());
+                shapes.insert(format!("{}.self_attn.lora_q_b.weight", prefix), vec![q_dim, layer.lora_rank]);
+
+                tensors.insert(format!("{}.self_attn.lora_v_a.weight", prefix), layer.lora_v_a.clone());
+                shapes.insert(format!("{}.self_attn.lora_v_a.weight", prefix), vec![layer.lora_rank, h]);
+
+                tensors.insert(format!("{}.self_attn.lora_v_b.weight", prefix), layer.lora_v_b.clone());
+                shapes.insert(format!("{}.self_attn.lora_v_b.weight", prefix), vec![kv_dim, layer.lora_rank]);
+            }
 
             tensors.insert(format!("{}.post_attention_layernorm.weight", prefix), layer.post_attention_layernorm.clone());
             shapes.insert(format!("{}.post_attention_layernorm.weight", prefix), vec![h]);
@@ -1249,6 +1291,10 @@ mod tests {
         assert_eq!(wm1.w_action, wm2.w_action);
         assert_eq!(wm1.layers.len(), wm2.layers.len());
         assert_eq!(wm1.layers[0].q_proj, wm2.layers[0].q_proj);
+        assert_eq!(wm1.layers[0].lora_q_a, wm2.layers[0].lora_q_a);
+        assert_eq!(wm1.layers[0].lora_q_b, wm2.layers[0].lora_q_b);
+        assert_eq!(wm1.layers[0].lora_v_a, wm2.layers[0].lora_v_a);
+        assert_eq!(wm1.layers[0].lora_v_b, wm2.layers[0].lora_v_b);
         assert_eq!(wm1.w_reward, wm2.w_reward);
         assert!((wm1.b_reward - wm2.b_reward).abs() < 1e-6);
 
@@ -1350,6 +1396,29 @@ mod tests {
         let test_action = vec![0.02f32; 512];
         let step = wm.predict_step(&test_state, &test_action).expect("predict_step on on-disk model succeeds");
         assert_eq!(step.next_latent.len(), 2048);
+        assert!(step.predicted_reward.is_finite());
+        assert!(step.failure_probability >= 0.0 && step.failure_probability <= 1.0);
+        assert!(step.expected_value.is_finite());
+        assert!(step.confidence > 0.0);
+    }
+
+    #[test]
+    fn test_transformer_world_model_load_python_checkpoint() {
+        let p = std::path::Path::new("target/test_wm_run");
+        if !p.exists() || !p.join("model.safetensors.index.json").exists() {
+            return;
+        }
+
+        let wm = WorldModel::load_from_dir(p).expect("loading python-exported sharded World Model succeeds");
+        assert_eq!(wm.config.latent_dim, 64);
+        assert_eq!(wm.config.hidden_size, 64);
+        assert_eq!(wm.config.action_dim, 32);
+        assert_eq!(wm.layers.len(), 2);
+
+        let test_state = vec![0.05f32; 64];
+        let test_action = vec![0.02f32; 32];
+        let step = wm.predict_step(&test_state, &test_action).expect("predict_step on python-trained model succeeds");
+        assert_eq!(step.next_latent.len(), 64);
         assert!(step.predicted_reward.is_finite());
         assert!(step.failure_probability >= 0.0 && step.failure_probability <= 1.0);
         assert!(step.expected_value.is_finite());

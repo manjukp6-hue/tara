@@ -15,6 +15,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 from typing import Dict, List, Optional, Tuple
 
@@ -221,12 +222,16 @@ class NeuralWorldModel(nn.Module):
             "horizon_limit": self.horizon_limit,
         }
 
-    def save_checkpoint(self, output_dir: str):
+    def save_checkpoint(self, output_dir: str, max_shard_mb: int = 480):
         os.makedirs(output_dir, exist_ok=True)
 
+        cfg_dict = self.get_config()
         cfg_path = os.path.join(output_dir, "world_model_config.json")
+        alt_cfg_path = os.path.join(output_dir, "config.json")
         with open(cfg_path, "w", encoding="utf-8") as f:
-            json.dump(self.get_config(), f, indent=2)
+            json.dump(cfg_dict, f, indent=2)
+        with open(alt_cfg_path, "w", encoding="utf-8") as f:
+            json.dump(cfg_dict, f, indent=2)
 
         tensor_dict = {
             "input_proj.state_proj.weight": self.state_proj.weight.detach().cpu().contiguous(),
@@ -254,28 +259,187 @@ class NeuralWorldModel(nn.Module):
             tensor_dict[f"{p}.mlp.up_proj.weight"] = layer.up_proj.weight.detach().cpu().contiguous()
             tensor_dict[f"{p}.mlp.down_proj.weight"] = layer.down_proj.weight.detach().cpu().contiguous()
 
-        weights_path = os.path.join(output_dir, "world_model_dynamics.safetensors")
+        # 1. Monolithic weights file for backwards compatibility
+        monolithic_path = os.path.join(output_dir, "world_model_dynamics.safetensors")
         if HAS_SAFETENSORS:
-            save_safetensors(tensor_dict, weights_path)
+            save_safetensors(tensor_dict, monolithic_path)
         else:
-            torch.save(tensor_dict, weights_path.replace(".safetensors", ".pt"))
+            torch.save(tensor_dict, monolithic_path.replace(".safetensors", ".pt"))
+
+        # 2. Canonical Part-Wise Sharded SafeTensors format with model.safetensors.index.json (Rule 20)
+        if HAS_SAFETENSORS:
+            max_shard_bytes = max_shard_mb * 1024 * 1024
+            shards: List[Dict[str, torch.Tensor]] = [{}]
+            cur_shard_bytes = 0
+            weight_map: Dict[str, str] = {}
+            total_size = 0
+
+            # Deterministic sorted key iteration
+            for name in sorted(tensor_dict.keys()):
+                tensor = tensor_dict[name]
+                t_bytes = tensor.numel() * tensor.element_size()
+                total_size += t_bytes
+
+                if cur_shard_bytes > 0 and (cur_shard_bytes + t_bytes > max_shard_bytes):
+                    shards.append({})
+                    cur_shard_bytes = 0
+
+                shard_idx = len(shards)
+                shard_name = f"world_model-{shard_idx:05d}.safetensors"
+                shards[-1][name] = tensor
+                weight_map[name] = shard_name
+                cur_shard_bytes += t_bytes
+
+            num_shards = len(shards)
+            for s_idx, shard_tensors in enumerate(shards, start=1):
+                s_filename = f"world_model-{s_idx:05d}.safetensors"
+                s_path = os.path.join(output_dir, s_filename)
+                save_safetensors(shard_tensors, s_path)
+
+            index_dict = {
+                "metadata": {"total_size": total_size},
+                "weight_map": weight_map,
+            }
+            index_path = os.path.join(output_dir, "model.safetensors.index.json")
+            with open(index_path, "w", encoding="utf-8") as f:
+                json.dump(index_dict, f, indent=2)
+
+
+def project_tokens_to_latent(
+    tokens: List[int],
+    target_dim: int,
+    rope_theta: float = 500000.0,
+) -> torch.Tensor:
+    """
+    Continuous Rotary Frequency Token Projection:
+    100% Mathematical Parity with Rust 'project_tokens_to_latent' in world_model.rs.
+    Maps discrete token or UTF-8 byte sequences into continuous normalized latent vectors.
+    """
+    if not tokens:
+        return torch.zeros(target_dim, dtype=torch.float32)
+
+    half_dim = target_dim // 2
+    tok_tensor = torch.tensor(tokens, dtype=torch.float32)
+    pos = torch.arange(len(tokens), dtype=torch.float32)
+    val_pos = tok_tensor * 0.01 + pos
+
+    idx = torch.arange(half_dim, dtype=torch.float32)
+    freq = 1.0 / (rope_theta ** ((2.0 * idx) / target_dim))
+
+    angles = val_pos.unsqueeze(1) * freq.unsqueeze(0)
+    sin_comp = torch.sin(angles).sum(dim=0)
+    cos_comp = torch.cos(angles).sum(dim=0)
+
+    vec = torch.empty(target_dim, dtype=torch.float32)
+    vec[0::2] = sin_comp
+    vec[1::2] = cos_comp
+
+    norm = torch.norm(vec).item()
+    if norm > 1e-6:
+        vec = vec / norm
+    return vec
+
+
+def extract_transition_payload(rec: Dict) -> Optional[Tuple[Any, Any, Any, float, float, float]]:
+    """
+    Extracts authentic (state, action, next_state, reward, failed, return) from diverse record formats:
+    - Pre-vectorized numerical vectors
+    - Structured (state_observation, action, next_state_observation)
+    - Nested 'state_transition' objects
+    - Curriculum and derivation traces
+    """
+    if not isinstance(rec, dict):
+        return None
+
+    t_obj = rec.get("state_transition") if isinstance(rec.get("state_transition"), dict) else rec
+
+    # 1. Direct vector or string observations
+    s = t_obj.get("state") or t_obj.get("state_observation") or t_obj.get("observation")
+    a = t_obj.get("action") or t_obj.get("intervention")
+    ns = t_obj.get("next_state") or t_obj.get("next_state_observation") or t_obj.get("subsequent_state")
+
+    # 2. Derivation trace extraction (from agi_causal_transitions)
+    if not (s and a and ns):
+        deriv = str(rec.get("derivation", ""))
+        if "State observation" in deriv or "State s" in deriv:
+            m = re.search(
+                r"State(?:\s+observation)?:\s*(.+?)\.\s*Action:\s*(.+?)\.\s*Next(?:\s+state)?(?:\s+observation)?:\s*(.+?)(?:\.\s*Reward:|$)",
+                deriv,
+                re.DOTALL | re.IGNORECASE,
+            )
+            if m:
+                s, a, ns = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+
+    # 3. Fallback to concept / definition / formula transitions
+    if not (s and a and ns):
+        if rec.get("domain") == "agi_causal_transitions" or "transition" in str(rec.get("concept", "")).lower():
+            s = str(rec.get("definition", rec.get("concept", rec.get("input", ""))))[:512].strip()
+            a = str(rec.get("formula", rec.get("subject", "causal_transition")))[:256].strip()
+            ns = str(rec.get("derivation", rec.get("explanation", rec.get("output", ""))))[:1024].strip()
+
+    if not s or not a or not ns:
+        return None
+
+    # Rewards & Viability
+    try:
+        r = float(t_obj.get("reward", rec.get("reward", 0.0)))
+    except (ValueError, TypeError):
+        r = 0.0
+
+    done_flag = bool(t_obj.get("done", rec.get("done", False)))
+    failed_raw = t_obj.get("failed", rec.get("failed", t_obj.get("is_failure", rec.get("is_failure"))))
+    if failed_raw is not None:
+        failed = 1.0 if bool(failed_raw) else 0.0
+    elif done_flag and r < 0.0:
+        failed = 1.0
+    else:
+        failed = 0.0
+
+    ret_raw = t_obj.get("return", rec.get("return"))
+    try:
+        ret = float(ret_raw) if ret_raw is not None else r
+    except (ValueError, TypeError):
+        ret = r
+
+    return s, a, ns, r, failed, ret
 
 
 class StateTransitionDataset(Dataset):
-    def __init__(self, data_path: str, latent_dim: int = 256, action_dim: int = 64):
+    def __init__(
+        self,
+        data_path: str,
+        latent_dim: int = 2048,
+        action_dim: int = 512,
+        tokenizer: Optional[Any] = None,
+    ):
         self.latent_dim = latent_dim
         self.action_dim = action_dim
+        self.tokenizer = tokenizer
         self.records: List[Dict] = []
 
-        if os.path.exists(data_path):
-            if os.path.isdir(data_path):
-                for root, _, files in os.walk(data_path):
-                    for f in files:
-                        if f.endswith(".jsonl") and ("world" in f.lower() or "wm_" in f.lower()):
-                            self._load_file(os.path.join(root, f))
-            else:
-                self._load_file(data_path)
+        candidate_dirs = [data_path]
+        if os.path.isdir(data_path):
+            candidate_dirs.append(os.path.join(data_path, "curriculum"))
+            candidate_dirs.append(os.path.join(data_path, "transitions"))
 
+        visited_files = set()
+        for c_dir in candidate_dirs:
+            if not os.path.exists(c_dir):
+                continue
+            if os.path.isfile(c_dir):
+                if c_dir not in visited_files:
+                    visited_files.add(c_dir)
+                    self._load_file(c_dir)
+            else:
+                for root, _, files in os.walk(c_dir):
+                    for f in files:
+                        if f.endswith(".jsonl"):
+                            fp = os.path.join(root, f)
+                            if fp not in visited_files:
+                                visited_files.add(fp)
+                                self._load_file(fp)
+
+        # Fail-closed validation against synthetic fallbacks or empty datasets
         if not self.records:
             raise FileNotFoundError(
                 f"No authentic state transition records found at '{data_path}'. "
@@ -283,30 +447,75 @@ class StateTransitionDataset(Dataset):
             )
 
     def _load_file(self, file_path: str):
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
                 try:
                     obj = json.loads(line)
-                    if "state" in obj and "next_state" in obj:
-                        self.records.append(obj)
+                    parsed = extract_transition_payload(obj)
+                    if parsed is not None:
+                        s, a, ns, r, failed, ret = parsed
+                        self.records.append({
+                            "s": s,
+                            "a": a,
+                            "ns": ns,
+                            "r": r,
+                            "failed": failed,
+                            "ret": ret,
+                        })
                 except json.JSONDecodeError:
                     continue
 
     def __len__(self) -> int:
         return len(self.records)
 
+    def _encode_feature(self, val: Any, target_dim: int) -> torch.Tensor:
+        if isinstance(val, (list, tuple)):
+            if len(val) == target_dim:
+                return torch.tensor(val, dtype=torch.float32)
+            elif len(val) > 0 and all(isinstance(x, (int, float)) for x in val):
+                t = torch.tensor(val, dtype=torch.float32)
+                if len(t) < target_dim:
+                    return F.pad(t, (0, target_dim - len(t)))
+                else:
+                    return t[:target_dim]
+        elif isinstance(val, torch.Tensor):
+            if val.numel() == target_dim:
+                return val.view(-1).float()
+
+        # String observation encoding into continuous latent vector
+        text = str(val)
+        if self.tokenizer is not None and hasattr(self.tokenizer, "encode"):
+            try:
+                res = self.tokenizer.encode(text)
+                tokens = res.ids if hasattr(res, "ids") else list(res)
+            except Exception:
+                tokens = [b for b in text.encode("utf-8")]
+        else:
+            tokens = [b for b in text.encode("utf-8")]
+
+        return project_tokens_to_latent(tokens, target_dim)
+
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         rec = self.records[idx]
-        s = torch.tensor(rec.get("state", [0.0] * self.latent_dim), dtype=torch.float32)
-        a = torch.tensor(rec.get("action", [0.0] * self.action_dim), dtype=torch.float32)
-        ns = torch.tensor(rec.get("next_state", [0.0] * self.latent_dim), dtype=torch.float32)
-        r = torch.tensor(rec.get("reward", 0.0), dtype=torch.float32)
-        failed = torch.tensor(rec.get("failed", 0.0), dtype=torch.float32)
-        ret = torch.tensor(rec.get("return", 0.0), dtype=torch.float32)
-        return {"state": s, "action": a, "next_state": ns, "reward": r, "failed": failed, "return": ret}
+        if "s_tensor" not in rec:
+            rec["s_tensor"] = self._encode_feature(rec["s"], self.latent_dim)
+            rec["a_tensor"] = self._encode_feature(rec["a"], self.action_dim)
+            rec["ns_tensor"] = self._encode_feature(rec["ns"], self.latent_dim)
+            rec["r_tensor"] = torch.tensor(rec["r"], dtype=torch.float32)
+            rec["failed_tensor"] = torch.tensor(rec["failed"], dtype=torch.float32)
+            rec["ret_tensor"] = torch.tensor(rec["ret"], dtype=torch.float32)
+
+        return {
+            "state": rec["s_tensor"],
+            "action": rec["a_tensor"],
+            "next_state": rec["ns_tensor"],
+            "reward": rec["r_tensor"],
+            "failed": rec["failed_tensor"],
+            "return": rec["ret_tensor"],
+        }
 
 
 def train_world_model_gpu(args):

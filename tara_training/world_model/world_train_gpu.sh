@@ -2,7 +2,11 @@
 set -euo pipefail
 
 # Standalone World Model GPU Training Launcher for Colab / Kaggle
-DATA_PATH="${1:-storage/datasets/08_commonsense_world_model}"
+DEFAULT_DATA="storage/datasets/curriculum/agi_causal_transitions.jsonl"
+if [ ! -f "$DEFAULT_DATA" ]; then
+    DEFAULT_DATA="storage/datasets"
+fi
+DATA_PATH="${1:-$DEFAULT_DATA}"
 OUTPUT_DIR="${2:-storage/models/tara_world_model}"
 EPOCHS="${3:-10}"
 BATCH_SIZE="${4:-64}"

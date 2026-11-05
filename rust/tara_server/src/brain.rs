@@ -2312,62 +2312,92 @@ impl TaraBrain {
                             .unwrap_or_else(|e| e.into_inner());
                         let step_names: Vec<String> =
                             steps.iter().map(|s| s.target_name.clone()).collect();
-                        let root_state = format!("plan_{}", step_names.join("_"));
                         let n_steps = steps.len();
-                        let best_path = mcts.search(
-                            &root_state,
-                            |state| {
-                                steps
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(idx, s)| {
-                                        let next_st = if self.is_world_model_loaded() {
-                                            self.simulate_world_transition(state, &s.target_name, 32)
-                                                .unwrap_or_else(|_| format!("{}_{}", state, idx))
-                                        } else {
-                                            format!("{}_{}", state, idx)
-                                        };
-                                        (
-                                            s.target_name.clone(),
-                                            next_st,
-                                            1.0 / (n_steps as f64),
-                                        )
-                                    })
-                                    .collect()
-                            },
-                            |state| {
-                                // Dynamic state evaluation based on capability existence and execution guard policies
-                                let mut score = 0.5f64;
-                                for s in &steps {
-                                    if state.contains(&s.target_name) {
-                                        let has_cap = self.tool_registry.list_tools().contains(&s.target_name)
-                                            || self.skill_engine.list_skills().contains(&s.target_name)
-                                            || self.capability_registry.get_capability(&s.target_name).is_some();
-                                        if has_cap {
-                                            score += 0.25;
-                                        }
-                                        let mut preflight_ctx = HashMap::new();
-                                        preflight_ctx.insert("actor_id".to_string(), json!(actor_id));
-                                        preflight_ctx.insert("target".to_string(), json!(s.target_name));
-                                        preflight_ctx.insert("parameters".to_string(), s.parameters.clone());
-                                        let dec = self.guard.evaluate_action(&s.action_intent, &preflight_ctx);
-                                        if dec.decision == "ALLOW" {
-                                            score += 0.25;
-                                        } else {
-                                            score -= 0.5;
-                                        }
-                                        if state.contains("ERROR")
-                                            || state.contains("FAILED")
-                                            || state.contains("PANIC")
-                                            || state.contains("TIMEOUT")
-                                        {
-                                            score -= 0.35;
+
+                        // If Native Latent World Model is loaded, execute genuine Continuous Latent MCTS
+                        let native_wm_opt = self.native_world_model.read().ok().and_then(|g| g.clone());
+                        let best_path = if let Some(nwm) = native_wm_opt {
+                            let tok_guard = self.tokenizer.read().ok();
+                            let tok_ref = tok_guard.as_ref().and_then(|g| g.as_ref());
+                            let initial_latent = {
+                                let act_lat = self.cognitive.world_state.to_latent_vector(nwm.config.latent_dim);
+                                let norm: f32 = act_lat.iter().map(|v| v * v).sum::<f32>().sqrt();
+                                if norm > 1e-6 {
+                                    act_lat
+                                } else {
+                                    nwm.encode_state_str(input_text, tok_ref)
+                                }
+                            };
+
+                            mcts.search_latent(
+                                &initial_latent,
+                                &step_names,
+                                |parent_latent, _idx, act_name| {
+                                    let a_t = nwm.encode_action_str(act_name, tok_ref);
+                                    match nwm.predict_step(parent_latent, &a_t) {
+                                        Ok(step_res) => (
+                                            step_res.next_latent,
+                                            step_res.predicted_reward as f64,
+                                            step_res.failure_probability as f64,
+                                            step_res.expected_value as f64,
+                                            step_res.viable,
+                                        ),
+                                        Err(_) => (parent_latent.to_vec(), 0.0, 1.0, 0.0, false),
+                                    }
+                                },
+                            )
+                        } else {
+                            let root_state = format!("plan_{}", step_names.join("_"));
+                            mcts.search(
+                                &root_state,
+                                |state| {
+                                    steps
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(idx, s)| {
+                                            let next_st = format!("{}_{}_{}", state, s.target_name, idx);
+                                            (
+                                                s.target_name.clone(),
+                                                next_st,
+                                                1.0 / (n_steps as f64),
+                                            )
+                                        })
+                                        .collect()
+                                },
+                                |state| {
+                                    // Dynamic state evaluation based on capability existence and execution guard policies
+                                    let mut score = 0.5f64;
+                                    for s in &steps {
+                                        if state.contains(&s.target_name) {
+                                            let has_cap = self.tool_registry.list_tools().contains(&s.target_name)
+                                                || self.skill_engine.list_skills().contains(&s.target_name)
+                                                || self.capability_registry.get_capability(&s.target_name).is_some();
+                                            if has_cap {
+                                                score += 0.25;
+                                            }
+                                            let mut preflight_ctx = HashMap::new();
+                                            preflight_ctx.insert("actor_id".to_string(), json!(actor_id));
+                                            preflight_ctx.insert("target".to_string(), json!(s.target_name));
+                                            preflight_ctx.insert("parameters".to_string(), s.parameters.clone());
+                                            let dec = self.guard.evaluate_action(&s.action_intent, &preflight_ctx);
+                                            if dec.decision == "ALLOW" {
+                                                score += 0.25;
+                                            } else {
+                                                score -= 0.5;
+                                            }
+                                            if state.contains("ERROR")
+                                                || state.contains("FAILED")
+                                                || state.contains("PANIC")
+                                                || state.contains("TIMEOUT")
+                                            {
+                                                score -= 0.35;
+                                            }
                                         }
                                     }
-                                }
-                                score.clamp(0.0, 1.0)
-                            },
-                        );
+                                    score.clamp(0.0, 1.0)
+                                },
+                            )
+                        };
 
                         if !best_path.is_empty() {
                             let mut reordered = Vec::new();

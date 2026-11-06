@@ -17,13 +17,17 @@ echo "==========================================================================
 echo "  TARA CLOUD TRAINING PIPELINE (AUTONOMOUS STANDALONE RUNNER)"
 echo "=============================================================================="
 
-# 0. Proactive Disk Hygiene
-echo "[DISK CLEANUP] Reclaiming disk space from caches and temporary files..."
-rm -rf /tmp/tara_* /tmp/tmp_tara_* 2>/dev/null || true
-rm -rf /root/.cache/pip /root/.cache/torch /root/.cache/huggingface 2>/dev/null || true
-if command -v apt-get >/dev/null 2>&1; then
-    apt-get clean 2>/dev/null || true
-    rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+# 0. Optional Disk Hygiene
+if [ "${TARA_CLEAN_TRAINING_CACHES:-0}" = "1" ]; then
+    echo "[DISK CLEANUP] Explicit cache cleanup enabled."
+    rm -rf /tmp/tara_* /tmp/tmp_tara_* 2>/dev/null || true
+    rm -rf /root/.cache/pip /root/.cache/torch /root/.cache/huggingface 2>/dev/null || true
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get clean 2>/dev/null || true
+        rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+    fi
+else
+    echo "[DISK] Retaining package, model, and dataset caches for reuse. Set TARA_CLEAN_TRAINING_CACHES=1 to opt into cleanup."
 fi
 if command -v df >/dev/null 2>&1; then
     df -h / | awk 'NR==2 {print "[DISK] Available disk space: " $4 " free / " $2 " total (" $5 " used)"}'
@@ -83,7 +87,7 @@ GRAD_ACCUM="${GRAD_ACCUM:-$DEFAULT_ACCUM}"
 OPTIMIZER_TYPE="${OPTIMIZER:-$DEFAULT_OPTIM}"
 LR="${LR:-3e-4}"
 EPOCHS="${EPOCHS:-1}"
-STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-1000}"
+STAGE_MAX_STEPS="${STAGE_MAX_STEPS:-20000}"
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-100}"
 GRADIENT_CHECKPOINTING="${GRADIENT_CHECKPOINTING:-1}"
 GRAD_CHECKPOINT_FLAG=""

@@ -76,7 +76,7 @@ elif [ -n "$GPU_MEM_MB" ] && [ "$GPU_MEM_MB" -ge 12000 ] 2>/dev/null; then
         DEFAULT_BATCH=1
         DEFAULT_ACCUM=16
         DEFAULT_SEQ_LEN=2048
-        DEFAULT_CHECKPOINT_INTERVAL=500
+        DEFAULT_CHECKPOINT_INTERVAL=1000
         echo "[HARDWARE] Multi-GPU ($GPU_COUNT x $GPU_NAME) detected. Micro-Batch=$DEFAULT_BATCH/GPU Accum=$DEFAULT_ACCUM SeqLen=$DEFAULT_SEQ_LEN CheckpointInterval=$DEFAULT_CHECKPOINT_INTERVAL."
     else
         # Single GPU (e.g. Google Colab free Tesla T4):
@@ -98,7 +98,7 @@ fi
 # Fallback checkpoint interval logic: 500 for Dual/Multi-GPU, 100 for Single GPU
 if [ -z "${DEFAULT_CHECKPOINT_INTERVAL:-}" ]; then
     if [ "$GPU_COUNT" -ge 2 ] 2>/dev/null; then
-        DEFAULT_CHECKPOINT_INTERVAL=500
+        DEFAULT_CHECKPOINT_INTERVAL=1000
     else
         DEFAULT_CHECKPOINT_INTERVAL=100
     fi

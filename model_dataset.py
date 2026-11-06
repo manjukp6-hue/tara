@@ -1860,20 +1860,44 @@ class TaraStreamingJsonlDataset(IterableDataset):
         if ext == ".parquet":
             try:
                 import pyarrow.parquet as pq
-                pf = pq.ParquetFile(actual_fp)
-                line_idx = 0
-                for batch in pf.iter_batches(batch_size=64):
-                    df = batch.to_pydict()
-                    keys = list(df.keys())
-                    n_rows = len(df[keys[0]]) if keys else 0
-                    for r in range(n_rows):
-                        current_idx = line_idx
-                        line_idx += 1
-                        if should_skip_record(current_idx):
-                            continue
-                        row = {k: df[k][r] for k in keys}
-                        yield current_idx, (current_idx + 1) * 1024, row
-                return
+                use_ram_cache = os.environ.get("TARA_RAM_SHARD_CACHE", "1") == "1"
+                if use_ram_cache:
+                    # In-Memory Shard Table Cache (Option B: Zero-Disk RAM Table Streaming)
+                    table = pq.read_table(actual_fp)
+                    n_rows = table.num_rows
+                    start_idx = 0
+                    if is_resume_target:
+                        start_idx = target_resume_line if target_resume_chunk > 0 else min(n_rows, target_resume_line + 1)
+                    
+                    sliced = table.slice(start_idx)
+                    cur_idx = start_idx
+                    for batch in sliced.to_batches(max_chunksize=2048):
+                        df = batch.to_pydict()
+                        keys = list(df.keys())
+                        batch_rows = len(df[keys[0]]) if keys else 0
+                        for r in range(batch_rows):
+                            row = {k: df[k][r] for k in keys}
+                            yield cur_idx, (cur_idx + 1) * 1024, row
+                            cur_idx += 1
+                    del sliced
+                    del table
+                    gc.collect()
+                    return
+                else:
+                    pf = pq.ParquetFile(actual_fp)
+                    line_idx = 0
+                    for batch in pf.iter_batches(batch_size=64):
+                        df = batch.to_pydict()
+                        keys = list(df.keys())
+                        n_rows = len(df[keys[0]]) if keys else 0
+                        for r in range(n_rows):
+                            current_idx = line_idx
+                            line_idx += 1
+                            if should_skip_record(current_idx):
+                                continue
+                            row = {k: df[k][r] for k in keys}
+                            yield current_idx, (current_idx + 1) * 1024, row
+                    return
             except Exception as pe:
                 print(f"[Parquet Stream Error] {actual_fp}: {pe}", flush=True)
                 return

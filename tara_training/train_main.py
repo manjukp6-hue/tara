@@ -20,6 +20,7 @@ import hashlib
 import json
 import math
 import os
+import queue
 import random
 import re
 import shutil
@@ -282,11 +283,13 @@ def ensure_remote_assets_available(
                             shutil.move(s, d)
                     shutil.rmtree(sub_v2, ignore_errors=True)
 
-                # Purge hidden .cache directories to eliminate duplicate disk usage
-                for d in [model_dir, dataset_dir]:
-                    shutil.rmtree(os.path.join(d, ".cache"), ignore_errors=True)
-                shutil.rmtree(os.path.expanduser("~/.cache/huggingface"), ignore_errors=True)
-                shutil.rmtree(os.path.expanduser("~/.cache/pip"), ignore_errors=True)
+                if os.environ.get("TARA_CLEAN_TRAINING_CACHES", "0") == "1":
+                    # Keep cache cleanup explicit because Hugging Face cache entries can be reused
+                    # across subsequent training and pre-tokenization runs.
+                    for d in [model_dir, dataset_dir]:
+                        shutil.rmtree(os.path.join(d, ".cache"), ignore_errors=True)
+                    shutil.rmtree(os.path.expanduser("~/.cache/huggingface"), ignore_errors=True)
+                    shutil.rmtree(os.path.expanduser("~/.cache/pip"), ignore_errors=True)
 
                 print(f"[High-Speed HF] Dataset shards ready in {dataset_dir}")
             except Exception as e:
@@ -321,7 +324,11 @@ def execute_optimizer_step(
 
     # Mathematically exact token-level gradient normalization:
     # Divides accumulated token-loss sum gradients by the exact total valid tokens across the window.
-    if accum_tokens is not None and accum_tokens > 0:
+    if torch.is_tensor(accum_tokens):
+        for p in model.parameters():
+            if p.grad is not None:
+                p.grad.div_(accum_tokens.to(device=p.grad.device, dtype=p.grad.dtype))
+    elif accum_tokens is not None and accum_tokens > 0:
         for p in model.parameters():
             if p.grad is not None:
                 p.grad.div_(accum_tokens)
@@ -808,6 +815,68 @@ def verify_pretraining_authorization_proof(model_dir: str, checkpoints_dir: str 
 
 
 # Note: upload_promoted_model_to_hf is imported from gdrive_sync
+
+
+class BackgroundRAMPrefetcher:
+    """
+    Asynchronous CPU RAM Prefetch Buffer.
+    Continuously prefetches batches from the DataLoader into Host RAM via a background thread,
+    so GPU compute overlaps 100% with CPU streaming, Parquet reading, and tokenization.
+    Eliminates GPU starvation without multi-processing worker IPC issues.
+    """
+    def __init__(self, iterable, buffer_size: int = 16):
+        self.iterable = iterable
+        self.buffer_size = max(1, buffer_size)
+        self.queue = queue.Queue(maxsize=self.buffer_size)
+        self.stop_event = threading.Event()
+        self.thread = None
+        self._sentinel = object()
+
+    def _worker(self):
+        try:
+            for item in self.iterable:
+                while not self.stop_event.is_set():
+                    try:
+                        self.queue.put(item, timeout=0.1)
+                        break
+                    except queue.Full:
+                        continue
+                if self.stop_event.is_set():
+                    break
+        except Exception as e:
+            self.queue.put((self._sentinel, e))
+        finally:
+            self.queue.put((self._sentinel, None))
+
+    def __iter__(self):
+        self.stop_event.clear()
+        self.thread = threading.Thread(target=self._worker, daemon=True)
+        self.thread.start()
+        return self
+
+    def __next__(self):
+        while not self.stop_event.is_set():
+            try:
+                item = self.queue.get(timeout=0.1)
+                break
+            except queue.Empty:
+                continue
+        if self.stop_event.is_set():
+            raise StopIteration
+        if isinstance(item, tuple) and len(item) == 2 and item[0] is self._sentinel:
+            err = item[1]
+            if err is not None:
+                raise err
+            raise StopIteration
+        return item
+
+    def stop(self):
+        self.stop_event.set()
+        while not self.queue.empty():
+            try:
+                self.queue.get_nowait()
+            except queue.Empty:
+                break
 
 
 # =============================================================================
@@ -1589,6 +1658,12 @@ def main():
         collate_fn=collate_fn,
         pin_memory=(device.type == "cuda"),
     )
+    prefetch_buffer = int(os.environ.get("TARA_PREFETCH_BUFFER", "16"))
+    if prefetch_buffer > 0:
+        train_iter_loader = BackgroundRAMPrefetcher(dataloader, buffer_size=prefetch_buffer)
+        print(f"[Hardware RAM Acceleration] Active Background RAM Prefetch Queue ({prefetch_buffer} batches prefetched in Host RAM).", flush=True)
+    else:
+        train_iter_loader = dataloader
 
     # Setup Best Checkpoint Directory
     best_cp_dir = os.path.join(args.output_dir, "best_checkpoint")
@@ -1615,11 +1690,7 @@ def main():
         world_model.train()
     step = start_step
     running_loss = 0.0
-    accum_loss = 0.0
-    accum_ce = 0.0
-    accum_aux = 0.0
-    accum_world_loss = 0.0
-    accum_tokens = 0
+    accum_metrics = torch.zeros(5, dtype=torch.float64, device=device)
     ema_loss = None
     ema_world_loss = None
     grad_norm_val = 0.0
@@ -1633,9 +1704,10 @@ def main():
             world_optimizer.zero_grad(set_to_none=True)
         accum_batches = []
         accum_world_batches = []
-        for batch_idx, (inputs, labels, cursors) in enumerate(dataloader):
+        for batch_idx, (inputs, labels, cursors) in enumerate(train_iter_loader):
             inputs = inputs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
+            attn_mask = (inputs != 0).long()
 
             if hasattr(torch, "amp") and hasattr(torch.amp, "autocast"):
                 autocast_ctx = torch.amp.autocast(device_type="cuda" if device.type == "cuda" else "cpu", enabled=(device.type == "cuda"), dtype=autocast_dtype)
@@ -1644,12 +1716,9 @@ def main():
 
             try:
                 with autocast_ctx:
-                    attn_mask = (inputs != 0).long() if (inputs == 0).any() else None
                     _, loss, ce_loss, aux_loss = model(inputs, labels=labels, attention_mask=attn_mask)
                     # Causal LM predicts shifted labels: shift_labels = labels[..., 1:]
                     v_tokens = (labels[..., 1:] != -100).sum().clamp(min=1) if labels.dim() > 1 else (labels != -100).sum().clamp(min=1)
-                    effective_tokens = v_tokens.item()
-
                     # Mathematically exact token-weighted gradient scaling:
                     # Backward with sum of token losses (loss * v_tokens).
                     # Parameter gradients accumulate sum_{i,t} grad(l_{i,t}) across the window.
@@ -1657,10 +1726,19 @@ def main():
                     loss_sum = loss * v_tokens
 
                 scaler.scale(loss_sum).backward()
-                accum_loss += (loss.item() * effective_tokens)
-                accum_ce += ((ce_loss.item() if ce_loss is not None else loss.item()) * effective_tokens)
-                accum_aux += aux_loss.item() if aux_loss is not None else 0.0
-                accum_tokens += effective_tokens
+                metric_ce = ce_loss if ce_loss is not None else loss
+                metric_aux = aux_loss.detach() if aux_loss is not None else loss.detach().new_zeros(())
+                metric_world = loss.detach().new_zeros(())
+                metric_batch = torch.stack(
+                    (
+                        loss.detach() * v_tokens,
+                        metric_ce.detach() * v_tokens,
+                        metric_aux,
+                        metric_world,
+                        v_tokens.to(dtype=accum_metrics.dtype),
+                    )
+                )
+                accum_metrics.add_(metric_batch.to(dtype=accum_metrics.dtype))
 
                 # Store only lightweight cursor metadata without forcing GPU-to-CPU tensor sync
                 accum_batches.append(cursors)
@@ -1683,7 +1761,7 @@ def main():
                         w_loss_scaled = (w_loss * args.lambda_world) / args.grad_accum
 
                     world_scaler.scale(w_loss_scaled).backward()
-                    accum_world_loss += w_loss.item()
+                    accum_metrics[3].add_(w_loss.detach().to(dtype=accum_metrics.dtype))
                     # Store lightweight cursor metadata without forcing GPU-to-CPU tensor synchronization
                     accum_world_batches.append(w_cursors)
 
@@ -1711,11 +1789,7 @@ def main():
                     del loss
                 if "loss_scaled" in locals():
                     del loss_scaled
-                accum_loss = 0.0
-                accum_ce = 0.0
-                accum_aux = 0.0
-                accum_world_loss = 0.0
-                accum_tokens = 0
+                accum_metrics.zero_()
                 accum_batches.clear()
                 accum_world_batches.clear()
                 gc.collect()
@@ -1733,9 +1807,11 @@ def main():
                     for w_pg in world_optimizer.param_groups:
                         w_pg["lr"] = cur_lr
 
-                cur_window_loss = accum_loss / max(1, accum_tokens)
+                metric_values = accum_metrics.cpu().tolist()
+                accum_token_count = int(metric_values[4])
+                cur_window_loss = metric_values[0] / max(1, accum_token_count)
                 is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after = execute_optimizer_step(
-                    model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0, cur_loss=cur_window_loss, ema_loss=ema_loss, accum_tokens=accum_tokens
+                    model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0, cur_loss=cur_window_loss, ema_loss=ema_loss, accum_tokens=accum_metrics[4]
                 )
 
                 if is_step_skipped:
@@ -1753,11 +1829,7 @@ def main():
                     optimizer.zero_grad(set_to_none=True)
                     if world_optimizer is not None:
                         world_optimizer.zero_grad(set_to_none=True)
-                    accum_loss = 0.0
-                    accum_ce = 0.0
-                    accum_aux = 0.0
-                    accum_world_loss = 0.0
-                    accum_tokens = 0
+                    accum_metrics.zero_()
                     accum_batches.clear()
                     accum_world_batches.clear()
                     continue
@@ -1769,18 +1841,14 @@ def main():
                 window_samples = sum(len(c) for c in accum_batches)
                 total_samples_trained += window_samples
 
-                cur_step_loss = accum_loss / max(1, accum_tokens)
-                cur_step_ce = accum_ce / max(1, accum_tokens)
-                cur_step_aux = accum_aux / args.grad_accum
-                cur_step_world = (accum_world_loss / args.grad_accum) if world_model is not None else 0.0
+                cur_step_loss = metric_values[0] / max(1, accum_token_count)
+                cur_step_ce = metric_values[1] / max(1, accum_token_count)
+                cur_step_aux = metric_values[2] / args.grad_accum
+                cur_step_world = (metric_values[3] / args.grad_accum) if world_model is not None else 0.0
                 cur_joint_loss = cur_step_loss + (args.lambda_world * cur_step_world if world_model is not None else 0.0)
 
                 running_loss += cur_step_loss
-                accum_loss = 0.0
-                accum_ce = 0.0
-                accum_aux = 0.0
-                accum_tokens = 0
-                accum_world_loss = 0.0
+                accum_metrics.zero_()
 
                 # Proactive CPU RAM & Linux Memory Hygiene (releases unmapped heap back to OS)
                 if step % 100 == 0:
@@ -2013,6 +2081,8 @@ def main():
                 step_last_time = time.time()
 
                 if step >= args.max_steps:
+                    if hasattr(train_iter_loader, "stop"):
+                        train_iter_loader.stop()
                     break
 
         # Process any remaining partial accumulation window at the end of an epoch.
@@ -2045,8 +2115,10 @@ def main():
                 for w_pg in world_optimizer.param_groups:
                     w_pg["lr"] = cur_lr
 
+            metric_values = accum_metrics.cpu().tolist()
+            accum_token_count = int(metric_values[4])
             is_step_skipped, grad_norm_val, w_grad_norm_val, scale_before, scale_after = execute_optimizer_step(
-                model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0, accum_tokens=accum_tokens
+                model, optimizer, scaler, world_model, world_optimizer, world_scaler, max_grad_norm=1.0, accum_tokens=accum_metrics[4]
             )
 
             if is_step_skipped:
@@ -2073,15 +2145,11 @@ def main():
                 step += 1
                 window_samples = sum(len(c) for _, _, c in accum_batches)
                 total_samples_trained += window_samples
-                cur_step_loss = accum_loss / max(1, accum_tokens) if accum_tokens > 0 else (accum_loss / partial_count)
-                cur_step_ce = accum_ce / max(1, accum_tokens) if accum_tokens > 0 else (accum_ce / partial_count)
-                cur_step_aux = accum_aux / partial_count
+                cur_step_loss = metric_values[0] / max(1, accum_token_count) if accum_token_count > 0 else (metric_values[0] / partial_count)
+                cur_step_ce = metric_values[1] / max(1, accum_token_count) if accum_token_count > 0 else (metric_values[1] / partial_count)
+                cur_step_aux = metric_values[2] / partial_count
                 running_loss += cur_step_loss
-                accum_loss = 0.0
-                accum_ce = 0.0
-                accum_aux = 0.0
-                accum_tokens = 0
-                accum_world_loss = 0.0
+                accum_metrics.zero_()
                 ema_loss = cur_step_loss if ema_loss is None else (0.9 * ema_loss + 0.1 * cur_step_loss)
 
                 current_cursor = extract_accumulated_data_cursor(
@@ -2092,6 +2160,8 @@ def main():
             optimizer.zero_grad(set_to_none=True)
 
         if step >= args.max_steps:
+            if hasattr(train_iter_loader, "stop"):
+                train_iter_loader.stop()
             break
 
     total_time = time.time() - t0

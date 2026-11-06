@@ -22,7 +22,6 @@ import json
 import math
 import os
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-import queue
 import random
 import re
 import shutil
@@ -1058,68 +1057,6 @@ def probe_model_generation(
 # 9. Main Autonomous Multi-Stage Training Runner & Optimizer Execution
 # =============================================================================
 
-class BackgroundRAMPrefetcher:
-    """
-    Asynchronous CPU RAM Prefetch Buffer.
-    Continuously prefetches batches from the DataLoader into Host RAM via a background thread,
-    so GPU compute overlaps 100% with CPU streaming, Parquet reading, and tokenization.
-    Eliminates GPU starvation without multi-processing worker IPC issues.
-    """
-    def __init__(self, iterable, buffer_size: int = 16):
-        self.iterable = iterable
-        self.buffer_size = max(1, buffer_size)
-        self.queue = queue.Queue(maxsize=self.buffer_size)
-        self.stop_event = threading.Event()
-        self.thread = None
-        self._sentinel = object()
-
-    def _worker(self):
-        try:
-            for item in self.iterable:
-                while not self.stop_event.is_set():
-                    try:
-                        self.queue.put(item, timeout=0.1)
-                        break
-                    except queue.Full:
-                        continue
-                if self.stop_event.is_set():
-                    break
-        except Exception as e:
-            self.queue.put((self._sentinel, e))
-        finally:
-            self.queue.put((self._sentinel, None))
-
-    def __iter__(self):
-        self.stop_event.clear()
-        self.thread = threading.Thread(target=self._worker, daemon=True)
-        self.thread.start()
-        return self
-
-    def __next__(self):
-        while not self.stop_event.is_set():
-            try:
-                item = self.queue.get(timeout=0.1)
-                break
-            except queue.Empty:
-                continue
-        if self.stop_event.is_set():
-            raise StopIteration
-        if isinstance(item, tuple) and len(item) == 2 and item[0] is self._sentinel:
-            err = item[1]
-            if err is not None:
-                raise err
-            raise StopIteration
-        return item
-
-    def stop(self):
-        self.stop_event.set()
-        while not self.queue.empty():
-            try:
-                self.queue.get_nowait()
-            except queue.Empty:
-                break
-
-
 def main():
     parser = argparse.ArgumentParser(description="TARA Autonomous Cloud Multi-Stage Training Pipeline")
     parser.add_argument("--model-dir", type=str, default="storage/models/tara_candidate_v1", help="Candidate / input model directory")
@@ -1980,13 +1917,6 @@ def main():
         collate_fn=collate_fn,
         pin_memory=(device.type == "cuda"),
     )
-    prefetch_buffer = int(os.environ.get("TARA_PREFETCH_BUFFER", "16"))
-    if prefetch_buffer > 0:
-        train_iter_loader = BackgroundRAMPrefetcher(dataloader, buffer_size=prefetch_buffer)
-        if is_main_process:
-            print(f"[Hardware RAM Acceleration] Active Background RAM Prefetch Queue ({prefetch_buffer} batches prefetched in Host RAM).", flush=True)
-    else:
-        train_iter_loader = dataloader
 
     # Setup Best Checkpoint Directory
     best_cp_dir = os.path.join(args.output_dir, "best_checkpoint")
@@ -2078,7 +2008,7 @@ def main():
             world_optimizer.zero_grad(set_to_none=True)
         accum_batches = []
         accum_world_batches = []
-        for batch_idx, (inputs, labels, cursors) in enumerate(train_iter_loader):
+        for batch_idx, (inputs, labels, cursors) in enumerate(dataloader):
             # NOTE: DDP requires ALL ranks to process EVERY batch.
             # The old batch_idx % world_size != rank skip caused NCCL deadlock.
             # Batch distribution to GPUs is handled by DistributedSampler in the DataLoader.
@@ -2535,8 +2465,6 @@ def main():
                 step_last_time = time.time()
 
                 if step >= args.max_steps:
-                    if hasattr(train_iter_loader, "stop"):
-                        train_iter_loader.stop()
                     break
 
         # Process any remaining partial accumulation window at the end of an epoch.
@@ -2641,8 +2569,6 @@ def main():
             _dist_barrier.barrier()
 
         if step >= args.max_steps:
-            if hasattr(train_iter_loader, "stop"):
-                train_iter_loader.stop()
             break
 
     total_time = time.time() - t0

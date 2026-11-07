@@ -1149,8 +1149,8 @@ def main():
     parser.add_argument("--checkpoint-interval", type=int, default=int(os.environ.get("CHECKPOINT_INTERVAL", 100)), help="Optimizer step interval between checkpoint commits and cloud backups (default: 100)")
     parser.add_argument("--eval-interval", type=int, default=int(os.environ.get("EVAL_INTERVAL", 100)),
                         help="Optimizer step interval to probe model generation with live sample prompts (default: 100; 0 to disable)")
-    parser.add_argument("--promote-interval", type=int, default=int(os.environ.get("PROMOTE_INTERVAL", 1000)),
-                        help="Optimizer step interval for periodic model promotion and non-blocking Hugging Face upload (default: 1000; 0 to disable)")
+    parser.add_argument("--promote-interval", type=int, default=int(os.environ.get("PROMOTE_INTERVAL", 20000)),
+                        help="Optimizer step interval for periodic model promotion and non-blocking Hugging Face upload (default: 20000; 0 to disable)")
     parser.add_argument("--optimizer", type=str, default="auto", choices=["auto", "adamw", "adamw8bit"], help="Optimizer choice ('adamw8bit' saves 5.5GB VRAM for Tesla T4)")
     parser.add_argument("--resume", action="store_true", default=True, help="Auto-resume from existing checkpoint if available")
     parser.add_argument("--force", action="store_true", default=False, help="Force training continuation even if stage is marked completed")

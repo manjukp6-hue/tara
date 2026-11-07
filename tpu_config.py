@@ -1104,6 +1104,6 @@ class TPUConfig:
     # Periodic intervals
     CHECKPOINT_INTERVAL: int = 100
     EVAL_INTERVAL: int = 0  # Default disabled for maximum TPU throughput; enable via --enable-probe --eval-interval 500
-    PROMOTE_INTERVAL: int = 1000
+    PROMOTE_INTERVAL: int = 20000
     KEEP_CHECKPOINTS: int = 2
     MAX_SHARD_MB: int = 480

@@ -3,13 +3,10 @@
 =============================================================================
 TARA Native TPU Autonomous Multi-Stage Pre-Training Engine
 =============================================================================
-Dedicated Google TPU runner supporting ALL Google TPU generations:
+Dedicated Google TPU runner supporting Google TPU architectures:
   - Google Cloud TPU v6e (Trillium | 32GB HBM per chip | 6th Gen)
   - Google Cloud TPU v5p (Flagship LLM Training | 95GB HBM per chip)
   - Google Cloud TPU v5e (LitePod / Kaggle v5e-8 / Colab v5e-1)
-  - Google Cloud TPU v4 (8 Cores / 32GB HBM per chip)
-  - Google Cloud TPU v3-8 (128GB HBM | 8 Cores | 420 TFLOPS)
-  - Google Cloud TPU v2-8 (64GB HBM | 8 Cores | 180 TFLOPS)
 
 Key Architectural Pillars (Full GPU Parity):
   - 100% Decoupled: Zero modifications to existing GPU files (train_main.py, run_train.sh).
@@ -3197,7 +3194,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
 
 def parse_tpu_arguments() -> argparse.Namespace:
     """Parses command-line arguments for TARA TPU Training."""
-    parser = argparse.ArgumentParser(description="TARA Autonomous Google TPU (v6e / v5p / v5e / v4 / v3-8 / v2-8) Engine")
+    parser = argparse.ArgumentParser(description="TARA Autonomous Google TPU (v6e / v5p / v5e) Engine")
     parser.add_argument("--model-dir", type=str, default="storage/models/tara_candidate_v1", help="Candidate model directory (config.json & tokenizer.json)")
     parser.add_argument("--dataset-dir", type=str, default="storage/datasets/main_dataset_v2", help="Dataset directory")
     parser.add_argument("--output-dir", type=str, default=TPUConfig.DEFAULT_OUTPUT_DIR, help="Dedicated TPU checkpoint directory (does not overwrite GPU checkpoints)")
@@ -3246,7 +3243,7 @@ def parse_tpu_arguments() -> argparse.Namespace:
     parser.add_argument("--mask-prompt", action="store_true", default=False, help="Mask user instruction tokens with -100 in SFT stages")
     parser.add_argument("--freeze-backbone", action="store_true", default=False, help="Freeze backbone transformer layers during specialized head training")
     parser.add_argument("--single-core", action="store_true", default=False, help="Run single-core TPU mode")
-    parser.add_argument("--offload-optimizer", action=argparse.BooleanOptionalAction, default=None, help="Offload AdamW momentum buffers to CPU Host RAM (default: auto-detected for 16GB TPUs like v5e, v3, v2)")
+    parser.add_argument("--offload-optimizer", action=argparse.BooleanOptionalAction, default=None, help="Offload AdamW momentum buffers to CPU Host RAM (default: auto-detected for 16GB TPUs like v5e)")
     parser.add_argument("--validate-checkpoint-handoff", type=str, default=None, help="Validate a candidate checkpoint directory before stage handoff and exit")
     return parser.parse_args()
 
@@ -3265,6 +3262,15 @@ def main():
             sys.exit(1)
 
     hw_info = get_tpu_hardware_info()
+    if not hw_info["available"]:
+        print(
+            "[TPU Hardware FATAL] Physical Google TPU accelerator not found!\n"
+            "  This runner strictly requires Google Cloud TPU hardware (v5e-8 / v5p / v6e).\n"
+            "  Please execute this runner on a Google Cloud TPU VM, Kaggle TPU (v5e-8), or Google Colab TPU runtime.",
+            file=sys.stderr,
+            flush=True,
+        )
+        sys.exit(1)
 
     # Pre-training Authorization Gate Check (fast-fail on parent process before spawn)
     if args.verify_gate and verify_pretraining_authorization_proof:

@@ -4,7 +4,7 @@
 TARA Native TPU Implementation & Compatibility Verification Test Suite
 =============================================================================
 Validates:
-  1. Multi-Generation TPU Detection & Abstraction (v6e, v5p, v5e, v4, v3, v2)
+  1. TPU Detection & Abstraction (v6e, v5p, v5e)
   2. Model Loading & Instantiation (TaraForCausalLM reuse)
   3. Tokenizer & Static-Shape Collation (tpu_collate_fn)
   4. Gradient Accumulation Precision
@@ -45,17 +45,27 @@ def run_all_tpu_tests() -> bool:
     all_passed = True
 
     # -------------------------------------------------------------------------
-    # TEST 1: TPU Detection (v6e, v5p, v5e-8, v5e-1, v4, v3-8, v2-8)
+    # TEST 1: TPU Detection (v6e, v5p, v5e-8, v5e-1) & Accelerator Requirement Gate
     # -------------------------------------------------------------------------
-    print("\n[TEST 1/7] Testing Multi-Generation TPU Hardware Layer & Environment Abstraction...")
+    print("\n[TEST 1/7] Testing TPU Hardware Layer & Accelerator Requirement Gate...")
     try:
         hw_info = get_tpu_hardware_info()
-        dev = get_tpu_device()
         rank = get_tpu_rank()
         world_size = get_tpu_world_size()
         print(f"  -> Hardware topology: {hw_info['hardware_type']}")
-        print(f"  -> Active device    : {dev}")
+        print(f"  -> TPU Available    : {hw_info['available']}")
         print(f"  -> Cores & Topology : {hw_info['num_cores']} core(s) | Rank {rank}/{world_size}")
+        if not hw_info["available"]:
+            raised = False
+            try:
+                get_tpu_device()
+            except RuntimeError as err:
+                raised = True
+                print(f"  -> Verified strict TPU requirement: {err}")
+            assert raised, "FAIL: get_tpu_device() returned without raising RuntimeError when TPU is absent!"
+        else:
+            dev = get_tpu_device()
+            print(f"  -> Active device    : {dev}")
 
         # Validate v6e / v5p detection pattern logic
         os.environ["TPU_ACCELERATOR_TYPE"] = "v6e-8"
@@ -68,7 +78,7 @@ def run_all_tpu_tests() -> bool:
 
         # Reset env
         os.environ.pop("TPU_ACCELERATOR_TYPE", None)
-        print("  [PASS] Test 1: Multi-generation TPU detection verified (v6e Trillium, v5p, v5e, v4, v3, v2).")
+        print("  [PASS] Test 1: TPU detection verified (v6e Trillium, v5p, v5e).")
     except Exception as e:
         print(f"  [FAIL] Test 1: {e}")
         all_passed = False

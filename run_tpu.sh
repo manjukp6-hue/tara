@@ -6,9 +6,6 @@
 #   - Google Cloud TPU v6e (Trillium | 1 / 4 / 8 chips | 32GB HBM)
 #   - Google Cloud TPU v5p (Flagship LLM Training | 95GB HBM)
 #   - Google Cloud TPU v5e (v5e-1 Colab / v5e-8 Kaggle / GCP LitePod)
-#   - Google Cloud TPU v4 (v4-8 / v4 Pod Slices)
-#   - Google Cloud TPU v3-8 (128GB HBM)
-#   - Google Cloud TPU v2-8 (64GB HBM)
 #
 # Usage:
 #   bash run_tpu.sh                   # Standard multi-core TPU pre-training
@@ -96,7 +93,7 @@ fi
 # 4a. Memory-Safe TPU Hyperparameter Defaults (Prevents 16GB HBM exhaustion)
 EXTRA_ARGS+=("--batch-size" "${BATCH_SIZE:-1}")
 EXTRA_ARGS+=("--grad-accum" "${GRAD_ACCUM:-32}")
-EXTRA_ARGS+=("--loss-chunk-size" "${LOSS_CHUNK_SIZE:-128}")
+EXTRA_ARGS+=("--loss-chunk-size" "${LOSS_CHUNK_SIZE:-256}")
 EXTRA_ARGS+=("--precision" "${PRECISION:-bf16}")
 if [ "${OFFLOAD_OPTIMIZER:-false}" = "true" ] || [ "${OFFLOAD_OPTIMIZER:-0}" = "1" ]; then
     EXTRA_ARGS+=("--offload-optimizer")

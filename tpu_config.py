@@ -2,13 +2,10 @@
 TARA Autonomous TPU Engine Configuration & Hardware Abstraction Layer
 =============================================================================
 Provides seamless detection, initialization, and hardware-optimized configuration
-for ALL Google TPU generations:
+for Google TPU architectures:
   - Google Cloud TPU v6e (Trillium | 32GB HBM per chip | 6th Gen)
   - Google Cloud TPU v5p (Flagship LLM Training | 95GB HBM per chip)
   - Google Cloud TPU v5e (LitePod / Kaggle v5e-8 / Colab v5e-1)
-  - Google Cloud TPU v4 (8 Cores / 32GB HBM per chip)
-  - Google Cloud TPU v3-8 (128GB HBM | 8 Cores | 420 TFLOPS)
-  - Google Cloud TPU v2-8 (64GB HBM | 8 Cores | 180 TFLOPS)
 
 Designed to be 100% decoupled from existing GPU scripts (train_main.py, run_train.sh).
 """
@@ -76,7 +73,7 @@ except Exception as _e_root:
 
 
 def is_tpu_available() -> bool:
-    """Returns True if PyTorch/XLA or native TorchTPU accelerator is present."""
+    """Returns True ONLY if an authentic physical PyTorch/XLA or native TorchTPU accelerator is present."""
     if HAS_XLA:
         try:
             if xr is not None and hasattr(xr, "device_type"):
@@ -84,7 +81,7 @@ def is_tpu_available() -> bool:
             device_hw = xm.xla_device_hw()
             return "TPU" in str(device_hw).upper()
         except Exception:
-            return True
+            pass
     try:
         import torch
         dev = torch.device("tpu")
@@ -92,12 +89,12 @@ def is_tpu_available() -> bool:
         return True
     except Exception:
         pass
-    # Check environment markers common in Colab / Kaggle / GCP TPU VMs
+    # Check authentic cloud TPU environment markers common in Colab / Kaggle / GCP TPU VMs
     return bool(
         os.environ.get("TPU_NAME")
         or os.environ.get("COLAB_TPU_ADDR")
         or os.environ.get("TPU_ACCELERATOR_TYPE")
-        or (os.environ.get("PJRT_DEVICE") == "TPU")
+        or os.environ.get("KAGGLE_TPU_VERSION")
     )
 
 
@@ -107,7 +104,7 @@ def get_tpu_hardware_info() -> Dict[str, Any]:
     Safe to call in parent process without premature PJRT client binding.
     """
     available = is_tpu_available()
-    hw_type = "Unknown Accelerator (CPU Fallback)"
+    hw_type = "No TPU Detected"
     num_cores = 1
     device_name = "N/A"
 
@@ -169,20 +166,6 @@ def get_tpu_hardware_info() -> Dict[str, Any]:
         hw_type = "Google Cloud TPU v5e-8 (Kaggle/GCP | 8 Cores | 128GB HBM | 1576 TFLOPS)"
         num_cores = 8
 
-    # 5. Google Cloud TPU v4 (v4-8 / Pod Slices)
-    elif "v4" in tpu_env:
-        hw_type = f"Google Cloud TPU v4 ({num_cores} Cores | 32GB HBM/chip | 275 TFLOPS/chip)"
-        num_cores = max(num_cores, 8) if num_cores <= 1 and available else num_cores
-
-    # 6. Google Cloud TPU v3-8 (128GB HBM | 8 Cores)
-    elif "v3-8" in tpu_env or "v3" in tpu_env:
-        hw_type = "Google TPU v3-8 (128GB HBM | 8 Cores | 420 TFLOPS BF16)"
-        num_cores = 8
-
-    # 7. Google Cloud TPU v2-8 (64GB HBM | 8 Cores)
-    elif "v2-8" in tpu_env or "v2" in tpu_env:
-        hw_type = "Google TPU v2-8 (64GB HBM | 8 Cores | 180 TFLOPS)"
-        num_cores = 8
 
     elif available:
         hw_type = f"Google Cloud TPU ({num_cores} Cores | PyTorch/XLA PJRT)"
@@ -210,12 +193,15 @@ def get_tpu_hardware_info() -> Dict[str, Any]:
 
 
 def get_tpu_device():
-    """Acquires the authentic PyTorch/XLA or native TorchTPU device bound to the current process."""
+    """
+    Acquires the authentic PyTorch/XLA or native TorchTPU device bound to the current process.
+    Raises RuntimeError if no physical Google TPU accelerator is detected.
+    """
     if HAS_XLA:
         try:
             return xm.xla_device()
-        except Exception:
-            pass
+        except Exception as e:
+            raise RuntimeError(f"[TPU Hardware Error] PyTorch/XLA present but failed to acquire TPU device: {e}")
     try:
         import torch
         dev = torch.device("tpu")
@@ -223,8 +209,10 @@ def get_tpu_device():
         return dev
     except Exception:
         pass
-    import torch
-    return torch.device("cpu")
+    raise RuntimeError(
+        "[TPU Hardware Error] Physical Google TPU accelerator not found! "
+        "This training runner requires an authentic Google Cloud TPU (v5e-8, v5p, v6e). Please run on a genuine Google Cloud TPU VM, Kaggle TPU, or Google Colab TPU runtime."
+    )
 
 
 def get_tpu_rank() -> int:
@@ -262,7 +250,7 @@ def is_tpu_master() -> bool:
 def tpu_barrier(tag: str = "tpu_barrier"):
     """
     Synchronizes all TPU worker cores at a common rendezvous point.
-    Guarded so single-core or CPU runs do not hang.
+    Guarded so single-core TPU runs do not hang.
     """
     if HAS_XLA and get_tpu_world_size() > 1:
         try:
@@ -273,13 +261,12 @@ def tpu_barrier(tag: str = "tpu_barrier"):
 
 def get_tpu_memory_diagnostics(device: Optional[Any] = None) -> Dict[str, Any]:
     """
-    Queries authentic memory telemetry from physical TPU / XLA, CUDA, or host CPU fallback.
-    Explicitly distinguishes genuine physical TPU execution from CPU Fallback/Mock Engine.
-    Returns structured memory metrics and hardware identification without silent suppression.
+    Queries authentic memory telemetry from physical Google TPU / PyTorch XLA.
+    Returns structured memory metrics and hardware identification.
     """
     diag = {
         "is_physical_tpu": False,
-        "backend": "CPU Host (Fallback Engine)",
+        "backend": "Google Cloud TPU (PyTorch/XLA)",
         "bytes_used": 0,
         "bytes_free": 0,
         "bytes_total": 0,
@@ -368,47 +355,6 @@ def get_tpu_memory_diagnostics(device: Optional[Any] = None) -> Dict[str, Any]:
                 return diag
         except Exception as hw_err:
             diag["telemetry_error"] = f"XLA hardware query exception: {hw_err}"
-
-    # 2. CUDA Device (if running on GPU fallback)
-    try:
-        import torch
-        if torch.cuda.is_available() and (device is None or (isinstance(device, torch.device) and device.type == "cuda")):
-            diag["is_physical_tpu"] = False
-            diag["backend"] = f"NVIDIA CUDA ({torch.cuda.get_device_name(0)})"
-            alloc = torch.cuda.memory_allocated()
-            res = torch.cuda.memory_reserved()
-            total = torch.cuda.get_device_properties(0).total_memory
-            peak = torch.cuda.max_memory_allocated()
-            diag["bytes_used"] = alloc
-            diag["bytes_free"] = total - alloc
-            diag["bytes_total"] = total
-            diag["used_mb"] = round(alloc / (1024 * 1024), 2)
-            diag["free_mb"] = round((total - alloc) / (1024 * 1024), 2)
-            diag["total_mb"] = round(total / (1024 * 1024), 2)
-            diag["peak_mb"] = round(peak / (1024 * 1024), 2)
-            return diag
-    except Exception:
-        pass
-
-    # 3. CPU Host RAM fallback (Standard process / system memory)
-    try:
-        import psutil
-        vmem = psutil.virtual_memory()
-        proc = psutil.Process()
-        proc_mem = proc.memory_info().rss
-        diag["is_physical_tpu"] = False
-        diag["backend"] = "CPU Host (Fallback Engine)"
-        diag["bytes_used"] = proc_mem
-        diag["bytes_free"] = vmem.available
-        diag["bytes_total"] = vmem.total
-        diag["used_mb"] = round(proc_mem / (1024 * 1024), 2)
-        diag["free_mb"] = round(vmem.available / (1024 * 1024), 2)
-        diag["total_mb"] = round(vmem.total / (1024 * 1024), 2)
-        diag["peak_mb"] = round(proc_mem / (1024 * 1024), 2)
-    except Exception:
-        pass
-    except Exception:
-        pass
 
     return diag
 
@@ -516,7 +462,7 @@ _COLLECTIVE_GRAD_HOOK: Optional[Any] = None
 
 
 def set_collective_mock(hook: Optional[Any], grad_hook: Optional[Any] = None) -> None:
-    """Sets mock hooks for testing multi-worker collective decisions and gradient reduction on CPU/simulated environments."""
+    """Sets mock hooks for testing multi-worker collective decisions and gradient reduction in test/simulated environments."""
     global _COLLECTIVE_MOCK_HOOK, _COLLECTIVE_GRAD_HOOK
     _COLLECTIVE_MOCK_HOOK = hook
     _COLLECTIVE_GRAD_HOOK = grad_hook
@@ -676,12 +622,12 @@ def should_offload_optimizer(hardware_type: str = "", num_cores: int = 1) -> boo
     """
     Determines whether optimizer states should be offloaded to CPU Host RAM.
     v6e (Trillium, 32GB/core) and v5p (95GB/core) have large HBM and do not require offload.
-    v5e (16GB/core), v3 (16GB/core), v2 (8GB/core), and custom single-core setups benefit from offload.
+    v5e (16GB/core) and custom single-core setups benefit from offload.
     """
     hw_lower = (hardware_type or "").lower()
     if any(tag in hw_lower for tag in ("v6e", "trillium", "v5p")):
         return False
-    if any(tag in hw_lower for tag in ("v5e", "v3", "v2", "litepod", "colab")):
+    if any(tag in hw_lower for tag in ("v5e", "litepod", "colab")):
         return True
     if num_cores <= 1:
         return True
@@ -1068,15 +1014,15 @@ def tpu_save(state_dict: Any, path: str):
 
 class TPUConfig:
     """
-    Authoritative default hyper-parameters optimized for Google TPU (v6e / v5p / v5e / v4 / v3-8).
+    Authoritative default hyper-parameters optimized for Google TPU (v6e / v5p / v5e).
     Maintains exact numerical and hyperparameter parity with TARA GPU training.
     """
     # Micro-batch per TPU core (1 per core = 8 samples across 8 cores; 4x activation memory reduction)
     DEFAULT_BATCH_SIZE: int = 1
     # Gradient accumulation steps (1 * 32 * 8 = 256 effective batch size preserved)
     DEFAULT_GRAD_ACCUM: int = 32
-    # Memory-safe chunk size for vocabulary projection and cross-entropy (prevents 196MB OOM)
-    DEFAULT_LOSS_CHUNK_SIZE: int = 128
+    # Memory-safe chunk size for vocabulary projection and cross-entropy
+    DEFAULT_LOSS_CHUNK_SIZE: int = 256
     # Default training precision: bf16 (hardware execution via XLA_USE_BF16)
     DEFAULT_PRECISION: str = "bf16"
     # Native TPU Sequence Length (fixed static shape)

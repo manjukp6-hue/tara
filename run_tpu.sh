@@ -92,7 +92,7 @@ fi
 
 # 4a. Memory-Safe TPU Hyperparameter Defaults (Prevents 16GB HBM exhaustion)
 EXTRA_ARGS+=("--batch-size" "${BATCH_SIZE:-2}")
-EXTRA_ARGS+=("--grad-accum" "${GRAD_ACCUM:-64}")
+EXTRA_ARGS+=("--grad-accum" "${GRAD_ACCUM:-32}")
 EXTRA_ARGS+=("--loss-chunk-size" "${LOSS_CHUNK_SIZE:-512}")
 EXTRA_ARGS+=("--precision" "${PRECISION:-bf16}")
 if [ "${OFFLOAD_OPTIMIZER:-false}" = "true" ] || [ "${OFFLOAD_OPTIMIZER:-0}" = "1" ]; then

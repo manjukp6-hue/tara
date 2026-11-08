@@ -1021,8 +1021,8 @@ class TPUConfig:
     DEFAULT_BATCH_SIZE: int = 1
     # Gradient accumulation steps (1 * 32 * 8 = 256 effective batch size preserved)
     DEFAULT_GRAD_ACCUM: int = 32
-    # Memory-safe chunk size for vocabulary projection and cross-entropy
-    DEFAULT_LOSS_CHUNK_SIZE: int = 256
+    # Memory-safe chunk size for vocabulary projection and cross-entropy (512 tokens preserves high TPU MXU utilization while keeping peak projection VRAM bounded to ~100MB)
+    DEFAULT_LOSS_CHUNK_SIZE: int = 512
     # Default training precision: bf16 (hardware execution via XLA_USE_BF16)
     DEFAULT_PRECISION: str = "bf16"
     # Native TPU Sequence Length (fixed static shape)

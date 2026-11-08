@@ -165,6 +165,42 @@ def wait_for_hf_upload(timeout: Optional[float] = 180.0) -> bool:
     return True
 
 
+def resolve_promotion_source(best_dir: str, latest_dir: str, current_step: int, max_stale_delta: int = 2000) -> str:
+    """
+    Selects the optimal model directory for promotion:
+    - If best_dir exists and was saved recently (within max_stale_delta steps of current_step),
+      promotes best_dir to preserve peak validation quality.
+    - If best_dir is stale (older than max_stale_delta steps, e.g. Step 6000 while at Step 50000),
+      promotes latest_dir to ensure all tens of thousands of curriculum steps are preserved.
+    """
+    if not check_model_weights_exist(best_dir):
+        return latest_dir
+
+    best_step = 0
+    for meta_file in ["checkpoint_state.json", "STAGE_METADATA.json", "COMMITTED"]:
+        p = os.path.join(best_dir, meta_file)
+        if os.path.isfile(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                    if "step" in d and isinstance(d["step"], (int, float)):
+                        best_step = int(d["step"])
+                        break
+            except Exception:
+                pass
+
+    if best_step > 0 and (current_step - best_step) > max_stale_delta:
+        print(
+            f"[TPU Promotion Notice] Best milestone at {best_dir} is stale "
+            f"(Step {best_step} vs Current Step {current_step}; delta={current_step - best_step} > {max_stale_delta}). "
+            f"Promoting latest fully-trained model ({latest_dir} at Step {current_step}) to preserve complete curriculum knowledge.",
+            flush=True,
+        )
+        return latest_dir
+
+    return best_dir
+
+
 def resolve_tpu_gdrive_backup_dir(explicit_dir: Optional[str] = None) -> Optional[str]:
     """
     Dynamically resolves dedicated Google Drive backup directory for TPU.
@@ -3133,7 +3169,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
                 is_promote = (args.promote_interval > 0 and step % args.promote_interval == 0 and step > last_promote_step)
                 if is_promote and is_main:
                     last_promote_step = step
-                    src_cand = best_cp_dir if check_model_weights_exist(best_cp_dir) else args.output_dir
+                    src_cand = resolve_promotion_source(best_cp_dir, args.output_dir, current_step=step)
                     print(f"\n{CLR_GREEN}>>> PERIODIC TPU MODEL PROMOTION (Step {step}) -> {promoted_target} <<<{CLR_RESET}", flush=True)
                     try:
                         promote_checkpoint(src_cand, promoted_target, args.stage_id)
@@ -3173,7 +3209,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
     )
 
     if is_main:
-        src_final = best_cp_dir if check_model_weights_exist(best_cp_dir) else args.output_dir
+        src_final = resolve_promotion_source(best_cp_dir, args.output_dir, current_step=step)
         print(f"\n{CLR_GREEN}{'=' * 80}{CLR_RESET}")
         print(f"[{args.stage_id} COMPLETE] TPU Pre-Training finished {step} steps with loss {best_loss:.4f}!")
         print(f"Promoting final deployment model to: {promoted_target}")

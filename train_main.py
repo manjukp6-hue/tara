@@ -2136,7 +2136,7 @@ def main():
 
                 # Store only lightweight cursor metadata without forcing GPU-to-CPU tensor sync
                 accum_batches.append(cursors)
-                samples_consumed += len(cursors)
+                samples_consumed += len(cursors) * (world_size if is_distributed else 1)
 
                 # Joint World Model Step Forward & Backward
                 if world_model is not None and world_iter is not None:

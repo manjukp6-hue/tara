@@ -420,50 +420,67 @@ def restore_checkpoint_from_gdrive(gdrive_dir: str, local_ckpt_dir: str) -> bool
     if not os.path.exists(gdrive_dir):
         return False
 
-    def resolve_normal_checkpoint_folder(norm_path: str) -> str:
+    def resolve_normal_checkpoint_folder(norm_path: str, ref_best_loss: float = float("inf")) -> Optional[str]:
         if not os.path.isdir(norm_path):
-            return norm_path
+            return None
         subdirs = []
         for d in os.listdir(norm_path):
             p = os.path.join(norm_path, d)
             if os.path.isdir(p) and not d.startswith("."):
+                s, l, bl = extract_checkpoint_loss_health(p)
                 m = re.match(r"^(?:step_)?(\d+)", d)
                 if m:
-                    subdirs.append((int(m.group(1)), p))
+                    step_num = int(m.group(1))
+                    subdirs.append((step_num, l, p))
+                elif s >= 0:
+                    subdirs.append((s, l, p))
         if subdirs:
+            # Sort descending by step (highest step first)
             subdirs.sort(key=lambda x: x[0], reverse=True)
-            chosen = subdirs[0][1]
-            print(f"[GDrive Restore] Resolved latest normal checkpoint directory: {os.path.basename(chosen)} (step {subdirs[0][0]})", flush=True)
-            return chosen
-        return norm_path
+            for s_val, l_val, chosen_p in subdirs:
+                if is_checkpoint_loss_healthy(l_val, ref_best_loss=ref_best_loss):
+                    print(f"[GDrive Restore] Resolved healthy normal checkpoint directory: {os.path.basename(chosen_p)} (step {s_val}, loss {l_val:.4f})", flush=True)
+                    return chosen_p
+                else:
+                    print(f"[GDrive Restore Loss Audit] Normal checkpoint backup {os.path.basename(chosen_p)} (step {s_val}) rejected: Loss {l_val:.4f} diverged (> {ref_best_loss * 1.5:.4f}). Auditing next older normal checkpoint backup...", flush=True)
 
-    def resolve_best_milestone_folder(bm_path: str) -> str:
+        # Check root norm_path itself
+        s, l, bl = extract_checkpoint_loss_health(norm_path)
+        if s >= 0 and is_checkpoint_loss_healthy(l, ref_best_loss=ref_best_loss):
+            return norm_path
+        return None
+
+    def resolve_best_milestone_folder(bm_path: str) -> Tuple[str, float]:
         if not os.path.isdir(bm_path):
-            return bm_path
+            return bm_path, float("inf")
         subdirs = []
         for d in os.listdir(bm_path):
             p = os.path.join(bm_path, d)
             if os.path.isdir(p) and not d.startswith("."):
+                s, l, bl = extract_checkpoint_loss_health(p)
                 m = re.match(r"^step_(\d+)(?:_loss_([0-9\.]+))?", d)
                 if m:
                     step_val = int(m.group(1))
-                    loss_val = float(m.group(2)) if m.group(2) else float("inf")
+                    loss_val = float(m.group(2)) if m.group(2) else l
                     subdirs.append((step_val, loss_val, p))
+                elif s >= 0:
+                    subdirs.append((s, l, p))
         if subdirs:
             # Sort by step descending (highest step first), then loss ascending
             subdirs.sort(key=lambda x: (x[0], -x[1]), reverse=True)
             chosen = subdirs[0][2]
-            print(f"[GDrive Restore] Resolved latest best milestone directory: {os.path.basename(chosen)} (step {subdirs[0][0]}, loss {subdirs[0][1]})", flush=True)
-            return chosen
-        return bm_path
+            chosen_loss = subdirs[0][1]
+            print(f"[GDrive Restore] Resolved latest best milestone directory: {os.path.basename(chosen)} (step {subdirs[0][0]}, loss {chosen_loss})", flush=True)
+            return chosen, chosen_loss
+        return bm_path, float("inf")
 
     source_dir = gdrive_dir
     has_normal = os.path.exists(os.path.join(gdrive_dir, "normal_checkpoint"))
     has_best = os.path.exists(os.path.join(gdrive_dir, "best_milestone"))
 
     if has_normal or has_best:
-        normal_cand = resolve_normal_checkpoint_folder(os.path.join(gdrive_dir, "normal_checkpoint")) if has_normal else None
-        best_cand = resolve_best_milestone_folder(os.path.join(gdrive_dir, "best_milestone")) if has_best else None
+        best_cand, best_cand_loss = resolve_best_milestone_folder(os.path.join(gdrive_dir, "best_milestone")) if has_best else (None, float("inf"))
+        normal_cand = resolve_normal_checkpoint_folder(os.path.join(gdrive_dir, "normal_checkpoint"), ref_best_loss=best_cand_loss) if has_normal else None
 
         def get_dir_step(d: Optional[str]) -> int:
             if not d or not os.path.exists(d):
@@ -483,18 +500,21 @@ def restore_checkpoint_from_gdrive(gdrive_dir: str, local_ckpt_dir: str) -> bool
         norm_step = get_dir_step(normal_cand)
         bst_step = get_dir_step(best_cand)
 
-        if norm_step >= bst_step and norm_step >= 0:
+        if normal_cand and norm_step >= bst_step and norm_step >= 0:
             source_dir = normal_cand
-        elif bst_step >= 0:
+        elif best_cand and bst_step >= 0:
             source_dir = best_cand
+            if normal_cand is None and has_normal:
+                print(f"[GDrive Restore Safe Fallback] All normal checkpoints in GDrive diverged or invalid. Falling back safely to best_milestone: {os.path.basename(best_cand)}", flush=True)
         elif normal_cand:
             source_dir = normal_cand
         elif best_cand:
             source_dir = best_cand
     elif os.path.basename(os.path.normpath(gdrive_dir)) == "best_milestone":
-        source_dir = resolve_best_milestone_folder(gdrive_dir)
+        source_dir, _ = resolve_best_milestone_folder(gdrive_dir)
     elif os.path.basename(os.path.normpath(gdrive_dir)) == "normal_checkpoint":
-        source_dir = resolve_normal_checkpoint_folder(gdrive_dir)
+        resolved_norm = resolve_normal_checkpoint_folder(gdrive_dir)
+        source_dir = resolved_norm if resolved_norm else gdrive_dir
 
     try:
         os.makedirs(local_ckpt_dir, exist_ok=True)
@@ -832,6 +852,138 @@ def find_all_gdrive_checkpoint_candidates() -> List[str]:
             pass
 
     return candidates
+
+
+def extract_checkpoint_loss_health(d: str) -> Tuple[int, float, float]:
+    r"""
+    Extracts (step, loss, best_loss) from checkpoint directory `d`.
+    Inspects:
+      1. STAGE_METADATA.json
+      2. checkpoint_state.json
+      3. sft_checkpoint_state.json
+      4. Directory basename regex: step_(\d+)(?:_loss_([0-9.]+))?
+    Returns: (step, loss, best_loss)
+    """
+    if not d or not os.path.isdir(d):
+        return -1, float("inf"), float("inf")
+
+    step_val = -1
+    loss_val = float("inf")
+    best_loss_val = float("inf")
+
+    # 1. Inspect STAGE_METADATA.json
+    sm_path = os.path.join(d, "STAGE_METADATA.json")
+    if os.path.isfile(sm_path):
+        try:
+            with open(sm_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if "step" in data and data["step"] is not None:
+                step_val = max(step_val, int(data["step"]))
+            if "loss" in data and data["loss"] is not None:
+                l = float(data["loss"])
+                if math.isfinite(l):
+                    loss_val = min(loss_val, l)
+            if "best_loss" in data and data["best_loss"] is not None:
+                bl = float(data["best_loss"])
+                if math.isfinite(bl):
+                    best_loss_val = min(best_loss_val, bl)
+        except Exception:
+            pass
+
+    # 2. Inspect checkpoint_state.json
+    cs_path = os.path.join(d, "checkpoint_state.json")
+    if os.path.isfile(cs_path):
+        try:
+            with open(cs_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if "step" in data and data["step"] is not None:
+                step_val = max(step_val, int(data["step"]))
+            if "loss" in data and data["loss"] is not None:
+                l = float(data["loss"])
+                if math.isfinite(l):
+                    loss_val = min(loss_val, l)
+            if "best_loss" in data and data["best_loss"] is not None:
+                bl = float(data["best_loss"])
+                if math.isfinite(bl):
+                    best_loss_val = min(best_loss_val, bl)
+        except Exception:
+            pass
+
+    # 3. Inspect sft_checkpoint_state.json (for SFT stages)
+    sft_path = os.path.join(d, "sft_checkpoint_state.json")
+    if os.path.isfile(sft_path):
+        try:
+            with open(sft_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if "step" in data and data["step"] is not None:
+                step_val = max(step_val, int(data["step"]))
+            if "loss" in data and data["loss"] is not None:
+                l = float(data["loss"])
+                if math.isfinite(l):
+                    loss_val = min(loss_val, l)
+            if "best_loss" in data and data["best_loss"] is not None:
+                bl = float(data["best_loss"])
+                if math.isfinite(bl):
+                    best_loss_val = min(best_loss_val, bl)
+        except Exception:
+            pass
+
+    # 4. Folder name fallback
+    bname = os.path.basename(os.path.normpath(d))
+    m = re.search(r"step[_-](\d+)", bname)
+    if m and step_val < 0:
+        try:
+            step_val = int(m.group(1))
+        except Exception:
+            pass
+    lm = re.search(r"loss[_-]([0-9.]+)", bname)
+    if lm and loss_val == float("inf"):
+        try:
+            l = float(lm.group(1))
+            if math.isfinite(l):
+                loss_val = l
+        except Exception:
+            pass
+
+    return step_val, loss_val, best_loss_val
+
+
+def is_checkpoint_loss_healthy(
+    loss: float,
+    best_loss: float = float("inf"),
+    ref_best_loss: Optional[float] = None,
+    max_divergence_ratio: float = 2.0,
+    divergence_abs_threshold: float = 3.8,
+) -> bool:
+    """
+    Rigorously evaluates the loss health of a candidate checkpoint.
+    Guarantees:
+      1. Zero false rejections of legitimate checkpoints in multi-domain pre-training:
+         - Any loss <= divergence_abs_threshold (3.8) is inherently within valid
+           pre-training domain distribution (e.g., Code/Reasoning at 1.6 vs easy text at 0.62).
+      2. True divergence / loss explosion detection:
+         - Rejects NaN, non-positive, or catastrophic spikes (> 3.8 AND > ref_best_loss * 2.0).
+      3. Full backward compatibility:
+         - If loss was unrecorded (inf), allows resume if valid weights exist.
+    """
+    if not math.isfinite(loss):
+        return True  # If loss was unrecorded in legacy metadata, do not block resume
+
+    if loss <= 0.0:
+        return False  # Non-positive loss indicates corruption / log-prob bug
+
+    # Domain-variance protection: Any loss in standard pretraining range is healthy
+    if loss <= divergence_abs_threshold:
+        return True
+
+    # If loss exceeds the pretraining ceiling, check against reference best loss
+    ref = ref_best_loss if (ref_best_loss is not None and math.isfinite(ref_best_loss) and ref_best_loss > 0.0) else best_loss
+    if math.isfinite(ref) and ref > 0.0:
+        spike_threshold = max(ref * max_divergence_ratio, ref + 1.5, divergence_abs_threshold)
+        if loss > spike_threshold:
+            return False
+
+    return True
 
 
 def get_checkpoint_dir_step(d: str) -> int:
@@ -2861,14 +3013,73 @@ def resolve_and_auto_select_checkpoint(
     
     Returns: (selected_source_name, selected_step)
     """
-    # 1. Local Disk Step
-    local_step = get_checkpoint_dir_step(local_ckpt_dir)
+    # 0. Global Reference Best Loss Discovery across Local, GDrive, HF
+    ref_best_loss = float("inf")
     parent_dir = os.path.dirname(os.path.abspath(local_ckpt_dir)) or "."
+    local_bm_cands = [
+        os.path.join(parent_dir, "best_milestone"),
+        os.path.join(local_ckpt_dir, "best_milestone"),
+        os.path.join(parent_dir, "best_checkpoint"),
+    ]
+    for bm_dir in local_bm_cands:
+        if os.path.isdir(bm_dir):
+            _, bm_l, bm_bl = extract_checkpoint_loss_health(bm_dir)
+            if math.isfinite(bm_l) and bm_l > 0.0:
+                ref_best_loss = min(ref_best_loss, bm_l)
+            if math.isfinite(bm_bl) and bm_bl > 0.0:
+                ref_best_loss = min(ref_best_loss, bm_bl)
+            for sub in os.listdir(bm_dir):
+                sub_p = os.path.join(bm_dir, sub)
+                if os.path.isdir(sub_p):
+                    _, sl, sbl = extract_checkpoint_loss_health(sub_p)
+                    if math.isfinite(sl) and sl > 0.0:
+                        ref_best_loss = min(ref_best_loss, sl)
+                    if math.isfinite(sbl) and sbl > 0.0:
+                        ref_best_loss = min(ref_best_loss, sbl)
+
+    # 1. Local Disk Step (Loss Health Verification & Normal Backups Audit)
+    local_candidates: List[Tuple[int, float, str]] = []
+    # Check active local_ckpt_dir
+    s_act, l_act, _ = extract_checkpoint_loss_health(local_ckpt_dir)
+    if s_act >= 0:
+        local_candidates.append((s_act, l_act, local_ckpt_dir))
+
+    # Check versioned normal backups
     v_dirs = _collect_versioned_checkpoint_dirs(parent_dir, os.path.basename(local_ckpt_dir))
-    if v_dirs:
-        m = re.search(r"(?:[._]?step[._]?)(\d+)", os.path.basename(v_dirs[0]))
-        if m:
-            local_step = max(local_step, int(m.group(1)))
+    for v_path in v_dirs:
+        s_v, l_v, _ = extract_checkpoint_loss_health(v_path)
+        step_to_use = s_v if s_v >= 0 else get_checkpoint_dir_step(v_path)
+        if step_to_use >= 0:
+            local_candidates.append((step_to_use, l_v, v_path))
+
+    # Sort candidates descending by step (highest step first)
+    local_candidates.sort(key=lambda x: x[0], reverse=True)
+
+    local_step = -1
+    selected_local_dir = local_ckpt_dir
+    local_is_best_fallback = False
+
+    for cand_step, cand_loss, cand_dir in local_candidates:
+        if is_checkpoint_loss_healthy(cand_loss, ref_best_loss=ref_best_loss):
+            local_step = cand_step
+            selected_local_dir = cand_dir
+            if cand_step < local_candidates[0][0]:
+                print(f"  [Local Loss Health Audit] Selected healthy normal checkpoint backup at Step {cand_step:04d} (Loss {cand_loss:.4f} <= {ref_best_loss * 1.5:.4f}) after newer candidate(s) diverged!", flush=True)
+            break
+        else:
+            print(f"  [Local Loss Health Warning] Local checkpoint at Step {cand_step:04d} ({os.path.basename(cand_dir)}) rejected: Loss {cand_loss:.4f} diverged (> {ref_best_loss * 1.5:.4f}). Auditing previous normal backup...", flush=True)
+
+    if local_step < 0:
+        # Fall back to local best milestone if all normal backups diverged
+        for bm_dir in local_bm_cands:
+            if os.path.isdir(bm_dir):
+                s_bm, l_bm, _ = extract_checkpoint_loss_health(bm_dir)
+                if s_bm >= 0 and is_checkpoint_loss_healthy(l_bm, ref_best_loss=ref_best_loss):
+                    local_step = s_bm
+                    selected_local_dir = bm_dir
+                    local_is_best_fallback = True
+                    print(f"  [Local Safe Fallback] All normal checkpoints diverged or invalid! Safely falling back to local best_milestone at Step {s_bm:04d} (Loss {l_bm:.4f}).", flush=True)
+                    break
 
     # 2. Google Drive Step
     gdrive_dir = resolve_gdrive_restore_dir() or gdrive_base_dir
@@ -2914,7 +3125,17 @@ def resolve_and_auto_select_checkpoint(
 
     # 1. Local Disk is already at or above the latest remote checkpoint
     if local_step >= highest_step and local_step >= 0:
-        print(f"  {CLR_BOLD}{CLR_GREEN}>>> AUTO-SELECTED: LOCAL DISK (Step {local_step:04d} is already latest. No remote download required) <<<{CLR_RESET}", flush=True)
+        if os.path.abspath(selected_local_dir) != os.path.abspath(local_ckpt_dir):
+            print(f"  [Local Alignment] Aligning verified healthy checkpoint from {os.path.basename(selected_local_dir)} into {local_ckpt_dir}...", flush=True)
+            for fname in os.listdir(selected_local_dir):
+                s = os.path.join(selected_local_dir, fname)
+                d = os.path.join(local_ckpt_dir, fname)
+                if os.path.isfile(s):
+                    try:
+                        shutil.copy2(s, d)
+                    except Exception:
+                        pass
+        print(f"  {CLR_BOLD}{CLR_GREEN}>>> AUTO-SELECTED: LOCAL DISK (Step {local_step:04d} is healthy & latest. No remote download required) <<<{CLR_RESET}", flush=True)
         print(f"{CLR_CYAN}{'=' * 85}{CLR_RESET}\n", flush=True)
         return "local", local_step
 

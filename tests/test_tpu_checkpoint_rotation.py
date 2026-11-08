@@ -283,6 +283,147 @@ def test_dual_cloud_configuration_wiring():
     return True
 
 
+def test_5_loss_health_audit_rejects_diverged_and_picks_healthy_normal_backup():
+    print("\n[TEST 5/6] Testing Loss Health Audit: Rejects Diverged Step & Selects Healthy Normal Backup...")
+    test_tpu_parent = "storage/models/checkpoints_tpu/test_health_stage_parent"
+    test_tpu_dir = os.path.join(test_tpu_parent, "test_health_stage")
+    test_bm_dir = os.path.join(test_tpu_parent, "best_milestone")
+
+    try:
+        shutil.rmtree(test_tpu_parent, ignore_errors=True)
+        os.makedirs(test_tpu_dir, exist_ok=True)
+        os.makedirs(test_bm_dir, exist_ok=True)
+
+        # 1. Best milestone at Step 4500 with loss 1.70
+        bm_sub = os.path.join(test_bm_dir, "step_4500_loss_1.7000")
+        os.makedirs(bm_sub, exist_ok=True)
+        with open(os.path.join(bm_sub, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
+            json.dump({"step": 4500, "loss": 1.70, "best_loss": 1.70}, f)
+        with open(os.path.join(bm_sub, "COMMITTED"), "w", encoding="utf-8") as f:
+            f.write("STEP=4500\n")
+        with open(os.path.join(bm_sub, "model.safetensors"), "wb") as f:
+            f.write(b"MOCK_WEIGHTS_BM_4500")
+
+        # 2. Healthy normal backup at Step 5000 with loss 1.90 (<= 1.7 * 1.5 = 2.55)
+        backup_5000 = f"{test_tpu_dir}.step5000_1794000000"
+        os.makedirs(backup_5000, exist_ok=True)
+        with open(os.path.join(backup_5000, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
+            json.dump({"step": 5000, "loss": 1.90, "best_loss": 1.70}, f)
+        with open(os.path.join(backup_5000, "COMMITTED"), "w", encoding="utf-8") as f:
+            f.write("STEP=5000\n")
+        with open(os.path.join(backup_5000, "model.safetensors"), "wb") as f:
+            f.write(b"MOCK_WEIGHTS_STEP_5000")
+
+        # 3. Diverged latest normal checkpoint at Step 5500 with loss 6.20 (> 2.55)
+        with open(os.path.join(test_tpu_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
+            json.dump({"step": 5500, "loss": 6.20, "best_loss": 1.70}, f)
+        with open(os.path.join(test_tpu_dir, "COMMITTED"), "w", encoding="utf-8") as f:
+            f.write("STEP=5500\n")
+        with open(os.path.join(test_tpu_dir, "model.safetensors"), "wb") as f:
+            f.write(b"MOCK_WEIGHTS_STEP_5500")
+
+        source, resume_path, step = resolve_and_auto_select_tpu_checkpoint(
+            tpu_ckpt_dir=test_tpu_dir,
+            stage_id="test_health_stage",
+        )
+
+        assert step == 5000, f"Expected step 5000 (healthy backup), but got {step}"
+        assert os.path.abspath(resume_path) == os.path.abspath(backup_5000), f"Expected {backup_5000}, got {resume_path}"
+        print("  -> Confirmed: Diverged Step 5500 (Loss 6.20) rejected; Healthy normal backup Step 5000 (Loss 1.90) selected!")
+        print("  [PASS] Test 5: Loss Health Audit with Normal Backup Selection verified.")
+        return True
+    finally:
+        shutil.rmtree(test_tpu_parent, ignore_errors=True)
+
+
+def test_6_loss_health_fallback_to_best_milestone_when_all_normal_diverged():
+    print("\n[TEST 6/6] Testing Loss Health Fallback: All Normal Diverged -> Falls Back to Best Milestone...")
+    test_tpu_parent = "storage/models/checkpoints_tpu/test_fallback_stage_parent"
+    test_tpu_dir = os.path.join(test_tpu_parent, "test_fallback_stage")
+    test_bm_dir = os.path.join(test_tpu_parent, "best_milestone")
+
+    try:
+        shutil.rmtree(test_tpu_parent, ignore_errors=True)
+        os.makedirs(test_tpu_dir, exist_ok=True)
+        os.makedirs(test_bm_dir, exist_ok=True)
+
+        # 1. Best milestone at Step 4500 with loss 1.70
+        bm_sub = os.path.join(test_bm_dir, "step_4500_loss_1.7000")
+        os.makedirs(bm_sub, exist_ok=True)
+        with open(os.path.join(bm_sub, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
+            json.dump({"step": 4500, "loss": 1.70, "best_loss": 1.70}, f)
+        with open(os.path.join(bm_sub, "COMMITTED"), "w", encoding="utf-8") as f:
+            f.write("STEP=4500\n")
+        with open(os.path.join(bm_sub, "model.safetensors"), "wb") as f:
+            f.write(b"MOCK_WEIGHTS_BM_4500")
+
+        # 2. Diverged normal backup at Step 5000 with loss 5.50 (> 2.55)
+        backup_5000 = f"{test_tpu_dir}.step5000_1794000000"
+        os.makedirs(backup_5000, exist_ok=True)
+        with open(os.path.join(backup_5000, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
+            json.dump({"step": 5000, "loss": 5.50, "best_loss": 1.70}, f)
+        with open(os.path.join(backup_5000, "COMMITTED"), "w", encoding="utf-8") as f:
+            f.write("STEP=5000\n")
+        with open(os.path.join(backup_5000, "model.safetensors"), "wb") as f:
+            f.write(b"MOCK_WEIGHTS_STEP_5000")
+
+        # 3. Diverged latest normal checkpoint at Step 5500 with loss 6.20 (> 2.55)
+        with open(os.path.join(test_tpu_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
+            json.dump({"step": 5500, "loss": 6.20, "best_loss": 1.70}, f)
+        with open(os.path.join(test_tpu_dir, "COMMITTED"), "w", encoding="utf-8") as f:
+            f.write("STEP=5500\n")
+        with open(os.path.join(test_tpu_dir, "model.safetensors"), "wb") as f:
+            f.write(b"MOCK_WEIGHTS_STEP_5500")
+
+        source, resume_path, step = resolve_and_auto_select_tpu_checkpoint(
+            tpu_ckpt_dir=test_tpu_dir,
+            stage_id="test_fallback_stage",
+        )
+
+        assert step == 4500, f"Expected step 4500 (best milestone), but got {step}"
+        assert "4500" in resume_path or "best_milestone" in resume_path, f"Expected best milestone path, got {resume_path}"
+        print("  -> Confirmed: All normal checkpoints (Step 5500 & 5000) diverged. Safely fell back to Best Milestone Step 4500!")
+        print("  [PASS] Test 6: Loss Health Fallback to Best Milestone verified.")
+        return True
+    finally:
+        shutil.rmtree(test_tpu_parent, ignore_errors=True)
+
+
+def test_7_real_world_checkpoint_backward_compatibility_and_resume():
+    print("\n[TEST 7/7] Testing Real-World Multi-Domain Checkpoint Resume (Zero False Rejections)...")
+    test_tpu_parent = "storage/models/checkpoints_tpu/test_compat_stage_parent"
+    test_tpu_dir = os.path.join(test_tpu_parent, "test_compat_stage")
+
+    try:
+        shutil.rmtree(test_tpu_parent, ignore_errors=True)
+        os.makedirs(test_tpu_dir, exist_ok=True)
+
+        # Realistic pretraining checkpoint: Step 7700 with loss 1.6209, best_loss 0.6298
+        with open(os.path.join(test_tpu_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "step": 7700,
+                "loss": 1.62095322,
+                "best_loss": 0.62989691,
+                "stage_id": "test_compat_stage",
+            }, f)
+        with open(os.path.join(test_tpu_dir, "COMMITTED"), "w", encoding="utf-8") as f:
+            f.write("STEP=7700\n")
+        with open(os.path.join(test_tpu_dir, "model.safetensors"), "wb") as f:
+            f.write(b"MOCK_WEIGHTS_STEP_7700")
+
+        source, resume_path, step = resolve_and_auto_select_tpu_checkpoint(
+            tpu_ckpt_dir=test_tpu_dir,
+            stage_id="test_compat_stage",
+        )
+
+        assert step == 7700, f"Expected step 7700, but got {step}"
+        print("  -> Confirmed: Existing Step 7700 (Loss 1.6209 vs Best 0.6298) is 100% accepted and resumes smoothly without any false rejection!")
+        print("  [PASS] Test 7: Real-world multi-domain backward compatibility verified.")
+        return True
+    finally:
+        shutil.rmtree(test_tpu_parent, ignore_errors=True)
+
+
 def run_all_checkpoint_tests():
     print("=" * 80)
     print("  RUNNING TARA TPU CHECKPOINT ROTATION & MULTI-CLOUD VERIFICATION SUITE")
@@ -291,10 +432,13 @@ def run_all_checkpoint_tests():
     t2 = test_rolling_retention_step_pruning()
     t3 = test_gpu_protection_safety_boundary()
     t4 = test_dual_cloud_configuration_wiring()
-    all_ok = t1 and t2 and t3 and t4
+    t5 = test_5_loss_health_audit_rejects_diverged_and_picks_healthy_normal_backup()
+    t6 = test_6_loss_health_fallback_to_best_milestone_when_all_normal_diverged()
+    t7 = test_7_real_world_checkpoint_backward_compatibility_and_resume()
+    all_ok = t1 and t2 and t3 and t4 and t5 and t6 and t7
     print("\n" + "=" * 80)
     if all_ok:
-        print("  ALL 4 CHECKPOINT ROTATION & MULTI-CLOUD TESTS PASSED!")
+        print("  ALL 7 CHECKPOINT ROTATION & LOSS HEALTH TESTS PASSED!")
     else:
         print("  SOME TESTS FAILED!")
     print("=" * 80)

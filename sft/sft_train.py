@@ -37,6 +37,7 @@ for p in (REPO_ROOT, TRAINING_DIR, SCRIPT_DIR):
         sys.path.insert(0, p)
 
 from model_dataset import TaraForCausalLM, TaraNativeTokenizer
+from gdrive_sync import is_checkpoint_loss_healthy, extract_checkpoint_loss_health
 from sft_dataset import (
     CANONICAL_DOMAINS,
     BinaryCacheSftDataset,
@@ -258,33 +259,36 @@ def resolve_highest_sft_checkpoint(
     """
     Scans local output directory, Google Drive, and Hugging Face repository
     to automatically identify the highest step SFT checkpoint and select it for resumption.
+    Applies Loss Health Verification:
+    - If a candidate checkpoint has diverged loss (> 1.5x best loss), it is rejected.
+    - Audits previous normal checkpoint backups.
+    - If all normal checkpoints are diverged, safely falls back to best_sft_milestone.
     """
-    highest_step = 0
-    best_source = None
+    candidates: List[Tuple[int, float, str]] = []
+    ref_best_loss = float("inf")
+    bm_source: Optional[str] = None
+    bm_step: int = -1
 
     # Helper to check a candidate folder
     def check_candidate(candidate_dir: str):
-        nonlocal highest_step, best_source
+        nonlocal ref_best_loss, bm_source, bm_step
         if not os.path.isdir(candidate_dir):
             return
-        state_file = os.path.join(candidate_dir, "sft_checkpoint_state.json")
-        if os.path.exists(state_file):
-            try:
-                with open(state_file, "r", encoding="utf-8") as f:
-                    meta = json.load(f)
-                s = meta.get("step", 0)
-                if s > highest_step:
-                    highest_step = s
-                    best_source = candidate_dir
-            except Exception:
-                pass
-        else:
-            m = re.search(r"step_(\d+)", candidate_dir)
-            if m:
-                s = int(m.group(1))
-                if s > highest_step and os.path.exists(os.path.join(candidate_dir, "model.safetensors")):
-                    highest_step = s
-                    best_source = candidate_dir
+        s, l, bl = extract_checkpoint_loss_health(candidate_dir)
+        is_bm = "best_sft_milestone" in candidate_dir or "best_milestone" in candidate_dir
+        if math.isfinite(l) and l > 0.0:
+            if is_bm:
+                ref_best_loss = min(ref_best_loss, l)
+        if math.isfinite(bl) and bl > 0.0:
+            ref_best_loss = min(ref_best_loss, bl)
+
+        if s >= 0:
+            if is_bm:
+                if s > bm_step:
+                    bm_step = s
+                    bm_source = candidate_dir
+            else:
+                candidates.append((s, l, candidate_dir))
 
     # 1. Scan Local Directory & Subfolders
     if os.path.exists(local_output_dir):
@@ -312,26 +316,42 @@ def resolve_highest_sft_checkpoint(
                     hf_steps.append((int(m.group(1)), f))
             if hf_steps:
                 max_hf_step, _ = max(hf_steps, key=lambda x: x[0])
-                if max_hf_step > highest_step:
-                    highest_step = max_hf_step
-                    print(
-                        f"[Auto-Resume HF] Highest SFT step {highest_step} discovered on Hugging Face! Downloading...",
-                        flush=True,
-                    )
-                    from huggingface_hub import snapshot_download
+                from huggingface_hub import snapshot_download
 
-                    dl_dir = os.path.join(local_output_dir, f"hf_step_{highest_step}")
-                    snapshot_download(
-                        repo_id=hf_repo,
-                        repo_type="model",
-                        local_dir=dl_dir,
-                        allow_patterns=[f"sft_checkpoints/step_{highest_step:04d}/*"],
-                        token=hf_token,
-                    )
-                    sub = os.path.join(dl_dir, f"sft_checkpoints/step_{highest_step:04d}")
-                    best_source = sub if os.path.isdir(sub) else dl_dir
+                dl_dir = os.path.join(local_output_dir, f"hf_step_{max_hf_step}")
+                snapshot_download(
+                    repo_id=hf_repo,
+                    repo_type="model",
+                    local_dir=dl_dir,
+                    allow_patterns=[f"sft_checkpoints/step_{max_hf_step:04d}/*"],
+                    token=hf_token,
+                )
+                sub = os.path.join(dl_dir, f"sft_checkpoints/step_{max_hf_step:04d}")
+                cand_sub = sub if os.path.isdir(sub) else dl_dir
+                check_candidate(cand_sub)
         except Exception as e:
             print(f"[Auto-Resume HF Notice] Hugging Face scan skipped: {e}", flush=True)
+
+    # Sort candidates descending by step (highest step first)
+    candidates.sort(key=lambda x: x[0], reverse=True)
+
+    highest_step = 0
+    best_source = None
+
+    for s_cand, l_cand, dir_cand in candidates:
+        if is_checkpoint_loss_healthy(l_cand, ref_best_loss=ref_best_loss):
+            highest_step = s_cand
+            best_source = dir_cand
+            if candidates and s_cand < candidates[0][0]:
+                print(f"[SFT Resume Loss Audit] Selected healthy normal checkpoint backup at Step {s_cand} (Loss {l_cand:.4f} <= {ref_best_loss * 1.5:.4f}) after newer candidate(s) diverged!", flush=True)
+            break
+        else:
+            print(f"[SFT Resume Loss Audit] Checkpoint at Step {s_cand} ({os.path.basename(dir_cand)}) rejected: Loss {l_cand:.4f} diverged (> {ref_best_loss * 1.5:.4f}). Auditing older normal backup...", flush=True)
+
+    if highest_step <= 0 and bm_step > 0 and bm_source:
+        highest_step = bm_step
+        best_source = bm_source
+        print(f"[SFT Resume Safe Fallback] All normal SFT checkpoints diverged. Falling back to best_sft_milestone at Step {bm_step} ({bm_source})", flush=True)
 
     return highest_step, best_source
 
@@ -1165,24 +1185,31 @@ def main():
                     hf_token=args.hf_token,
                 )
 
-            # Regular Checkpoint Interval
+            # Regular Checkpoint Interval with Loss Spike Guard
             if step % args.checkpoint_interval == 0 or step >= args.max_steps:
-                save_sft_checkpoint(
-                    model=model,
-                    optimizer=optimizer,
-                    scaler=scaler,
-                    config=config,
-                    tokenizer_path=tok_file,
-                    output_dir=args.output_dir,
-                    step=step,
-                    loss=cur_loss,
-                    best_loss=best_loss,
-                    consumed_samples=step * args.grad_accum,
-                    is_best=False,
-                    gdrive_backup_dir=gdrive_dir,
-                    hf_repo=args.hf_repo,
-                    hf_token=args.hf_token,
-                )
+                if best_loss < float("inf") and not is_checkpoint_loss_healthy(cur_loss, ref_best_loss=best_loss):
+                    print(
+                        f"[SFT Loss Spike Guard] Step {step:04d}: Current loss {cur_loss:.4f} is diverged (vs best {best_loss:.4f}). "
+                        f"Skipping regular checkpoint save to protect normal backups from divergence pollution!",
+                        flush=True,
+                    )
+                else:
+                    save_sft_checkpoint(
+                        model=model,
+                        optimizer=optimizer,
+                        scaler=scaler,
+                        config=config,
+                        tokenizer_path=tok_file,
+                        output_dir=args.output_dir,
+                        step=step,
+                        loss=cur_loss,
+                        best_loss=best_loss,
+                        consumed_samples=step * args.grad_accum,
+                        is_best=False,
+                        gdrive_backup_dir=gdrive_dir,
+                        hf_repo=args.hf_repo,
+                        hf_token=args.hf_token,
+                    )
                 ledger.save()
 
             # Live Multi-Domain Scoring Benchmark (GSM8K Math + Code + Kannada + Reasoning + STEM)

@@ -546,6 +546,9 @@ def train_world_model_gpu(args):
 
     print(f"[World Model GPU] Loaded {len(dataset)} records. Loss weights: dyn={lambda_dyn}, rew={lambda_rew}, fail={lambda_fail}, val={lambda_val}")
 
+    best_loss = float("inf")
+    best_bm_dir = os.path.join(args.output_dir, "best_milestone")
+
     for epoch in range(args.epochs):
         model.train()
         total_loss = 0.0
@@ -588,13 +591,34 @@ def train_world_model_gpu(args):
             total_val += loss_val.item()
 
         n = max(len(dataloader), 1)
+        avg_epoch_loss = total_loss / n
         print(
-            f"  Epoch [{epoch+1}/{args.epochs}] Total Loss: {total_loss/n:.4f} | "
+            f"  Epoch [{epoch+1}/{args.epochs}] Total Loss: {avg_epoch_loss:.4f} | "
             f"Dynamics MSE: {total_dyn/n:.4f} | Reward MSE: {total_rew/n:.4f} | Fail BCE: {total_fail/n:.4f}"
         )
 
-    # Export trained weights
-    model.save_checkpoint(args.output_dir)
+        # Best Milestone Checkpoint Tracking
+        if avg_epoch_loss < best_loss:
+            best_loss = avg_epoch_loss
+            os.makedirs(best_bm_dir, exist_ok=True)
+            model.save_checkpoint(best_bm_dir)
+            meta = {"epoch": epoch + 1, "loss": avg_epoch_loss, "best_loss": best_loss, "status": "BEST_MILESTONE"}
+            with open(os.path.join(best_bm_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+            print(f"[World Model GPU] >>> Committing Best Milestone Checkpoint: {best_loss:.4f} <<<", flush=True)
+
+        # Regular Checkpoint Save with Loss Spike Guard
+        if best_loss < float("inf") and avg_epoch_loss > (best_loss * 1.5):
+            print(
+                f"[World Model GPU Loss Spike Guard] Epoch {epoch+1}: Loss {avg_epoch_loss:.4f} > 1.5x best loss ({best_loss:.4f}). "
+                f"Skipping regular checkpoint save to protect normal backups from divergence pollution!",
+                flush=True,
+            )
+        else:
+            model.save_checkpoint(args.output_dir)
+            meta = {"epoch": epoch + 1, "loss": avg_epoch_loss, "best_loss": best_loss, "status": "NORMAL_CHECKPOINT"}
+            with open(os.path.join(args.output_dir, "STAGE_METADATA.json"), "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
 
     # Export numerical parity probe for Rust cross-verification
     model.eval()

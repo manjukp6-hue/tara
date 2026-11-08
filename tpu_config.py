@@ -1017,9 +1017,9 @@ class TPUConfig:
     Authoritative default hyper-parameters optimized for Google TPU (v6e / v5p / v5e).
     Maintains exact numerical and hyperparameter parity with TARA GPU training.
     """
-    # Micro-batch per TPU core (1 per core = 8 samples across 8 cores; 4x activation memory reduction)
-    DEFAULT_BATCH_SIZE: int = 1
-    # Gradient accumulation steps (1 * 32 * 8 = 256 effective batch size preserved)
+    # Micro-batch per TPU core (2 per core doubles systolic MXU utilization)
+    DEFAULT_BATCH_SIZE: int = 2
+    # Gradient accumulation steps
     DEFAULT_GRAD_ACCUM: int = 32
     # Memory-safe chunk size for vocabulary projection and cross-entropy (512 tokens preserves high TPU MXU utilization while keeping peak projection VRAM bounded to ~100MB)
     DEFAULT_LOSS_CHUNK_SIZE: int = 512

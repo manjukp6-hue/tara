@@ -2247,7 +2247,7 @@ def main():
                     world_optimizer.zero_grad(set_to_none=True)
                 optimizer.zero_grad(set_to_none=True)
                 step += 1
-                window_samples = sum(len(c) for c in accum_batches)
+                window_samples = sum(len(c) for c in accum_batches) * (world_size if is_distributed else 1)
                 total_samples_trained += window_samples
 
                 cur_step_loss = accum_loss / max(1, accum_tokens)
@@ -2603,7 +2603,7 @@ def main():
             if not is_step_skipped:
                 optimizer.zero_grad(set_to_none=True)
                 step += 1
-                window_samples = sum(len(c) for c in accum_batches)
+                window_samples = sum(len(c) for c in accum_batches) * (world_size if is_distributed else 1)
                 total_samples_trained += window_samples
                 cur_step_loss = accum_loss / max(1, accum_tokens) if accum_tokens > 0 else (accum_loss / partial_count)
                 cur_step_ce = accum_ce / max(1, accum_tokens) if accum_tokens > 0 else (accum_ce / partial_count)

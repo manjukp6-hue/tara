@@ -170,8 +170,8 @@ def resolve_promotion_source(best_dir: str, latest_dir: str, current_step: int, 
     Selects the optimal model directory for promotion:
     - If best_dir exists and was saved recently (within max_stale_delta steps of current_step),
       promotes best_dir to preserve peak validation quality.
-    - If best_dir is stale (older than max_stale_delta steps, e.g. Step 6000 while at Step 50000),
-      promotes latest_dir to ensure all tens of thousands of curriculum steps are preserved.
+    - If best_dir is stale (older than max_stale_delta steps),
+      promotes latest_dir to ensure full curriculum training progress is preserved.
     """
     if not check_model_weights_exist(best_dir):
         return latest_dir

@@ -2801,9 +2801,9 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
     model.train()
     step = start_step
     accum_tokens = 0
-    accum_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
-    accum_ce_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
-    accum_aux_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
+    accum_loss = 0.0
+    accum_ce_loss = 0.0
+    accum_aux_loss = 0.0
     accum_valid_tokens = torch.tensor(0, dtype=torch.long, device=device)
     accum_batches = 0
     accum_batch_cursors = []
@@ -2877,9 +2877,9 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
             if HAS_XLA:
                 xm.mark_step()
 
-            accum_loss = accum_loss + getattr(loss_res, "loss_sum", loss).detach()
-            accum_ce_loss = accum_ce_loss + getattr(loss_res, "ce_loss", ce_loss).detach()
-            accum_aux_loss = accum_aux_loss + getattr(loss_res, "aux_loss", aux_loss).detach()
+            accum_loss += getattr(loss_res, "loss_sum", loss).detach()
+            accum_ce_loss += float(ce_loss.item()) if hasattr(ce_loss, "item") else float(ce_loss)
+            accum_aux_loss += float(aux_loss.item()) if hasattr(aux_loss, "item") else float(aux_loss)
             accum_valid_tokens = accum_valid_tokens + cur_valid_tokens.detach()
             accum_batches += 1
             accum_tokens += (inputs.size(0) * inputs.size(1))
@@ -2895,8 +2895,6 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
 
                 local_loss_sum = accum_loss.item() if isinstance(accum_loss, torch.Tensor) else float(accum_loss)
                 local_valid_tokens = int(accum_valid_tokens.item())
-                local_ce_sum = accum_ce_loss.item() if isinstance(accum_ce_loss, torch.Tensor) else float(accum_ce_loss)
-                local_aux_sum = accum_aux_loss.item() if isinstance(accum_aux_loss, torch.Tensor) else float(accum_aux_loss)
                 if HAS_XLA and world_size > 1:
                     loss_sync_tag = f"tpu_loss_s{step}_a{accum_attempt}" if accum_attempt > 0 else f"tpu_loss_{step}"
                     cluster_loss_sum = sync_tpu_sum_float(local_loss_sum, tag=loss_sync_tag)
@@ -2907,8 +2905,8 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
                     cluster_valid_tokens = local_valid_tokens
 
                 cur_step_loss = (cluster_loss_sum / float(cluster_valid_tokens)) if cluster_valid_tokens > 0 else 0.0
-                cur_step_ce = (local_ce_sum / max(1, accum_batches))
-                cur_step_aux = (local_aux_sum / max(1, accum_batches))
+                cur_step_ce = (accum_ce_loss / max(1, accum_batches))
+                cur_step_aux = (accum_aux_loss / max(1, accum_batches))
 
                 # Diagnostic stage: BEFORE_OPTIMIZER_STEP
                 if step == start_step or (args.checkpoint_interval > 0 and step % args.checkpoint_interval == 0):
@@ -2940,9 +2938,9 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
                             flush=True,
                         )
                     optimizer.zero_grad(set_to_none=True)
-                    accum_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
-                    accum_ce_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
-                    accum_aux_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
+                    accum_loss = 0.0
+                    accum_ce_loss = 0.0
+                    accum_aux_loss = 0.0
                     accum_valid_tokens = torch.tensor(0, dtype=torch.long, device=device)
                     accum_batches = 0
                     accum_tokens = 0
@@ -2976,9 +2974,9 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
 
                 step += 1
                 total_samples_trained += sum(len(c) for c in accum_batch_cursors)
-                accum_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
-                accum_ce_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
-                accum_aux_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
+                accum_loss = 0.0
+                accum_ce_loss = 0.0
+                accum_aux_loss = 0.0
                 accum_valid_tokens = torch.tensor(0, dtype=torch.long, device=device)
                 accum_batches = 0
                 # Preserve accum_tokens for accurate speed calculation below

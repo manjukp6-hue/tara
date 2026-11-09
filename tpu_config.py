@@ -73,29 +73,32 @@ except Exception as _e_root:
 
 
 def is_tpu_available() -> bool:
-    """Returns True ONLY if an authentic physical PyTorch/XLA or native TorchTPU accelerator is present."""
-    if HAS_XLA:
-        try:
-            if xr is not None and hasattr(xr, "device_type"):
-                return xr.device_type().upper() == "TPU"
-            device_hw = xm.xla_device_hw()
-            return "TPU" in str(device_hw).upper()
-        except Exception:
-            pass
-    try:
-        import torch
-        dev = torch.device("tpu")
-        _ = torch.empty(0, device=dev)
-        return True
-    except Exception:
-        pass
-    # Check authentic cloud TPU environment markers common in Colab / Kaggle / GCP TPU VMs
-    return bool(
+    """
+    Returns True ONLY if an authentic physical PyTorch/XLA or native TorchTPU accelerator is present.
+    CRITICAL: In PyTorch/XLA PJRT, NEVER call xm.xla_device(), xm.xla_device_hw(),
+    or torch.empty(..., device='tpu') in the parent process before xmp.spawn(),
+    as this binds the PJRT runtime prematurely and crashes with:
+    'RuntimeError: Runtime is already initialized. Do not use the XLA device before calling xmp.spawn.'
+    """
+    if bool(
         os.environ.get("TPU_NAME")
         or os.environ.get("COLAB_TPU_ADDR")
         or os.environ.get("TPU_ACCELERATOR_TYPE")
         or os.environ.get("KAGGLE_TPU_VERSION")
-    )
+        or (os.environ.get("PJRT_DEVICE", "").upper() == "TPU")
+    ):
+        return True
+
+    if HAS_XLA:
+        try:
+            if hasattr(xm, "get_xla_supported_devices"):
+                devs = xm.get_xla_supported_devices()
+                if any("TPU" in str(d).upper() for d in devs):
+                    return True
+        except Exception:
+            pass
+
+    return False
 
 
 def get_tpu_hardware_info() -> Dict[str, Any]:
@@ -108,19 +111,22 @@ def get_tpu_hardware_info() -> Dict[str, Any]:
     num_cores = 1
     device_name = "N/A"
 
-    # Safely query device count without full device allocation
-    if HAS_XLA:
+    # Safely query device count from environment or get_xla_supported_devices without premature PJRT binding
+    env_num_devices = os.environ.get("TPU_NUM_DEVICES")
+    if env_num_devices and env_num_devices.isdigit():
+        num_cores = int(env_num_devices)
+    elif HAS_XLA and available:
         try:
-            if xr is not None and hasattr(xr, "local_device_count"):
-                num_cores = xr.local_device_count()
-            elif hasattr(torch_xla, "device_count"):
-                num_cores = torch_xla.device_count()
-            elif hasattr(xm, "xworld_size"):
-                num_cores = xm.xworld_size()
-            elif hasattr(xm, "xrt_world_size"):
-                num_cores = xm.xrt_world_size()
+            if hasattr(xm, "get_xla_supported_devices"):
+                devs = xm.get_xla_supported_devices()
+                tpu_devs = [d for d in devs if "TPU" in str(d).upper()]
+                num_cores = len(tpu_devs) if tpu_devs else 8
+            else:
+                num_cores = 8
         except Exception:
-            num_cores = 8 if available else 1
+            num_cores = 8
+    elif available:
+        num_cores = 8
 
     # Detect TPU generation from environment or hardware string
     tpu_env = (
@@ -131,7 +137,6 @@ def get_tpu_hardware_info() -> Dict[str, Any]:
         + " " + device_name
     ).lower()
 
-    env_num_devices = os.environ.get("TPU_NUM_DEVICES")
     if env_num_devices and env_num_devices.isdigit():
         num_cores = int(env_num_devices)
 
@@ -162,31 +167,21 @@ def get_tpu_hardware_info() -> Dict[str, Any]:
         num_cores = 1
 
     # 4. Kaggle / GCP TPU v5e-8 (Multi-core / 8 TensorCores / 4 Chips / 128GB HBM)
-    elif "v5e-8" in tpu_env or "v5e" in tpu_env or "v5litepod" in tpu_env:
+    elif "v5e-8" in tpu_env or "v5e" in tpu_env or "v5litepod" in tpu_env or os.environ.get("KAGGLE_TPU_VERSION"):
         hw_type = "Google Cloud TPU v5e-8 (Kaggle/GCP | 8 Cores | 128GB HBM | 1576 TFLOPS)"
         num_cores = 8
-
 
     elif available:
         hw_type = f"Google Cloud TPU ({num_cores} Cores | PyTorch/XLA PJRT)"
 
-    has_native_tpu = False
-    try:
-        import torch
-        dev = torch.device("tpu")
-        _ = torch.empty(0, device=dev)
-        has_native_tpu = True
-    except Exception:
-        has_native_tpu = False
-
-    engine_name = "PyTorch/XLA (PJRT)" if HAS_XLA else ("TorchTPU (Colab/Native Backend)" if has_native_tpu else "None")
+    engine_name = "PyTorch/XLA (PJRT)" if HAS_XLA else "TorchTPU (Native Backend)"
 
     return {
-        "available": available or has_native_tpu,
+        "available": available,
         "hardware_type": hw_type,
         "num_cores": max(1, num_cores),
         "has_xla": HAS_XLA,
-        "has_native_tpu": has_native_tpu,
+        "has_native_tpu": False,
         "engine_name": engine_name,
         "device_name": device_name,
     }

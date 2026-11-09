@@ -22,6 +22,11 @@ try:
 except ImportError:
     torch = None
 
+# Clean up any legacy Kaggle environment variables that conflict with PJRT SliceBuilder
+if os.environ.get("TPU_PROCESS_ADDRESSES") == "local":
+    os.environ.pop("TPU_PROCESS_ADDRESSES", None)
+os.environ.pop("CLOUD_TSK_ID", None)
+
 # Ensure PJRT & Bfloat16 defaults are active in Python environment before importing torch_xla
 os.environ.setdefault("PJRT_DEVICE", "TPU")
 os.environ.setdefault("XLA_USE_BF16", "1")

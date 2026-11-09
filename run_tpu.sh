@@ -47,6 +47,10 @@ TPU_TYPE_LOWER="$(echo "${TPU_ACCELERATOR_TYPE:-${TPU_NAME:-}}" | tr '[:upper:]'
 if [ -n "${KAGGLE_KERNEL_RUN_TYPE:-}" ] || [ -n "${KAGGLE_TPU_VERSION:-}" ]; then
     echo "[TPU DETECTED] Kaggle Cloud TPU Environment detected: TPU v5e-8 (8 Cores | 128GB HBM)"
     export TPU_NUM_DEVICES="${TPU_NUM_DEVICES:-8}"
+    if [ "${TPU_PROCESS_ADDRESSES:-}" = "local" ]; then
+        unset TPU_PROCESS_ADDRESSES
+    fi
+    unset CLOUD_TSK_ID 2>/dev/null || true
 
 elif [[ "$TPU_TYPE_LOWER" == *"v6e-1"* ]] || [[ "$TPU_TYPE_LOWER" == *"v5e-1"* ]] || [ -n "${COLAB_TPU_ADDR:-}" ] || [ "${TPU_NUM_DEVICES:-}" = "1" ]; then
     echo "[TPU DETECTED] Single-Core TPU Environment detected (e.g. Google Colab TPU v5e-1 / v6e-1)"

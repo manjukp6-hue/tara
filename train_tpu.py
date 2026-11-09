@@ -22,6 +22,11 @@ Key Architectural Pillars (Full GPU Parity):
 from __future__ import annotations
 
 import os
+
+# Clean up any legacy Kaggle environment variables that conflict with PJRT SliceBuilder
+if os.environ.get("TPU_PROCESS_ADDRESSES") == "local":
+    os.environ.pop("TPU_PROCESS_ADDRESSES", None)
+os.environ.pop("CLOUD_TSK_ID", None)
 import sys
 import time
 import math

@@ -72,6 +72,8 @@ try:
 
     if xm is not None or "torch_xla" in sys.modules:
         HAS_XLA = True
+        if torch is not None and not hasattr(torch, "xla"):
+            torch.xla = torch_xla
 except Exception as _e_root:
     HAS_XLA = False
     XLA_IMPORT_ERRORS.append(f"torch_xla root: {_e_root}")

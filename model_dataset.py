@@ -430,7 +430,14 @@ class TaraModel(nn.Module):
                     def custom_forward(*inputs):
                         return module(inputs[0], inputs[1], inputs[2], inputs[3] if len(inputs) > 3 else None)
                     return custom_forward
-                h = torch.utils.checkpoint.checkpoint(create_custom_forward(layer), h, cos, sin, attention_mask, use_reentrant=False)
+                try:
+                    h = torch.utils.checkpoint.checkpoint(create_custom_forward(layer), h, cos, sin, attention_mask, use_reentrant=False)
+                except AttributeError as _e_chk:
+                    if "xla" in str(_e_chk).lower():
+                        # Fallback for PyTorch/XLA without torch.xla module registration
+                        h = torch.utils.checkpoint.checkpoint(create_custom_forward(layer), h, cos, sin, attention_mask, use_reentrant=True)
+                    else:
+                        raise
             else:
                 h = layer(h, cos, sin, attention_mask)
 

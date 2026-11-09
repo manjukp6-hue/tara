@@ -49,6 +49,12 @@ os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import torch
+try:
+    import torch_xla
+    if not hasattr(torch, 'xla'):
+        torch.xla = torch_xla
+except Exception:
+    pass
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader

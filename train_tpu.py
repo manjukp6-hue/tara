@@ -3457,6 +3457,7 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
                     if can_save and (is_meaningful or cooldown_ok or step >= args.max_steps):
                         committed_best_this_step = True
                         last_best_checkpoint_step = step
+                        last_regular_checkpoint_step = step
                         if is_main:
                             print(f"[{args.stage_id}] >>> {CLR_GREEN}{CLR_BOLD}COMMITTING TPU BEST MILESTONE: {best_loss:.4f} (Step {step}){CLR_RESET} <<<", flush=True)
 
@@ -3486,7 +3487,10 @@ def train_tpu_worker(index: int, args: argparse.Namespace):
                         log_tpu_memory_stage("AFTER_CHECKPOINT_SAVE", step=step, device=device, model=model, optimizer=optimizer)
 
                 # Regular Checkpoint Saving with Loss Spike Guard
-                is_regular = (args.checkpoint_interval > 0 and step % args.checkpoint_interval == 0 and step > last_regular_checkpoint_step)
+                is_regular = (
+                    args.checkpoint_interval > 0
+                    and (step - last_regular_checkpoint_step) >= args.checkpoint_interval
+                )
                 if can_save and is_regular and not committed_best_this_step:
                     last_regular_checkpoint_step = step
                     # Loss Spike Guard: Prevent saving diverged checkpoints to protect healthy normal backups

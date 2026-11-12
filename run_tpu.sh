@@ -38,6 +38,13 @@ export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
 export TF_CPP_MIN_LOG_LEVEL="${TF_CPP_MIN_LOG_LEVEL:-2}"
 
+# 2a. Resolve full tensorflow / torch-xla LibTPU runtime collision in Kaggle/Colab environments
+if command -v pip &>/dev/null && pip show tensorflow &>/dev/null; then
+    echo "[TPU SETUP] Resolving tensorflow/torch-xla LibTPU collision (replacing tensorflow with tensorflow-cpu)..."
+    pip uninstall -y tensorflow 2>/dev/null || true
+    pip install -q tensorflow-cpu 2>/dev/null || true
+fi
+
 # 3. Detect TPU Environment (Colab vs Kaggle vs Cloud TPU VM)
 echo "[TPU SETUP] Inspecting Cloud TPU Environment..."
 EXTRA_ARGS=()

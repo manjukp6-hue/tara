@@ -1146,7 +1146,7 @@ def main():
     parser.add_argument("--max-shards", type=int, default=0, help="Max shards to ingest (0 for all discovered shards)")
     parser.add_argument("--exclude-shards", type=str, default="*shard_099*,*shard_098*", help="Comma-separated patterns of shards strictly excluded from training (held-out validation)")
     parser.add_argument("--max-samples", type=int, default=0, help="Max samples to ingest across shards (0 for unlimited)")
-    parser.add_argument("--checkpoint-interval", type=int, default=int(os.environ.get("CHECKPOINT_INTERVAL", 100)), help="Optimizer step interval between checkpoint commits and cloud backups (default: 100)")
+    parser.add_argument("--checkpoint-interval", type=int, default=int(os.environ.get("CHECKPOINT_INTERVAL", 1)), help="Optimizer step interval between checkpoint commits and cloud backups (default: 1)")
     parser.add_argument("--eval-interval", type=int, default=int(os.environ.get("EVAL_INTERVAL", 100)),
                         help="Optimizer step interval to probe model generation with live sample prompts (default: 100; 0 to disable)")
     parser.add_argument("--promote-interval", type=int, default=int(os.environ.get("PROMOTE_INTERVAL", 20000)),
@@ -1218,13 +1218,9 @@ def main():
 
     is_main_process = (rank == 0)
 
-    # Dynamic checkpoint interval: 1000 steps for dual/multi GPU, 100 steps for single GPU
+    # Dynamic checkpoint interval: default 1 step across single & multi GPU
     if "--checkpoint-interval" not in sys.argv and "CHECKPOINT_INTERVAL" not in os.environ:
-        n_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
-        if n_gpus > 1 or is_distributed:
-            args.checkpoint_interval = 1000
-        else:
-            args.checkpoint_interval = 100
+        args.checkpoint_interval = 1
 
     # Suppress non-critical stdout for worker ranks so terminal output remains single-stream and clean
     if is_distributed and not is_main_process:

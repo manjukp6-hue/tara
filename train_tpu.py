@@ -1097,10 +1097,11 @@ def save_tpu_checkpoint(
         print(f"[TPU Checkpoint] Snapshotting [{tag}] into {output_dir}... (Parent: {parent_dir})", flush=True)
 
         # If running on Kaggle, stage checkpoint directly in /kaggle/temp/ (or /tmp)
-        # to strictly protect /kaggle/working from exhausting its 20GB quota.
+        # to strictly protect /kaggle/working from exhausting its 20GB quota and push directly from temp.
+        is_kaggle = bool(os.path.exists("/kaggle/temp") or os.path.exists("/kaggle") or os.environ.get("KAGGLE_KERNEL_RUN_TYPE"))
         if os.path.exists("/kaggle/temp"):
             staging_base = "/kaggle/temp"
-        elif os.path.exists("/kaggle") or os.environ.get("KAGGLE_KERNEL_RUN_TYPE"):
+        elif is_kaggle:
             staging_base = "/tmp"
         else:
             staging_base = parent_dir
@@ -1376,14 +1377,17 @@ def save_tpu_checkpoint(
                 return False
 
             # 8. Promote staging -> immutable versioned directory
+            # On Kaggle, versioned_dir stays inside staging_base (/kaggle/temp or /tmp)
+            # so direct cloud push happens from temp without duplicating heavy multi-GB weights to /kaggle/working.
+            v_parent = staging_base if is_kaggle else parent_dir
             if is_best:
                 versioned_dir = os.path.join(
-                    parent_dir,
+                    v_parent,
                     f"best_milestone_step_{step}_{int(time.time())}"
                 )
             else:
                 versioned_dir = os.path.join(
-                    parent_dir,
+                    v_parent,
                     f"{output_dir_basename}.step{step}_{int(time.time())}"
                 )
 
@@ -1406,14 +1410,19 @@ def save_tpu_checkpoint(
 
             # 10. Align active output_dir safely with verified latest artifacts
             os.makedirs(output_dir, exist_ok=True)
-            if os.path.isfile(os.path.join(versioned_dir, "model.safetensors.index.json")):
-                _safe_unlink(os.path.join(output_dir, "model.safetensors"))
-            elif os.path.isfile(os.path.join(versioned_dir, "model.safetensors")):
-                _safe_unlink(os.path.join(output_dir, "model.safetensors.index.json"))
-                for old_sf in glob.glob(os.path.join(output_dir, "model-*-of-*.safetensors")):
-                    _safe_unlink(old_sf)
+            if not is_kaggle:
+                if os.path.isfile(os.path.join(versioned_dir, "model.safetensors.index.json")):
+                    _safe_unlink(os.path.join(output_dir, "model.safetensors"))
+                elif os.path.isfile(os.path.join(versioned_dir, "model.safetensors")):
+                    _safe_unlink(os.path.join(output_dir, "model.safetensors.index.json"))
+                    for old_sf in glob.glob(os.path.join(output_dir, "model-*-of-*.safetensors")):
+                        _safe_unlink(old_sf)
 
             for fname in os.listdir(versioned_dir):
+                if is_kaggle and (fname.endswith(".safetensors") or fname == "optimizer_state.pt" or fname.endswith(".bin")):
+                    # Strictly protect Kaggle /kaggle/working 20GB disk limit by NOT duplicating heavy weights.
+                    # Direct upload to Hugging Face executes directly from temp versioned_dir.
+                    continue
                 src = os.path.join(versioned_dir, fname)
                 dst = os.path.join(output_dir, fname)
                 if os.path.isfile(src):
@@ -1463,6 +1472,8 @@ def save_tpu_checkpoint(
                         for old_sf in glob.glob(os.path.join(best_cp_dir, "model-*-of-*.safetensors")):
                             _safe_unlink(old_sf)
                     for fname in os.listdir(versioned_dir):
+                        if is_kaggle and (fname.endswith(".safetensors") or fname == "optimizer_state.pt" or fname.endswith(".bin")):
+                            continue
                         s_art = os.path.join(versioned_dir, fname)
                         d_art = os.path.join(best_cp_dir, fname)
                         if os.path.isfile(s_art):
@@ -1503,6 +1514,13 @@ def save_tpu_checkpoint(
                 keep_n=keep_n,
                 protected_dirs=prot_dirs,
             )
+            if is_kaggle and staging_base and os.path.isdir(staging_base) and staging_base != parent_dir:
+                _cleanup_old_versioned_checkpoints(
+                    parent_dir=staging_base,
+                    output_dir_basename=output_dir_basename,
+                    keep_n=keep_n,
+                    protected_dirs=prot_dirs,
+                )
 
             # 13. Non-Blocking Dual-Cloud Synchronization (Google Drive AND/OR Hugging Face)
             # Dedicated TPU cloud isolation: uploads to tara_checkpoints_tpu; prunes ONLY TPU backups.

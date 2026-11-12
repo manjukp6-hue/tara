@@ -1050,7 +1050,7 @@ class TPUConfig:
     # Promoted Model Output Directory
     DEFAULT_PROMOTED_DIR: str = "storage/models/promoted_tpu_stage0"
     # Periodic intervals
-    CHECKPOINT_INTERVAL: int = int(os.environ.get("CHECKPOINT_INTERVAL", 700))
+    CHECKPOINT_INTERVAL: int = int(os.environ.get("CHECKPOINT_INTERVAL", 1))
     EVAL_INTERVAL: int = 0  # Default disabled for maximum TPU throughput; enable via --enable-probe --eval-interval 500
     PROMOTE_INTERVAL: int = 50000
     KEEP_CHECKPOINTS: int = 2

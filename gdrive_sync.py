@@ -2212,11 +2212,12 @@ def save_checkpoint(
         os.makedirs(output_dir, exist_ok=True)
 
         parent_dir = os.path.dirname(os.path.abspath(output_dir)) or "."
-        # If running on Kaggle, stage checkpoint directly in /kaggle/temp/ (or /tmp)
-        # to strictly protect /kaggle/working from exhausting its 20GB quota.
+        # If running on Kaggle, stage and version checkpoint directly in /kaggle/temp/ (or /tmp)
+        # to strictly protect /kaggle/working from exhausting its 20GB quota and push directly from temp.
+        is_kaggle = bool(os.path.exists("/kaggle/temp") or os.path.exists("/kaggle") or os.environ.get("KAGGLE_KERNEL_RUN_TYPE"))
         if os.path.exists("/kaggle/temp"):
             staging_base = "/kaggle/temp"
-        elif os.path.exists("/kaggle") or os.environ.get("KAGGLE_KERNEL_RUN_TYPE"):
+        elif is_kaggle:
             staging_base = "/tmp"
         else:
             staging_base = parent_dir
@@ -2487,8 +2488,11 @@ def save_checkpoint(
                 return False
 
             # Step 3: Promote staging -> immutable versioned directory
+            # On Kaggle, versioned_dir stays inside staging_base (/kaggle/temp or /tmp)
+            # so direct cloud push happens from temp without duplicating heavy multi-GB weights to /kaggle/working.
+            v_parent = staging_base if is_kaggle else parent_dir
             versioned_dir = os.path.join(
-                parent_dir,
+                v_parent,
                 f"{os.path.basename(output_dir)}.step{step}_{int(time.time())}"
             )
 
@@ -2501,6 +2505,10 @@ def save_checkpoint(
             # Align active output_dir to latest versioned content safely via atomic replacement
             os.makedirs(output_dir, exist_ok=True)
             for fname in os.listdir(versioned_dir):
+                if is_kaggle and (fname.endswith(".safetensors") or fname == "optimizer_state.pt" or fname.endswith(".bin")):
+                    # Strictly protect Kaggle /kaggle/working 20GB disk limit by NOT duplicating heavy weights.
+                    # Direct upload to Hugging Face executes directly from temp versioned_dir.
+                    continue
                 src = os.path.join(versioned_dir, fname)
                 dst = os.path.join(output_dir, fname)
                 if os.path.isfile(src):
@@ -2621,6 +2629,14 @@ def save_checkpoint(
                 force_keep_exact=force_keep_exact,
                 protected_dirs=prot_dirs,
             )
+            if is_kaggle and staging_base and os.path.isdir(staging_base) and staging_base != parent_dir:
+                _cleanup_old_versioned_checkpoints(
+                    staging_base,
+                    os.path.basename(output_dir),
+                    keep_n=keep_n,
+                    force_keep_exact=force_keep_exact,
+                    protected_dirs=prot_dirs,
+                )
 
             # Step 8: Non-Blocking Background Multi-Cloud Synchronization (GDrive + HF)
             # If Google Drive is not mounted, auto-selects Hugging Face as the primary backup target!

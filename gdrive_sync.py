@@ -2212,8 +2212,15 @@ def save_checkpoint(
         os.makedirs(output_dir, exist_ok=True)
 
         parent_dir = os.path.dirname(os.path.abspath(output_dir)) or "."
+        # If running on Kaggle, stage checkpoint directly in /tmp (which has ~70-100GB space)
+        # to strictly protect /kaggle/working from exhausting its 20GB quota.
+        if os.path.exists("/kaggle") or os.environ.get("KAGGLE_KERNEL_RUN_TYPE"):
+            staging_base = "/tmp"
+        else:
+            staging_base = parent_dir
+
         staging_dir = os.path.join(
-            parent_dir,
+            staging_base,
             f".ckpt_staging_{os.path.basename(output_dir)}_step{step}_{int(time.time())}_{os.getpid()}"
         )
         os.makedirs(staging_dir, exist_ok=True)

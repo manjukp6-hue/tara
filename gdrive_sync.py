@@ -2834,21 +2834,33 @@ def probe_hf_checkpoint_step(
     highest_step = -1
     best_subfolder: Optional[str] = None
 
-    # Priority 1: Check 1:1 matching normal_checkpoint and best_milestone structures
+    # Priority 1: Check 1:1 matching normal_checkpoint and best_milestone structures (GPU and TPU)
     candidate_meta_files = [
         "tara_checkpoints/normal_checkpoint/checkpoint_state.json",
         "tara_checkpoints/normal_checkpoint/STAGE_METADATA.json",
         "tara_checkpoints/best_milestone/checkpoint_state.json",
         "tara_checkpoints/best_milestone/STAGE_METADATA.json",
+        "tara_checkpoints_tpu/normal_checkpoint/checkpoint_state.json",
+        "tara_checkpoints_tpu/normal_checkpoint/STAGE_METADATA.json",
+        "tara_checkpoints_tpu/best_milestone/checkpoint_state.json",
+        "tara_checkpoints_tpu/best_milestone/STAGE_METADATA.json",
         "normal_checkpoint/checkpoint_state.json",
         "normal_checkpoint/STAGE_METADATA.json",
         "best_milestone/checkpoint_state.json",
         "best_milestone/STAGE_METADATA.json",
     ]
 
-    # Find all versioned step folders in normal_checkpoint and best_milestone
+    # Find all versioned step folders in normal_checkpoint and best_milestone (both GPU and TPU)
+    scan_prefixes = (
+        "tara_checkpoints/normal_checkpoint/",
+        "tara_checkpoints/best_milestone/",
+        "tara_checkpoints_tpu/normal_checkpoint/",
+        "tara_checkpoints_tpu/best_milestone/",
+        "normal_checkpoint/",
+        "best_milestone/",
+    )
     for f in files:
-        if f.startswith("tara_checkpoints/normal_checkpoint/") or f.startswith("tara_checkpoints/best_milestone/") or f.startswith("normal_checkpoint/") or f.startswith("best_milestone/"):
+        if f.startswith(scan_prefixes):
             b = os.path.basename(f)
             if b in ("checkpoint_state.json", "STAGE_METADATA.json") and f not in candidate_meta_files:
                 candidate_meta_files.append(f)
@@ -2902,7 +2914,11 @@ def probe_hf_checkpoint_step(
         has_weights = any(f.endswith(".safetensors") for f in files)
         if has_weights:
             highest_step = 0
-            if any(f.startswith("normal_checkpoint/") for f in files):
+            if any(f.startswith("tara_checkpoints_tpu/normal_checkpoint/") for f in files):
+                best_subfolder = "tara_checkpoints_tpu/normal_checkpoint"
+            elif any(f.startswith("tara_checkpoints/normal_checkpoint/") for f in files):
+                best_subfolder = "tara_checkpoints/normal_checkpoint"
+            elif any(f.startswith("normal_checkpoint/") for f in files):
                 best_subfolder = "normal_checkpoint"
             elif any(f.startswith("best_milestone/") for f in files):
                 best_subfolder = "best_milestone"

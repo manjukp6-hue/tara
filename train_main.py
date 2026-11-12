@@ -381,13 +381,13 @@ def execute_optimizer_step(
         scale_before = 1.0
         scale_after = 1.0
     elif is_global_skip:
+        scale_before = scaler.get_scale() if hasattr(scaler, "get_scale") else 1.0
         optimizer.zero_grad(set_to_none=True)
         if world_optimizer is not None:
             world_optimizer.zero_grad(set_to_none=True)
         scaler.update()
+        scale_after = scaler.get_scale() if hasattr(scaler, "get_scale") else scale_before
         is_step_skipped = True
-        scale_before = scaler.get_scale()
-        scale_after = scale_before
     else:
         scale_before = scaler.get_scale()
         scaler.step(optimizer)
@@ -429,6 +429,15 @@ def extract_accumulated_data_cursor(
     c_byte = last_sample_cursor[2] if len(last_sample_cursor) > 2 else 0
     c_chunk_last = last_sample_cursor[3] if len(last_sample_cursor) > 3 else 0
     c_is_last = last_sample_cursor[4] if len(last_sample_cursor) > 4 else False
+    c_domain = last_sample_cursor[5] if len(last_sample_cursor) > 5 else None
+    if not c_domain and c_shard:
+        c_domain = resolve_shard_domain(c_shard)
+
+    c_total_lines = 0
+    if hasattr(dataset, "domain_datasets") and c_domain and c_domain in dataset.domain_datasets:
+        c_total_lines = getattr(dataset.domain_datasets[c_domain], "active_shard_total_lines", 0)
+    elif hasattr(dataset, "active_shard_total_lines"):
+        c_total_lines = getattr(dataset, "active_shard_total_lines", 0)
 
     if c_is_last:
         c_line_offset = c_line
@@ -439,8 +448,9 @@ def extract_accumulated_data_cursor(
 
     return {
         "active_shard": c_shard,
+        "domain": c_domain,
         "active_shard_line_offset": c_line_offset,
-        "active_shard_total_lines": getattr(dataset, "active_shard_total_lines", 0),
+        "active_shard_total_lines": c_total_lines,
         "active_shard_byte_offset": c_byte,
         "active_chunk_idx": c_chunk_next,
         "total_samples_trained": total_samples_trained,
@@ -2318,13 +2328,13 @@ def main():
                 ppl_clr, ppl_status, ppl_tag = get_metric_status_and_color(ppl, (4.0, 7.0), (7.1, 20.0))
                 bpb_clr, bpb_status, bpb_tag = get_metric_status_and_color(bpb, (0.55, 0.75), (0.76, 1.20))
 
-                cur_domain = getattr(dataset, "active_domain", "")
+                cur_domain = (current_cursor.get("domain") if current_cursor else None) or getattr(dataset, "active_domain", "")
                 if not cur_domain and current_cursor and current_cursor.get("active_shard"):
                     cur_domain = resolve_shard_domain(current_cursor["active_shard"])
 
                 cur_shard_name = current_cursor.get("active_shard") if current_cursor else getattr(dataset, "current_active_shard", "N/A")
                 cur_line_num = current_cursor.get("active_shard_line_offset", 0) if current_cursor else getattr(dataset, "active_shard_offset", 0)
-                cur_shard_tot = getattr(dataset, "active_shard_total_lines", 0)
+                cur_shard_tot = current_cursor.get("active_shard_total_lines", 0) if current_cursor else getattr(dataset, "active_shard_total_lines", 0)
                 shard_pct = f" {(cur_line_num / cur_shard_tot) * 100:.2f}%" if cur_shard_tot > 0 else ""
                 shard_progress_str = f"Shard: {cur_shard_name} (Line {cur_line_num:,}/{cur_shard_tot:,}{shard_pct})" if cur_shard_tot > 0 else f"Shard: {cur_shard_name} (Line {cur_line_num:,})"
                 shard_line_log = f"{shard_progress_str} | " if (cur_shard_name and cur_shard_name != "N/A") else ""

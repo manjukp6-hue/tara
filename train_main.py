@@ -1222,7 +1222,7 @@ def main():
     if "--checkpoint-interval" not in sys.argv and "CHECKPOINT_INTERVAL" not in os.environ:
         n_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
         if n_gpus > 1 or is_distributed:
-            args.checkpoint_interval = 1000
+            args.checkpoint_interval = 1
         else:
             args.checkpoint_interval = 100
 
